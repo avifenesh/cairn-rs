@@ -29,6 +29,7 @@
 mod integration {
     pub mod test_budget;
     pub mod test_checkpoint;
+    pub mod test_event_emission;
     pub mod test_run_lifecycle;
     pub mod test_session;
     pub mod test_suspension;
@@ -107,6 +108,10 @@ async fn get_valkey_endpoint() -> (String, u16) {
 pub struct TestHarness {
     pub fabric: FabricServices,
     pub project: ProjectKey,
+    /// Shared handle to the InMemoryStore that backs `fabric`'s bridge.
+    /// Tests inspect projection state here to assert that a mutation
+    /// emitted its `BridgeEvent::*` → `RuntimeEvent::*` round-trip.
+    pub event_log: Arc<InMemoryStore>,
 }
 
 impl TestHarness {
@@ -183,11 +188,17 @@ impl TestHarness {
         };
 
         let event_log = Arc::new(InMemoryStore::default());
-        let fabric = FabricServices::start(config, event_log)
+        let event_log_for_bridge: Arc<dyn cairn_store::event_log::EventLog + Send + Sync> =
+            event_log.clone();
+        let fabric = FabricServices::start(config, event_log_for_bridge)
             .await
             .expect("FabricServices::start failed — is the container reachable?");
 
-        Self { fabric, project }
+        Self {
+            fabric,
+            project,
+            event_log,
+        }
     }
 
     pub fn unique_run_id(&self) -> RunId {
