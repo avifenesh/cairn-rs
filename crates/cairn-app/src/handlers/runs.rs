@@ -1057,10 +1057,11 @@ pub(crate) async fn claim_run_handler(
 ) -> impl IntoResponse {
     let run_id = RunId::new(&id);
 
-    // Resolve the run first so a missing id surfaces a clean 404
-    // instead of whatever error the Fabric claim path emits for an
-    // unknown execution (which would present as a 500). This
-    // mirrors the pattern established by `cancel_task_handler` and
+    // Belt-and-suspenders: the adapter's resolve_run_project already
+    // maps missing-in-store to RuntimeError::NotFound → 404 (see
+    // errors.rs::runtime_error_response), but the explicit lookup
+    // here isolates the 404 response from any future change in the
+    // adapter layer. Pattern mirrors `cancel_task_handler` and
     // `release_task_lease_handler` in handlers/tasks.rs.
     match state.runtime.runs.get(&run_id).await {
         Ok(Some(_)) => {}

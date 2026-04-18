@@ -1351,8 +1351,11 @@ async fn claim_run_route_happy_path_and_missing() {
     );
 
     // 404 before any state exists — proves the handler's get-first
-    // guard surfaces a clean not-found instead of whatever error the
-    // runtime's claim path would emit for a missing run.
+    // guard returns the documented 404. Even if that guard were
+    // removed, the in-memory claim impl's `get_run` would still
+    // surface `RuntimeError::NotFound` → 404 via
+    // `runtime_error_response`; this test pins the HTTP contract,
+    // not the layer that enforces it.
     let missing_response = send_json_request(
         &app,
         "POST",
