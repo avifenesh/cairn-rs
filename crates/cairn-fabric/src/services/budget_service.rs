@@ -35,7 +35,7 @@ pub(crate) fn compute_spend_idempotency_key(
     dimension_deltas: &[(&str, u64)],
 ) -> String {
     let mut sorted: Vec<(&str, u64)> = dimension_deltas.to_vec();
-    sorted.sort_by(|a, b| a.0.cmp(b.0));
+    sorted.sort_by_key(|r| r.0);
 
     let mut input = format!("v{SPEND_NAMESPACE_VERSION}:spend:\0{budget_id}\0{execution_id}");
     for (dim, delta) in &sorted {

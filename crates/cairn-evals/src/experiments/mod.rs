@@ -140,7 +140,7 @@ impl BanditExperiment {
             .iter()
             .map(|a| (a.arm_id.clone(), a.win_rate()))
             .collect();
-        rates.sort_by(|a, b| a.0.cmp(&b.0));
+        rates.sort_by_key(|r| r.0.clone());
         rates
     }
 }
@@ -173,7 +173,7 @@ impl ExperimentStore {
     /// List all experiments with `active == true`.
     pub fn list_active(&self) -> Vec<&BanditExperiment> {
         let mut active: Vec<_> = self.experiments.values().filter(|e| e.active).collect();
-        active.sort_by(|a, b| a.experiment_id.cmp(&b.experiment_id));
+        active.sort_by_key(|r| r.experiment_id.clone());
         active
     }
 

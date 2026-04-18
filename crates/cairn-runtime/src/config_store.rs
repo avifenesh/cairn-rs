@@ -138,7 +138,7 @@ impl ConfigStore for InMemoryConfigStore {
             .filter(|(k, _)| k.starts_with(prefix))
             .map(|(k, v)| (k.clone(), v.clone()))
             .collect();
-        results.sort_by(|a, b| a.0.cmp(&b.0));
+        results.sort_by_key(|r| r.0.clone());
         results
     }
 }
@@ -244,7 +244,7 @@ impl ConfigStore for FileConfigStore {
             .filter(|(k, _)| k.starts_with(prefix))
             .map(|(k, v)| (k.clone(), v.clone()))
             .collect();
-        results.sort_by(|a, b| a.0.cmp(&b.0));
+        results.sort_by_key(|r| r.0.clone());
         results
     }
 }

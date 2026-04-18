@@ -193,7 +193,7 @@ pub async fn list_triggers_handler(
         Err(message) => return bad_request_response(message),
     };
     let mut list: Vec<&Trigger> = triggers.list_triggers_for_project(&project);
-    list.sort_by(|left, right| left.id.as_str().cmp(right.id.as_str()));
+    list.sort_by_key(|r| r.id.clone());
     let list: Vec<&Trigger> = list
         .into_iter()
         .skip(query.offset())
@@ -509,7 +509,7 @@ pub async fn list_run_templates_handler(
         Err(message) => return bad_request_response(message),
     };
     let mut list: Vec<&RunTemplate> = triggers.list_templates_for_project(&project);
-    list.sort_by(|left, right| left.id.as_str().cmp(right.id.as_str()));
+    list.sort_by_key(|r| r.id.clone());
     let list: Vec<&RunTemplate> = list
         .into_iter()
         .skip(query.offset())

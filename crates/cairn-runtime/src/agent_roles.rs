@@ -62,7 +62,7 @@ impl AgentRoleRegistry {
             .filter(|r| r.tier == tier)
             .cloned()
             .collect();
-        roles.sort_by(|a, b| a.role_id.cmp(&b.role_id));
+        roles.sort_by_key(|r| r.role_id.clone());
         roles
     }
 
@@ -75,7 +75,7 @@ impl AgentRoleRegistry {
             .values()
             .cloned()
             .collect();
-        roles.sort_by(|a, b| a.role_id.cmp(&b.role_id));
+        roles.sort_by_key(|r| r.role_id.clone());
         roles
     }
 

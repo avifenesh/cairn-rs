@@ -796,7 +796,7 @@ impl TriggerService {
             })
             .map(|trigger| trigger.id.clone())
             .collect();
-        trigger_ids.sort_by(|left, right| left.as_str().cmp(right.as_str()));
+        trigger_ids.sort_by_key(|r| r.clone());
         trigger_ids
     }
 

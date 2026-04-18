@@ -177,7 +177,7 @@ impl ModelRegistry {
     /// All entries sorted by ID.
     pub fn all(&self) -> Vec<&ModelEntry> {
         let mut v: Vec<_> = self.entries.values().collect();
-        v.sort_by(|a, b| a.id.cmp(&b.id));
+        v.sort_by_key(|r| r.id.clone());
         v
     }
 
@@ -188,7 +188,7 @@ impl ModelRegistry {
             .values()
             .filter(|e| e.provider == provider)
             .collect();
-        v.sort_by(|a, b| a.id.cmp(&b.id));
+        v.sort_by_key(|r| r.id.clone());
         v
     }
 
@@ -199,14 +199,14 @@ impl ModelRegistry {
             .values()
             .filter(|e| e.tier == tier && e.enabled)
             .collect();
-        v.sort_by(|a, b| a.id.cmp(&b.id));
+        v.sort_by_key(|r| r.id.clone());
         v
     }
 
     /// All enabled entries for routing.
     pub fn enabled(&self) -> Vec<&ModelEntry> {
         let mut v: Vec<_> = self.entries.values().filter(|e| e.enabled).collect();
-        v.sort_by(|a, b| a.id.cmp(&b.id));
+        v.sort_by_key(|r| r.id.clone());
         v
     }
 
