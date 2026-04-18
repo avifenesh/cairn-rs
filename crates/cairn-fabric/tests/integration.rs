@@ -30,6 +30,7 @@ mod integration {
     pub mod test_budget;
     pub mod test_checkpoint;
     pub mod test_event_emission;
+    pub mod test_orchestrator_stream;
     pub mod test_run_lifecycle;
     pub mod test_session;
     pub mod test_suspension;
