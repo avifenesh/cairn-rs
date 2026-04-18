@@ -216,7 +216,15 @@ the caller (HTTP handler) decides which suspension primitive to fire:
   This is the canonical path today — it works whether the caller holds
   a `CairnTask` or not. `RunService` under the Fabric adapter routes to
   `FabricRunService::enter_waiting_approval` which runs
-  `ff_suspend_execution`.
+  `ff_suspend_execution`. **Prerequisite**: the run must have been
+  claimed first — `ff_suspend_execution` rejects a non-active
+  execution. Callers that start a run via `POST /v1/runs` and want to
+  enter an approval gate before a worker claims it must issue
+  `POST /v1/runs/{id}/claim` (or `runs.claim(&run_id)` through the
+  service trait) to activate the lease. See the `RunService::claim`
+  docstring for the one-claim-per-lifecycle contract (non-idempotent
+  on Fabric; a second claim fails at the grant gate unless the run
+  has been through a suspend/resume cycle).
 - **Task-level path** (preferred when the caller holds a live
   `CairnTask`): call `cairn_task.suspend_for_approval(&approval_id, None)`.
   This consumes the `CairnTask` and the task stays suspended until
