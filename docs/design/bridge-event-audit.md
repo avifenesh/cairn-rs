@@ -29,9 +29,9 @@ The 12 `BridgeEvent` variants (`crates/cairn-fabric/src/event_bridge.rs:17-87`) 
 | `complete` | `FF_COMPLETE_EXECUTION` | `ExecutionCompleted` | EMITS | Unconditional on FCALL success. |
 | `fail` | `FF_FAIL_EXECUTION` | `ExecutionFailed` (only when terminal per `parse_fail_outcome`) | EMITS | Retry-scheduled fail intentionally silent — non-terminal. |
 | `cancel` | `FF_CANCEL_EXECUTION` | `ExecutionCancelled` | EMITS | Unconditional on success. |
-| `pause` | `FF_SUSPEND_EXECUTION` | `ExecutionSuspended` (guarded by `!is_already_satisfied`) | EMITS | |
+| `pause` | `FF_SUSPEND_EXECUTION` | `ExecutionSuspended` | EMITS | Unconditional on FCALL success (pre-#43 gated on `!is_already_satisfied`; dropped — see retry-safety note in §3.2). |
 | `resume` | `FF_RESUME_EXECUTION` | `ExecutionResumed` | EMITS | |
-| `enter_waiting_approval` | `FF_SUSPEND_EXECUTION` (approval waitpoint) | `ExecutionSuspended` (guarded by `!is_already_satisfied`) | EMITS | |
+| `enter_waiting_approval` | `FF_SUSPEND_EXECUTION` (approval waitpoint) | `ExecutionSuspended` | EMITS | Unconditional on FCALL success (pre-#43 gated on `!is_already_satisfied`; dropped — see §3.2). |
 | `resolve_approval` (approved branch) | `FF_DELIVER_SIGNAL` | `ExecutionResumed` | EMITS | |
 | `resolve_approval` (rejected branch) | delegates to `fail(…, ApprovalRejected)` | — | EMITS | Covered by `fail`. |
 
@@ -137,31 +137,19 @@ Not audited as a separate row. `pub(crate) issue_grant_and_claim` is the helper 
 
 ### §3.2 Mitigation
 
-**No FF dependency.** Both fixes are pure cairn-side additions — the FCALL already succeeds, we just need to emit afterward. Pattern mirrors `FabricRunService::pause` / `resume` exactly:
+**No FF dependency.** Both fixes are pure cairn-side additions — the FCALL already succeeds, we just need to emit afterward. Emit is UNCONDITIONAL on the success path (don't gate on `is_already_satisfied`; see "retry-safety" note below):
 
 ```rust
-// Imports: add `is_already_satisfied` to the existing
-// `use crate::helpers::{…}` line at the top of task_service.rs — it
-// lives alongside `is_duplicate_result` / `check_fcall_success` in
-// crate::helpers but isn't imported today.
-use crate::helpers::{
-    check_fcall_success, is_already_satisfied, is_duplicate_result,
-    parse_fail_outcome, parse_public_state, try_parse_project_key,
-    FailOutcome,
-};
-
 // pause — after check_fcall_success on FF_SUSPEND_EXECUTION:
 let record = self.read_task_record(project, task_id).await?;
-if !is_already_satisfied(&raw) {
-    self.bridge
-        .emit(BridgeEvent::TaskStateChanged {
-            task_id: task_id.clone(),
-            project: record.project.clone(),
-            to: record.state, // reflects Paused / WaitingApproval from FF read
-            failure_class: None,
-        })
-        .await;
-}
+self.bridge
+    .emit(BridgeEvent::TaskStateChanged {
+        task_id: task_id.clone(),
+        project: record.project.clone(),
+        to: record.state, // reflects Paused / WaitingApproval from FF read
+        failure_class: None,
+    })
+    .await;
 Ok(record)
 
 // resume — after check_fcall_success on FF_RESUME_EXECUTION:
@@ -176,6 +164,8 @@ self.bridge
     .await;
 Ok(record)
 ```
+
+**Retry-safety — why no `is_already_satisfied` guard.** An earlier draft of this fix gated emission on `!is_already_satisfied(&raw)` (mirroring the pattern that existed in `FabricRunService::pause` / `enter_waiting_approval` pre-#43). The guard has a latent bug: if the FCALL commits on FF but the cairn process crashes before the emit (or `read_task_record` errors post-commit), a subsequent retry sees `ALREADY_SATISFIED` and skips emission forever — the projection permanently drifts. The projection is idempotent on `EventId` (the `EventBridge` mints a fresh UUID per emit; cairn-store's sync projection upserts by `(task_id, event_id)` — see `crates/cairn-store/src/in_memory.rs:350`), so a double-emit on benign replay is a harmless re-write. Given the asymmetric risk (silent permanent drift vs a duplicate projection write), unconditional emission is strictly safer. PR #43 drops the same guard from `FabricRunService::pause` and `::enter_waiting_approval` to keep the suspend-emission contract consistent.
 
 **Why read `record.state` instead of hard-coding `TaskState::Paused`:** FF's `map_reason_to_blocking` can route `OperatorPause` to either `operator_hold` (→ `Paused`) or `waiting_for_approval` (→ `WaitingApproval`); the authoritative value is what FF actually committed. `read_task_record` HGETALLs `exec_core` fresh, so it reflects the post-FCALL truth. Same pattern as `FabricRunService::pause` which reads `prev_run_state` from exec_core.
 

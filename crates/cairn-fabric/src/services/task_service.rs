@@ -7,8 +7,8 @@ use cairn_store::projections::{TaskDependencyRecord, TaskRecord};
 use crate::error::FabricError;
 use crate::event_bridge::{BridgeEvent, EventBridge};
 use crate::helpers::{
-    check_fcall_success, is_already_satisfied, is_duplicate_result, parse_fail_outcome,
-    parse_public_state, try_parse_project_key, FailOutcome,
+    check_fcall_success, is_duplicate_result, parse_fail_outcome, parse_public_state,
+    try_parse_project_key, FailOutcome,
 };
 use ff_core::keys::{ExecKeyContext, IndexKeys};
 use ff_core::partition::execution_partition;
@@ -951,30 +951,36 @@ impl FabricTaskService {
         check_fcall_success(&raw, crate::fcall::names::FF_SUSPEND_EXECUTION)?;
 
         // Emit TaskStateChanged so the cairn-store projection + SSE subscribers
-        // observe the suspension. Symmetric with FabricRunService::pause; the
-        // audit at docs/design/bridge-event-audit.md §3.1 filed this as G1.
+        // observe the suspension. Fixes audit gap G1
+        // (docs/design/bridge-event-audit.md §3.1).
         //
         // `record.state` carries FF's post-commit truth — FF's
         // map_reason_to_blocking can route OperatorPause to either
-        // `operator_hold` (→ TaskState::Paused) or `waiting_for_approval`
+        // operator_hold (→ TaskState::Paused) or waiting_for_approval
         // (→ TaskState::WaitingApproval) per reason_code. Reading from the
         // fresh HGETALL in read_task_record avoids hard-coding a single state.
         //
-        // `is_already_satisfied` guards the duplicate case: FF returns
-        // ok_already_satisfied when the execution is already suspended
-        // (idempotent replay). We skip the emit on that path so we don't
-        // double-project; the first emit already populated the record.
+        // Emit is UNCONDITIONAL. An earlier draft of this fix guarded on
+        // `!is_already_satisfied(&raw)` to skip replays (mirroring a pattern
+        // that existed in FabricRunService). That guard is retry-unsafe: if
+        // the FCALL committed on FF but the cairn process crashed before
+        // reaching the emit, a subsequent retry sees ALREADY_SATISFIED and
+        // skips emission forever — the projection permanently drifts. The
+        // projection is idempotent on EventId (EventBridge mints a fresh
+        // v4 UUID per emit; cairn-store's sync projection upserts by
+        // (task_id, event_id) — see crates/cairn-store/src/in_memory.rs:350),
+        // so a double-emit on benign back-to-back replay is a harmless
+        // re-write. Given the asymmetric risk (silent permanent drift vs
+        // a duplicate projection write), unconditional is strictly safer.
         let record = self.read_task_record(project, task_id).await?;
-        if !is_already_satisfied(&raw) {
-            self.bridge
-                .emit(BridgeEvent::TaskStateChanged {
-                    task_id: task_id.clone(),
-                    project: record.project.clone(),
-                    to: record.state,
-                    failure_class: None,
-                })
-                .await;
-        }
+        self.bridge
+            .emit(BridgeEvent::TaskStateChanged {
+                task_id: task_id.clone(),
+                project: record.project.clone(),
+                to: record.state,
+                failure_class: None,
+            })
+            .await;
         Ok(record)
     }
 
