@@ -63,7 +63,6 @@
 | `CAIRN_FABRIC_HOST` / `_PORT` / `_TLS` / `_CLUSTER` | `localhost` / `6379` / off / off | env var | Valkey connection. `_CLUSTER=1` uses cluster mode; all FCALL KEYS on a single `{p:N}` hash tag so this is cluster-safe without extra wiring. |
 | `CAIRN_FABRIC_LEASE_TTL_MS` / `_GRANT_TTL_MS` | `30_000` / `5_000` | env var | Timing knobs. |
 | `insecure-direct-claim` | off | cargo feature | Forwards to `ff-sdk/insecure-direct-claim`, exposing `CairnWorker::claim_next`. **Test / local dev only** — the direct path skips budget + quota admission that only ff-scheduler enforces. Production must go through `FabricSchedulerService::claim_for_worker`. |
-| `fabric-b4-idempotency` | off | cargo feature | Two-phase rollout for FF's B4 idempotency-key ARGV slot on `ff_report_usage_and_check`. Kept off until the FF version we pin ships it. |
 
 ---
 
@@ -121,13 +120,12 @@ The in-memory impls are **not** duplication of FF — they're the fallback when 
 
 The deleted pieces in finalization were: `FabricRecoveryStub` (cairn-fabric side) and `RecoveryServiceImpl` (cairn-runtime side). Both were passive duplicates of FF's scanners — FF owns recovery whether Fabric is enabled or not, so the cairn-side sweeps were redundant under FF-enabled and useless under FF-disabled (no background worker to drive them).
 
-### 3.5 Common failures
+### 3.6 Common failures
 
 | Symptom | Cause | Fix |
 |---|---|---|
 | `ff_suspend_execution rejected: hmac_secret_not_initialized` | HMAC secret not seeded on execution partitions | Set `CAIRN_FABRIC_WAITPOINT_HMAC_SECRET` and reboot. |
 | `ff_deliver_signal rejected: invalid_token` | Waitpoint token stale (HMAC rotated mid-flight) or client passed empty token | Re-read from `waitpoint_hash.waitpoint_token` via cairn's `read_waitpoint_token` helper. |
-| `ff_report_usage_and_check rejected: wrong number of arguments` | `fabric-b4-idempotency` enabled against an FF version without B4 | Turn the cargo feature off and rebuild. |
 | `scheduler claim_for_worker: SchedulerError::Config(...)` on capability token | Operator supplied a token with `,` or whitespace | Fix config — cairn validates at boot, FF validates at claim. |
 | CairnTask dropped without terminal call (log warn) | Handler forgot to call `complete` / `fail` / `cancel` | FF's `LeaseExpiryScanner` promotes the execution back to eligible when the lease TTL fires; no data loss, just latency. |
 
@@ -139,8 +137,7 @@ Filed with FF maintainers; tracked for re-wiring when they land.
 
 1. **`pub fn FlowFabricWorker::claim_from_grant(grant: ClaimGrant) -> Result<ClaimedTask, SdkError>`** — required to route cairn's production worker path through `ff-scheduler` without enabling `insecure-direct-claim`. Today `ClaimedTask::new` is `pub(crate)` on ff-sdk, so cairn can obtain a `ClaimGrant` from the scheduler but cannot turn it into a `ClaimedTask` for the stream / renewal / terminal methods.
 2. **`pub fn parse_report_usage_result(raw: &Value) -> Result<ReportUsageResult, SdkError>`** — ff-sdk's parser is private, so cairn-fabric re-implements it (`services/budget_service.rs::parse_spend_result`) and keeps it in sync by hand. Exposing the upstream parser eliminates a drift hazard.
-3. **B4 idempotency ARGV stabilisation** on `ff_report_usage_and_check`. Cairn already computes a stable dedup key and passes it as `ARGV[2 * dim_count + 3]`; FF accepts it. When FF ships a typed `ReportUsageArgs.dedup_key: Option<String>` on the contract side, cairn switches to the typed path behind `fabric-b4-idempotency` cargo feature.
-4. **Scheduler-mediated `claim_resumed_execution`** — same visibility problem as #1 for the resume-after-suspend path. Needs a `pub` entry point so cairn can consume a scheduler grant for a previously-suspended execution.
+3. **Scheduler-mediated `claim_resumed_execution`** — same visibility problem as #1 for the resume-after-suspend path. Needs a `pub` entry point so cairn can consume a scheduler grant for a previously-suspended execution.
 
 ---
 
@@ -149,10 +146,9 @@ Filed with FF maintainers; tracked for re-wiring when they land.
 Accepted limitations as of finalization — each has a follow-up round scoped.
 
 - **`FabricTaskService::declare_dependency` + `check_dependencies` return errors / empty vecs** (`services/task_service.rs:352-370`). The plan is FF flow-edge FCALLs (`ff_stage_dependency_edge`, `ff_apply_dependency_to_child`) wrapped by Fabric. Blocked on Session→Flow DAG work (Phase 3). Handler `add_task_dependency_handler` must stay on the store-event path until then; adapter routes accordingly.
-- **`FabricTaskService::list_expired_leases`** returns empty (FF's `LeaseExpiryScanner` handles expiry server-side). Admin handler `expire_task_leases_handler` becomes a no-op under Fabric — delegate to `TaskReadModel::list_expired_leases` in the adapter or mark the endpoint deprecated.
+- **`FabricTaskService::list_expired_leases`** returns empty (FF's `LeaseExpiryScanner` handles expiry server-side). The admin handler `expire_task_leases_handler` is delegated via the adapter to the cairn-store projection — see `crates/cairn-app/src/fabric_adapter.rs:556-565` for the `TaskReadModel::list_expired_leases` fallback path.
 - **`FabricTaskService::list_by_state`** and **`FabricSessionService::list`** return empty — FF doesn't index by cairn's `(tenant, workspace, project)` scope. Adapter delegates to `TaskReadModel` / `SessionReadModel` projections. Not a defect; it's the read-path split.
 - **Provider budgets and tenant quotas** (`handlers/providers.rs` + `handlers/admin.rs`) remain on the legacy `BudgetServiceImpl` / `QuotaServiceImpl` over the cairn event log. `FabricBudgetService` and `FabricQuotaService` are per-run admission controls, not tenant-wide ceilings; they ride alongside as new surfaces, not replacements.
-- **Approval path has no active live-FF integration test** (three `test_suspension.rs` tests are `#[cfg(any())]`-gated) because `FabricRunService` has no `claim` API — a run's execution never reaches `lifecycle_phase=active`, which `ff_suspend_execution` requires. Worker-1 owns the run-claim landing. Once it lands, re-enable the gated tests.
 - **`ActiveTaskRegistry` is a latency-cache for lease context**, not a source of truth — FF owns every field it stores. It also doubles as the gate for terminal-state `TaskStateChanged` emission, which means API-claimed tasks (claimed without routing through `FabricTaskService::claim`) skip the projection update. Flagged MAJOR in the finalization audit; scheduled for removal once the claim-API work stabilises. See audit report for detail.
 - **`scripts/smoke-test.sh` HTTP harness assumes a permissive state machine** (the in-memory `RunServiceImpl` allows `pause` without a prior `claim`, etc). Under `CAIRN_FABRIC_ENABLED=1`, FF enforces strict state transitions — a run must be claimed and active before it can be paused/resumed, tasks must be submitted-and-claimed before lease operations. 8 smoke sections (`POST /v1/runs/:id/pause`, `/resume`, `POST /v1/tasks/:id/claim`, `/release-lease`) return HTTP 500 for this reason on the fabric path. These are **NOT runtime defects** — FF's strictness is correct production behaviour. The smoke-test harness needs a short-lived worker-loop fixture (claim-then-operate) to exercise FF semantics correctly. Filed as a separate follow-up PR: **"smoke-test: harness rewrite for Fabric state machine"**.
   - Fabric-off path (`CAIRN_FABRIC_ENABLED` unset): 97/97 pass, 4 skipped.
@@ -210,6 +206,12 @@ Bugs of this shape are invisible to unit tests (services write to FF correctly) 
 *Location*: `crates/cairn-fabric/src/event_bridge.rs:56-62`.
 
 The `TaskLeaseClaimed` bridge event payload carries `lease_expires_at_ms`, which is also stored on FF's `exec_core` as `current_lease_expires_at`. This is a moment-in-time snapshot for projection display, not a cached field with invalidation semantics — consumers must not treat the value as tracked (FF can extend / renew the lease after the event is emitted). Documented here so future readers don't mistake it for live state.
+
+### LOW — `list_child_runs` silently truncates at 10k events
+
+*Location*: `crates/cairn-app/src/fabric_adapter.rs` (`FabricRunServiceAdapter::list_child_runs`) and `crates/cairn-runtime/src/services/run_impl.rs` (`RunServiceImpl::list_child_runs`).
+
+Both implementations scan up to 10,000 `EventLog` events and truncate silently if the parent run's `RunCreated` is older than that window. At high event rates this could miss child runs. `RunReadModel` has no `list_by_parent_run` projection index today, so the scan is the only option. Pre-existing across both paths — not introduced by finalization — flagged for a future round that adds the projection index (then both impls delegate to a single indexed read with no truncation).
 
 ## 7. Versioning
 
