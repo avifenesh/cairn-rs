@@ -428,6 +428,21 @@ impl FabricTaskService {
         Ok(record)
     }
 
+    /// Renew an active lease on a task by `lease_extension_ms`.
+    ///
+    /// **Lean-bridge silence (intentional).** Does not emit a `BridgeEvent`.
+    /// Lease renewal extends `lease_expires_at_ms` on FF's exec_core; the
+    /// `TaskLeaseClaimed` variant in `BridgeEvent` represents a fresh claim,
+    /// not a renewal. Emitting on every heartbeat would also saturate the
+    /// bridge (heartbeat cadence is sub-lease-TTL, typically 5-10s).
+    /// Projection readers that want freshness read `lease_expires_at` via
+    /// `FabricTaskService::get` which HGETALLs FF directly.
+    ///
+    /// If a future surface needs a `TaskLeaseHeartbeated` audit trail,
+    /// introduce a dedicated BridgeEvent variant and revisit. Until then
+    /// additions here must not emit.
+    ///
+    /// See `docs/design/bridge-event-audit.md` §2.2.
     pub async fn heartbeat(
         &self,
         project: &ProjectKey,

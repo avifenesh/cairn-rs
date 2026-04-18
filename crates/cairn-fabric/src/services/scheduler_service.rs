@@ -58,6 +58,18 @@ impl FabricSchedulerService {
         &self.worker_capabilities
     }
 
+    /// Issue a claim grant for a worker against an eligible execution in `lane_id`.
+    ///
+    /// **Lean-bridge silence (intentional).** Does not emit a `BridgeEvent`. A
+    /// claim grant is transient pre-claim state — it becomes observable only
+    /// when the worker converts the grant into a real claim via
+    /// `task_service::claim` / `run_service::claim`, which emit
+    /// `TaskLeaseClaimed` or document their own silence (see run claim §4.3
+    /// in `docs/design/CAIRN-FABRIC-FINALIZED.md`). A grant that expires
+    /// without conversion has no projection impact — cairn's read model only
+    /// needs to see the eventual claim.
+    ///
+    /// See `docs/design/bridge-event-audit.md` §2.4.
     pub async fn claim_for_worker(
         &self,
         lane_id: &LaneId,
