@@ -430,6 +430,21 @@ async fn full_workspace_run_with_tool_invocation() {
         StatusCode::CREATED
     );
 
+    // Claim the run after creation. On the Fabric runtime this flips
+    // lifecycle_phase=active so downstream FCALLs (suspend / signal)
+    // accept the execution; on the in-memory runtime it's a no-op
+    // that returns the record. Pinning the route here means a
+    // regression that breaks the handler wiring fails this
+    // lifecycle test, not just the dedicated unit test.
+    let claim_run_response = send_json_request(
+        &app,
+        "POST",
+        "/v1/runs/run_full_tool/claim",
+        serde_json::json!({}),
+    )
+    .await;
+    assert_eq!(claim_run_response.status(), StatusCode::OK);
+
     assert_eq!(
         send_json_request(
             &app,
