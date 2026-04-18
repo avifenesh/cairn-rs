@@ -223,6 +223,11 @@ pub struct ActionResult {
     pub tool_output: Option<serde_json::Value>,
     /// The ToolInvocationId recorded in the event log (for replay linkage).
     pub invocation_id: Option<ToolInvocationId>,
+    /// Wall-clock duration of this proposal's dispatch, in milliseconds.
+    /// Stamped by the `ExecutePhase` caller. 0 means "unknown" (test stub
+    /// or below-timer-resolution), NOT "zero duration" — downstream
+    /// telemetry must treat 0 as no-signal.
+    pub duration_ms: u64,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

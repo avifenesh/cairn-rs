@@ -161,9 +161,17 @@ impl ExecutePhase for RuntimeExecutePhase {
         let mut loop_signal = LoopSignal::Continue;
 
         for proposal in &decide.proposals {
-            let result = self
+            // Wrap the per-proposal dispatch so each ActionResult carries its
+            // own wall-clock duration rather than the loop re-computing a
+            // (averaged) value from the full `execute` wall-clock later.
+            // `dispatch_one` initialises `duration_ms: 0` at every return
+            // site; we overwrite with the real elapsed here. 0 stays only
+            // for results synthesised by tests that bypass this path.
+            let started_at = std::time::Instant::now();
+            let mut result = self
                 .dispatch_one(ctx, proposal, &mut tool_call_count)
                 .await?;
+            result.duration_ms = started_at.elapsed().as_millis() as u64;
 
             // Capture any terminal loop signal from this action before pushing.
             let new_signal = derive_signal(&result, &loop_signal);
@@ -265,6 +273,7 @@ impl RuntimeExecutePhase {
                                     },
                                     tool_output: None,
                                     invocation_id: Some(inv_id),
+                                    duration_ms: 0,
                                 });
                             }
                         }
@@ -331,6 +340,7 @@ impl RuntimeExecutePhase {
                             status: ActionStatus::Succeeded,
                             tool_output: Some(context_output),
                             invocation_id: Some(inv_id),
+                            duration_ms: 0,
                         })
                     }
                     Err(reason) => {
@@ -351,6 +361,7 @@ impl RuntimeExecutePhase {
                             status: ActionStatus::Failed { reason },
                             tool_output: None,
                             invocation_id: Some(inv_id),
+                            duration_ms: 0,
                         })
                     }
                 }
@@ -378,6 +389,7 @@ impl RuntimeExecutePhase {
                         status: ActionStatus::SubagentSpawned { child_task_id },
                         tool_output: None,
                         invocation_id: None,
+                        duration_ms: 0,
                     }),
                     Err(e) => Ok(ActionResult {
                         proposal: proposal.clone(),
@@ -386,6 +398,7 @@ impl RuntimeExecutePhase {
                         },
                         tool_output: None,
                         invocation_id: None,
+                        duration_ms: 0,
                     }),
                 }
             }
@@ -403,6 +416,7 @@ impl RuntimeExecutePhase {
                             },
                             tool_output: None,
                             invocation_id: None,
+                            duration_ms: 0,
                         });
                     }
                 };
@@ -423,6 +437,7 @@ impl RuntimeExecutePhase {
                         status: ActionStatus::Succeeded,
                         tool_output: None,
                         invocation_id: None,
+                        duration_ms: 0,
                     }),
                     Err(e) => Ok(ActionResult {
                         proposal: proposal.clone(),
@@ -431,6 +446,7 @@ impl RuntimeExecutePhase {
                         },
                         tool_output: None,
                         invocation_id: None,
+                        duration_ms: 0,
                     }),
                 }
             }
@@ -442,6 +458,7 @@ impl RuntimeExecutePhase {
                     status: ActionStatus::Succeeded,
                     tool_output: None,
                     invocation_id: None,
+                    duration_ms: 0,
                 }),
                 Err(e) => Ok(ActionResult {
                     proposal: proposal.clone(),
@@ -450,6 +467,7 @@ impl RuntimeExecutePhase {
                     },
                     tool_output: None,
                     invocation_id: None,
+                    duration_ms: 0,
                 }),
             },
 
@@ -496,6 +514,7 @@ impl RuntimeExecutePhase {
                         status: ActionStatus::AwaitingApproval { approval_id },
                         tool_output: None,
                         invocation_id: None,
+                        duration_ms: 0,
                     }),
                     Err(e) => Ok(ActionResult {
                         proposal: proposal.clone(),
@@ -504,6 +523,7 @@ impl RuntimeExecutePhase {
                         },
                         tool_output: None,
                         invocation_id: None,
+                        duration_ms: 0,
                     }),
                 }
             }
@@ -519,6 +539,7 @@ impl RuntimeExecutePhase {
                     "note": "async — see /v1/memory/ingest"
                 })),
                 invocation_id: None,
+                duration_ms: 0,
             }),
         }
     }

@@ -540,8 +540,11 @@ pub(crate) fn build_orchestrator_emitter(
             ok: bool,
             out: Option<&serde_json::Value>,
             err: Option<&str>,
+            duration_ms: u64,
         ) {
-            self.inner.on_tool_result(ctx, name, ok, out, err).await;
+            self.inner
+                .on_tool_result(ctx, name, ok, out, err, duration_ms)
+                .await;
         }
         async fn on_context_compacted(
             &self,

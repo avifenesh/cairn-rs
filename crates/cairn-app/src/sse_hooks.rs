@@ -286,15 +286,17 @@ impl cairn_orchestrator::OrchestratorEventEmitter for SseOrchestratorEmitter {
         succeeded: bool,
         output: Option<&serde_json::Value>,
         error: Option<&str>,
+        duration_ms: u64,
     ) {
         self.emit(serde_json::json!({
-            "event":     "tool_result",
-            "run_id":    ctx.run_id,
-            "iteration": ctx.iteration,
-            "tool_name": tool_name,
-            "succeeded": succeeded,
-            "output":    output,
-            "error":     error,
+            "event":       "tool_result",
+            "run_id":      ctx.run_id,
+            "iteration":   ctx.iteration,
+            "tool_name":   tool_name,
+            "succeeded":   succeeded,
+            "output":      output,
+            "error":       error,
+            "duration_ms": duration_ms,
         }));
     }
 
@@ -419,6 +421,7 @@ mod sse_orchestrator_tests {
                 true,
                 Some(&serde_json::json!({"body":"ok"})),
                 None,
+                42,
             )
             .await;
 
@@ -429,6 +432,9 @@ mod sse_orchestrator_tests {
         let f2 = rx.try_recv().unwrap();
         assert_eq!(f2.data["event"], "tool_result");
         assert_eq!(f2.data["succeeded"], true);
+        // duration_ms lands on the SSE frame so dashboards can surface
+        // per-tool latency without re-reading FF's attempt stream.
+        assert_eq!(f2.data["duration_ms"], 42);
     }
 
     #[tokio::test]

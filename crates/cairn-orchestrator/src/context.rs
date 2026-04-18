@@ -146,6 +146,22 @@ pub struct ActionResult {
     pub tool_output: Option<serde_json::Value>,
     /// The `ToolInvocationId` recorded in the event log (for replay linkage).
     pub invocation_id: Option<ToolInvocationId>,
+    /// Wall-clock duration of the dispatch, in milliseconds. Stamped by the
+    /// `ExecutePhase` caller after `dispatch_one` returns; inner construction
+    /// sites initialise to 0 and the outer wrapper overwrites with the real
+    /// elapsed value.
+    ///
+    /// **0 means "unknown / below-timer-resolution" or "result was synthesised
+    /// by a test stub that did not actually dispatch,"** NOT "the tool ran in
+    /// literally zero time." Downstream consumers (FF attempt-stream replay,
+    /// cost reconciliation, latency percentiles) MUST treat 0 as no-signal
+    /// rather than zero-duration; averaging or percentile computations that
+    /// trust 0-as-measured will under-report latency. The same convention
+    /// applies to the `tool_result` frame the loop emits to FF's
+    /// attempt_stream — see `loop_runner.rs` where this field feeds
+    /// `log_tool_result`. Closes the "Better fix" follow-up on #33; replaces
+    /// the previous wall-clock-divided-by-result-count approximation.
+    pub duration_ms: u64,
 }
 
 /// Status of a single executed action.
