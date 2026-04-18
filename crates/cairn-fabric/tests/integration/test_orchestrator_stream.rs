@@ -247,25 +247,87 @@ async fn orchestrator_loop_emits_four_frames_in_per_iteration_order() {
         serde_json::from_str(payload).expect("payload not valid JSON")
     };
 
+    // llm_response frame — `stream.rs::log_llm_response` serializes model +
+    // token counts + latency + timestamp. Assert EVERY field is present
+    // AND typed so a silent field-drop or type coercion in the sink
+    // (e.g. u64→String) surfaces here, not in downstream cost
+    // reconciliation.
     let llm = parse(&frames[0]);
     assert_eq!(llm["model"], "claude-3-opus");
-    assert_eq!(llm["tokens_in"], 500);
-    assert_eq!(llm["tokens_out"], 200);
-    assert_eq!(llm["latency_ms"], 1_200);
+    assert_eq!(
+        llm["tokens_in"].as_u64(),
+        Some(500),
+        "tokens_in must be a u64 number, got {:?}",
+        llm["tokens_in"]
+    );
+    assert_eq!(
+        llm["tokens_out"].as_u64(),
+        Some(200),
+        "tokens_out must be a u64 number, got {:?}",
+        llm["tokens_out"]
+    );
+    assert_eq!(
+        llm["latency_ms"].as_u64(),
+        Some(1_200),
+        "latency_ms must be a u64 number, got {:?}",
+        llm["latency_ms"]
+    );
+    assert!(
+        llm["timestamp_ms"].as_u64().is_some(),
+        "llm_response must carry a numeric timestamp_ms, got {:?}",
+        llm["timestamp_ms"]
+    );
 
+    // tool_call frame — `stream.rs::log_tool_call` serializes tool_name +
+    // args + timestamp. Args is a nested JSON object round-tripped verbatim.
     let tool_call = parse(&frames[1]);
     assert_eq!(tool_call["tool_name"], "fs.read");
     assert_eq!(tool_call["args"]["path"], "/tmp/x");
+    assert!(
+        tool_call["timestamp_ms"].as_u64().is_some(),
+        "tool_call must carry a numeric timestamp_ms, got {:?}",
+        tool_call["timestamp_ms"]
+    );
 
+    // tool_result frame — `stream.rs::log_tool_result` serializes
+    // tool_name + output + success + duration_ms + timestamp. duration_ms
+    // is the per-result averaged value the loop computes
+    // (loop_runner.rs:485-489) — present even when it's 0 from a
+    // sub-result-count wall-clock truncation (see issue #33). Assert
+    // presence + type, not a specific value, so this test doesn't flake
+    // on fast runs.
     let tool_result = parse(&frames[2]);
     assert_eq!(tool_result["tool_name"], "fs.read");
     assert_eq!(tool_result["success"], true);
     assert_eq!(tool_result["output"]["ok"], true);
+    assert!(
+        tool_result["duration_ms"].as_u64().is_some(),
+        "tool_result must carry a numeric duration_ms (0 = unknown, \
+         not missing), got {:?}",
+        tool_result["duration_ms"]
+    );
+    assert!(
+        tool_result["timestamp_ms"].as_u64().is_some(),
+        "tool_result must carry a numeric timestamp_ms, got {:?}",
+        tool_result["timestamp_ms"]
+    );
 
-    // Checkpoint frame is raw bytes from `save_checkpoint` — the
-    // loop_runner writes a JSON snapshot with iteration + run_id +
-    // session_id + step_summary + loop_signal (see §6b of
-    // loop_runner.rs). The payload parses as JSON and carries the run id.
+    // checkpoint frame — `save_checkpoint` takes raw bytes from the loop
+    // runner's per-iteration JSON snapshot. Assert the payload bytes are
+    // non-empty (FF would reject empty) AND that they decode back as
+    // JSON carrying iteration + run_id + session_id. If `save_checkpoint`
+    // ever drops the bytes or writes zero-length, this test fails here
+    // instead of silently in resume reconstruction.
+    let checkpoint_bytes = frames[3]
+        .fields
+        .get("payload")
+        .expect("checkpoint frame missing payload field");
+    assert!(
+        !checkpoint_bytes.is_empty(),
+        "checkpoint payload must be non-empty bytes (FF rejects empty \
+         frames); got {} bytes",
+        checkpoint_bytes.len()
+    );
     let checkpoint = parse(&frames[3]);
     assert_eq!(checkpoint["iteration"], 0);
     assert_eq!(checkpoint["run_id"], run_id.as_str());
