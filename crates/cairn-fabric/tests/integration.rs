@@ -4,12 +4,22 @@
 // (one container per `cargo test` invocation, shared across every test in
 // the binary through a `tokio::sync::OnceCell`). `FabricServices::start`
 // runs against the container's host:port, and FF's Lua library is loaded
-// on first boot via `ff_script::loader::ensure_library`. Each test calls
-// `TestHarness::setup()` which acquires the shared container handle and
-// issues `FLUSHDB` so every test starts from a clean Valkey.
+// on first boot via `ff_script::loader::ensure_library`.
+//
+// **Parallel-safe key isolation.** There is NO `FLUSHDB` between tests.
+// Running `FLUSHDB` on a shared container concurrently is destructive —
+// one test's FLUSHDB wipes another's in-flight state. Instead, every
+// test gets a uuid-scoped `ProjectKey` via `TestHarness::setup()`, and
+// every id inside the test is generated with `uuid::Uuid::new_v4()`
+// (`unique_run_id`, `unique_task_id`, `unique_session_id`,
+// `ExecutionId::new()`, `BudgetId::new()`, …). Keyspaces therefore do
+// not collide across parallel tests — each test operates in its own
+// project partition and FF's `{p:N}` hashtags route their FCALLs to
+// disjoint slots.
 //
 // Run with:
-//   cargo test -p cairn-fabric --test integration
+//   cargo test -p cairn-fabric --test integration           # parallel (default)
+//   cargo test -p cairn-fabric --test integration -- --test-threads=1
 //
 // No `--ignored` and no `CAIRN_TEST_VALKEY_URL` required. Set
 // `CAIRN_TEST_VALKEY_URL` to override the container path and point at an
@@ -42,10 +52,10 @@ use tokio::sync::OnceCell;
 // `OnceCell<ContainerHandle>` — the container is started lazily by the
 // first test, shared across every test in the binary, and torn down when
 // the binary exits (ContainerAsync's Drop kills and removes the container).
-// Tests do NOT get isolated databases; we rely on `FLUSHDB` between tests
-// to keep them independent, which is sufficient because FF's Lua library
-// is idempotent under FUNCTION LOAD REPLACE and the OnceCell guarantees
-// `ff_script::loader::ensure_library` runs exactly once.
+// Tests share one Valkey DB; isolation comes from uuid-scoped
+// (tenant, workspace, project) triples per test (see
+// `TestHarness::setup`), NOT from FLUSHDB — parallel tests must not
+// trample each other's keyspaces.
 
 struct ContainerHandle {
     // The handle itself is held only so Drop doesn't run early.
@@ -103,13 +113,17 @@ impl TestHarness {
     pub async fn setup() -> Self {
         let (host, port) = get_valkey_endpoint().await;
 
-        // Give every test a fresh keyspace. The FF Lua library survives
-        // FLUSHDB (Valkey FUNCTIONs are stored separately) so we do not
-        // need to reload it per-test.
-        flushdb(&host, port).await;
-
-        let project_id = format!("test_project_{}", uuid::Uuid::new_v4().simple());
-        let project = ProjectKey::new("test_tenant", "test_workspace", project_id.as_str());
+        // Per-test project scope — uuid-suffixed so parallel tests route
+        // their FCALLs to disjoint `{p:N}` hashtags and never share state.
+        // Also per-test tenant/workspace so tenant-level indices (session
+        // and run projections, budget ZSETs keyed on (tenant,workspace))
+        // stay disjoint even when future tests graduate beyond project
+        // scope.
+        let suffix = uuid::Uuid::new_v4().simple().to_string();
+        let tenant = format!("test_tenant_{}", suffix);
+        let workspace = format!("test_workspace_{}", suffix);
+        let project_id = format!("test_project_{}", suffix);
+        let project = ProjectKey::new(tenant.as_str(), workspace.as_str(), project_id.as_str());
 
         // The engine's background scanners (delayed_promoter, lease_expiry,
         // etc.) iterate the lanes listed in FabricConfig.lane_id. Task and run
@@ -170,17 +184,4 @@ impl TestHarness {
     pub async fn teardown(self) {
         self.fabric.shutdown().await;
     }
-}
-
-async fn flushdb(host: &str, port: u16) {
-    use ferriskey::Client;
-    let url = format!("redis://{host}:{port}");
-    let client = Client::connect(&url)
-        .await
-        .expect("failed to connect ferriskey Client for FLUSHDB");
-    let _: String = client
-        .cmd("FLUSHDB")
-        .execute()
-        .await
-        .expect("FLUSHDB failed");
 }
