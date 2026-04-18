@@ -184,6 +184,16 @@ jobs:
       - name: cargo test --test integration (default — parallel)
         run: cargo test -p cairn-fabric --test integration
         timeout-minutes: 10
+      # Separate step so default-feature coverage stays visible independently.
+      # `insecure-direct-claim` gates `CairnWorker::claim_next`, which the
+      # orchestrator-stream regression test uses to obtain a live CairnTask
+      # (ff-sdk's `ClaimedTask::new` is `pub(crate)` — see
+      # `crates/cairn-fabric/src/worker_sdk.rs` for the architectural note).
+      # Without the flag, every `#![cfg(feature = "insecure-direct-claim")]`
+      # test compiles to zero tests and the coverage is CI-dark.
+      - name: cargo test --test integration (--features insecure-direct-claim)
+        run: cargo test -p cairn-fabric --test integration --features insecure-direct-claim
+        timeout-minutes: 10
 
   # ── 6. UI Build + Type Check + Component Tests ──────────────────────────────
   ui:
