@@ -9,7 +9,7 @@ development workflow, testing, and the pull-request process.
 
 | Tool | Minimum version | Notes |
 |------|-----------------|-------|
-| Rust | 1.83 | `rustup update stable` |
+| Rust | 1.95 | `rustup update stable` — project pins via `rust-toolchain.toml` |
 | Node.js | 22 | Required only for UI development |
 | npm | 10 | Bundled with Node.js 22 |
 | Ollama | any | Optional; enables local LLM tests |
@@ -24,23 +24,32 @@ Install Rust via [rustup](https://rustup.rs). Node.js via
 
 ```
 crates/
-  cairn-domain/      Domain types, events, lifecycle rules, RFC contracts
-  cairn-store/       Append-only event log + projections (InMemory / Postgres / SQLite)
-  cairn-runtime/     Service implementations: sessions, runs, tasks, approvals, routing
-  cairn-api/         HTTP types, SSE payloads, auth, bootstrap config
-  cairn-app/         Axum HTTP server, route handlers, embedded React UI (ui/dist/)
-  cairn-memory/      Knowledge ingestion, chunking, retrieval pipeline
-  cairn-graph/       Entity relationship graph
-  cairn-evals/       Eval runs, rubrics, baselines, bandit experiments
-  cairn-tools/       Tool invocation, stdio plugin host
-  cairn-agent/       Agent orchestration loop
-  cairn-signal/      Signal routing
-  cairn-channels/    Agent message channels
-  cairn-plugin-proto Plugin wire protocol
+  cairn-domain/          Domain types, events, lifecycle rules, RFC contracts
+  cairn-store/           Append-only event log + projections (InMemory / Postgres / SQLite)
+  cairn-runtime/         Service implementations: sessions, runs, tasks, approvals, routing
+  cairn-api/             HTTP route handlers (admin, evals, graph, memory, triggers)
+  cairn-app/             Axum HTTP server, route handlers, embedded React UI (ui/dist/)
+  cairn-memory/          Knowledge ingestion, chunking, retrieval pipeline
+  cairn-graph/           Entity relationship graph
+  cairn-evals/           Eval runs, rubrics, baselines, bandit experiments
+  cairn-tools/           Tool invocation, stdio plugin host
+  cairn-tools-derive/    Proc-macro helpers for built-in and plugin tool definitions
+  cairn-agent/           Agent orchestration loop, ReAct / reflection / streaming
+  cairn-orchestrator/    GATHER → DECIDE → EXECUTE loop, lifecycle control
+  cairn-workspace/       Sandbox workspaces (OverlayFS / reflink-copy)
+  cairn-integrations/    Integration plugin framework (GitHub, Linear, Notion, webhook)
+  cairn-providers/       Unified LLM provider abstraction (13+ backends)
+  cairn-github/          GitHub App client (JWT auth, webhook verification)
+  cairn-plugin-catalog/  Plugin marketplace + catalog
+  cairn-signal/          Signal routing
+  cairn-channels/        Notification channels (Slack, email, webhook)
+  cairn-plugin-proto/    Plugin wire protocol types
+  cairn-fabric/          FlowFabric bridge — Valkey-native execution layer (feature-gated)
 
 ui/                  React + TypeScript operator dashboard (Vite, Tailwind)
 docs/
-  design/rfcs/       RFC specifications (002–014)
+  design/rfcs/       RFC specifications
+  design/            Architecture notes + FINALIZED runbook
   api-reference.md   Full endpoint reference
 ```
 
