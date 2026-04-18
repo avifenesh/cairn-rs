@@ -87,11 +87,25 @@ async fn orchestrator_sink_emits_four_frames_in_xrange_order() {
         .await
         .expect("CairnWorker::connect failed");
 
-    let claimed = worker
-        .claim_next()
-        .await
-        .expect("claim_next rpc failed")
-        .expect("no eligible task returned");
+    // `CairnWorker::claim_next` scans a rolling 32-partition window per
+    // call (PARTITION_SCAN_CHUNK in ff-sdk). With 256 partitions, up to
+    // 8 polls are needed to cover the full keyspace. Loop with a short
+    // backoff until a task comes up OR we hit the deadline.
+    let claim_deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    let claimed = loop {
+        match worker.claim_next().await.expect("claim_next rpc failed") {
+            Some(task) => break task,
+            None => {
+                if std::time::Instant::now() >= claim_deadline {
+                    panic!(
+                        "no eligible task returned within 10s — lane/capability/partition \
+                         mismatch between harness submit path and worker claim path"
+                    );
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            }
+        }
+    };
 
     // 3. Call the orchestrator's sink trait on the live CairnTask.
     //    `Arc<dyn TaskFrameSink>` is how OrchestratorLoop holds it; we
