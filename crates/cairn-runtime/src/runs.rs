@@ -95,6 +95,16 @@ pub trait RunService: Send + Sync {
     /// fresh re-claim of an active run. Callers must claim once per
     /// lifecycle and advance the run via the terminal or suspend
     /// paths; do not retry on success.
+    ///
+    /// A second claim is only legitimate after a suspend/resume
+    /// cycle has flipped `lifecycle_phase` back to `runnable` (FF
+    /// resume emits the resume-eligible state per
+    /// lua/suspension.lua; see
+    /// `crates/cairn-fabric/tests/integration/test_suspension.rs::test_suspend_and_resume_roundtrip`
+    /// for the resume-after-suspend flow, which exercises the
+    /// `ff_claim_resumed_execution` dispatch). In that case the
+    /// second claim is a fresh activation, not a retry of a prior
+    /// success.
     async fn claim(&self, run_id: &RunId) -> Result<RunRecord, RuntimeError>;
 
     /// Transition a run to WaitingApproval (approval gate).

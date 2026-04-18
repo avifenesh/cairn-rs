@@ -1038,12 +1038,12 @@ pub(crate) async fn cancel_run_handler(
 /// 500 here. Callers must claim once per lifecycle. See
 /// `RunService::claim` docstring.
 ///
-/// Unlike `cancel_run_handler`, this handler does a get-first
-/// lookup: the Fabric `claim` path presents a missing execution as
-/// an FCALL `Internal` error (→ 500), so we pre-resolve the run to
-/// keep missing-id at the expected 404. `cancel_run_handler` can
-/// defer to the service layer because cancel maps missing-run to a
-/// typed `RuntimeError` that already reaches 404.
+/// Get-first is belt-and-suspenders against projection staleness —
+/// `FabricRunServiceAdapter::claim` already delegates through
+/// `resolve_run_project`, which maps missing-in-store to
+/// `RuntimeError::NotFound` → 404. Keeping the explicit lookup here
+/// avoids relying on that transitive mapping and isolates the 404
+/// response from any future change in the adapter layer.
 ///
 /// No request body: runs are not worker-pulled, so the caller never
 /// advertises worker identity through this endpoint (unlike
