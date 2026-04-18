@@ -482,11 +482,46 @@ where
             // surface per-call durations today. Accurate-enough for audit
             // telemetry; if/when execute exposes per-call timing, switch to
             // the real value here.
+            //
+            // 0 semantics: `per_result_duration_ms == 0` means "unknown /
+            // below-timer-resolution," NOT "the tool executed in literally
+            // zero time." Two ways it lands at 0 here:
+            //   - Empty results (no tools dispatched this iteration).
+            //   - Fast iteration where execute_duration_ms < results.len()
+            //     → integer division truncates to 0 for every frame.
+            // Downstream consumers (FF stream replay, cost reconciliation)
+            // MUST treat 0 as "no signal" rather than "zero-duration" —
+            // averaging or percentile computations that trust 0-as-measured
+            // will under-report latency. Follow-up: thread per-call
+            // duration through ActionResult so this averaging math
+            // disappears. Tracked in issue #33 (initial minimum-scope fix
+            // landed this commit); the real-value plumbing is deferred
+            // because it touches ~10 ActionResult construction sites in
+            // execute_impl + test stubs.
             let per_result_duration_ms = if execute_outcome.results.is_empty() {
                 0
             } else {
                 execute_duration_ms / execute_outcome.results.len() as u64
             };
+            // Emit a debug-level trace when the wall-clock was shorter than
+            // the result count — that's the silent-truncation case where
+            // every frame lands with duration_ms=0. Operators grepping for
+            // "per-result duration truncated" in logs can spot how often a
+            // given run's cost data is under-measured. Kept at debug not
+            // warn: 0-on-fast-path is ACCEPTABLE telemetry, just noisy
+            // enough at high volume to want a threshold alert.
+            if !execute_outcome.results.is_empty()
+                && execute_duration_ms < execute_outcome.results.len() as u64
+            {
+                tracing::debug!(
+                    run_id    = %ctx.run_id,
+                    iteration = ctx.iteration,
+                    execute_duration_ms,
+                    result_count = execute_outcome.results.len(),
+                    "per-result duration truncated to 0 — wall-clock under result count, \
+                     downstream cost telemetry will under-measure this iteration"
+                );
+            }
             for result in &execute_outcome.results {
                 let tool_name = result
                     .proposal
