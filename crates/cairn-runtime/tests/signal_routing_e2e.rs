@@ -1,3 +1,5 @@
+#![cfg(feature = "in-memory-runtime")]
+
 //! Signal routing end-to-end integration test (RFC 012).
 //!
 //! Validates the full signal routing pipeline:

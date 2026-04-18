@@ -1,3 +1,5 @@
+#![cfg(feature = "in-memory-runtime")]
+
 //! RFC 005 — run cost tracking and alert system end-to-end integration tests.
 //!
 //! Tests the full cost-tracking arc:

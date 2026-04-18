@@ -8,6 +8,13 @@ publish = false
 [lib]
 path = "src/lib.rs"
 
+[features]
+default = []
+# Forwards to cairn-runtime/in-memory-runtime so tests that construct
+# concrete TaskServiceImpl / InMemoryServices remain compilable. Default
+# builds skip these test modules.
+in-memory-runtime = ["cairn-runtime/in-memory-runtime"]
+
 [dependencies]
 cairn-domain = { path = "../cairn-domain" }
 cairn-graph  = { path = "../cairn-graph" }

@@ -81,7 +81,7 @@ impl ToolHandler for GetRunTool {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "in-memory-runtime"))]
 mod tests {
     use super::*;
     use cairn_domain::{ProjectKey, RunId, SessionId};

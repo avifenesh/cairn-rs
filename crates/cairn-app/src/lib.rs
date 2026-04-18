@@ -59,17 +59,22 @@ pub(crate) use triggers::*;
 pub(crate) use cairn_runtime::RuntimeError;
 pub(crate) use cairn_tools::cancel_plugin_invocation;
 
-#[cfg(test)]
+// Test-only imports that back the `mod tests` block below. The module
+// requires an `AppState` booted via `AppBootstrap`, which in turn demands
+// the HMAC env (fail-loud in the default Fabric build). Gating on
+// `feature = "in-memory-runtime"` keeps `cargo test -p cairn-app` green
+// by default; the feature build runs them unchanged.
+#[cfg(all(test, feature = "in-memory-runtime"))]
 use axum::http::StatusCode;
-#[cfg(test)]
+#[cfg(all(test, feature = "in-memory-runtime"))]
 use cairn_api::auth::AuthPrincipal;
-#[cfg(test)]
+#[cfg(all(test, feature = "in-memory-runtime"))]
 use cairn_api::bootstrap::{BootstrapConfig, DeploymentMode, ServerBootstrap, StorageBackend};
-#[cfg(test)]
+#[cfg(all(test, feature = "in-memory-runtime"))]
 use cairn_domain::{RunState, TaskState};
-#[cfg(test)]
+#[cfg(all(test, feature = "in-memory-runtime"))]
 use cairn_tools::{PluginCapability, PluginManifest, PluginToolDescriptor};
-#[cfg(test)]
+#[cfg(all(test, feature = "in-memory-runtime"))]
 use std::sync::Arc;
 
 // ── Handler re-exports ─────────────────────────────────────────────────────────
@@ -120,7 +125,7 @@ pub(crate) use handlers::tools::*;
 #[allow(unused_imports)]
 pub(crate) use handlers::workers::*;
 
-#[cfg(test)]
+#[cfg(all(test, feature = "in-memory-runtime"))]
 mod tests {
     use super::*;
     use axum::body::{to_bytes, Body};

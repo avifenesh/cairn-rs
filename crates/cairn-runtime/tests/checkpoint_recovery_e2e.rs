@@ -1,3 +1,5 @@
+#![cfg(feature = "in-memory-runtime")]
+
 //! RFC 005 — checkpoint and recovery lifecycle end-to-end integration tests.
 //!
 //! Covers the full checkpoint + recovery arc:

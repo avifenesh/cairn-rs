@@ -166,7 +166,7 @@ fn now_millis() -> u64 {
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
-#[cfg(test)]
+#[cfg(all(test, feature = "in-memory-runtime"))]
 mod tests {
     use super::*;
     use cairn_runtime::services::TaskServiceImpl;

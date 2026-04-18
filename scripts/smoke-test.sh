@@ -146,12 +146,41 @@ chk "GET /v1/runs/:id/events"    200 GET "/v1/runs/${RUN_ID}/events"
 chk "GET /v1/runs/:id/tasks"     200 GET "/v1/runs/${RUN_ID}/tasks"
 chk "GET /v1/runs/:id/approvals" 200 GET "/v1/runs/${RUN_ID}/approvals"
 
-chk "POST pause"  200 POST "/v1/runs/${RUN_ID}/pause" \
-  '{"reason_kind":"operator_pause","detail":"smoke"}'
-[ "$(jf state)" = "paused"  ] && log_ok "  paused"  || log_fail "  pause state='$(jf state)'"
+# Sections 3.lease + 4.claim: the FF-enforced state machine rejects
+# pause/resume/release-lease that aren't preceded by a claim. We exercise
+# the claim-then-operate sequence via the smoke_worker binary — it drives
+# a separate run + task through the full lifecycle in the correct order.
+#
+# The main RUN_ID / TASK_ID / SESSION_ID stay on the read-path checks so
+# the smoke_worker fixture runs in isolation.
+section "3b. Claim-then-operate (smoke_worker fixture)"
 
-chk "POST resume" 200 POST "/v1/runs/${RUN_ID}/resume" '{}'
-[ "$(jf state)" = "running" ] && log_ok "  running" || log_fail "  resume state='$(jf state)'"
+SW_RUN_ID="sw_run_${RUN_ID}"
+SW_TASK_ID="sw_task_${RUN_ID}"
+SW_SESS_ID="sw_sess_${RUN_ID}"
+
+SMOKE_WORKER_BIN="${CAIRN_SMOKE_WORKER_BIN:-}"
+if [ -z "$SMOKE_WORKER_BIN" ]; then
+  # Prefer a pre-built release binary, fall back to cargo run for dev invocations.
+  if [ -x "target/release/smoke_worker" ]; then
+    SMOKE_WORKER_BIN="target/release/smoke_worker"
+  elif [ -x "target/debug/smoke_worker" ]; then
+    SMOKE_WORKER_BIN="target/debug/smoke_worker"
+  else
+    SMOKE_WORKER_BIN="cargo run --quiet --bin smoke_worker --"
+  fi
+fi
+
+if CAIRN_URL="$BASE" CAIRN_TOKEN="$TOKEN" \
+   $SMOKE_WORKER_BIN \
+     --tenant default_tenant --workspace default_workspace \
+     --project default_project \
+     --run-id "$SW_RUN_ID" --session-id "$SW_SESS_ID" --task-id "$SW_TASK_ID" \
+     >&2; then
+  log_ok "smoke_worker claim-then-operate"
+else
+  log_fail "smoke_worker claim-then-operate (see stderr above)"
+fi
 
 # Cancel run — create a separate run so we don't break the main lifecycle
 CANCEL_RUN_ID="crun_${RUN_ID}"
@@ -161,7 +190,7 @@ chk "POST /v1/runs/:id/cancel" 200 POST "/v1/runs/${CANCEL_RUN_ID}/cancel" ""
 [ "$(jf state)" = "canceled" ] && log_ok "  canceled" || log_fail "  cancel state='$(jf state)'"
 
 # =============================================================================
-section "4. Task queue"
+section "4. Task queue (read-path surface)"
 
 # Correct EventEnvelope + RuntimeEvent (tagged with "event" discriminator)
 # OwnershipKey: tag="scope", rename_all="snake_case" → Project variant flattens its fields
@@ -176,13 +205,6 @@ chk "POST /v1/events/append (TaskCreated)" 201 POST /v1/events/append \
 sleep 0.4
 
 chk "GET /v1/tasks" 200 GET "/v1/tasks?tenant_id=default&workspace_id=default&project_id=default"
-
-chk "POST /v1/tasks/:id/claim" 200 POST "/v1/tasks/${TASK_ID}/claim" \
-  "{\"worker_id\":\"${WORKER_ID}\",\"lease_duration_ms\":30000}"
-[ "$(jf state)" = "leased" ] && log_ok "  claimed (leased)" || log_fail "  claim state='$(jf state)'"
-
-chk "POST /v1/tasks/:id/release-lease" 200 POST "/v1/tasks/${TASK_ID}/release-lease" ""
-[ "$(jf state)" = "queued" ] && log_ok "  released (queued)" || log_fail "  release state='$(jf state)'"
 
 # =============================================================================
 section "5. Approval workflow"

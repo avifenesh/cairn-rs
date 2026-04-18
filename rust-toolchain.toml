@@ -1,4 +1,12 @@
 [toolchain]
-channel = "stable"
+# Pinned Rust version. Float-free so compiler / clippy regressions in
+# new stable releases (e.g. the 1.94 → 1.95 clippy break that cost half
+# a day) surface when we deliberately bump this file, not when someone's
+# clone silently picks up a newer stable toolchain between jobs.
+#
+# Bump process: open a PR that bumps this line plus any `cargo fmt` /
+# `clippy` fixes the new version requires, land it, propagate.
+channel = "1.95.0"
 components = ["rustfmt", "clippy"]
+profile = "minimal"
 

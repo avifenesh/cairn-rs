@@ -656,7 +656,9 @@ pub async fn delete_run_template_handler(
     }
 }
 
-#[cfg(test)]
+// Boots `AppState` via `BootstrapConfig`; same HMAC-fail-loud reason as
+// `repo_routes::tests` — gate on `in-memory-runtime`.
+#[cfg(all(test, feature = "in-memory-runtime"))]
 mod tests {
     use std::sync::Arc;
 

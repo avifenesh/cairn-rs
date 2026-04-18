@@ -1,3 +1,5 @@
+#![cfg(feature = "in-memory-runtime")]
+
 //! RFC 005 task lifecycle end-to-end integration test.
 //!
 //! Validates the complete task state machine:

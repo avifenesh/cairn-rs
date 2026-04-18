@@ -1,3 +1,5 @@
+#![cfg(feature = "in-memory-runtime")]
+
 //! RFC 002 mailbox messaging end-to-end integration test.
 //!
 //! Validates the full inter-agent mailbox pipeline:

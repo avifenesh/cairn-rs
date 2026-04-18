@@ -6,6 +6,8 @@
 //! - The event log append → read cycle works correctly.
 //! - The AppBootstrap builds a working router.
 
+#![cfg(feature = "in-memory-runtime")]
+
 use std::sync::Arc;
 
 use cairn_api::bootstrap::BootstrapConfig;

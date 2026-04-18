@@ -6,7 +6,6 @@ use ff_core::types::ExecutionId;
 use crate::TestHarness;
 
 #[tokio::test]
-#[ignore]
 async fn test_budget_hard_limit() {
     let h = TestHarness::setup().await;
     let run_id = RunId::new(format!("budget_run_{}", uuid::Uuid::new_v4()));
@@ -47,7 +46,6 @@ async fn test_budget_hard_limit() {
 }
 
 #[tokio::test]
-#[ignore]
 async fn test_budget_status_reflects_spend() {
     let h = TestHarness::setup().await;
     let run_id = RunId::new(format!("budget_status_{}", uuid::Uuid::new_v4()));
@@ -81,7 +79,6 @@ async fn test_budget_status_reflects_spend() {
 }
 
 #[tokio::test]
-#[ignore]
 async fn test_budget_release_resets_usage() {
     let h = TestHarness::setup().await;
     let run_id = RunId::new(format!("budget_release_{}", uuid::Uuid::new_v4()));
@@ -130,7 +127,6 @@ async fn test_budget_release_resets_usage() {
 /// fires) — which is why the unit-level guard is to REQUIRE a non-optional
 /// `&ExecutionId`. The integration test proves FF-side behavior matches.
 #[tokio::test]
-#[ignore]
 async fn test_budget_spend_dedup_returns_already_applied() {
     let h = TestHarness::setup().await;
     let run_id = RunId::new(format!("budget_dedup_{}", uuid::Uuid::new_v4()));

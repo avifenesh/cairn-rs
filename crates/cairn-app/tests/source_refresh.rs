@@ -1,3 +1,5 @@
+#![cfg(feature = "in-memory-runtime")]
+
 //! RFC 003 source refresh scheduling integration tests.
 
 use axum::{

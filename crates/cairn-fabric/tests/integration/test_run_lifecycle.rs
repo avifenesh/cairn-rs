@@ -1,8 +1,8 @@
 // Run and task lifecycle integration tests.
 //
-// These tests create real FF executions in Valkey. Each test uses unique IDs
-// to avoid cross-test interference. However, keys accumulate — use a dedicated
-// test Valkey instance and FLUSHDB between full test runs if needed.
+// These tests create real FF executions in Valkey. Runs against a
+// testcontainers-provisioned Valkey (see tests/integration.rs); every test
+// gets a FLUSHDB between invocations plus unique ids as defense in depth.
 //
 // Terminal operations (complete/fail/cancel) require the execution to be
 // Active (leased). run_service.start() creates executions in Waiting state.
@@ -26,7 +26,6 @@ use crate::TestHarness;
 /// finalization cross-review: if someone deletes the override, sqeq
 /// telemetry silently drops request correlation on the Fabric path.
 #[tokio::test]
-#[ignore]
 async fn test_start_with_correlation_tags_exec_core() {
     let h = TestHarness::setup().await;
     let session_id = h.unique_session_id();
@@ -63,7 +62,6 @@ async fn test_start_with_correlation_tags_exec_core() {
 }
 
 #[tokio::test]
-#[ignore]
 async fn test_create_and_read_run() {
     let h = TestHarness::setup().await;
     let session_id = h.unique_session_id();
@@ -96,7 +94,6 @@ async fn test_create_and_read_run() {
 }
 
 #[tokio::test]
-#[ignore]
 async fn test_tags_readable() {
     let h = TestHarness::setup().await;
     let session_id = h.unique_session_id();
@@ -115,7 +112,6 @@ async fn test_tags_readable() {
 }
 
 #[tokio::test]
-#[ignore]
 async fn test_duplicate_start_is_idempotent() {
     let h = TestHarness::setup().await;
     let session_id = h.unique_session_id();
@@ -147,7 +143,6 @@ async fn test_duplicate_start_is_idempotent() {
 // We use task_service which creates + claims in the correct flow.
 
 #[tokio::test]
-#[ignore]
 async fn test_complete_task() {
     let h = TestHarness::setup().await;
     let session_id = h.unique_session_id();
@@ -201,7 +196,6 @@ async fn test_complete_task() {
 // class of regression where the retry path is silently skipped and a
 // transient error is promoted straight to Failed.
 #[tokio::test]
-#[ignore]
 async fn test_fail_task_retry_scheduled() {
     let h = TestHarness::setup().await;
     let session_id = h.unique_session_id();
@@ -265,7 +259,6 @@ async fn test_fail_task_retry_scheduled() {
 /// If this test flakes on slow CI, the first response should be to
 /// investigate delayed_promoter health — NOT to widen the timeout.
 #[tokio::test]
-#[ignore]
 async fn test_fail_reaches_terminal_after_retry_exhaustion() {
     let h = TestHarness::setup().await;
     let session_id = h.unique_session_id();
@@ -421,7 +414,6 @@ async fn wait_until_eligible(
 }
 
 #[tokio::test]
-#[ignore]
 async fn test_cancel_task() {
     let h = TestHarness::setup().await;
     let session_id = h.unique_session_id();

@@ -1,3 +1,5 @@
+#![cfg(feature = "in-memory-runtime")]
+
 //! Integration test for RFC 008 tenant overview endpoint.
 
 use axum::{

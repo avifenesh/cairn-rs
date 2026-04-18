@@ -32,3 +32,8 @@ cairn-memory = { path = "../cairn-memory" }
 
 [features]
 default = []
+# In-memory courtesy backing for Run/Task/Session services. Gated OFF by
+# default — correctness guarantees only hold when the Fabric path is wired.
+# Enable for local tinkering, cargo-test harnesses that don't want a live
+# Valkey, and CI jobs that exercise the event-log-only path.
+in-memory-runtime = []

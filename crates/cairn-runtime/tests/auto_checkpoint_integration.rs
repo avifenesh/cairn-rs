@@ -1,3 +1,5 @@
+#![cfg(feature = "in-memory-runtime")]
+
 use std::sync::Arc;
 
 use cairn_domain::{ProjectKey, RunId, SessionId, TaskId};

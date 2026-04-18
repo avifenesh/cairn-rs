@@ -21,10 +21,11 @@ use crate::services::{
     PromptReleaseServiceImpl, PromptVersionServiceImpl, ProviderBindingServiceImpl,
     ProviderConnectionPoolServiceImpl, ProviderConnectionServiceImpl, ProviderHealthServiceImpl,
     QuotaServiceImpl, RetentionServiceImpl, RoutePolicyServiceImpl, RunCostAlertServiceImpl,
-    RunServiceImpl, RunSlaServiceImpl, SessionServiceImpl, SignalRouterServiceImpl,
-    SignalServiceImpl, TaskServiceImpl, TenantServiceImpl, WorkspaceMembershipServiceImpl,
-    WorkspaceServiceImpl,
+    RunSlaServiceImpl, SignalRouterServiceImpl, SignalServiceImpl, TenantServiceImpl,
+    WorkspaceMembershipServiceImpl, WorkspaceServiceImpl,
 };
+#[cfg(feature = "in-memory-runtime")]
+use crate::services::{RunServiceImpl, SessionServiceImpl, TaskServiceImpl};
 use crate::sessions::SessionService;
 use crate::tasks::TaskService;
 use crate::ProviderRegistry;
@@ -33,8 +34,10 @@ use crate::ProviderRegistry;
 ///
 /// Core execution fields (`runs`, `tasks`, `sessions`) are `Arc<dyn Trait>`
 /// so cairn-app can swap the in-memory impl for
-/// `Fabric{Run,Task,Session}ServiceAdapter` at boot when
-/// `CAIRN_FABRIC_ENABLED=1`. All other fields remain concrete
+/// `Fabric{Run,Task,Session}ServiceAdapter` at boot. In default builds the
+/// Fabric adapters are always installed; the `in-memory-runtime` cargo
+/// feature (OFF by default) replaces them with event-log-only courtesy
+/// impls for local tinkering. All other fields remain concrete
 /// `*ServiceImpl<InMemoryStore>` — they back non-execution surfaces
 /// (approvals, evals, provider bindings, etc.) that FF does not manage.
 pub struct InMemoryServices {
@@ -43,10 +46,11 @@ pub struct InMemoryServices {
 
     // ── Core runtime ───────────────────────────────────────────────────────
     //
-    // Trait-object fields so the Fabric adapter can be swapped in at boot
-    // when `CAIRN_FABRIC_ENABLED=1`. Cairn-app's `AppState::new` picks the
-    // concrete impl (in-memory vs FabricRunServiceAdapter et al.). Handlers
-    // call trait methods through these fields unchanged either way.
+    // Trait-object fields so the Fabric adapter can be installed at boot.
+    // Cairn-app's `AppState::new` picks the concrete impl via the
+    // `in-memory-runtime` cargo feature (default OFF → Fabric adapters;
+    // feature ON → in-memory event-log courtesy impls). Handlers call
+    // trait methods through these fields unchanged either way.
     //
     // `InMemoryServices::new()` / `with_store()` default to the in-memory
     // impl; `with_store_and_core(store, runs, tasks, sessions)` lets callers
@@ -90,8 +94,8 @@ pub struct InMemoryServices {
     // PendingWaitpointExpiryScanner, BudgetResetScanner, BudgetReconciler,
     // QuotaReconciler, DependencyReconciler, FlowProjector,
     // IndexReconciler, RetentionTrimmer, UnblockScanner) own recovery
-    // unconditionally — whether CAIRN_FABRIC_ENABLED is set or not, there is
-    // no cairn-side recovery sweep worth running. The pre-Fabric
+    // unconditionally — on either cargo feature path, there is no
+    // cairn-side recovery sweep worth running. The pre-Fabric
     // `RecoveryServiceImpl` was removed in the finalization round.
     pub observability: LlmObservabilityServiceImpl<InMemoryStore>,
 
@@ -146,16 +150,24 @@ pub struct InMemoryServices {
 
 impl InMemoryServices {
     /// Create a fully-wired bundle backed by a fresh `InMemoryStore`.
+    ///
+    /// Only available under the `in-memory-runtime` feature. Default builds
+    /// must use [`Self::with_store_and_core`] and inject Fabric-backed
+    /// adapters for `runs` / `tasks` / `sessions` — the production path.
+    #[cfg(feature = "in-memory-runtime")]
     pub fn new() -> Self {
         let store = Arc::new(InMemoryStore::new());
         Self::with_store(store)
     }
 
-    /// Create a bundle wired to an existing store (useful for testing).
+    /// Create a bundle wired to an existing store, defaulting
+    /// runs/tasks/sessions to the in-memory impls.
     ///
-    /// Defaults runs/tasks/sessions to the in-memory impls. Use
-    /// [`Self::with_store_and_core`] to inject alternate impls (e.g. the
-    /// Fabric adapter) at construction time.
+    /// Only available under the `in-memory-runtime` feature — the in-memory
+    /// Run/Task/Session backings carry no correctness guarantees and exist
+    /// for local tinkering and tests. Production callers use
+    /// [`Self::with_store_and_core`] with Fabric adapters.
+    #[cfg(feature = "in-memory-runtime")]
     pub fn with_store(store: Arc<InMemoryStore>) -> Self {
         let runs: Arc<dyn RunService> = Arc::new(RunServiceImpl::new(store.clone()));
         let tasks: Arc<dyn TaskService> = Arc::new(TaskServiceImpl::new(store.clone()));
@@ -167,7 +179,7 @@ impl InMemoryServices {
     /// services.
     ///
     /// Cairn-app uses this to install Fabric-backed adapters for runs,
-    /// tasks, and sessions when `CAIRN_FABRIC_ENABLED` is set. Every other
+    /// tasks, and sessions in default (production) builds. Every other
     /// service still hangs off the shared in-memory store, so provider
     /// bindings, evals, approvals, etc. remain identical.
     pub fn with_store_and_core(
@@ -237,6 +249,11 @@ impl InMemoryServices {
     /// The `fabric` argument is type-erased to avoid a cairn-runtime -> cairn-fabric
     /// cyclic dependency. Callers pass `Arc<cairn_fabric::FabricServices>` and
     /// retrieve it later via `fabric::<T>()`.
+    ///
+    /// Only available under the `in-memory-runtime` feature because it
+    /// starts from `Self::with_store` which needs the in-memory impls. The
+    /// production path builds via `Self::with_store_and_core` directly.
+    #[cfg(feature = "in-memory-runtime")]
     pub fn with_fabric(store: Arc<InMemoryStore>, fabric: Arc<dyn Any + Send + Sync>) -> Self {
         let mut services = Self::with_store(store);
         services.fabric = Some(fabric);
@@ -252,13 +269,14 @@ impl InMemoryServices {
     }
 }
 
+#[cfg(feature = "in-memory-runtime")]
 impl Default for InMemoryServices {
     fn default() -> Self {
         Self::new()
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "in-memory-runtime"))]
 mod tests {
     use super::InMemoryServices;
     use crate::decisions::DecisionService;
