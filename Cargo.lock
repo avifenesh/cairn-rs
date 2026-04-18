@@ -933,6 +933,7 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "cairn-domain",
+ "cairn-orchestrator",
  "cairn-store",
  "dashmap",
  "ferriskey",
@@ -1024,6 +1025,7 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "cairn-domain",
+ "cairn-fabric",
  "cairn-graph",
  "cairn-memory",
  "cairn-providers",

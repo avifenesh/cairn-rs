@@ -36,6 +36,7 @@ use crate::emitter::{NoOpEmitter, OrchestratorEventEmitter};
 use crate::error::OrchestratorError;
 use crate::execute::ExecutePhase;
 use crate::gather::GatherPhase;
+use crate::task_sink::{NoOpTaskSink, TaskFrameSink};
 
 // ── CheckpointHook ────────────────────────────────────────────────────────────
 
@@ -103,6 +104,11 @@ pub struct OrchestratorLoop<G, D, E> {
     config: LoopConfig,
     checkpoint_hook: Arc<dyn CheckpointHook>,
     emitter: Arc<dyn OrchestratorEventEmitter>,
+    /// FF task-stream sink. `NoOpTaskSink` in the default construction —
+    /// call `with_task_sink` to install a `cairn_fabric::CairnTask`-backed
+    /// sink once the handler has claimed a task. Non-consuming
+    /// (frames only); terminal + suspension ops stay at the caller.
+    task_sink: Arc<dyn TaskFrameSink>,
 }
 
 impl<G, D, E> OrchestratorLoop<G, D, E>
@@ -112,7 +118,8 @@ where
     E: ExecutePhase,
 {
     /// Construct a new loop with the given phases and configuration.
-    /// Uses `NoOpCheckpointHook` and `NoOpEmitter` — call the builder methods to override.
+    /// Uses `NoOpCheckpointHook`, `NoOpEmitter`, and `NoOpTaskSink` — call
+    /// the builder methods to override.
     pub fn new(gather: G, decide: D, execute: E, config: LoopConfig) -> Self {
         Self {
             gather,
@@ -121,6 +128,7 @@ where
             config,
             checkpoint_hook: Arc::new(NoOpCheckpointHook),
             emitter: Arc::new(NoOpEmitter),
+            task_sink: Arc::new(NoOpTaskSink),
         }
     }
 
@@ -133,6 +141,21 @@ where
     /// Replace the event emitter (e.g., an SSE broadcaster for live progress).
     pub fn with_emitter(mut self, emitter: Arc<dyn OrchestratorEventEmitter>) -> Self {
         self.emitter = emitter;
+        self
+    }
+
+    /// Install a task-stream sink so FF receives `tool_call`, `tool_result`,
+    /// `llm_response`, and `checkpoint` frames for the attempt, and the
+    /// loop can poll `is_lease_healthy` between iterations.
+    ///
+    /// Pass an `Arc<cairn_fabric::CairnTask>` (via the blanket impl in
+    /// [`crate::task_sink`]) once the caller has claimed an FF task.
+    /// Callers without an FF task can omit this — the default
+    /// `NoOpTaskSink` leaves FF-side telemetry silent while the rest of
+    /// the loop (EventLog bridge events, store projections, SSE) runs
+    /// unchanged.
+    pub fn with_task_sink(mut self, sink: Arc<dyn TaskFrameSink>) -> Self {
+        self.task_sink = sink;
         self
     }
 
@@ -195,6 +218,25 @@ where
                     "orchestrator loop timed out"
                 );
                 return Ok(LoopTermination::TimedOut);
+            }
+
+            // ── (1b) Lease health gate ───────────────────────────────────────
+            // FF's ClaimedTask tracks consecutive renewal failures; after 3
+            // misses `is_lease_healthy()` returns false and every downstream
+            // FCALL will reject as stale_lease. Bail before committing any
+            // irreversible side effect (LLM call, tool dispatch, checkpoint
+            // write) — the caller sees `LoopTermination::Failed { reason:
+            // "lease unhealthy" }` and can fail the run cleanly via the
+            // CairnTask handle it still owns.
+            if !self.task_sink.is_lease_healthy() {
+                tracing::warn!(
+                    run_id    = %ctx.run_id,
+                    iteration = ctx.iteration,
+                    "lease unhealthy (3+ renewal failures) — aborting loop"
+                );
+                return Ok(LoopTermination::Failed {
+                    reason: "lease unhealthy".to_owned(),
+                });
             }
 
             let remaining_ms = deadline_ms.saturating_sub(now_ms);
@@ -273,6 +315,32 @@ where
             );
             self.emitter.on_decide_completed(ctx, &decide_output).await;
 
+            // ── (3b') FF stream: llm_response frame ──────────────────────────
+            // DecideOutput already carries model_id, token counts, and
+            // latency. Surface those on FF's attempt stream so cost
+            // reconciliation + audit replay work off a single durable source
+            // without cairn-store having to parse the raw LLM body. Token
+            // counts default to 0 when the provider didn't report them (FF
+            // stream format requires u64).
+            if let Err(e) = self
+                .task_sink
+                .log_llm_response(
+                    &decide_output.model_id,
+                    decide_output.input_tokens.unwrap_or(0) as u64,
+                    decide_output.output_tokens.unwrap_or(0) as u64,
+                    decide_output.latency_ms,
+                )
+                .await
+            {
+                tracing::warn!(
+                    run_id    = %ctx.run_id,
+                    iteration = ctx.iteration,
+                    model     = %decide_output.model_id,
+                    error     = %e,
+                    "task_sink.log_llm_response failed — frame lost, loop continues"
+                );
+            }
+
             // ── (3b) Plan artifact detection (RFC 018) ───────────────────────
             // In Plan mode, check if the LLM response contains a <proposed_plan>
             // block. If so, extract the plan markdown and terminate the run.
@@ -302,6 +370,28 @@ where
                     "decision requires approval — suspending for ApprovalRequested"
                 );
 
+                // FF stream: log tool_call frames for the approval-gate
+                // proposals before execute. The approval path emits
+                // `ApprovalRequested` rather than dispatching; the tool_call
+                // frame captures the INTENT of the action that triggered the
+                // gate so replay can reconstruct the audit trail.
+                for proposal in &decide_output.proposals {
+                    if let Some(tool_name) = &proposal.tool_name {
+                        let args = proposal
+                            .tool_args
+                            .clone()
+                            .unwrap_or(serde_json::Value::Null);
+                        if let Err(e) = self.task_sink.log_tool_call(tool_name, &args).await {
+                            tracing::warn!(
+                                run_id = %ctx.run_id,
+                                tool = %tool_name,
+                                error = %e,
+                                "task_sink.log_tool_call (approval gate) failed — frame lost"
+                            );
+                        }
+                    }
+                }
+
                 let outcome = self.execute.execute(ctx, &decide_output).await.map_err(|e| {
                     tracing::error!(run_id = %ctx.run_id, error = %e, "execute (approval gate) failed");
                     e
@@ -328,11 +418,37 @@ where
                 ));
             }
 
-            // ── (5) EXECUTE ───────────────────────────────────────────────────
+            // ── (5a) FF stream: tool_call frames (intent) ────────────────────
+            // Appended BEFORE execute so a process restart mid-dispatch leaves
+            // an in-flight marker that `restore_frames()` can observe. Only
+            // proposals with a concrete tool_name are framed; bookkeeping
+            // action types (CompleteRun, EscalateToOperator, …) have no
+            // stream-facing analogue.
+            for proposal in &decide_output.proposals {
+                if let Some(tool_name) = &proposal.tool_name {
+                    let args = proposal
+                        .tool_args
+                        .clone()
+                        .unwrap_or(serde_json::Value::Null);
+                    if let Err(e) = self.task_sink.log_tool_call(tool_name, &args).await {
+                        tracing::warn!(
+                            run_id    = %ctx.run_id,
+                            iteration = ctx.iteration,
+                            tool      = %tool_name,
+                            error     = %e,
+                            "task_sink.log_tool_call failed — frame lost, loop continues"
+                        );
+                    }
+                }
+            }
+
+            // ── (5b) EXECUTE ──────────────────────────────────────────────────
+            let execute_started_at_ms = now_millis();
             let execute_outcome = self.execute.execute(ctx, &decide_output).await.map_err(|e| {
                 tracing::error!(run_id = %ctx.run_id, iteration = ctx.iteration, error = %e, "execute failed");
                 e
             })?;
+            let execute_duration_ms = now_millis().saturating_sub(execute_started_at_ms);
 
             let succeeded_count = execute_outcome
                 .results
@@ -354,7 +470,23 @@ where
                 "execute complete"
             );
 
-            // Emit per-action tool_called / tool_result events.
+            // Emit per-action tool_called / tool_result events AND append
+            // matching FF stream frames. The two channels are independent:
+            // `OrchestratorEventEmitter` drives cairn-store projections + SSE
+            // (existing behavior); `task_sink.log_tool_result` appends to
+            // FF's attempt-scoped stream so `restore_frames()` can replay on
+            // resume. Stream-frame failures are logged and swallowed.
+            //
+            // Tool-result duration is approximated by per-iteration execute
+            // wall-clock divided across the results — execute_impl does not
+            // surface per-call durations today. Accurate-enough for audit
+            // telemetry; if/when execute exposes per-call timing, switch to
+            // the real value here.
+            let per_result_duration_ms = if execute_outcome.results.is_empty() {
+                0
+            } else {
+                execute_duration_ms / execute_outcome.results.len() as u64
+            };
             for result in &execute_outcome.results {
                 let tool_name = result
                     .proposal
@@ -378,6 +510,37 @@ where
                         error,
                     )
                     .await;
+
+                // FF stream frame — only emitted when the proposal carried a
+                // concrete tool_name (matches the pre-execute log_tool_call).
+                // AwaitingApproval / SubagentSpawned statuses have no output
+                // to log; record success=false with a null output so the
+                // frame pair is balanced.
+                if result.proposal.tool_name.is_some() {
+                    let output = match &result.tool_output {
+                        Some(v) => v.clone(),
+                        None => {
+                            if let Some(reason) = error {
+                                serde_json::json!({ "error": reason })
+                            } else {
+                                serde_json::Value::Null
+                            }
+                        }
+                    };
+                    if let Err(e) = self
+                        .task_sink
+                        .log_tool_result(tool_name, &output, succeeded, per_result_duration_ms)
+                        .await
+                    {
+                        tracing::warn!(
+                            run_id    = %ctx.run_id,
+                            iteration = ctx.iteration,
+                            tool      = %tool_name,
+                            error     = %e,
+                            "task_sink.log_tool_result failed — frame lost, loop continues"
+                        );
+                    }
+                }
             }
 
             // ── (6) CHECKPOINT ────────────────────────────────────────────────
@@ -408,6 +571,53 @@ where
                     iteration = ctx.iteration,
                     "checkpoint saved"
                 );
+            }
+
+            // ── (6b) FF stream: checkpoint frame ─────────────────────────────
+            // Matches the write half of PR #27's `restore_frames()` read path.
+            // Serializes the per-iteration context snapshot (iteration number,
+            // run/session ids, the step summary just pushed, and the
+            // loop_signal) as JSON and appends it as a `checkpoint` frame on
+            // the attempt stream. A cross-process resumer reads the stream
+            // via `restore_frames()` and rebuilds enough context to pick up
+            // where the previous attempt left off.
+            //
+            // Same best-effort contract as tool/llm frames: failure = WARN +
+            // continue. See `task_sink` module docs for the nuance (a lost
+            // checkpoint frame means restart-resumption silently misses this
+            // iteration's state; kept advisory for consistency with the
+            // existing `CheckpointHook::save` failure policy).
+            let checkpoint_snapshot = serde_json::json!({
+                "iteration": ctx.iteration,
+                "run_id": ctx.run_id.to_string(),
+                "session_id": ctx.session_id.to_string(),
+                "step_summary": step_history.last(),
+                "loop_signal": format!("{:?}", execute_outcome.loop_signal),
+            });
+            match serde_json::to_vec(&checkpoint_snapshot) {
+                Ok(checkpoint_bytes) => {
+                    if let Err(e) = self.task_sink.save_checkpoint(&checkpoint_bytes).await {
+                        tracing::warn!(
+                            run_id    = %ctx.run_id,
+                            iteration = ctx.iteration,
+                            error     = %e,
+                            "task_sink.save_checkpoint failed — frame lost, loop continues"
+                        );
+                    }
+                }
+                Err(e) => {
+                    // Should be unreachable (the snapshot is built from
+                    // owned primitives + Debug format), but don't eat the
+                    // failure silently. Loss of a checkpoint frame is
+                    // advisory (see CAIRN-FABRIC-FINALIZED.md §4.5) —
+                    // WARN + continue matches the other sink failure paths.
+                    tracing::warn!(
+                        run_id    = %ctx.run_id,
+                        iteration = ctx.iteration,
+                        error     = %e,
+                        "failed to serialize checkpoint snapshot — frame lost, loop continues"
+                    );
+                }
             }
 
             self.emitter
@@ -855,6 +1065,81 @@ mod tests {
 
         let result = lp.run(past_ctx).await.unwrap();
         assert!(matches!(result, LoopTermination::TimedOut));
+    }
+
+    // ── (1b) Lease health gate ────────────────────────────────────────────────
+    //
+    // The §1b gate in `run_inner` polls `task_sink.is_lease_healthy()` at
+    // each iteration start and short-circuits to
+    // `LoopTermination::Failed { reason: "lease unhealthy" }` when the
+    // sink reports false. This is the safety gate for the whole feature —
+    // a degraded lease means every downstream FCALL (LLM call, tool
+    // dispatch, checkpoint) will be rejected by FF anyway, so bailing
+    // early avoids committing irreversible work.
+
+    struct UnhealthySink;
+    #[async_trait]
+    impl crate::task_sink::TaskFrameSink for UnhealthySink {
+        async fn log_tool_call(
+            &self,
+            _name: &str,
+            _args: &serde_json::Value,
+        ) -> Result<(), OrchestratorError> {
+            panic!("log_tool_call must not be reached when lease is unhealthy")
+        }
+        async fn log_tool_result(
+            &self,
+            _name: &str,
+            _output: &serde_json::Value,
+            _success: bool,
+            _duration_ms: u64,
+        ) -> Result<(), OrchestratorError> {
+            panic!("log_tool_result must not be reached when lease is unhealthy")
+        }
+        async fn log_llm_response(
+            &self,
+            _model: &str,
+            _tokens_in: u64,
+            _tokens_out: u64,
+            _latency_ms: u64,
+        ) -> Result<(), OrchestratorError> {
+            panic!("log_llm_response must not be reached when lease is unhealthy")
+        }
+        async fn save_checkpoint(&self, _bytes: &[u8]) -> Result<(), OrchestratorError> {
+            panic!("save_checkpoint must not be reached when lease is unhealthy")
+        }
+        fn is_lease_healthy(&self) -> bool {
+            false
+        }
+    }
+
+    #[tokio::test]
+    async fn unhealthy_lease_aborts_before_gather() {
+        // Install a sink that reports unhealthy AND panics on any frame
+        // write — if the loop reached gather/decide/execute and tried to
+        // emit a frame, the test would fail with the panic message.
+        // Termination must arrive from the §1b gate alone.
+        let lp = OrchestratorLoop::new(
+            FixedGather,
+            ScriptedDecide::always(decide_done()),
+            ScriptedExecute {
+                signal: LoopSignal::Done,
+            },
+            LoopConfig::default(),
+        )
+        .with_task_sink(std::sync::Arc::new(UnhealthySink));
+
+        let result = lp.run(ctx()).await.unwrap();
+        match result {
+            LoopTermination::Failed { reason } => {
+                assert_eq!(
+                    reason, "lease unhealthy",
+                    "lease-health gate must surface the exact reason — callers downstream \
+                     (CairnTask::fail_with_retry, handler error mapping) may match on it",
+                );
+            }
+            other => panic!("expected Failed {{ reason: 'lease unhealthy' }}, got {other:?}"),
+        }
     }
 
     // ── (2–5) Happy path: Continue × N then Done ──────────────────────────────

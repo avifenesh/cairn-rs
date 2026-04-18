@@ -25,6 +25,7 @@ pub mod error;
 pub mod execute;
 pub mod gather;
 pub mod loop_runner;
+pub mod task_sink;
 
 // ── Public re-exports ─────────────────────────────────────────────────────────
 
@@ -39,6 +40,7 @@ pub use error::OrchestratorError;
 pub use execute::ExecutePhase;
 pub use gather::GatherPhase;
 pub use loop_runner::OrchestratorLoop;
+pub use task_sink::{NoOpTaskSink, TaskFrameSink};
 
 pub mod gather_impl;
 pub use gather_impl::StandardGatherPhase;
