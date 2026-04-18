@@ -146,6 +146,15 @@ chk "GET /v1/runs/:id/events"    200 GET "/v1/runs/${RUN_ID}/events"
 chk "GET /v1/runs/:id/tasks"     200 GET "/v1/runs/${RUN_ID}/tasks"
 chk "GET /v1/runs/:id/approvals" 200 GET "/v1/runs/${RUN_ID}/approvals"
 
+# Claim the run so downstream Fabric-only FCALLs (suspend / signal
+# / enter_waiting_approval) would accept it. On the in-memory runtime
+# this is a no-op that returns the record unchanged; on the Fabric
+# runtime it flips lifecycle_phase=active. Idempotent either way —
+# a second call exercises FabricRunService's
+# `ff_claim_resumed_execution` dispatch.
+chk "POST /v1/runs/:id/claim"    200 POST "/v1/runs/${RUN_ID}/claim" "{}"
+chk "POST /v1/runs/:id/claim (idempotent)" 200 POST "/v1/runs/${RUN_ID}/claim" "{}"
+
 # Sections 3.lease + 4.claim: the FF-enforced state machine rejects
 # pause/resume/release-lease that aren't preceded by a claim. We exercise
 # the claim-then-operate sequence via the smoke_worker binary — it drives
