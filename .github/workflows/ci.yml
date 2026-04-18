@@ -137,7 +137,13 @@ jobs:
             ${{ runner.os }}-cargo-integration-
             ${{ runner.os }}-cargo-
       - name: cargo test --tests (runtime + orchestrator + app)
-        run: cargo test --tests -p cairn-runtime -p cairn-orchestrator -p cairn-app --features cairn-app/in-memory-runtime
+        # `--test-threads=2` matches CARGO_BUILD_JOBS and keeps RSS under the
+        # 7GB ubuntu-latest budget. The 1298 integration tests each boot an
+        # AppBootstrap (EventLog + InMemoryStore + services) costing ~80MB,
+        # so default parallelism (= #cores) on a runner pushed the runner to
+        # OOM and truncated CI logs. Local parallel stays fine because
+        # developer machines have more headroom.
+        run: cargo test --tests -p cairn-runtime -p cairn-orchestrator -p cairn-app --features cairn-app/in-memory-runtime -- --test-threads=2
         timeout-minutes: 20
         env:
           CARGO_BUILD_JOBS: "2"
