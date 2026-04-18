@@ -12,8 +12,8 @@ use ff_core::types::{ExecutionId, LaneId, Namespace, TimestampMs};
 use crate::boot::FabricRuntime;
 use crate::event_bridge::{BridgeEvent, EventBridge};
 use crate::helpers::{
-    check_fcall_success, is_already_satisfied, is_duplicate_result, parse_fail_outcome,
-    parse_public_state, try_parse_project_key, FailOutcome,
+    check_fcall_success, is_duplicate_result, parse_fail_outcome, parse_public_state,
+    try_parse_project_key, FailOutcome,
 };
 use crate::id_map;
 use crate::state_map;
@@ -805,16 +805,20 @@ impl FabricRunService {
 
         check_fcall_success(&raw, crate::fcall::names::FF_SUSPEND_EXECUTION)?;
 
+        // Emit unconditionally — see the rationale on FabricTaskService::pause
+        // for why the prior `!is_already_satisfied(&raw)` guard was retry-
+        // unsafe. Projection is idempotent on EventId; a duplicate emit on
+        // benign back-to-back replay is a harmless re-write, while guarding
+        // would silently lose the event if the process crashed between the
+        // FCALL commit and this emit.
         let record = self.read_run_record(project, run_id).await?;
-        if !is_already_satisfied(&raw) {
-            self.bridge
-                .emit(BridgeEvent::ExecutionSuspended {
-                    run_id: run_id.clone(),
-                    project: record.project.clone(),
-                    prev_state: Some(prev_run_state),
-                })
-                .await;
-        }
+        self.bridge
+            .emit(BridgeEvent::ExecutionSuspended {
+                run_id: run_id.clone(),
+                project: record.project.clone(),
+                prev_state: Some(prev_run_state),
+            })
+            .await;
         Ok(record)
     }
 
@@ -1017,16 +1021,18 @@ impl FabricRunService {
 
         check_fcall_success(&raw, crate::fcall::names::FF_SUSPEND_EXECUTION)?;
 
+        // Emit unconditionally — see rationale on FabricRunService::pause
+        // (and FabricTaskService::pause) for why the prior guard was
+        // retry-unsafe. Idempotent projection on EventId absorbs the benign
+        // double-emit case.
         let record = self.read_run_record(project, run_id).await?;
-        if !is_already_satisfied(&raw) {
-            self.bridge
-                .emit(BridgeEvent::ExecutionSuspended {
-                    run_id: run_id.clone(),
-                    project: record.project.clone(),
-                    prev_state: Some(prev_run_state),
-                })
-                .await;
-        }
+        self.bridge
+            .emit(BridgeEvent::ExecutionSuspended {
+                run_id: run_id.clone(),
+                project: record.project.clone(),
+                prev_state: Some(prev_run_state),
+            })
+            .await;
         Ok(record)
     }
 

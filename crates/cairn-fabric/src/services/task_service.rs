@@ -950,7 +950,38 @@ impl FabricTaskService {
 
         check_fcall_success(&raw, crate::fcall::names::FF_SUSPEND_EXECUTION)?;
 
-        self.read_task_record(project, task_id).await
+        // Emit TaskStateChanged so the cairn-store projection + SSE subscribers
+        // observe the suspension. Fixes audit gap G1
+        // (docs/design/bridge-event-audit.md §3.1).
+        //
+        // `record.state` carries FF's post-commit truth — FF's
+        // map_reason_to_blocking can route OperatorPause to either
+        // operator_hold (→ TaskState::Paused) or waiting_for_approval
+        // (→ TaskState::WaitingApproval) per reason_code. Reading from the
+        // fresh HGETALL in read_task_record avoids hard-coding a single state.
+        //
+        // Emit is UNCONDITIONAL. An earlier draft of this fix guarded on
+        // `!is_already_satisfied(&raw)` to skip replays (mirroring a pattern
+        // that existed in FabricRunService). That guard is retry-unsafe: if
+        // the FCALL committed on FF but the cairn process crashed before
+        // reaching the emit, a subsequent retry sees ALREADY_SATISFIED and
+        // skips emission forever — the projection permanently drifts. The
+        // projection is idempotent on EventId (EventBridge mints a fresh
+        // v4 UUID per emit; cairn-store's sync projection upserts by
+        // (task_id, event_id) — see crates/cairn-store/src/in_memory.rs:350),
+        // so a double-emit on benign back-to-back replay is a harmless
+        // re-write. Given the asymmetric risk (silent permanent drift vs
+        // a duplicate projection write), unconditional is strictly safer.
+        let record = self.read_task_record(project, task_id).await?;
+        self.bridge
+            .emit(BridgeEvent::TaskStateChanged {
+                task_id: task_id.clone(),
+                project: record.project.clone(),
+                to: record.state,
+                failure_class: None,
+            })
+            .await;
+        Ok(record)
     }
 
     pub async fn resume(
@@ -1012,7 +1043,30 @@ impl FabricTaskService {
 
         check_fcall_success(&raw, crate::fcall::names::FF_RESUME_EXECUTION)?;
 
-        self.read_task_record(project, task_id).await
+        // Emit TaskStateChanged so the cairn-store projection + SSE subscribers
+        // observe the resume. Symmetric with FabricRunService::resume; the audit
+        // at docs/design/bridge-event-audit.md §3.1 filed this as G2.
+        //
+        // Unconditional (unlike pause) — FF's ff_resume_execution rejects an
+        // already-running execution with `execution_not_suspended` via
+        // check_fcall_success above, so reaching this point means a real
+        // suspended→runnable transition just committed. No already_satisfied
+        // branch exists on the resume FCALL.
+        //
+        // `record.state` can be Queued / Leased / Running depending on how
+        // fast the delayed_promoter / scheduler runs between FF_RESUME_EXECUTION
+        // and read_task_record (existing test_suspension.rs integration test
+        // accepts all three). FF's post-FCALL truth, not a hard-coded value.
+        let record = self.read_task_record(project, task_id).await?;
+        self.bridge
+            .emit(BridgeEvent::TaskStateChanged {
+                task_id: task_id.clone(),
+                project: record.project.clone(),
+                to: record.state,
+                failure_class: None,
+            })
+            .await;
+        Ok(record)
     }
 
     pub async fn list_by_state(

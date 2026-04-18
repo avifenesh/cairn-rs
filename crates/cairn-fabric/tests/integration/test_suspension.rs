@@ -11,16 +11,50 @@
 // depth.
 
 use std::collections::HashMap;
+use std::time::Duration;
 
 use cairn_domain::lifecycle::{
     PauseReason, PauseReasonKind, ResumeTrigger, TaskResumeTarget, TaskState,
 };
 use cairn_domain::policy::ApprovalDecision;
+use cairn_domain::RuntimeEvent;
+use cairn_store::event_log::EventLog;
 use ff_core::keys::ExecKeyContext;
 use ff_core::partition::execution_partition;
 use ff_sdk::task::SignalOutcome;
 
 use crate::TestHarness;
+
+/// Wait for a `RuntimeEvent` matching `predicate` to land in the event
+/// log, polling every 50ms up to `deadline`. Returns Err on timeout with
+/// the last-observed event count. Mirrors the helper in
+/// `test_event_emission.rs`; bridge emission is async (mpsc → consumer
+/// → append), so a hard sleep is flaky.
+async fn wait_for_event<F>(h: &TestHarness, deadline: Duration, predicate: F) -> Result<(), String>
+where
+    F: Fn(&RuntimeEvent) -> bool,
+{
+    let start = std::time::Instant::now();
+    loop {
+        let events = EventLog::read_stream(h.event_log.as_ref(), None, 10_000)
+            .await
+            .map_err(|e| format!("read_stream: {e}"))?;
+        if events
+            .iter()
+            .any(|stored| predicate(&stored.envelope.payload))
+        {
+            return Ok(());
+        }
+        if start.elapsed() >= deadline {
+            return Err(format!(
+                "predicate not satisfied within {:?}; {} events observed",
+                deadline,
+                events.len()
+            ));
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+}
 
 /// Read the FF `exec_core` hash for a run id directly from Valkey. Needed
 /// for post-condition assertions that prove Valkey state, not just the
@@ -446,6 +480,128 @@ async fn test_enter_approval_after_prior_approval_creates_fresh_waitpoint() {
     assert_ne!(
         first_wp, second_wp,
         "second enter_waiting_approval must create a FRESH waitpoint id; reusing a closed waitpoint would indicate FF drift",
+    );
+
+    h.teardown().await;
+}
+
+/// Regression guard for issue #40 / audit G1 + G2: task pause and resume
+/// must emit `BridgeEvent::TaskStateChanged` so the cairn-store projection
+/// and SSE subscribers observe the transitions.
+///
+/// Pre-fix: `FabricTaskService::pause` and `::resume` called the FCALL
+/// successfully and returned the new state to the caller, but never
+/// emitted a bridge event. FF committed the transition; cairn-store's
+/// `TaskReadModel` drifted because no event reached the projection.
+///
+/// Post-fix: both emit unconditionally on the happy path (pause guards
+/// only the `ALREADY_SATISFIED` replay branch, which is not exercised
+/// here). This test fails on pre-fix code with
+/// `TaskStateChanged{Paused|...} not emitted`.
+///
+/// Both suspend and resume are covered in one test because (a) the
+/// transitions are paired on FF side, (b) the event-log is shared so
+/// asserting both transitions on the same task validates that neither
+/// is accidentally squelched by the other's presence.
+#[tokio::test]
+async fn task_pause_and_resume_emit_state_changed() {
+    let h = TestHarness::setup().await;
+    let session_id = h.unique_session_id();
+    let task_id = h.unique_task_id();
+
+    h.fabric
+        .tasks
+        .submit(
+            &h.project,
+            task_id.clone(),
+            None,
+            None,
+            0,
+            Some(&session_id),
+        )
+        .await
+        .expect("submit failed");
+
+    h.fabric
+        .tasks
+        .claim(&h.project, &task_id, "test-worker".into(), 30_000)
+        .await
+        .expect("claim failed");
+
+    // --- Pause ---
+    let pause_reason = PauseReason {
+        kind: PauseReasonKind::OperatorPause,
+        detail: None,
+        resume_after_ms: None,
+        actor: Some("integration-test".into()),
+    };
+    let paused = h
+        .fabric
+        .tasks
+        .pause(&h.project, &task_id, pause_reason)
+        .await
+        .expect("pause failed");
+
+    // Same accept-both rationale as test_suspend_and_resume_roundtrip:
+    // FF's map_reason_to_blocking may route OperatorPause to either
+    // operator_hold (→ Paused) or waiting_for_approval (→ WaitingApproval).
+    assert!(
+        matches!(paused.state, TaskState::Paused | TaskState::WaitingApproval),
+        "expected Paused or WaitingApproval after pause, got {:?}",
+        paused.state
+    );
+
+    let expected_pause_state = paused.state;
+    let expected_task = task_id.clone();
+    wait_for_event(&h, Duration::from_secs(2), move |event| {
+        matches!(event, RuntimeEvent::TaskStateChanged(e)
+            if e.task_id == expected_task && e.transition.to == expected_pause_state)
+    })
+    .await
+    .expect(
+        "TaskStateChanged{Paused|WaitingApproval} not emitted on pause — G1 regressed. \
+         FabricTaskService::pause must emit BridgeEvent::TaskStateChanged after FF_SUSPEND_EXECUTION \
+         succeeds, otherwise the cairn-store projection stays stuck at the prior state. \
+         See docs/design/bridge-event-audit.md §3.1.",
+    );
+
+    // --- Resume ---
+    let resumed = h
+        .fabric
+        .tasks
+        .resume(
+            &h.project,
+            &task_id,
+            ResumeTrigger::OperatorResume,
+            TaskResumeTarget::Running,
+        )
+        .await
+        .expect("resume failed");
+
+    // Same positive-assertion rationale as test_suspend_and_resume_roundtrip:
+    // delayed_promoter / claim machinery can race the resume write, so we
+    // accept any actionable runnable state.
+    assert!(
+        matches!(
+            resumed.state,
+            TaskState::Queued | TaskState::Leased | TaskState::Running
+        ),
+        "expected Queued/Leased/Running after resume (positive), got {:?}",
+        resumed.state
+    );
+
+    let expected_resume_state = resumed.state;
+    let expected_task = task_id.clone();
+    wait_for_event(&h, Duration::from_secs(2), move |event| {
+        matches!(event, RuntimeEvent::TaskStateChanged(e)
+            if e.task_id == expected_task && e.transition.to == expected_resume_state)
+    })
+    .await
+    .expect(
+        "TaskStateChanged{Queued|Leased|Running} not emitted on resume — G2 regressed. \
+         FabricTaskService::resume must emit BridgeEvent::TaskStateChanged after FF_RESUME_EXECUTION \
+         succeeds, otherwise SSE subscribers never see task resume transitions. \
+         See docs/design/bridge-event-audit.md §3.1.",
     );
 
     h.teardown().await;
