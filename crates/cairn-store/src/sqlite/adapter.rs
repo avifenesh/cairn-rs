@@ -1246,7 +1246,7 @@ mod tests {
             "INSERT INTO approvals (
                 approval_id, tenant_id, workspace_id, project_id, run_id, task_id,
                 requirement, decision, title, description, version, created_at, updated_at
-             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind("approval_pending")
         .bind("tenant")
@@ -1256,6 +1256,8 @@ mod tests {
         .bind(Some("task_queued"))
         .bind("required")
         .bind(Option::<&str>::None)
+        .bind(Option::<&str>::None) // title
+        .bind(Option::<&str>::None) // description
         .bind(1_i64)
         .bind(40_i64)
         .bind(40_i64)
@@ -1267,6 +1269,8 @@ mod tests {
         .bind(Some("task_expired"))
         .bind("required")
         .bind(Some("approved"))
+        .bind(Option::<&str>::None) // title
+        .bind(Option::<&str>::None) // description
         .bind(2_i64)
         .bind(45_i64)
         .bind(46_i64)

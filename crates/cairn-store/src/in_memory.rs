@@ -1769,16 +1769,34 @@ impl EventLog for InMemoryStore {
             // `state` (MutexGuard) is dropped here, before any await point.
         };
 
-        // Dual-write to the durable secondary log (Postgres, SQLite) if one
-        // is configured. Fail CLOSED: the in-memory write has already
-        // committed by this point, but we surface the secondary failure so
-        // the caller can decide whether to retry, compensate, or abort — the
-        // old eprintln-and-swallow path silently lost data on restart when
-        // the secondary was the durable source of truth (RFC 002). The
-        // in-memory state deliberately remains updated; callers that observe
-        // `Err` here must assume the two logs have diverged and reconcile
-        // accordingly (typically by re-appending on retry, which is
-        // idempotent via event_id).
+        // Dual-write to the durable secondary log (Postgres, SQLite) if
+        // one is configured. Fail CLOSED: the in-memory write has already
+        // committed by this point, but we surface the secondary failure
+        // so the caller can decide whether to retry, compensate, or
+        // abort. The old `eprintln`-and-swallow path silently lost data
+        // on restart when the secondary was the durable source of truth
+        // (RFC 002).
+        //
+        // **Divergence contract on `Err`:** the in-memory log has the
+        // events, the secondary does not. The caller MUST treat this as
+        // a recoverable divergence and is responsible for reconciliation.
+        // Options, in rough order of preference:
+        //   1. Retry the same call. `InMemoryStore::append` today does
+        //      NOT dedup by `event_id`, so a plain retry would double-
+        //      apply the projection — do not retry blindly against the
+        //      same store; construct a fresh caller-side envelope or
+        //      flush+replay on the primary. Populating event_id dedup
+        //      on the primary is tracked as audit follow-up T2-M4.
+        //   2. Write the events directly to the secondary once it's
+        //      healthy, then confirm primary/secondary head positions
+        //      match.
+        //   3. Abort the caller-level transaction, roll forward from
+        //      the secondary's last durable position.
+        //
+        // Until T2-M4 lands, the safest pattern for a deploy using
+        // InMemoryStore as primary with a durable secondary is to
+        // configure the app to crash on `Err` from `append` and rely
+        // on restart-plus-replay to reconverge.
         let secondary = self
             .secondary_log
             .read()

@@ -17,7 +17,7 @@ use cairn_runtime::{
 };
 use cairn_store::event_log::{EntityRef, EventLog, EventPosition, StoredEvent};
 use cairn_store::projections::*;
-use cairn_store::sqlite::{SqliteAdapter, SqliteEventLog, SqliteSyncProjection};
+use cairn_store::sqlite::{SqliteAdapter, SqliteEventLog};
 use cairn_store::StoreError;
 
 /// Combined SQLite store implementing EventLog + all ReadModel traits.

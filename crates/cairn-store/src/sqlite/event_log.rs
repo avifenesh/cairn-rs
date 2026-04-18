@@ -149,37 +149,36 @@ impl EventLog for SqliteEventLog {
     }
 
     async fn head_position(&self) -> Result<Option<EventPosition>, StoreError> {
-        let row: Option<(i64,)> = sqlx::query_as("SELECT MAX(position) FROM event_log")
+        // `MAX(position)` on empty table yields NULL (decoded as
+        // `Some((None,))` by sqlx-SQLite). Decode into `Option<i64>` and
+        // filter on the inner option; decoding into plain `i64` would
+        // error on NULL.
+        let row: Option<(Option<i64>,)> = sqlx::query_as("SELECT MAX(position) FROM event_log")
             .fetch_optional(&self.pool)
             .await
             .map_err(|e| StoreError::Internal(e.to_string()))?;
 
-        Ok(row.and_then(|(pos,)| {
-            if pos > 0 {
-                Some(EventPosition(pos as u64))
-            } else {
-                None
-            }
-        }))
+        Ok(row.and_then(|(pos,)| pos.map(|p| EventPosition(p as u64))))
     }
 
     async fn find_by_causation_id(
         &self,
         causation_id: &str,
     ) -> Result<Option<EventPosition>, StoreError> {
-        // MIN on an empty match returns NULL which `fetch_optional` maps to
-        // `None`; any row returned is a real hit. Pre-T2-M7 an additional
-        // `pos > 0` guard discarded the legitimate position-0 edge and
-        // diverged from the PG backend which returns `Some(0)` in that
-        // case.
-        let row: Option<(i64,)> =
+        // `MIN(position)` on an empty match always returns one row with a
+        // NULL value — `fetch_optional` reports `Some(...)` for the row and
+        // sqlx decodes the NULL into `Option<i64>`. Filter on the inner
+        // `Option` rather than checking for a sentinel. Pre-T2-M7 a
+        // `pos > 0` guard tried to approximate this but discarded the
+        // legitimate position-0 edge, diverging from the PG backend.
+        let row: Option<(Option<i64>,)> =
             sqlx::query_as("SELECT MIN(position) FROM event_log WHERE causation_id = ?")
                 .bind(causation_id)
                 .fetch_optional(&self.pool)
                 .await
                 .map_err(|e| StoreError::Internal(e.to_string()))?;
 
-        Ok(row.map(|(pos,)| EventPosition(pos as u64)))
+        Ok(row.and_then(|(pos,)| pos.map(|p| EventPosition(p as u64))))
     }
 }
 

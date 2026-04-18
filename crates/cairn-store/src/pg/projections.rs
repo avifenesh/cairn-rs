@@ -501,20 +501,39 @@ impl PgSyncProjection {
             RuntimeEvent::PromptVersionCreated(e) => {
                 // Allocate the next version_number under row-level lock.
                 //
-                // Pre-T2-H4 this used `COUNT(*) + 1` under READ COMMITTED which
-                // is a classic race — two concurrent appends for the same
-                // asset both read N and both try to insert N+1, either
+                // Pre-T2-H4 this used `COUNT(*) + 1` under READ COMMITTED
+                // which is a classic race — two concurrent appends for
+                // the same asset both read N and try to insert N+1,
                 // colliding on the unique constraint or silently producing
-                // duplicate version numbers. `COALESCE(MAX, 0) + 1` with
-                // `FOR UPDATE` serialises the allocation on the existing
-                // rows for that asset. Errors propagate (no `unwrap_or`
-                // swallowing) so the transaction aborts rather than inserting
+                // duplicates.
+                //
+                // The first serialisation attempt used `SELECT MAX(...)
+                // FROM prompt_versions WHERE prompt_asset_id = $1 FOR
+                // UPDATE`, but `FOR UPDATE` on an aggregate query with
+                // zero matching rows locks nothing. We now take a lock on
+                // the parent `prompt_assets` row (which must exist before
+                // any version for it can be created) and derive the
+                // version number from the versions table under that held
+                // lock. Concurrent appends for the same asset serialise
+                // behind the parent row lock.
+                //
+                // Errors propagate (no `unwrap_or` swallowing) so the
+                // transaction aborts rather than inserting
                 // `version_number = 1` on top of a transient DB failure.
+                sqlx::query_scalar::<_, String>(
+                    "SELECT prompt_asset_id FROM prompt_assets
+                     WHERE prompt_asset_id = $1
+                     FOR UPDATE",
+                )
+                .bind(e.prompt_asset_id.as_str())
+                .fetch_optional(&mut **tx)
+                .await
+                .map_err(|err| StoreError::Internal(err.to_string()))?;
+
                 let version_number: i64 = sqlx::query_scalar(
                     "SELECT COALESCE(MAX(version_number), 0) + 1
                      FROM prompt_versions
-                     WHERE prompt_asset_id = $1
-                     FOR UPDATE",
+                     WHERE prompt_asset_id = $1",
                 )
                 .bind(e.prompt_asset_id.as_str())
                 .fetch_one(&mut **tx)
