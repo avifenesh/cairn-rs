@@ -238,7 +238,7 @@ mod tests {
             Ok(self
                 .policies
                 .lock()
-                .unwrap()
+                .unwrap_or_else(|e| e.into_inner())
                 .values()
                 .filter(|p| &p.tenant_id == tenant_id)
                 .cloned()

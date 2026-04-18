@@ -198,7 +198,7 @@ impl PromptReleasePipeline {
     pub fn store_version_content(&self, version_id: &str, content: String) {
         self.version_content
             .lock()
-            .unwrap()
+            .unwrap_or_else(|e| e.into_inner())
             .insert(version_id.to_owned(), content);
     }
 
@@ -206,7 +206,7 @@ impl PromptReleasePipeline {
     pub fn get_version_content(&self, version_id: &str) -> Option<String> {
         self.version_content
             .lock()
-            .unwrap()
+            .unwrap_or_else(|e| e.into_inner())
             .get(version_id)
             .cloned()
     }
@@ -251,7 +251,7 @@ impl PromptReleasePipeline {
         };
         self.rollouts
             .lock()
-            .unwrap()
+            .unwrap_or_else(|e| e.into_inner())
             .insert(release_id.to_owned(), state.clone());
         state
     }
@@ -372,7 +372,7 @@ impl PromptReleasePipeline {
     pub fn active_rollouts(&self) -> Vec<RolloutState> {
         self.rollouts
             .lock()
-            .unwrap()
+            .unwrap_or_else(|e| e.into_inner())
             .values()
             .filter(|s| {
                 s.status == RolloutStatus::Active || s.status == RolloutStatus::PendingApproval

@@ -240,7 +240,7 @@ impl WorkspaceQuotaManager {
     pub fn set_policy(&self, policy: WorkspaceQuotaPolicy) {
         self.policies
             .write()
-            .unwrap()
+            .unwrap_or_else(|e| e.into_inner())
             .insert(policy.workspace_id.as_str().to_owned(), policy);
     }
 
@@ -248,7 +248,7 @@ impl WorkspaceQuotaManager {
     pub fn get_policy(&self, workspace_id: &WorkspaceId) -> Option<WorkspaceQuotaPolicy> {
         self.policies
             .read()
-            .unwrap()
+            .unwrap_or_else(|e| e.into_inner())
             .get(workspace_id.as_str())
             .cloned()
     }
@@ -259,7 +259,7 @@ impl WorkspaceQuotaManager {
     pub fn set_tenant_access(&self, policy: TenantAccessPolicy) {
         self.tenant_access
             .write()
-            .unwrap()
+            .unwrap_or_else(|e| e.into_inner())
             .insert(policy.tenant_id.as_str().to_owned(), policy);
     }
 
@@ -267,7 +267,7 @@ impl WorkspaceQuotaManager {
     pub fn get_tenant_access(&self, tenant_id: &TenantId) -> TenantAccessPolicy {
         self.tenant_access
             .read()
-            .unwrap()
+            .unwrap_or_else(|e| e.into_inner())
             .get(tenant_id.as_str())
             .cloned()
             .unwrap_or_else(|| TenantAccessPolicy::deny_all(tenant_id.clone()))

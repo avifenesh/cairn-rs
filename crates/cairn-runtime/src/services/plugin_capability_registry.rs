@@ -119,7 +119,7 @@ impl CapabilityRegistry {
     pub fn plugins_with_family(&self, family: CapabilityFamily) -> Vec<String> {
         self.plugins
             .read()
-            .unwrap()
+            .unwrap_or_else(|e| e.into_inner())
             .iter()
             .filter(|(_, caps)| caps.families.contains(&family))
             .map(|(id, _)| id.clone())
@@ -132,7 +132,7 @@ impl CapabilityRegistry {
     pub fn find_tool_provider(&self, tool_name: &str) -> Option<String> {
         self.plugins
             .read()
-            .unwrap()
+            .unwrap_or_else(|e| e.into_inner())
             .iter()
             .find(|(_, caps)| caps.tools.iter().any(|t| t.name == tool_name))
             .map(|(id, _)| id.clone())
@@ -142,7 +142,7 @@ impl CapabilityRegistry {
     pub fn plugins_subscribed_to(&self, event_type: &str) -> Vec<String> {
         self.plugins
             .read()
-            .unwrap()
+            .unwrap_or_else(|e| e.into_inner())
             .iter()
             .filter(|(_, caps)| caps.event_subscriptions.contains(event_type))
             .map(|(id, _)| id.clone())

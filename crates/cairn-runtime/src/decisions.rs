@@ -432,14 +432,14 @@ impl DecisionCache {
     fn store_event(&self, decision_id: &DecisionId, event: &DecisionEvent) {
         self.events
             .lock()
-            .unwrap()
+            .unwrap_or_else(|e| e.into_inner())
             .insert(decision_id.as_str().to_owned(), event.clone());
     }
 
     fn get_event(&self, decision_id: &DecisionId) -> Option<DecisionEvent> {
         self.events
             .lock()
-            .unwrap()
+            .unwrap_or_else(|e| e.into_inner())
             .get(decision_id.as_str())
             .cloned()
     }

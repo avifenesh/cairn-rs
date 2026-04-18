@@ -198,14 +198,17 @@ where
             }
 
             if let Some(target_mailbox_id) = &subscription.target_mailbox_id {
-                // T3-C1: build a per-signal message id so two signals
-                // routed to the same mailbox don't collide on the same
-                // `MailboxMessageId` (which would upsert and overwrite
-                // each other). Pre-fix the mailbox branch reused
-                // `target_mailbox_id` verbatim; mirror the run branch's
-                // `signal_route_{sub}_{signal}` shape for uniqueness.
+                // T3-C1: build a (subscription, signal, mailbox)-unique
+                // message id. Two subscriptions targeting the same mailbox
+                // for the same signal would still collide if we only
+                // included `target_mailbox_id + signal_id`; adding
+                // `subscription_id` matches the run branch's uniqueness
+                // guarantee and ensures every routed signal lands as a
+                // distinct mailbox record. Pre-fix the mailbox branch
+                // reused `target_mailbox_id` verbatim as the message_id.
                 let message_id = MailboxMessageId::new(format!(
-                    "signal_route_{}_{}",
+                    "signal_route_{}_{}_{}",
+                    subscription.subscription_id,
                     target_mailbox_id.as_str(),
                     signal.id.as_str()
                 ));
@@ -339,11 +342,16 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(routed.routed_count, 1);
-        // T3-C1: mailbox message id is per-signal (`signal_route_{mbox}_{sig}`)
-        // to prevent collisions when the same mailbox receives multiple
-        // routed signals — pre-fix, two signals to the same mailbox shared
-        // a message_id and the projection overwrote one.
-        let expected_id = MailboxMessageId::new("signal_route_mailbox_alert_sig_alert");
+        // T3-C1: mailbox message id is
+        // `signal_route_{subscription_id}_{target_mailbox_id}_{signal_id}`
+        // so (a) two signals routed to the same mailbox don't collide and
+        // (b) two subscriptions targeting the same mailbox for the same
+        // signal also don't collide. Pre-fix the mailbox branch reused
+        // `target_mailbox_id` verbatim as the message_id.
+        let expected_id = MailboxMessageId::new(format!(
+            "signal_route_{}_mailbox_alert_sig_alert",
+            subscription.subscription_id
+        ));
         assert_eq!(routed.mailbox_message_ids, vec![expected_id.clone()]);
 
         let mailbox = MailboxReadModel::get(store.as_ref(), &expected_id)
