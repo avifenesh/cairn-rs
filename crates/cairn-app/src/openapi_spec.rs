@@ -424,6 +424,20 @@ pub const OPENAPI_JSON: &str = r##"{
         "responses": { "200": { "description": "Run record" }, "404": { "description": "Not found" } }
       }
     },
+    "/v1/runs/{id}/claim": {
+      "post": {
+        "tags": ["Runs"],
+        "summary": "Claim a run's execution lease (Fabric-only semantic; no-op on in-memory path)",
+        "description": "Activates the run's FF execution so downstream FCALLs (pause / enter_waiting_approval / resolve_approval / signals) accept it. Unlike POST /v1/tasks/{id}/claim, this endpoint takes no body: runs are not worker-pulled, so the caller never advertises worker identity here — the Fabric runtime uses its own configured worker_instance_id + lease_ttl_ms. NOT idempotent — re-claiming an already-active run fails at FF's grant gate (`execution_not_eligible`) and surfaces as a 500. Callers must claim once per lifecycle. A second claim after a suspend/resume cycle is legitimate and dispatches through FF's `ff_claim_resumed_execution` path.",
+        "operationId": "claimRun",
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": {
+          "200": { "description": "Run record after active-lease activation" },
+          "404": { "description": "Run not found" },
+          "500": { "description": "Underlying runtime error (including re-claim of an already-active run)" }
+        }
+      }
+    },
     "/v1/runs/{id}/pause": {
       "post": {
         "tags": ["Runs"],

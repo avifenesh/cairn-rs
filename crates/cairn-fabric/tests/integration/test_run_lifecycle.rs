@@ -139,6 +139,69 @@ async fn test_duplicate_start_is_idempotent() {
     h.teardown().await;
 }
 
+/// `runs.claim` is NOT idempotent on the Fabric path. Re-claiming an
+/// already-active run must fail at FF's grant gate:
+/// `ff_issue_claim_grant` requires `lifecycle_phase="runnable"` +
+/// `eligibility_state="eligible_now"` (lua/scheduling.lua:109-112); the
+/// `use_claim_resumed_execution` dispatch (claim_common.rs:148-154)
+/// only fires for `attempt_interrupted` executions (resume-from-suspend),
+/// not for a fresh re-claim of an active run.
+///
+/// This test is the tripwire for five written assertions of that contract
+/// (trait docstring, handler docstring, OpenAPI description, smoke-test
+/// comment, handler non-idempotency note). Two code-guarded failure
+/// modes:
+///   1. If FF relaxes scheduling.lua's grant gate, the second claim
+///      returns Ok and this test goes RED at `expect_err` — the loud
+///      alarm that the non-idempotency docs no longer hold.
+///   2. If FF keeps the gate but renames the error code, the second
+///      claim still returns Err but the message no longer contains
+///      `execution_not_eligible` — the test goes RED at the
+///      `msg.contains` assertion. Same alarm, different line.
+/// Either path forces a contract-and-docs revisit alongside the FF
+/// change. This is the bug pattern that caused round-1 cross-review to
+/// reject the original endpoint claim of idempotency — we add the test
+/// so recurrence is structurally impossible.
+///
+/// Resume-after-suspend (a legitimate second claim) is covered by
+/// `test_suspension.rs::test_enter_approval_after_prior_approval_creates_fresh_waitpoint`
+/// — that test does runs.claim → enter_waiting_approval →
+/// resolve_approval → runs.claim, and the second runs.claim hits the
+/// `use_claim_resumed_execution` dispatch in claim_common.rs:152-153.
+#[tokio::test]
+async fn test_claim_rejects_reclaim_on_active() {
+    let h = TestHarness::setup().await;
+    let session_id = h.unique_session_id();
+    let run_id = h.unique_run_id();
+
+    h.fabric
+        .runs
+        .start(&h.project, &session_id, run_id.clone(), None)
+        .await
+        .expect("start failed");
+
+    h.fabric
+        .runs
+        .claim(&h.project, &run_id)
+        .await
+        .expect("first claim must succeed — run is runnable");
+
+    let second = h.fabric.runs.claim(&h.project, &run_id).await;
+
+    let err = second.expect_err(
+        "second claim on an already-active run must fail at FF's grant gate, \
+         not silently succeed — see trait docstring contract on RunService::claim",
+    );
+    let msg = format!("{err}");
+    assert!(
+        msg.contains("execution_not_eligible"),
+        "expected FF grant-gate rejection with `execution_not_eligible` code \
+         from ff_issue_claim_grant (lua/scheduling.lua:109-112); got: {msg}",
+    );
+
+    h.teardown().await;
+}
+
 // Terminal operations require Active (leased) execution.
 // We use task_service which creates + claims in the correct flow.
 
