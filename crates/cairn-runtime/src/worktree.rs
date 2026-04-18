@@ -118,7 +118,7 @@ impl WorktreeRegistry {
             .values()
             .filter(|r| r.status.needs_attention())
             .collect();
-        v.sort_by(|a, b| a.worktree_id.cmp(&b.worktree_id));
+        v.sort_by_key(|r| r.worktree_id.clone());
         v
     }
 

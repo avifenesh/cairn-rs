@@ -133,7 +133,7 @@ impl SkillCatalog {
                         .all(|req| s.tags.iter().any(|t| t == req))
             })
             .collect();
-        results.sort_by(|a, b| a.skill_id.cmp(&b.skill_id));
+        results.sort_by_key(|r| r.skill_id.clone());
         results
     }
 
@@ -165,7 +165,7 @@ impl SkillCatalog {
     /// All enabled skills sorted by ID.
     pub fn enabled(&self) -> Vec<&Skill> {
         let mut v: Vec<_> = self.skills.values().filter(|s| s.enabled).collect();
-        v.sort_by(|a, b| a.skill_id.cmp(&b.skill_id));
+        v.sort_by_key(|r| r.skill_id.clone());
         v
     }
 

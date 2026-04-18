@@ -184,7 +184,7 @@ pub async fn list_catalog_handler(
 ) -> impl IntoResponse {
     let marketplace = state.marketplace.lock().unwrap();
     let mut records = marketplace.list_all_records();
-    records.sort_by(|left, right| left.descriptor.id.cmp(&right.descriptor.id));
+    records.sort_by_key(|r| r.descriptor.id.clone());
     let plugins = records
         .into_iter()
         .skip(query.offset())

@@ -1,4 +1,7 @@
-//! Durable runtime services for sessions, runs, tasks, approvals, and recovery.
+//! Durable runtime services for sessions, runs, tasks, and approvals.
+//!
+//! Recovery is owned unconditionally by FlowFabric's 14 background
+//! scanners (see cairn-fabric). There is no cairn-side recovery service.
 //!
 //! `cairn-runtime` owns the runtime service boundaries that accept
 //! commands, validate state transitions, persist events, and update
@@ -42,7 +45,6 @@ pub mod provider_health;
 pub mod provider_pools;
 pub mod provider_registry;
 pub mod quotas;
-pub mod recovery;
 pub mod research;
 pub mod resource_sharing;
 pub mod retention;
@@ -97,7 +99,6 @@ pub use projects::ProjectService;
 pub use prompt_assets::PromptAssetService;
 pub use prompt_releases::PromptReleaseService;
 pub use prompt_versions::PromptVersionService;
-pub use recovery::{RecoveryAction, RecoveryService, RecoverySummary};
 pub use routing::RouteResolverService;
 pub use runs::RunService;
 pub use runtime_config::{
@@ -109,8 +110,8 @@ pub use services::{
     ApprovalPolicyServiceImpl, ApprovalServiceImpl, CheckpointServiceImpl, EvalRunServiceImpl,
     ExternalWorkerService, ExternalWorkerServiceImpl, IngestJobServiceImpl,
     LlmObservabilityServiceImpl, MailboxServiceImpl, ProjectServiceImpl, PromptAssetServiceImpl,
-    PromptReleaseServiceImpl, PromptVersionServiceImpl, RecoveryServiceImpl, RunServiceImpl,
-    SessionServiceImpl, SignalServiceImpl, SimpleRouteResolver, TaskServiceImpl, TenantServiceImpl,
+    PromptReleaseServiceImpl, PromptVersionServiceImpl, RunServiceImpl, SessionServiceImpl,
+    SignalServiceImpl, SimpleRouteResolver, TaskServiceImpl, TenantServiceImpl,
     ToolInvocationService, ToolInvocationServiceImpl, WorkspaceServiceImpl,
 };
 pub use sessions::SessionService;

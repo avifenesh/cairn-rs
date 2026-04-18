@@ -288,6 +288,15 @@ pub struct AppState {
     /// Model catalog — per-model metadata including cost rates and capabilities.
     /// Operators can override entries at runtime via the admin API.
     pub model_registry: ModelRegistry,
+    /// FlowFabric services aggregate — `Some` only when
+    /// `CAIRN_FABRIC_ENABLED=1` AND boot-time construction succeeded. When
+    /// set, `runtime.runs / tasks / sessions` are the Fabric adapters (see
+    /// `crate::fabric_adapter`); handlers call through the trait unchanged.
+    ///
+    /// Rare direct-access handlers (e.g. admin inspect endpoints) may reach
+    /// through this field to `FabricServices::budgets`, `quotas`,
+    /// `scheduler`, `signals` which aren't on the core trait surface.
+    pub fabric: Option<Arc<cairn_fabric::FabricServices>>,
 }
 
 // ── GitHubIntegration ────────────────────────────────────────────────────────
@@ -653,7 +662,12 @@ impl AppState {
     }
 
     pub async fn new(config: BootstrapConfig) -> Result<Self, String> {
-        let runtime = Arc::new(InMemoryServices::new());
+        // If CAIRN_FABRIC_ENABLED is set, build FabricServices and swap the
+        // runtime's run/task/session impls for the FabricAdapter trio.
+        // Otherwise default to the in-memory path. Any boot failure
+        // (unreachable Valkey, HMAC validation, ...) surfaces here before
+        // cairn-app starts serving traffic — no silent fall-back.
+        let (runtime, fabric) = build_runtime_with_optional_fabric().await?;
         let graph = Arc::new(InMemoryGraphStore::new());
         let plugin_registry = Arc::new(InMemoryPluginRegistry::new());
         let document_store = Arc::new(InMemoryDocumentStore::new());
@@ -848,6 +862,7 @@ impl AppState {
             integrations: Arc::new(cairn_integrations::IntegrationRegistry::new()),
             model_registry: ModelRegistry::with_bundled()
                 .unwrap_or_else(|_| ModelRegistry::empty()),
+            fabric,
         };
         state.runtime.store.reset_usage_counters();
         Ok(state)
@@ -858,4 +873,83 @@ impl AppState {
 
 fn default_sandbox_base_dir() -> PathBuf {
     std::env::temp_dir().join("cairn-workspace-sandboxes")
+}
+
+/// Build `InMemoryServices` + optional `FabricServices`, honoring
+/// `CAIRN_FABRIC_ENABLED`. Returns the services aggregate (either in-memory
+/// defaults or fabric-adapter-backed) plus the fabric handle (`Some` when
+/// the flag was set and Fabric booted successfully; `None` otherwise).
+///
+/// The cairn-runtime aggregate does NOT depend on cairn-fabric directly
+/// (cycle avoided via `Option<Arc<dyn Any>>`), so the adapter wiring must
+/// happen in cairn-app. When fabric is enabled we:
+///   1. Build `FabricServices` from env config (`FabricConfig::from_env`).
+///      This is where HMAC secret validation + seeding happens.
+///   2. Construct `FabricRunServiceAdapter` / `Task` / `Session` sharing the
+///      same `store` so projection-backed reads stay on the store.
+///   3. Call `InMemoryServices::with_store_and_core(store, runs, tasks,
+///      sessions)` to install the adapters on the runtime aggregate.
+///   4. Attach the fabric handle via `runtime.fabric` (type-erased on the
+///      cairn-runtime side) AND return it concretely via `AppState.fabric`.
+///
+/// When disabled (`CAIRN_FABRIC_ENABLED` unset or falsy), returns
+/// `(InMemoryServices::new(), None)` — identical to the pre-finalization
+/// code path.
+async fn build_runtime_with_optional_fabric() -> Result<
+    (
+        Arc<InMemoryServices>,
+        Option<Arc<cairn_fabric::FabricServices>>,
+    ),
+    String,
+> {
+    let enabled = std::env::var("CAIRN_FABRIC_ENABLED")
+        .ok()
+        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+        .unwrap_or(false);
+
+    if !enabled {
+        tracing::debug!("CAIRN_FABRIC_ENABLED unset; using in-memory runs/tasks/sessions");
+        return Ok((Arc::new(InMemoryServices::new()), None));
+    }
+
+    tracing::info!("CAIRN_FABRIC_ENABLED=1; constructing FabricServices");
+
+    let fabric_config = cairn_fabric::FabricConfig::from_env()
+        .map_err(|e| format!("FabricConfig::from_env failed: {e}"))?;
+
+    // FabricServices::start needs a shared EventLog handle. We use the same
+    // InMemoryStore that backs the runtime's projections so fabric's
+    // EventBridge writes land on the same read model that cairn-app
+    // handlers query.
+    let store = Arc::new(cairn_store::InMemoryStore::new());
+    let event_log: Arc<dyn cairn_store::event_log::EventLog + Send + Sync> = store.clone();
+
+    let fabric = cairn_fabric::FabricServices::start(fabric_config, event_log)
+        .await
+        .map_err(|e| format!("FabricServices::start failed: {e}"))?;
+    let fabric = Arc::new(fabric);
+
+    // Build the adapters that implement the cairn-runtime traits but
+    // route mutations to Fabric. Each shares the same store for projection
+    // reads (the resolvers look up project from bare ids).
+    let runs: Arc<dyn cairn_runtime::runs::RunService> = Arc::new(
+        crate::fabric_adapter::FabricRunServiceAdapter::new(fabric.clone(), store.clone()),
+    );
+    let tasks: Arc<dyn cairn_runtime::tasks::TaskService> = Arc::new(
+        crate::fabric_adapter::FabricTaskServiceAdapter::new(fabric.clone(), store.clone()),
+    );
+    let sessions: Arc<dyn cairn_runtime::sessions::SessionService> = Arc::new(
+        crate::fabric_adapter::FabricSessionServiceAdapter::new(fabric.clone(), store.clone()),
+    );
+
+    let mut services = InMemoryServices::with_store_and_core(store, runs, tasks, sessions);
+    // Also expose the raw fabric via the type-erased slot on
+    // InMemoryServices so non-trait surfaces (budgets, quotas, signals)
+    // remain reachable from runtime-scoped code. Cast the Arc to Any here
+    // because cairn-runtime does not name cairn-fabric types.
+    services.fabric = Some(fabric.clone() as Arc<dyn std::any::Any + Send + Sync>);
+
+    tracing::info!("fabric runtime installed; adapters active on runs/tasks/sessions");
+
+    Ok((Arc::new(services), Some(fabric)))
 }

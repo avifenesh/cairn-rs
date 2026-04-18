@@ -140,7 +140,7 @@ impl ToolHandler for WaitForTaskTool {
 mod tests {
     use super::*;
     use cairn_domain::{ProjectKey, TaskId};
-    use cairn_runtime::{tasks::TaskService, InMemoryServices};
+    use cairn_runtime::InMemoryServices;
     use std::sync::Arc;
 
     fn project() -> ProjectKey {

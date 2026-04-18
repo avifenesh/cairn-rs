@@ -88,11 +88,12 @@ where
         }
 
         for budget in budgets {
-            let percent_used = if budget.limit_micros == 0 {
-                100
-            } else {
-                ((budget.current_spend_micros.saturating_mul(100)) / budget.limit_micros) as u32
-            };
+            let percent_used = budget
+                .current_spend_micros
+                .saturating_mul(100)
+                .checked_div(budget.limit_micros)
+                .map(|v| v as u32)
+                .unwrap_or(100);
             let remaining = budget
                 .limit_micros
                 .saturating_sub(budget.current_spend_micros);

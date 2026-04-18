@@ -237,7 +237,7 @@ impl InMemoryDocumentStore {
                 last_ingested_at_ms: source_last_ts.get(&key).copied(),
             })
             .collect::<Vec<_>>();
-        summaries.sort_by(|a, b| a.source_id.as_str().cmp(b.source_id.as_str()));
+        summaries.sort_by_key(|r| r.source_id.clone());
         summaries
     }
 

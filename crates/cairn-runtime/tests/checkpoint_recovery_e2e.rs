@@ -14,11 +14,8 @@ use std::sync::Arc;
 
 use cairn_domain::*;
 use cairn_runtime::checkpoints::CheckpointService;
-use cairn_runtime::recovery::RecoveryService;
 use cairn_runtime::runs::RunService;
-use cairn_runtime::services::{
-    CheckpointServiceImpl, RecoveryServiceImpl, RunServiceImpl, SessionServiceImpl,
-};
+use cairn_runtime::services::{CheckpointServiceImpl, RunServiceImpl, SessionServiceImpl};
 use cairn_runtime::sessions::SessionService;
 use cairn_store::projections::RunReadModel;
 use cairn_store::{EventLog, InMemoryStore};
@@ -388,185 +385,13 @@ async fn multiple_checkpoints_latest_is_used_for_recovery() {
     );
 }
 
-// ── Test 3: recover_interrupted_runs — runs in Running state with checkpoints ─
-
-/// RFC 005 §5: `recover_interrupted_runs` scans for runs stuck in Running
-/// (simulating a process crash that left the run state unchanged) and returns
-/// `RunResumedFromCheckpoint` for each run that has a checkpoint.
-#[tokio::test]
-async fn recover_interrupted_runs_with_checkpoint_returns_action() {
-    let store = Arc::new(InMemoryStore::new());
-    let session_svc = SessionServiceImpl::new(store.clone());
-    let run_svc = RunServiceImpl::new(store.clone());
-    let recovery_svc = RecoveryServiceImpl::new(store.clone());
-
-    let session_id = SessionId::new("sess_interrupted");
-    let run_id = RunId::new("run_interrupted");
-
-    session_svc
-        .create(&project(), session_id.clone())
-        .await
-        .unwrap();
-    run_svc
-        .start(&project(), &session_id, run_id.clone(), None)
-        .await
-        .unwrap();
-
-    // Transition run to Running (simulating it was active before crash).
-    store
-        .append(&[evt(
-            "evt_run_to_running",
-            RuntimeEvent::RunStateChanged(RunStateChanged {
-                project: project(),
-                run_id: run_id.clone(),
-                transition: StateTransition {
-                    from: Some(RunState::Pending),
-                    to: RunState::Running,
-                },
-                failure_class: None,
-                pause_reason: None,
-                resume_trigger: None,
-            }),
-        )])
-        .await
-        .unwrap();
-
-    // Save a checkpoint while "running".
-    store
-        .append(&[evt(
-            "evt_cp_interrupted",
-            RuntimeEvent::CheckpointRecorded(CheckpointRecorded {
-                project: project(),
-                run_id: run_id.clone(),
-                checkpoint_id: CheckpointId::new("cp_interrupted"),
-                disposition: CheckpointDisposition::Latest,
-                data: None,
-            }),
-        )])
-        .await
-        .unwrap();
-
-    // Run remains in Running state (process crashed — no explicit fail).
-    let run_before = RunReadModel::get(store.as_ref(), &run_id)
-        .await
-        .unwrap()
-        .unwrap();
-    assert_eq!(run_before.state, RunState::Running);
-
-    // Trigger recovery sweep.
-    let summary = recovery_svc.recover_interrupted_runs(100).await.unwrap();
-
-    assert_eq!(summary.scanned, 1, "recovery must scan the one Running run");
-    assert_eq!(
-        summary.actions.len(),
-        1,
-        "exactly one recovery action must be produced"
-    );
-
-    match &summary.actions[0] {
-        cairn_runtime::recovery::RecoveryAction::RunResumedFromCheckpoint {
-            run_id: recovered_id,
-        } => {
-            assert_eq!(
-                *recovered_id, run_id,
-                "RFC 005: recovery action must reference the interrupted run"
-            );
-        }
-        other => panic!("RFC 005: expected RunResumedFromCheckpoint action, got: {other:?}"),
-    }
-
-    // RecoveryAttempted event must have been emitted.
-    let events = store.read_stream(None, 1_000).await.unwrap();
-    let recovery_attempted_count = events
-        .iter()
-        .filter(|e| {
-            matches!(
-                &e.envelope.payload,
-                RuntimeEvent::RecoveryAttempted(ev) if ev.run_id == Some(run_id.clone())
-            )
-        })
-        .count();
-    assert_eq!(
-        recovery_attempted_count, 1,
-        "RFC 005: RecoveryAttempted must be emitted for each interrupted run"
-    );
-}
-
-// ── Test 4: recovery without checkpoint fails the run ─────────────────────────
-
-/// RFC 005 §5: a run stuck in Running with no checkpoint cannot be restored —
-/// `recover_interrupted_runs` must fail it and emit RecoveryCompleted(recovered=false).
-#[tokio::test]
-async fn recover_interrupted_run_without_checkpoint_fails_it() {
-    let store = Arc::new(InMemoryStore::new());
-    let session_svc = SessionServiceImpl::new(store.clone());
-    let run_svc = RunServiceImpl::new(store.clone());
-    let recovery_svc = RecoveryServiceImpl::new(store.clone());
-
-    let session_id = SessionId::new("sess_no_cp");
-    let run_id = RunId::new("run_no_cp");
-
-    session_svc
-        .create(&project(), session_id.clone())
-        .await
-        .unwrap();
-    run_svc
-        .start(&project(), &session_id, run_id.clone(), None)
-        .await
-        .unwrap();
-
-    // Force run into Running without a checkpoint.
-    store
-        .append(&[evt(
-            "evt_run_no_cp_running",
-            RuntimeEvent::RunStateChanged(RunStateChanged {
-                project: project(),
-                run_id: run_id.clone(),
-                transition: StateTransition {
-                    from: Some(RunState::Pending),
-                    to: RunState::Running,
-                },
-                failure_class: None,
-                pause_reason: None,
-                resume_trigger: None,
-            }),
-        )])
-        .await
-        .unwrap();
-
-    // No checkpoint saved — recovery must fail the run.
-    let summary = recovery_svc.recover_interrupted_runs(100).await.unwrap();
-
-    assert_eq!(summary.scanned, 1);
-    match &summary.actions[0] {
-        cairn_runtime::recovery::RecoveryAction::RunFailed { run_id: failed_id } => {
-            assert_eq!(*failed_id, run_id);
-        }
-        other => panic!("expected RunFailed action, got: {other:?}"),
-    }
-
-    // Run must now be Failed in the read model.
-    let run = RunReadModel::get(store.as_ref(), &run_id)
-        .await
-        .unwrap()
-        .unwrap();
-    assert_eq!(
-        run.state,
-        RunState::Failed,
-        "RFC 005: run without checkpoint must be failed by recovery"
-    );
-
-    // RecoveryCompleted(recovered=false) must be in the event stream.
-    let events = store.read_stream(None, 1_000).await.unwrap();
-    let completed = events.iter().find(|e| {
-        matches!(
-            &e.envelope.payload,
-            RuntimeEvent::RecoveryCompleted(ev)
-                if ev.run_id == Some(run_id.clone()) && !ev.recovered
-        )
-    });
-    assert!(
-        completed.is_some(),
-        "RFC 005: RecoveryCompleted(recovered=false) must be emitted when no checkpoint exists"
-    );
-}
+// Tests 3 + 4 (`recover_interrupted_runs_with_checkpoint_returns_action`,
+// `recover_interrupted_run_without_checkpoint_fails_it`) exercised
+// `RecoveryServiceImpl::recover_interrupted_runs` against the in-memory
+// store. Both were deleted in the Fabric finalization round — FF's
+// AttemptTimeoutScanner + ExecutionDeadlineScanner + LeaseExpiryScanner
+// own recovery of interrupted / orphaned runs unconditionally
+// (ff-engine/src/scanner/{attempt_timeout,execution_deadline,
+// lease_expiry}.rs). Tests 1 + 2 above stay — they validate checkpoint
+// lifecycle + latest-wins semantics, which are cairn-side concerns
+// unrelated to recovery.

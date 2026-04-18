@@ -1,3 +1,7 @@
+//! `TaskServiceImpl` — dev/CI path backing for [`crate::tasks::TaskService`].
+//! See the module comment on `run_impl.rs` for the dev-vs-production
+//! selection mechanism.
+
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -12,6 +16,12 @@ use super::event_helpers::make_envelope;
 use crate::error::RuntimeError;
 use crate::tasks::TaskService;
 
+/// In-memory dev-path implementation of [`crate::tasks::TaskService`].
+///
+/// Selected by `AppState::new` when `CAIRN_FABRIC_ENABLED` is unset; the
+/// production path is `FabricTaskServiceAdapter` (in the cairn-app crate)
+/// wrapping `cairn_fabric::FabricServices::tasks`. Not duplication — peers
+/// behind the trait, selected at boot.
 pub struct TaskServiceImpl<S> {
     store: Arc<S>,
 }

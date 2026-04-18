@@ -61,7 +61,7 @@ impl ResearchService for InMemoryResearchService {
         let results = self.results.lock().unwrap();
         // Most-recent first.
         let mut v: Vec<ResearchResult> = results.iter().rev().take(limit).cloned().collect();
-        v.sort_by(|a, b| b.created_at_ms.cmp(&a.created_at_ms));
+        v.sort_by_key(|r| std::cmp::Reverse(r.created_at_ms));
         Ok(v)
     }
 }

@@ -18,7 +18,6 @@ use cairn_api::auth::{AuthPrincipal, ServiceTokenAuthenticator};
 use cairn_api::bootstrap::DeploymentMode;
 use cairn_domain::{ApprovalDecision, ApprovalId, ProjectKey, RunId, TaskId};
 use cairn_runtime::approvals::ApprovalService;
-use cairn_runtime::tasks::TaskService;
 use cairn_store::projections::{
     ApprovalReadModel, LlmCallTraceReadModel, RunReadModel, SessionReadModel, TaskReadModel,
     ToolInvocationReadModel,

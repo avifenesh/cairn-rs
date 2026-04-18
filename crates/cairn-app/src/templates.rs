@@ -110,7 +110,7 @@ impl TemplateRegistry {
     pub fn list(&self) -> Vec<TemplateSummary> {
         let mut summaries: Vec<TemplateSummary> =
             self.templates.values().map(TemplateSummary::from).collect();
-        summaries.sort_by(|a, b| a.id.cmp(&b.id));
+        summaries.sort_by_key(|r| r.id.clone());
         summaries
     }
 

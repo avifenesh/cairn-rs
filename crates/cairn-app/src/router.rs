@@ -956,10 +956,6 @@ impl AppBootstrap {
             .route("/v1/runs/:id/audit", get(get_run_audit_trail_handler))
             .route("/v1/runs/:id/cost", get(get_run_cost_handler))
             .route("/v1/runs/:id/recover", post(recover_run_handler))
-            .route(
-                "/v1/runs/:id/recovery-status",
-                get(get_run_recovery_status_handler),
-            )
             .route("/v1/runs/:id/events", get(list_run_events_handler))
             .route("/v1/runs/:id/replay", get(replay_run_handler))
             .route(

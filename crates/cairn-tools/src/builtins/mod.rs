@@ -629,7 +629,7 @@ impl BuiltinToolRegistry {
             .filter(|(h, tier)| *tier == ToolTier::Deferred && matches_query(h))
             .map(|(h, _)| BuiltinToolDescriptor::from_handler(h.as_ref()))
             .collect();
-        tools.sort_by(|a, b| a.name.cmp(&b.name));
+        tools.sort_by_key(|r| r.name.clone());
         tools
     }
 
@@ -640,7 +640,7 @@ impl BuiltinToolRegistry {
             .values()
             .map(|(h, _)| BuiltinToolDescriptor::from_handler(h.as_ref()))
             .collect();
-        tools.sort_by(|a, b| a.name.cmp(&b.name));
+        tools.sort_by_key(|r| r.name.clone());
         tools
     }
 

@@ -1,4 +1,9 @@
-//! Week 4: End-to-end runtime slice from command through replay/recovery.
+//! Week 4: End-to-end runtime slice from command through replay.
+//!
+//! Recovery coverage that lived here was removed in the Fabric finalization
+//! round — FF's LeaseExpiryScanner, AttemptTimeoutScanner, and
+//! DependencyReconciler own the recovery paths that the deleted test
+//! `recovery_produces_auditable_events` used to exercise.
 //! Proves the full command → event → projection → replay cycle works.
 
 use std::sync::Arc;
@@ -6,8 +11,8 @@ use std::sync::Arc;
 use cairn_domain::*;
 use cairn_runtime::{
     ApprovalService, ApprovalServiceImpl, CheckpointService, CheckpointServiceImpl, MailboxService,
-    MailboxServiceImpl, RecoveryService, RecoveryServiceImpl, RunService, RunServiceImpl,
-    SessionService, SessionServiceImpl, TaskService, TaskServiceImpl,
+    MailboxServiceImpl, RunService, RunServiceImpl, SessionService, SessionServiceImpl,
+    TaskService, TaskServiceImpl,
 };
 use cairn_store::{EventLog, InMemoryStore};
 
@@ -313,60 +318,10 @@ async fn subagent_spawn_creates_linked_entities() {
     assert_eq!(parent_run.state, RunState::Completed);
 }
 
-/// Recovery after simulated crash: tasks with expired leases get recovered,
-/// event stream captures recovery events.
-#[tokio::test]
-async fn recovery_produces_auditable_events() {
-    let store = Arc::new(InMemoryStore::new());
-    let task_svc = TaskServiceImpl::new(store.clone());
-    let recovery_svc = RecoveryServiceImpl::new(store.clone());
-    let project = test_project();
-
-    // Create two tasks and claim them with tiny leases
-    for i in 1..=2 {
-        task_svc
-            .submit(&project, TaskId::new(format!("task_{i}")), None, None, 0)
-            .await
-            .unwrap();
-        task_svc
-            .claim(
-                &TaskId::new(format!("task_{i}")),
-                "worker-crash".to_owned(),
-                1,
-            )
-            .await
-            .unwrap();
-    }
-
-    // Recovery sweep
-    let far_future = u64::MAX / 2;
-    let summary = recovery_svc
-        .recover_expired_leases(far_future, 100)
-        .await
-        .unwrap();
-
-    assert_eq!(summary.scanned, 2);
-    assert_eq!(summary.actions.len(), 2);
-
-    // Verify recovery events in the stream
-    let all_events = store.read_stream(None, 1000).await.unwrap();
-    let recovery_events: Vec<_> = all_events
-        .iter()
-        .filter(|e| matches!(e.envelope.payload, RuntimeEvent::RecoveryAttempted(_)))
-        .collect();
-    assert_eq!(
-        recovery_events.len(),
-        2,
-        "expected 2 RecoveryAttempted events"
-    );
-
-    let recovery_completed: Vec<_> = all_events
-        .iter()
-        .filter(|e| matches!(e.envelope.payload, RuntimeEvent::RecoveryCompleted(_)))
-        .collect();
-    assert_eq!(
-        recovery_completed.len(),
-        2,
-        "expected 2 RecoveryCompleted events"
-    );
-}
+// `recovery_produces_auditable_events` deleted in the Fabric finalization
+// round. FF's LeaseExpiryScanner + AttemptTimeoutScanner emit equivalent
+// events into exec_core / lease_history / the event bridge — if cairn
+// wants auditable proof of a recovery sweep under FabricEnabled=1, read
+// the EventBridge sink directly. Under the in-memory dev path the sweep
+// has nothing to recover (no background scanner running) so the test
+// would have no useful invariant to check.

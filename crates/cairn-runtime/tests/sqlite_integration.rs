@@ -9,9 +9,9 @@ use cairn_domain::workers::{ExternalWorkerOutcome, ExternalWorkerReport};
 use cairn_domain::TenantId;
 use cairn_domain::*;
 use cairn_runtime::{
-    ExternalWorkerService, ExternalWorkerServiceImpl, RecoveryService, RecoveryServiceImpl,
-    RunService, RunServiceImpl, SessionService, SessionServiceImpl, TaskService, TaskServiceImpl,
-    ToolInvocationService, ToolInvocationServiceImpl,
+    ExternalWorkerService, ExternalWorkerServiceImpl, RunService, RunServiceImpl, SessionService,
+    SessionServiceImpl, TaskService, TaskServiceImpl, ToolInvocationService,
+    ToolInvocationServiceImpl,
 };
 use cairn_store::event_log::{EntityRef, EventLog, EventPosition, StoredEvent};
 use cairn_store::projections::*;
@@ -414,82 +414,9 @@ async fn sqlite_external_worker_seam() {
     assert_eq!(task.state, TaskState::Completed);
 }
 
-/// SQLite-backed resolve_stale_dependencies end-to-end.
-#[tokio::test]
-async fn sqlite_resolve_stale_dependencies_e2e() {
-    let store = Arc::new(SqliteStore::in_memory().await);
-    let session_svc = SessionServiceImpl::new(store.clone());
-    let run_svc = RunServiceImpl::new(store.clone());
-    let task_svc = TaskServiceImpl::new(store.clone());
-    let recovery_svc = RecoveryServiceImpl::new(store.clone());
-    let p = project();
-
-    session_svc.create(&p, SessionId::new("s1")).await.unwrap();
-    run_svc
-        .start(&p, &SessionId::new("s1"), RunId::new("parent"), None)
-        .await
-        .unwrap();
-    run_svc
-        .resume(
-            &RunId::new("parent"),
-            ResumeTrigger::RuntimeSignal,
-            RunResumeTarget::Running,
-        )
-        .await
-        .unwrap();
-
-    task_svc
-        .submit(
-            &p,
-            TaskId::new("child"),
-            Some(RunId::new("parent")),
-            None,
-            0,
-        )
-        .await
-        .unwrap();
-
-    // Move parent to WaitingDependency
-    store
-        .append(&[EventEnvelope {
-            event_id: EventId::new("evt_wd"),
-            source: EventSource::Runtime,
-            ownership: OwnershipKey::Project(p.clone()),
-            causation_id: None,
-            correlation_id: None,
-            payload: RuntimeEvent::RunStateChanged(RunStateChanged {
-                project: p.clone(),
-                run_id: RunId::new("parent"),
-                transition: StateTransition {
-                    from: Some(RunState::Running),
-                    to: RunState::WaitingDependency,
-                },
-                failure_class: None,
-                pause_reason: None,
-                resume_trigger: None,
-            }),
-        }])
-        .await
-        .unwrap();
-
-    // Child active → no resume
-    let summary = recovery_svc.resolve_stale_dependencies(10).await.unwrap();
-    assert_eq!(summary.scanned, 1);
-    assert_eq!(summary.actions.len(), 0);
-
-    // Complete child
-    task_svc
-        .claim(&TaskId::new("child"), "w".to_owned(), 60_000)
-        .await
-        .unwrap();
-    task_svc.start(&TaskId::new("child")).await.unwrap();
-    task_svc.complete(&TaskId::new("child")).await.unwrap();
-
-    // Now resumes parent
-    let summary = recovery_svc.resolve_stale_dependencies(10).await.unwrap();
-    assert_eq!(summary.scanned, 1);
-    assert_eq!(summary.actions.len(), 1);
-
-    let run = run_svc.get(&RunId::new("parent")).await.unwrap().unwrap();
-    assert_eq!(run.state, RunState::Running);
-}
+// `sqlite_resolve_stale_dependencies_e2e` deleted in the Fabric
+// finalization round. FF's DependencyReconciler scanner owns
+// resolve_stale_dependencies unconditionally
+// (ff-engine/src/scanner/dependency_reconciler.rs); a cairn-side sweep
+// over a SQLite projection was only meaningful when cairn-runtime did
+// recovery itself.

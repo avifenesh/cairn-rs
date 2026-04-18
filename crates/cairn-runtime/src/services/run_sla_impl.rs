@@ -74,11 +74,10 @@ where
         let now = now_ms();
         let elapsed_ms = now.saturating_sub(run.created_at);
         let target_ms = config.target_completion_ms;
-        let percent_used = if target_ms == 0 {
-            u64::MAX
-        } else {
-            elapsed_ms.saturating_mul(100) / target_ms
-        };
+        let percent_used = elapsed_ms
+            .saturating_mul(100)
+            .checked_div(target_ms)
+            .unwrap_or(u64::MAX);
 
         Ok(SlaStatus {
             on_track: elapsed_ms < target_ms,

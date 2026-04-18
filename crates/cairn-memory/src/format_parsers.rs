@@ -324,11 +324,9 @@ impl HtmlParser {
                     "head" => in_head = true,
                     "/head" => in_head = false,
                     "title" if in_head => in_title = true,
-                    "/title" => {
-                        if in_title {
-                            metadata.title = Some(title_buf.trim().to_owned());
-                            in_title = false;
-                        }
+                    "/title" if in_title => {
+                        metadata.title = Some(title_buf.trim().to_owned());
+                        in_title = false;
                     }
                     "script" => in_script = true,
                     "/script" => in_script = false,

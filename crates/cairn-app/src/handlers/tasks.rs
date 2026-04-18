@@ -16,7 +16,7 @@ use cairn_domain::{
     AuditOutcome, EventEnvelope, EventId, EventSource, ProjectKey, RunId, RunState, RuntimeEvent,
     StateTransition, TaskId, TaskState, TaskStateChanged,
 };
-use cairn_runtime::{AuditService, RunService, TaskService};
+use cairn_runtime::AuditService;
 use cairn_store::projections::{
     TaskDependencyReadModel, TaskLeaseExpiredReadModel, TaskReadModel, TaskRecord,
 };

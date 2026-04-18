@@ -171,7 +171,7 @@ impl<S> ProviderRegistry<S> {
                 cached: true,
             })
             .collect();
-        connections.sort_by(|left, right| left.connection_id.cmp(&right.connection_id));
+        connections.sort_by_key(|r| r.connection_id.clone());
 
         let fallbacks = fallback_snapshot(&read_lock(&self.fallbacks));
 
