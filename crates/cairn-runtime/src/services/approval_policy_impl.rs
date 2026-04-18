@@ -170,7 +170,7 @@ mod tests {
             events: &[EventEnvelope<RuntimeEvent>],
         ) -> Result<Vec<EventPosition>, StoreError> {
             // Project ApprovalPolicyCreated events into the mock store.
-            let mut policies = self.policies.lock().unwrap();
+            let mut policies = self.policies.lock().unwrap_or_else(|e| e.into_inner());
             for envelope in events {
                 if let RuntimeEvent::ApprovalPolicyCreated(e) = &envelope.payload {
                     policies.insert(
@@ -226,7 +226,12 @@ mod tests {
             &self,
             policy_id: &str,
         ) -> Result<Option<ApprovalPolicyRecord>, StoreError> {
-            Ok(self.policies.lock().unwrap().get(policy_id).cloned())
+            Ok(self
+                .policies
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .get(policy_id)
+                .cloned())
         }
 
         async fn list_by_tenant(
