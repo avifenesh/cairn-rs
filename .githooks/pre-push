@@ -8,6 +8,12 @@ echo "═══ pre-push gate ═══"
 #    The runtime / orchestrator / app test modules are gated on this
 #    feature (PR #27); without it the binaries compile to zero tests
 #    and the hook would ship blind. This is what CI's `test` job runs.
+#  - Workspace integration tests (`--tests`) for cairn-runtime,
+#    cairn-orchestrator, and cairn-app under the same feature. CLAUDE.md
+#    hard rule #2 requires integration coverage; `--lib` alone skips the
+#    78 files under `crates/*/tests/*.rs` (full_workspace_suite,
+#    e2e_lifecycle, approval_blocking_e2e, checkpoint_recovery_e2e, …).
+#    This is what CI's `integration-tests` job runs.
 #  - cairn-fabric integration suite runs separately against a
 #    testcontainers-managed Valkey (docker required; skipped if the
 #    daemon is unreachable so laptops without docker can still push).
@@ -19,6 +25,18 @@ if ! cargo test --workspace --lib --features cairn-app/in-memory-runtime --quiet
   exit 1
 fi
 echo "  ✓ rust lib tests"
+
+echo "  rust integration tests (runtime + orchestrator + app)..."
+if ! cargo test --tests \
+    -p cairn-runtime -p cairn-orchestrator -p cairn-app \
+    --features cairn-app/in-memory-runtime --quiet >/dev/null 2>&1; then
+  echo "  ❌ rust integration tests failed."
+  cargo test --tests \
+    -p cairn-runtime -p cairn-orchestrator -p cairn-app \
+    --features cairn-app/in-memory-runtime 2>&1 | grep "FAILED\|failures" | head -10
+  exit 1
+fi
+echo "  ✓ rust integration tests"
 
 echo "  fabric integration (testcontainers)..."
 if docker info >/dev/null 2>&1; then

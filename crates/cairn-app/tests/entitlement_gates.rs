@@ -1,3 +1,5 @@
+#![cfg(feature = "in-memory-runtime")]
+
 //! Integration tests for RFC 014 entitlement enforcement.
 //! Verifies that feature-gated endpoints return 403 in local_eval tier
 //! and 201/200 in team_self_hosted tier.

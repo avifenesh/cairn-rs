@@ -1,3 +1,5 @@
+#![cfg(feature = "in-memory-runtime")]
+
 //! Integration tests for RFC 010 system status page.
 
 use axum::{

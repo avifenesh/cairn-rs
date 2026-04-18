@@ -282,21 +282,27 @@ async fn main() -> ExitCode {
         }
     }
 
-    // Pause / resume must happen after a prior claim in Fabric-strict mode.
-    c.post(
-        "POST /v1/runs/:id/pause (post-claim)",
-        &format!("/v1/runs/{}/pause", opts.run_id),
-        json!({"reason_kind": "operator_pause", "detail": "smoke"}),
-        200,
-    )
-    .await;
-    c.post(
-        "POST /v1/runs/:id/resume (post-pause)",
-        &format!("/v1/runs/{}/resume", opts.run_id),
-        json!({}),
-        200,
-    )
-    .await;
+    // NOTE: run-surface pause/resume is intentionally omitted.
+    //
+    // Runs and tasks get distinct execution ids (`id_map::run_to_execution_id`
+    // vs `task_to_execution_id`). The task above was claimed, the run was
+    // not — and `POST /v1/runs` currently calls `runs.start()` which
+    // creates a waiting execution, never an active one. Under Fabric-strict
+    // state machine `ff_suspend_execution` rejects a non-active execution
+    // with `execution_not_active`, so `POST /v1/runs/:id/pause` against
+    // the smoke_worker-created run returns HTTP 500 — the exact
+    // false-green this fixture was built to prevent.
+    //
+    // Exercising run pause/resume end-to-end requires either:
+    //   (a) a run-surface HTTP claim (`POST /v1/runs/:id/claim`) wired to
+    //       `FabricRunService::claim`, which exists on the service layer
+    //       (cairn-fabric) but is not yet plumbed through the cairn-runtime
+    //       `RunService` trait or the cairn-app router, OR
+    //   (b) task-surface pause/resume (`POST /v1/tasks/:id/pause` +
+    //       `/resume`), with handlers/routes in cairn-app — also not
+    //       present today.
+    // Both are follow-up work; neither blocks this fixture from
+    // exercising the lease-bearing (task) lifecycle in Fabric-strict mode.
 
     // Release the lease — legal only after a prior claim.
     c.post(

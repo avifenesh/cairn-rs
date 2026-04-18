@@ -1,3 +1,5 @@
+#![cfg(feature = "in-memory-runtime")]
+
 use axum::{
     body::{to_bytes, Body},
     http::{Request, StatusCode},

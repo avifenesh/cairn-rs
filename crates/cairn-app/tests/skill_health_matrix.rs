@@ -1,3 +1,5 @@
+#![cfg(feature = "in-memory-runtime")]
+
 //! Integration test: skill health matrix stub returns empty rows.
 //!
 //! `build_skill_health_matrix` is currently a stub that always returns an empty
