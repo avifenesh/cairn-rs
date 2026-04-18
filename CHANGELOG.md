@@ -7,6 +7,37 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [Unreleased]
+
+### Added
+
+- **`POST /v1/runs/:id/claim`** — activates a run's FlowFabric execution lease
+  so downstream FCALLs (`enter_waiting_approval`, `pause`, signal delivery)
+  accept it. NOT idempotent on the Fabric path: re-claiming an already-active
+  run fails at FF's grant gate with `execution_not_eligible`. A second claim
+  after a suspend/resume cycle dispatches through `ff_claim_resumed_execution`
+  and is legitimate.
+
+### Changed
+
+- **`TaskFrameSink` orchestrator integration** (#30) — orchestrator logs
+  tool calls, tool results, LLM responses, and checkpoints through a
+  non-consuming sink on the active `CairnTask`, removing the need to thread
+  a separate `FrameSink` handle alongside the task. Lease-health gate pins
+  orchestrator emission ordering; checkpoint-snapshot serialize failures
+  degrade to a WARN log instead of aborting the step.
+
+### Removed
+
+- **`ActiveTaskRegistry`** (#29) — retired in favour of FlowFabric-owned lease
+  state. `CairnTask` now carries the underlying `ClaimedTask` directly; the
+  cairn-side registry was a cache of state FF already holds atomically, and
+  kept drifting out of sync under lease expiry. Event-emission gate in the
+  orchestrator now reads lease health through `TaskFrameSink::is_lease_healthy`
+  (the worker-sdk accessor) rather than a cairn-local flag.
+
+---
+
 ## [0.1.0] — 2026-04-05
 
 First complete, test-verified milestone. The core control-plane infrastructure
