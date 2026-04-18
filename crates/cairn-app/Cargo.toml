@@ -9,6 +9,10 @@ publish = false
 name = "cairn-app"
 path = "src/main.rs"
 
+[[bin]]
+name = "smoke_worker"
+path = "src/bin/smoke_worker.rs"
+
 [features]
 default = []
 # Courtesy in-memory backing for Run/Task/Session services. OFF by default
