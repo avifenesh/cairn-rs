@@ -962,6 +962,7 @@ impl AppBootstrap {
                 "/v1/runs/:id/replay-to-checkpoint",
                 post(replay_run_to_checkpoint_handler),
             )
+            .route("/v1/runs/:id/claim", post(claim_run_handler))
             .route("/v1/runs/:id/cancel", post(cancel_run_handler))
             .route("/v1/runs/:id/pause", post(pause_run_handler))
             .route("/v1/runs/:id/resume", post(resume_run_handler))

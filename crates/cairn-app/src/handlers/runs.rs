@@ -1022,6 +1022,53 @@ pub(crate) async fn cancel_run_handler(
     }
 }
 
+/// `POST /v1/runs/:id/claim` — activate the run's FF execution lease.
+///
+/// Required before `enter_waiting_approval`, `pause`, or any other
+/// FCALL that rejects non-active executions (see
+/// `RunService::claim` docstring for the full semantics). On the
+/// Fabric path this walks `ff_issue_claim_grant` +
+/// `ff_claim_execution` (with `ff_claim_resumed_execution` dispatch
+/// when the execution is resuming from a prior suspension). On the
+/// in-memory courtesy path this is a no-op that returns the current
+/// record — there's no lease to activate.
+///
+/// No request body: runs are not worker-pulled, so the caller never
+/// advertises worker identity through this endpoint (unlike
+/// `POST /v1/tasks/:id/claim`, which takes `worker_id` +
+/// `lease_duration_ms`). Fabric uses
+/// `FabricConfig::worker_instance_id` + `lease_ttl_ms` from the
+/// process config.
+pub(crate) async fn claim_run_handler(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> impl IntoResponse {
+    let run_id = RunId::new(&id);
+
+    // Resolve the run first so a missing id surfaces a clean 404
+    // instead of whatever error the Fabric claim path emits for an
+    // unknown execution (which would present as a 500). This
+    // mirrors the pattern established by `cancel_task_handler` and
+    // `release_task_lease_handler` in handlers/tasks.rs.
+    match state.runtime.runs.get(&run_id).await {
+        Ok(Some(_)) => {}
+        Ok(None) => {
+            return AppApiError::new(StatusCode::NOT_FOUND, "not_found", "run not found")
+                .into_response();
+        }
+        Err(err) => return runtime_error_response(err),
+    }
+
+    let before = current_event_head(&state).await;
+    match state.runtime.runs.claim(&run_id).await {
+        Ok(record) => {
+            publish_runtime_frames_since(&state, before).await;
+            (StatusCode::OK, Json(record)).into_response()
+        }
+        Err(err) => runtime_error_response(err),
+    }
+}
+
 pub(crate) async fn pause_run_handler(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,

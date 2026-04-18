@@ -424,6 +424,19 @@ pub const OPENAPI_JSON: &str = r##"{
         "responses": { "200": { "description": "Run record" }, "404": { "description": "Not found" } }
       }
     },
+    "/v1/runs/{id}/claim": {
+      "post": {
+        "tags": ["Runs"],
+        "summary": "Claim a run's execution lease (Fabric-only semantic; no-op on in-memory path)",
+        "description": "Activates the run's FF execution so downstream FCALLs (pause / enter_waiting_approval / resolve_approval / signals) accept it. Unlike POST /v1/tasks/{id}/claim, this endpoint takes no body: runs are not worker-pulled, so the caller never advertises worker identity here — the Fabric runtime uses its own configured worker_instance_id + lease_ttl_ms.",
+        "operationId": "claimRun",
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": {
+          "200": { "description": "Run record after active-lease activation" },
+          "404": { "description": "Run not found" }
+        }
+      }
+    },
     "/v1/runs/{id}/pause": {
       "post": {
         "tags": ["Runs"],
