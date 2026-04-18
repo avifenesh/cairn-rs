@@ -153,6 +153,9 @@ Accepted limitations as of finalization — each has a follow-up round scoped.
 - **Provider budgets and tenant quotas** (`handlers/providers.rs` + `handlers/admin.rs`) remain on the legacy `BudgetServiceImpl` / `QuotaServiceImpl` over the cairn event log. `FabricBudgetService` and `FabricQuotaService` are per-run admission controls, not tenant-wide ceilings; they ride alongside as new surfaces, not replacements.
 - **Approval path has no active live-FF integration test** (three `test_suspension.rs` tests are `#[cfg(any())]`-gated) because `FabricRunService` has no `claim` API — a run's execution never reaches `lifecycle_phase=active`, which `ff_suspend_execution` requires. Worker-1 owns the run-claim landing. Once it lands, re-enable the gated tests.
 - **`ActiveTaskRegistry` is a latency-cache for lease context**, not a source of truth — FF owns every field it stores. It also doubles as the gate for terminal-state `TaskStateChanged` emission, which means API-claimed tasks (claimed without routing through `FabricTaskService::claim`) skip the projection update. Flagged MAJOR in the finalization audit; scheduled for removal once the claim-API work stabilises. See audit report for detail.
+- **`scripts/smoke-test.sh` HTTP harness assumes a permissive state machine** (the in-memory `RunServiceImpl` allows `pause` without a prior `claim`, etc). Under `CAIRN_FABRIC_ENABLED=1`, FF enforces strict state transitions — a run must be claimed and active before it can be paused/resumed, tasks must be submitted-and-claimed before lease operations. 8 smoke sections (`POST /v1/runs/:id/pause`, `/resume`, `POST /v1/tasks/:id/claim`, `/release-lease`) return HTTP 500 for this reason on the fabric path. These are **NOT runtime defects** — FF's strictness is correct production behaviour. The smoke-test harness needs a short-lived worker-loop fixture (claim-then-operate) to exercise FF semantics correctly. Filed as a separate follow-up PR: **"smoke-test: harness rewrite for Fabric state machine"**.
+  - Fabric-off path (`CAIRN_FABRIC_ENABLED` unset): 97/97 pass, 4 skipped.
+  - Fabric-on path (`CAIRN_FABRIC_ENABLED=1` + Valkey + FF lua loaded): 89/97 pass, 8 harness gaps, 4 skipped.
 
 ---
 
@@ -190,6 +193,10 @@ The finalization-round smoke-test caught a single-emit gap: `FabricSessionServic
 The same class of gap could exist for any FF mutation path cairn-fabric exposes. A systematic audit should walk every public method on `FabricRunService` / `FabricTaskService` / `FabricSessionService` / `FabricBudgetService` / `FabricQuotaService` and verify: every mutation that changes FF state that cairn-app reads back from the projection has a corresponding `BridgeEvent` emitted. No cairn-app read-path should depend on a state change that only lives in Valkey.
 
 Bugs of this shape are invisible to unit tests (services write to FF correctly) and to live FF integration tests (each one tests the fabric layer in isolation, not the full handler → adapter → fabric → store-projection chain). The integration-readiness gate is cairn-app smoke — run `CAIRN_FABRIC_ENABLED=1 scripts/smoke-test.sh` on every cairn-fabric mutation-surface change.
+
+### LOW — Smoke-test harness rewrite for Fabric state machine
+
+`scripts/smoke-test.sh` simulates in-memory permissive state transitions (pause without prior claim, etc.). Under `CAIRN_FABRIC_ENABLED=1`, FF enforces strict state transitions, so 8 sections (pause/resume/claim/release-lease on freshly created runs and tasks) return HTTP 500 — the runtime is correct, the test's expectations aren't. Follow-up PR adds a worker-loop fixture that claims before operating so the fabric path gets exercised end-to-end.
 
 ### LOW — CairnTask tag micro-cache
 
