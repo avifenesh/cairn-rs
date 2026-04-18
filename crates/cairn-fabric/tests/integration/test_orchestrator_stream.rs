@@ -96,6 +96,7 @@ impl ExecutePhase for OneShotExecute {
                 status: ActionStatus::Succeeded,
                 tool_output: Some(serde_json::json!({ "ok": true })),
                 invocation_id: None,
+                duration_ms: 0,
             })
             .collect();
         Ok(ExecuteOutcome {

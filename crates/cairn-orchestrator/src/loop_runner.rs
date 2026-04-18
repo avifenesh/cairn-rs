@@ -443,12 +443,10 @@ where
             }
 
             // ── (5b) EXECUTE ──────────────────────────────────────────────────
-            let execute_started_at_ms = now_millis();
             let execute_outcome = self.execute.execute(ctx, &decide_output).await.map_err(|e| {
                 tracing::error!(run_id = %ctx.run_id, iteration = ctx.iteration, error = %e, "execute failed");
                 e
             })?;
-            let execute_duration_ms = now_millis().saturating_sub(execute_started_at_ms);
 
             let succeeded_count = execute_outcome
                 .results
@@ -477,51 +475,12 @@ where
             // FF's attempt-scoped stream so `restore_frames()` can replay on
             // resume. Stream-frame failures are logged and swallowed.
             //
-            // Tool-result duration is approximated by per-iteration execute
-            // wall-clock divided across the results — execute_impl does not
-            // surface per-call durations today. Accurate-enough for audit
-            // telemetry; if/when execute exposes per-call timing, switch to
-            // the real value here.
-            //
-            // 0 semantics: `per_result_duration_ms == 0` means "unknown /
-            // below-timer-resolution," NOT "the tool executed in literally
-            // zero time." Two ways it lands at 0 here:
-            //   - Empty results (no tools dispatched this iteration).
-            //   - Fast iteration where execute_duration_ms < results.len()
-            //     → integer division truncates to 0 for every frame.
-            // Downstream consumers (FF stream replay, cost reconciliation)
-            // MUST treat 0 as "no signal" rather than "zero-duration" —
-            // averaging or percentile computations that trust 0-as-measured
-            // will under-report latency. Follow-up: thread per-call
-            // duration through ActionResult so this averaging math
-            // disappears. Tracked in #33 (see "Better fix" in the issue
-            // body) — touches ~10 ActionResult construction sites in
-            // execute_impl + test stubs, scoped out of the minimum-fix
-            // commit that landed the trace + docs below.
-            let per_result_duration_ms = if execute_outcome.results.is_empty() {
-                0
-            } else {
-                execute_duration_ms / execute_outcome.results.len() as u64
-            };
-            // Emit a debug-level trace when the wall-clock was shorter than
-            // the result count — that's the silent-truncation case where
-            // every frame lands with duration_ms=0. Operators grepping for
-            // "per-result duration truncated" in logs can spot how often a
-            // given run's cost data is under-measured. Kept at debug not
-            // warn: 0-on-fast-path is ACCEPTABLE telemetry, just noisy
-            // enough at high volume to want a threshold alert.
-            if !execute_outcome.results.is_empty()
-                && execute_duration_ms < execute_outcome.results.len() as u64
-            {
-                tracing::debug!(
-                    run_id    = %ctx.run_id,
-                    iteration = ctx.iteration,
-                    execute_duration_ms,
-                    result_count = execute_outcome.results.len(),
-                    "per-result duration truncated to 0 — wall-clock under result count, \
-                     downstream cost telemetry will under-measure this iteration"
-                );
-            }
+            // `result.duration_ms` is stamped per-proposal inside
+            // `ExecutePhase::execute` (see `execute_impl.rs::execute`). 0
+            // means "unknown / below-timer-resolution" or "result was
+            // synthesised by a test stub that bypassed the dispatch wrapper" —
+            // NOT "zero time." Downstream consumers MUST treat 0 as no-signal.
+            // The `ActionResult.duration_ms` rustdoc is the canonical reference.
             for result in &execute_outcome.results {
                 let tool_name = result
                     .proposal
@@ -564,7 +523,7 @@ where
                     };
                     if let Err(e) = self
                         .task_sink
-                        .log_tool_result(tool_name, &output, succeeded, per_result_duration_ms)
+                        .log_tool_result(tool_name, &output, succeeded, result.duration_ms)
                         .await
                     {
                         tracing::warn!(
@@ -1007,6 +966,7 @@ mod tests {
                     status: ActionStatus::Succeeded,
                     tool_output: None,
                     invocation_id: None,
+                    duration_ms: 0,
                 })
                 .collect();
             Ok(ExecuteOutcome {
@@ -1212,6 +1172,7 @@ mod tests {
                         status: ActionStatus::Succeeded,
                         tool_output: None,
                         invocation_id: None,
+                        duration_ms: 0,
                     })
                     .collect();
                 Ok(ExecuteOutcome {
@@ -1299,6 +1260,7 @@ mod tests {
                         },
                         tool_output: None,
                         invocation_id: None,
+                        duration_ms: 0,
                     })
                     .collect();
                 Ok(ExecuteOutcome {
@@ -1409,6 +1371,7 @@ mod tests {
                         status: ActionStatus::Succeeded,
                         tool_output: None,
                         invocation_id: None,
+                        duration_ms: 0,
                     })
                     .collect();
                 Ok(ExecuteOutcome {
@@ -1448,6 +1411,7 @@ mod tests {
                 status: ActionStatus::Succeeded,
                 tool_output: Some(serde_json::json!({"result": "ok"})),
                 invocation_id: None,
+                duration_ms: 0,
             }],
             loop_signal: LoopSignal::Continue,
         };
@@ -1484,6 +1448,7 @@ mod tests {
                     "total": 2,
                 })),
                 invocation_id: None,
+                duration_ms: 0,
             }],
             loop_signal: LoopSignal::Continue,
         };
@@ -1511,6 +1476,7 @@ mod tests {
                     "matches": [{ "name": "should_not_appear" }]
                 })),
                 invocation_id: None,
+                duration_ms: 0,
             }],
             loop_signal: LoopSignal::Continue,
         };
@@ -1537,6 +1503,7 @@ mod tests {
                 status: ActionStatus::Succeeded,
                 tool_output: Some(serde_json::json!({ "matches": [], "total": 0 })),
                 invocation_id: None,
+                duration_ms: 0,
             }],
             loop_signal: LoopSignal::Continue,
         };
@@ -1637,6 +1604,7 @@ mod tests {
                         status: ActionStatus::Succeeded,
                         tool_output: tool_output.clone(),
                         invocation_id: None,
+                        duration_ms: 0,
                     })
                     .collect();
                 Ok(ExecuteOutcome {
