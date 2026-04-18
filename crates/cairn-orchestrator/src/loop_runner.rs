@@ -494,10 +494,10 @@ where
             // averaging or percentile computations that trust 0-as-measured
             // will under-report latency. Follow-up: thread per-call
             // duration through ActionResult so this averaging math
-            // disappears. Tracked in issue #33 (initial minimum-scope fix
-            // landed this commit); the real-value plumbing is deferred
-            // because it touches ~10 ActionResult construction sites in
-            // execute_impl + test stubs.
+            // disappears. Tracked in #33 (see "Better fix" in the issue
+            // body) — touches ~10 ActionResult construction sites in
+            // execute_impl + test stubs, scoped out of the minimum-fix
+            // commit that landed the trace + docs below.
             let per_result_duration_ms = if execute_outcome.results.is_empty() {
                 0
             } else {
