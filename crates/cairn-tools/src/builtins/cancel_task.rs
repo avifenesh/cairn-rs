@@ -99,7 +99,7 @@ impl ToolHandler for CancelTaskTool {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "in-memory-runtime"))]
 mod tests {
     use super::*;
     use cairn_domain::{lifecycle::TaskState, ProjectKey, TaskId};

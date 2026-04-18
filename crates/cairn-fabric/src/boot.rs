@@ -161,8 +161,8 @@ impl FabricRuntime {
 /// reject with `hmac_secret_not_initialized`, and the operator would only
 /// find out hours after boot when the first approval gate fires. Better to
 /// fail boot immediately with a clear error message. Dev / CI paths that
-/// don't need HMAC must boot with `CAIRN_FABRIC_ENABLED` unset — the
-/// in-memory runtime doesn't require it.
+/// don't need HMAC must build cairn-app with `--features in-memory-runtime`
+/// so Fabric boot is skipped entirely.
 ///
 /// The hash layout (per partition) is:
 ///   HSET waitpoint_hmac_secrets:{p:N} current_kid <kid>
@@ -185,11 +185,12 @@ async fn seed_waitpoint_hmac_secret_if_configured(
         (Some(s), Some(k)) => (s, k),
         _ => {
             return Err(FabricError::Config(
-                "CAIRN_FABRIC_WAITPOINT_HMAC_SECRET is required when Fabric is \
-                 enabled — boot refuses to ship a runtime that would reject \
-                 every ff_suspend_execution with hmac_secret_not_initialized. \
-                 Set the secret (64 hex chars) plus CAIRN_FABRIC_WAITPOINT_HMAC_KID, \
-                 or unset CAIRN_FABRIC_ENABLED to use the in-memory dev path."
+                "CAIRN_FABRIC_WAITPOINT_HMAC_SECRET is required in the \
+                 production (Fabric) build — boot refuses to ship a runtime \
+                 that would reject every ff_suspend_execution with \
+                 hmac_secret_not_initialized. Set the secret (64 hex chars) \
+                 plus CAIRN_FABRIC_WAITPOINT_HMAC_KID, or build cairn-app \
+                 with `--features in-memory-runtime` to skip Fabric boot."
                     .to_owned(),
             ));
         }

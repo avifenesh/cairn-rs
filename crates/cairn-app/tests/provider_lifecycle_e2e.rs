@@ -1,3 +1,5 @@
+#![cfg(feature = "in-memory-runtime")]
+
 use std::sync::{
     atomic::{AtomicUsize, Ordering},
     Arc,

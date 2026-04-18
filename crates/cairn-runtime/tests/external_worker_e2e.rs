@@ -1,3 +1,5 @@
+#![cfg(feature = "in-memory-runtime")]
+
 //! RFC 005 — external worker lifecycle end-to-end integration tests.
 //!
 //! Tests the full arc an external worker executes:

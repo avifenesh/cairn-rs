@@ -122,7 +122,7 @@ where
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "in-memory-runtime"))]
 mod tests {
     use std::sync::Arc;
 

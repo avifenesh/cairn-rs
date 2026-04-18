@@ -1,3 +1,5 @@
+#![cfg(feature = "in-memory-runtime")]
+
 //! Integration tests for RFC 011 request tracing and distributed trace IDs.
 
 use axum::{

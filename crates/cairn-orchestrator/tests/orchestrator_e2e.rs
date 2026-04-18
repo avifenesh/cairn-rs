@@ -25,6 +25,8 @@
 //! modification — just point `base_url` at `https://openrouter.ai/api/v1`
 //! and supply the bearer token.
 
+#![cfg(feature = "in-memory-runtime")]
+
 use std::path::PathBuf;
 use std::sync::Arc;
 

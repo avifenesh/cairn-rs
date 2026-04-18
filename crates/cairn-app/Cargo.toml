@@ -9,6 +9,22 @@ publish = false
 name = "cairn-app"
 path = "src/main.rs"
 
+[[bin]]
+name = "smoke_worker"
+path = "src/bin/smoke_worker.rs"
+
+[features]
+default = []
+# Courtesy in-memory backing for Run/Task/Session services. OFF by default
+# — the production path is Fabric-backed. Enable to run a fully local,
+# event-log-only build with no Valkey dependency (tinkering, unit-test
+# binaries).
+in-memory-runtime = [
+    "cairn-runtime/in-memory-runtime",
+    "cairn-orchestrator/in-memory-runtime",
+    "cairn-tools/in-memory-runtime",
+]
+
 [dependencies]
 cairn-api = { path = "../cairn-api" }
 cairn-memory = { path = "../cairn-memory" }

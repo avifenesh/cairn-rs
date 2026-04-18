@@ -1,3 +1,5 @@
+#![cfg(feature = "in-memory-runtime")]
+
 //! RFC 002 snapshot create-and-restore integration test.
 
 use std::sync::Arc;

@@ -1,3 +1,5 @@
+#![cfg(feature = "in-memory-runtime")]
+
 //! SSE event streaming end-to-end integration tests.
 //!
 //! Verifies that the runtime SSE endpoint at /v1/streams/runtime:
