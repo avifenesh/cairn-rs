@@ -190,11 +190,13 @@ impl TaskFrameSink for cairn_fabric::CairnTask {
 
 /// Convert FF bridge failures into the orchestrator's error shape.
 /// Frame writes are best-effort, so the loop runner logs and swallows
-/// whatever we return here; this keeps the type plumbing honest
-/// without introducing a separate FF-facing error variant in
-/// [`OrchestratorError`].
+/// whatever we return here. Uses the dedicated
+/// [`OrchestratorError::FrameSink`] variant so error-matching code
+/// never confuses a telemetry-channel failure with a tool-dispatch
+/// failure (Execute), which would be a misattribution if the
+/// error-handling policy ever tightens.
 fn fabric_to_orchestrator(err: cairn_fabric::FabricError) -> OrchestratorError {
-    OrchestratorError::Execute(format!("fabric frame sink: {err}"))
+    OrchestratorError::FrameSink(format!("fabric frame sink: {err}"))
 }
 
 #[cfg(test)]

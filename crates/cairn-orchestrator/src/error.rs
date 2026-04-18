@@ -13,6 +13,15 @@ pub enum OrchestratorError {
     Decide(String),
     /// Execute phase failed (tool dispatch, service call).
     Execute(String),
+    /// FF stream-frame sink failed (best-effort telemetry channel).
+    ///
+    /// Emitted by the `TaskFrameSink` blanket impl when a
+    /// `CairnTask::log_*` / `save_checkpoint` FCALL fails. The loop
+    /// runner logs this at WARN and continues — frame writes are
+    /// advisory, never fatal to a run. See
+    /// `docs/design/CAIRN-FABRIC-FINALIZED.md` §4.5 for the semantics
+    /// note.
+    FrameSink(String),
     /// A runtime service returned an error.
     Runtime(RuntimeError),
     /// The durable store returned an error.
@@ -37,6 +46,7 @@ impl std::fmt::Display for OrchestratorError {
             OrchestratorError::Gather(msg) => write!(f, "gather error: {msg}"),
             OrchestratorError::Decide(msg) => write!(f, "decide error: {msg}"),
             OrchestratorError::Execute(msg) => write!(f, "execute error: {msg}"),
+            OrchestratorError::FrameSink(msg) => write!(f, "frame sink error: {msg}"),
             OrchestratorError::Runtime(e) => write!(f, "runtime error: {e}"),
             OrchestratorError::Store(e) => write!(f, "store error: {e}"),
             OrchestratorError::MaxIterations { limit } => {
