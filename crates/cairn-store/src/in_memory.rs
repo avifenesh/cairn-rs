@@ -1918,7 +1918,7 @@ impl SessionReadModel for InMemoryStore {
             .cloned()
             .collect();
         // Most recently updated first (fleet view shows live activity).
-        results.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
+        results.sort_by_key(|r| std::cmp::Reverse(r.updated_at));
         results.truncate(limit);
         Ok(results)
     }
@@ -2997,7 +2997,7 @@ impl ExternalWorkerReadModel for InMemoryStore {
             .filter(|w| w.tenant_id == *tenant_id)
             .cloned()
             .collect();
-        results.sort_by(|a, b| a.registered_at.cmp(&b.registered_at));
+        results.sort_by_key(|r| r.registered_at);
         Ok(results.into_iter().skip(offset).take(limit).collect())
     }
 }
@@ -3029,7 +3029,7 @@ impl crate::projections::LlmCallTraceReadModel for InMemoryStore {
             .cloned()
             .collect();
         // Most-recent first.
-        results.sort_by(|a, b| b.created_at_ms.cmp(&a.created_at_ms));
+        results.sort_by_key(|r| std::cmp::Reverse(r.created_at_ms));
         results.truncate(limit);
         Ok(results)
     }
@@ -3040,7 +3040,7 @@ impl crate::projections::LlmCallTraceReadModel for InMemoryStore {
     ) -> Result<Vec<cairn_domain::LlmCallTrace>, StoreError> {
         let state = self.state.lock().unwrap();
         let mut results = state.llm_traces.clone();
-        results.sort_by(|a, b| b.created_at_ms.cmp(&a.created_at_ms));
+        results.sort_by_key(|r| std::cmp::Reverse(r.created_at_ms));
         results.truncate(limit);
         Ok(results)
     }
