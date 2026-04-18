@@ -60,6 +60,25 @@ pub struct BudgetStatus {
     pub soft_breach_count: u64,
 }
 
+/// Budget service.
+///
+/// **Lean-bridge silence (intentional).** None of this service's methods emit
+/// `BridgeEvent`s — budget state is FF-owned operational state with no
+/// `BudgetReadModel` projection on the cairn-store side. `create_budget`,
+/// `release_budget`, `record_spend`, and `get_budget_status` all route
+/// through FF directly; admin reads go via `get_budget_status` (HGETALL on
+/// FF's definition + usage hashes), not via a cairn projection.
+///
+/// `record_spend` is additionally volume-sensitive — it fires on every tool
+/// call / LLM token charge. Even if a `BudgetSpendRecorded` projection
+/// existed, the bridge-event channel would saturate first. Spend outcomes
+/// are returned inline in `ReportUsageResult` for the caller.
+///
+/// If a future cairn surface projects budgets (e.g. history timeline, breach
+/// replay), introduce BridgeEvent variants and revisit. Until then:
+/// additions here must not emit.
+///
+/// See `docs/design/bridge-event-audit.md` §2.6 for the full rationale.
 pub struct FabricBudgetService {
     runtime: Arc<FabricRuntime>,
 }

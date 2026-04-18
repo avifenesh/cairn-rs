@@ -16,6 +16,24 @@ pub enum AdmissionResult {
     ConcurrencyExceeded,
 }
 
+/// Quota / admission service.
+///
+/// **Lean-bridge silence (intentional).** None of this service's methods emit
+/// `BridgeEvent`s — quota state (policies, rate-window counters, concurrency
+/// gauges) is FF-owned with no cairn-store projection. `create_quota_policy`
+/// and variants register FF hashes; `check_admission` mutates the
+/// rate/concurrency counters inside `FF_CHECK_ADMISSION_AND_RECORD` and
+/// returns the decision inline.
+///
+/// `check_admission` is additionally volume-sensitive — it fires on every
+/// inbound request / run start. Even if an `AdmissionDecided` projection
+/// existed, the bridge-event channel would saturate first.
+///
+/// If a future cairn surface projects admission decisions (e.g. rate-limit
+/// hit timeline, concurrency back-pressure dashboard), introduce BridgeEvent
+/// variants and revisit. Until then: additions here must not emit.
+///
+/// See `docs/design/bridge-event-audit.md` §2.7 for the full rationale.
 pub struct FabricQuotaService {
     runtime: Arc<FabricRuntime>,
 }

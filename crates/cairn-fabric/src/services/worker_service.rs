@@ -18,6 +18,21 @@ pub struct ClaimResult {
     pub grant_key: String,
 }
 
+/// Worker-registry service.
+///
+/// **Lean-bridge silence (intentional).** None of this service's methods emit
+/// `BridgeEvent`s — worker lifecycle is FF-owned operational state with no
+/// corresponding cairn-store projection. `register_worker`, `heartbeat_worker`,
+/// `mark_worker_dead`, and `claim_next` all mutate FF's worker hash / TTL
+/// directly; cairn has no `WorkerReadModel` that needs to stay in sync, so
+/// emission would be a projection write with no reader.
+///
+/// If a future UI surface renders worker-status (alive / dead / last-heartbeat)
+/// from the cairn projection rather than from FF admin-reads, add BridgeEvent
+/// variants for register/dead/claim and revisit this note. Until then:
+/// additions here must not emit.
+///
+/// See `docs/design/bridge-event-audit.md` §2.5 for the full rationale.
 pub struct FabricWorkerService {
     runtime: Arc<FabricRuntime>,
     scheduler: FabricSchedulerService,
