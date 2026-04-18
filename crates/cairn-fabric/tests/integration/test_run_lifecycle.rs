@@ -150,10 +150,12 @@ async fn test_duplicate_start_is_idempotent() {
 /// This test is the tripwire for five written assertions of that contract
 /// (trait docstring, handler docstring, OpenAPI description, smoke-test
 /// comment, handler non-idempotency note). If FF ever relaxes
-/// scheduling.lua's grant gate, this test flips green and the
-/// non-idempotency docs become silently untrue. That is the bug pattern
-/// that caused round-1 cross-review to reject the original endpoint
-/// claim of idempotency — we add the test so recurrence is structurally
+/// scheduling.lua's grant gate, the second claim returns Ok and this
+/// test goes RED at `expect_err` — the loud alarm that the
+/// non-idempotency docs no longer hold and need to be revisited
+/// alongside the contract change. That is the bug pattern that caused
+/// round-1 cross-review to reject the original endpoint claim of
+/// idempotency — we add the test so recurrence is structurally
 /// impossible.
 ///
 /// Resume-after-suspend (a legitimate second claim) is already covered
