@@ -663,9 +663,21 @@ pub(crate) async fn compact_event_log_handler(
 pub(crate) async fn create_snapshot_handler(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
-) -> impl IntoResponse {
+) -> axum::response::Response {
     let tenant_id = TenantId::new(id);
-    let snapshot = state.runtime.store.create_snapshot(&tenant_id);
+    let snapshot = match state.runtime.store.create_snapshot(&tenant_id) {
+        Ok(s) => s,
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({
+                    "error": "snapshot_failed",
+                    "message": e.to_string(),
+                })),
+            )
+                .into_response();
+        }
+    };
     (
         StatusCode::CREATED,
         Json(serde_json::json!({

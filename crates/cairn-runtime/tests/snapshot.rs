@@ -74,7 +74,9 @@ async fn snapshot_create_restore_preserves_run_state() {
     );
 
     // Create snapshot — captures current tenant events
-    let snapshot = store.create_snapshot(&tenant_id);
+    let snapshot = store
+        .create_snapshot(&tenant_id)
+        .expect("snapshot must serialize");
     assert!(!snapshot.snapshot_id.is_empty());
     assert!(!snapshot.state_hash.is_empty());
     assert!(snapshot.event_position > 0);

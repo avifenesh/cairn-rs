@@ -40,32 +40,11 @@ impl EventLog for SqliteStore {
         &self,
         events: &[EventEnvelope<RuntimeEvent>],
     ) -> Result<Vec<EventPosition>, StoreError> {
-        // Append events to the log, then apply sync projections within a transaction
-        let positions = self.event_log.append(events).await?;
-
-        // Apply projections for each event
-        let mut tx = self
-            .adapter
-            .pool()
-            .begin()
-            .await
-            .map_err(|e| StoreError::Connection(e.to_string()))?;
-        for (envelope, pos) in events.iter().zip(positions.iter()) {
-            let stored = StoredEvent {
-                position: *pos,
-                envelope: envelope.clone(),
-                stored_at: std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap()
-                    .as_millis() as u64,
-            };
-            SqliteSyncProjection::apply_async(&mut tx, &stored).await?;
-        }
-        tx.commit()
-            .await
-            .map_err(|e| StoreError::Connection(e.to_string()))?;
-
-        Ok(positions)
+        // SqliteEventLog::append runs projections inside its own transaction
+        // (T2-C1 wired this in). Previously this test compensated for the
+        // missing wiring by calling apply_async manually afterwards; that
+        // now causes duplicate UNIQUE-key inserts. The test delegates fully.
+        self.event_log.append(events).await
     }
     async fn read_by_entity(
         &self,

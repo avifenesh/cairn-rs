@@ -4,10 +4,15 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use cairn_domain::{EventEnvelope, RuntimeEvent};
 
+use super::projections::SqliteSyncProjection;
 use crate::error::StoreError;
 use crate::event_log::{EntityRef, EventLog, EventPosition, StoredEvent};
 
 /// SQLite-backed append-only event log for local-mode.
+///
+/// Appends events and updates synchronous projections within a single
+/// transaction so reads can never observe an event position that hasn't
+/// been projected yet. Mirrors the Postgres backend contract.
 pub struct SqliteEventLog {
     pool: SqlitePool,
 }
@@ -32,6 +37,12 @@ impl EventLog for SqliteEventLog {
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
             .as_millis() as i64;
+
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .map_err(|e| StoreError::Connection(e.to_string()))?;
 
         let mut positions = Vec::with_capacity(events.len());
 
@@ -58,12 +69,29 @@ impl EventLog for SqliteEventLog {
             .bind(event.correlation_id.as_deref())
             .bind(&payload)
             .bind(now)
-            .fetch_one(&self.pool)
+            .fetch_one(&mut *tx)
             .await
             .map_err(|e| StoreError::Internal(e.to_string()))?;
 
-            positions.push(EventPosition(row.0 as u64));
+            let pos = EventPosition(row.0 as u64);
+
+            // Apply synchronous projections within the same transaction.
+            // Pre-T2-C1 this call was missing and every SQLite-backed
+            // projection table stayed empty in production — see audit queue
+            // at .claude/audit-state/review-queue.md §T2-C1.
+            let stored = StoredEvent {
+                position: pos,
+                envelope: event.clone(),
+                stored_at: now as u64,
+            };
+            SqliteSyncProjection::apply_async(&mut tx, &stored).await?;
+
+            positions.push(pos);
         }
+
+        tx.commit()
+            .await
+            .map_err(|e| StoreError::Connection(e.to_string()))?;
 
         Ok(positions)
     }
@@ -139,6 +167,11 @@ impl EventLog for SqliteEventLog {
         &self,
         causation_id: &str,
     ) -> Result<Option<EventPosition>, StoreError> {
+        // MIN on an empty match returns NULL which `fetch_optional` maps to
+        // `None`; any row returned is a real hit. Pre-T2-M7 an additional
+        // `pos > 0` guard discarded the legitimate position-0 edge and
+        // diverged from the PG backend which returns `Some(0)` in that
+        // case.
         let row: Option<(i64,)> =
             sqlx::query_as("SELECT MIN(position) FROM event_log WHERE causation_id = ?")
                 .bind(causation_id)
@@ -146,13 +179,7 @@ impl EventLog for SqliteEventLog {
                 .await
                 .map_err(|e| StoreError::Internal(e.to_string()))?;
 
-        Ok(row.and_then(|(pos,)| {
-            if pos > 0 {
-                Some(EventPosition(pos as u64))
-            } else {
-                None
-            }
-        }))
+        Ok(row.map(|(pos,)| EventPosition(pos as u64)))
     }
 }
 
