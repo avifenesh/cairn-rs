@@ -246,6 +246,21 @@ impl RunService for FabricRunServiceAdapter {
             .map_err(fabric_err_to_runtime)
     }
 
+    async fn claim(&self, run_id: &RunId) -> Result<RunRecord, RuntimeError> {
+        // Active-lease activation for the run's FF execution so the
+        // approval-gate / signal-delivery FCALLs accept it downstream.
+        // `FabricRunService::claim` handles the
+        // ff_issue_claim_grant + ff_claim_execution sequence (and the
+        // `use_claim_resumed_execution` dispatch for resumed
+        // executions) via `claim_common::issue_grant_and_claim`.
+        let project = resolve_run_project(&self.store, run_id).await?;
+        self.fabric
+            .runs
+            .claim(&project, run_id)
+            .await
+            .map_err(fabric_err_to_runtime)
+    }
+
     async fn enter_waiting_approval(&self, run_id: &RunId) -> Result<RunRecord, RuntimeError> {
         let project = resolve_run_project(&self.store, run_id).await?;
         self.fabric

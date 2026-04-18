@@ -64,6 +64,30 @@ pub trait RunService: Send + Sync {
         target: RunResumeTarget,
     ) -> Result<RunRecord, RuntimeError>;
 
+    /// Claim the run's execution so it becomes `lifecycle_phase=active`
+    /// on the Fabric path.
+    ///
+    /// Unlike [`TaskService::claim`](crate::tasks::TaskService::claim),
+    /// there is no `lease_owner` / `lease_duration_ms` parameter: runs
+    /// are not worker-scheduled (no poller pulls them off an eligible
+    /// zset), so the caller never advertises worker identity here.
+    /// The Fabric implementation uses
+    /// `FabricConfig::worker_instance_id` + `lease_ttl_ms`; the
+    /// in-memory implementation is a no-op because there is no FF
+    /// lease concept to activate.
+    ///
+    /// This call exists because FF's suspension / signal FCALLs
+    /// (`ff_suspend_execution`, `ff_deliver_signal`) reject
+    /// non-active executions. Approval gates
+    /// ([`Self::enter_waiting_approval`] → [`Self::resolve_approval`])
+    /// and orchestrator-driven suspension therefore need an explicit
+    /// claim first. Idempotent on the Fabric side —
+    /// `FabricRunService::claim` walks the
+    /// `ff_issue_claim_grant` + `ff_claim_execution` sequence and
+    /// dispatches to `ff_claim_resumed_execution` if the execution is
+    /// already interrupted from a prior suspension.
+    async fn claim(&self, run_id: &RunId) -> Result<RunRecord, RuntimeError>;
+
     /// Transition a run to WaitingApproval (approval gate).
     async fn enter_waiting_approval(&self, run_id: &RunId) -> Result<RunRecord, RuntimeError>;
 

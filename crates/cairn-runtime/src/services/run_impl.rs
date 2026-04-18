@@ -294,6 +294,20 @@ where
         self.get_run(run_id).await
     }
 
+    /// No-op: the in-memory runtime has no FF lease concept. The
+    /// `RunService::claim` trait method exists for the Fabric path
+    /// (`FabricRunServiceAdapter`) where it flips the execution's
+    /// `lifecycle_phase=active` via `ff_claim_execution` so the
+    /// approval gate and signal delivery FCALLs accept it. Cairn's
+    /// event-log-only courtesy impl has no such gate — any state
+    /// transition is allowed — so claim returns the current record
+    /// unchanged. Matches the phase-9 `RecoveryServiceImpl` deletion
+    /// rationale: if it only matters under Fabric, the in-memory side
+    /// should not pretend.
+    async fn claim(&self, run_id: &RunId) -> Result<RunRecord, RuntimeError> {
+        self.get_run(run_id).await
+    }
+
     async fn enter_waiting_approval(&self, run_id: &RunId) -> Result<RunRecord, RuntimeError> {
         self.transition_run(run_id, RunState::WaitingApproval, None)
             .await
