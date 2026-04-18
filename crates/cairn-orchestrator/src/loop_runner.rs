@@ -344,6 +344,28 @@ where
                     "decision requires approval — suspending for ApprovalRequested"
                 );
 
+                // FF stream: log tool_call frames for the approval-gate
+                // proposals before execute. The approval path emits
+                // `ApprovalRequested` rather than dispatching; the tool_call
+                // frame captures the INTENT of the action that triggered the
+                // gate so replay can reconstruct the audit trail.
+                for proposal in &decide_output.proposals {
+                    if let Some(tool_name) = &proposal.tool_name {
+                        let args = proposal
+                            .tool_args
+                            .clone()
+                            .unwrap_or(serde_json::Value::Null);
+                        if let Err(e) = self.task_sink.log_tool_call(tool_name, &args).await {
+                            tracing::warn!(
+                                run_id = %ctx.run_id,
+                                tool = %tool_name,
+                                error = %e,
+                                "task_sink.log_tool_call (approval gate) failed — frame lost"
+                            );
+                        }
+                    }
+                }
+
                 let outcome = self.execute.execute(ctx, &decide_output).await.map_err(|e| {
                     tracing::error!(run_id = %ctx.run_id, error = %e, "execute (approval gate) failed");
                     e
@@ -370,11 +392,37 @@ where
                 ));
             }
 
-            // ── (5) EXECUTE ───────────────────────────────────────────────────
+            // ── (5a) FF stream: tool_call frames (intent) ────────────────────
+            // Appended BEFORE execute so a process restart mid-dispatch leaves
+            // an in-flight marker that `restore_frames()` can observe. Only
+            // proposals with a concrete tool_name are framed; bookkeeping
+            // action types (CompleteRun, EscalateToOperator, …) have no
+            // stream-facing analogue.
+            for proposal in &decide_output.proposals {
+                if let Some(tool_name) = &proposal.tool_name {
+                    let args = proposal
+                        .tool_args
+                        .clone()
+                        .unwrap_or(serde_json::Value::Null);
+                    if let Err(e) = self.task_sink.log_tool_call(tool_name, &args).await {
+                        tracing::warn!(
+                            run_id    = %ctx.run_id,
+                            iteration = ctx.iteration,
+                            tool      = %tool_name,
+                            error     = %e,
+                            "task_sink.log_tool_call failed — frame lost, loop continues"
+                        );
+                    }
+                }
+            }
+
+            // ── (5b) EXECUTE ──────────────────────────────────────────────────
+            let execute_started_at_ms = now_millis();
             let execute_outcome = self.execute.execute(ctx, &decide_output).await.map_err(|e| {
                 tracing::error!(run_id = %ctx.run_id, iteration = ctx.iteration, error = %e, "execute failed");
                 e
             })?;
+            let execute_duration_ms = now_millis().saturating_sub(execute_started_at_ms);
 
             let succeeded_count = execute_outcome
                 .results
@@ -396,7 +444,23 @@ where
                 "execute complete"
             );
 
-            // Emit per-action tool_called / tool_result events.
+            // Emit per-action tool_called / tool_result events AND append
+            // matching FF stream frames. The two channels are independent:
+            // `OrchestratorEventEmitter` drives cairn-store projections + SSE
+            // (existing behavior); `task_sink.log_tool_result` appends to
+            // FF's attempt-scoped stream so `restore_frames()` can replay on
+            // resume. Stream-frame failures are logged and swallowed.
+            //
+            // Tool-result duration is approximated by per-iteration execute
+            // wall-clock divided across the results — execute_impl does not
+            // surface per-call durations today. Accurate-enough for audit
+            // telemetry; if/when execute exposes per-call timing, switch to
+            // the real value here.
+            let per_result_duration_ms = if execute_outcome.results.is_empty() {
+                0
+            } else {
+                execute_duration_ms / execute_outcome.results.len() as u64
+            };
             for result in &execute_outcome.results {
                 let tool_name = result
                     .proposal
@@ -420,6 +484,37 @@ where
                         error,
                     )
                     .await;
+
+                // FF stream frame — only emitted when the proposal carried a
+                // concrete tool_name (matches the pre-execute log_tool_call).
+                // AwaitingApproval / SubagentSpawned statuses have no output
+                // to log; record success=false with a null output so the
+                // frame pair is balanced.
+                if result.proposal.tool_name.is_some() {
+                    let output = match &result.tool_output {
+                        Some(v) => v.clone(),
+                        None => {
+                            if let Some(reason) = error {
+                                serde_json::json!({ "error": reason })
+                            } else {
+                                serde_json::Value::Null
+                            }
+                        }
+                    };
+                    if let Err(e) = self
+                        .task_sink
+                        .log_tool_result(tool_name, &output, succeeded, per_result_duration_ms)
+                        .await
+                    {
+                        tracing::warn!(
+                            run_id    = %ctx.run_id,
+                            iteration = ctx.iteration,
+                            tool      = %tool_name,
+                            error     = %e,
+                            "task_sink.log_tool_result failed — frame lost, loop continues"
+                        );
+                    }
+                }
             }
 
             // ── (6) CHECKPOINT ────────────────────────────────────────────────
