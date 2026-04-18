@@ -35,8 +35,7 @@ use crate::errors::{
 use crate::extractors::{HasProjectScope, ProjectJson, ProjectScope, TenantCostQuery, TenantScope};
 use crate::helpers::{
     build_diagnosis_report, build_run_record_view, build_run_replay_result,
-    checkpoint_recorded_position, derive_recovery_status, load_run_visible_to_tenant,
-    working_dir_for_run,
+    checkpoint_recorded_position, load_run_visible_to_tenant, working_dir_for_run,
 };
 use crate::middleware::ensure_workspace_role_for_project;
 use crate::sandbox::workspace_error_response;
@@ -2031,27 +2030,6 @@ pub(crate) async fn recover_run_handler(
         })),
     )
         .into_response()
-}
-
-pub(crate) async fn get_run_recovery_status_handler(
-    State(state): State<Arc<AppState>>,
-    Path(id): Path<String>,
-) -> impl IntoResponse {
-    let run_id = RunId::new(id);
-    match state.runtime.runs.get(&run_id).await {
-        Ok(Some(_)) => {}
-        Ok(None) => {
-            return AppApiError::new(StatusCode::NOT_FOUND, "not_found", "run not found")
-                .into_response()
-        }
-        Err(err) => return runtime_error_response(err),
-    }
-
-    let status = match derive_recovery_status(&state, &run_id).await {
-        Ok(status) => status,
-        Err(err) => return err,
-    };
-    (StatusCode::OK, Json(status)).into_response()
 }
 
 pub(crate) async fn list_tenant_costs_handler(

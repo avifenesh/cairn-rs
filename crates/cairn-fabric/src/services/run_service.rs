@@ -140,6 +140,7 @@ impl FabricRunService {
         session_id: &SessionId,
         run_id: &RunId,
         parent_run_id: Option<&RunId>,
+        correlation_id: Option<&str>,
     ) -> Result<bool, FabricError> {
         let eid = self.execution_id(project, run_id);
         let partition = self.partition(&eid);
@@ -163,6 +164,9 @@ impl FabricRunService {
         );
         if let Some(parent) = parent_run_id {
             tags.insert("cairn.parent_run_id".to_owned(), parent.as_str().to_owned());
+        }
+        if let Some(corr) = correlation_id.filter(|s| !s.is_empty()) {
+            tags.insert("cairn.correlation_id".to_owned(), corr.to_owned());
         }
 
         let tags_json = serde_json::to_string(&tags).unwrap_or_else(|_| "{}".to_owned());
@@ -361,8 +365,33 @@ impl FabricRunService {
         run_id: RunId,
         parent_run_id: Option<RunId>,
     ) -> Result<RunRecord, FabricError> {
+        self.start_with_correlation(project, session_id, run_id, parent_run_id, None)
+            .await
+    }
+
+    /// `start` but threading an external correlation id onto both the FF
+    /// exec_core tag (`cairn.correlation_id`) and the emitted
+    /// `BridgeEvent::ExecutionCreated` (which propagates to the
+    /// `EventEnvelope.correlation_id` field in cairn-store). Used by sqeq
+    /// ingress and any other handler path that must preserve a
+    /// request-scoped correlation through the run's projection / SSE
+    /// audit trail.
+    pub async fn start_with_correlation(
+        &self,
+        project: &ProjectKey,
+        session_id: &SessionId,
+        run_id: RunId,
+        parent_run_id: Option<RunId>,
+        correlation_id: Option<&str>,
+    ) -> Result<RunRecord, FabricError> {
         let created = self
-            .create_execution(project, session_id, &run_id, parent_run_id.as_ref())
+            .create_execution(
+                project,
+                session_id,
+                &run_id,
+                parent_run_id.as_ref(),
+                correlation_id,
+            )
             .await?;
 
         if created {
@@ -371,6 +400,7 @@ impl FabricRunService {
                     run_id: run_id.clone(),
                     session_id: session_id.clone(),
                     project: project.clone(),
+                    correlation_id: correlation_id.map(str::to_owned),
                 })
                 .await;
         }

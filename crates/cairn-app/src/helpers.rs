@@ -5,7 +5,6 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use axum::http::StatusCode;
-use axum::response::IntoResponse;
 
 use cairn_api::feed::FeedItem;
 use cairn_domain::workers::{ExternalWorkerProgress, ExternalWorkerRecord, ExternalWorkerReport};
@@ -38,14 +37,6 @@ pub(crate) struct RunRecordView {
     pub(crate) sandbox_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) sandbox_path: Option<String>,
-}
-
-#[derive(Clone, Debug, serde::Serialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct RecoveryStatusResponse {
-    pub(crate) run_id: String,
-    pub(crate) last_attempt_reason: Option<String>,
-    pub(crate) last_recovered: Option<bool>,
 }
 
 #[derive(Clone, Debug, serde::Serialize)]
@@ -656,51 +647,6 @@ pub(crate) async fn checkpoint_recorded_position(
             }
             _ => None,
         }))
-}
-
-pub(crate) async fn derive_recovery_status(
-    state: &AppState,
-    run_id: &RunId,
-) -> Result<RecoveryStatusResponse, axum::response::Response> {
-    let events = state
-        .runtime
-        .store
-        .read_stream(None, 10_000)
-        .await
-        .map_err(|err| {
-            tracing::error!("derive_recovery_status read_stream failed: {err}");
-            AppApiError::new(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "internal_error",
-                err.to_string(),
-            )
-            .into_response()
-        })?;
-
-    let mut last_attempt_reason = None;
-    let mut last_recovered = None;
-
-    for stored in events {
-        match &stored.envelope.payload {
-            cairn_domain::RuntimeEvent::RecoveryAttempted(event)
-                if event.run_id.as_ref() == Some(run_id) =>
-            {
-                last_attempt_reason = Some(event.reason.clone());
-            }
-            cairn_domain::RuntimeEvent::RecoveryCompleted(event)
-                if event.run_id.as_ref() == Some(run_id) =>
-            {
-                last_recovered = Some(event.recovered);
-            }
-            _ => {}
-        }
-    }
-
-    Ok(RecoveryStatusResponse {
-        run_id: run_id.to_string(),
-        last_attempt_reason,
-        last_recovered,
-    })
 }
 
 pub(crate) async fn append_runtime_event(

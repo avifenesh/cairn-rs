@@ -57,7 +57,7 @@
 | Flag / env var | Default | Scope | Effect |
 |---|---|---|---|
 | `CAIRN_FABRIC_ENABLED` | unset (off) | env var | When set, `AppState` constructs `FabricServices`, replaces `state.runtime.{runs,tasks,sessions}` with the adapter. Unset = in-memory path for dev/local. |
-| `CAIRN_FABRIC_WAITPOINT_HMAC_SECRET` | unset (warns) | env var | 64-char hex (32-byte) HMAC secret. Required for any suspend/signal path — without it, `ff_suspend_execution` fails with `hmac_secret_not_initialized`. Boot logs WARN when missing. |
+| `CAIRN_FABRIC_WAITPOINT_HMAC_SECRET` | unset (boot fails) | env var | 64-char hex (32-byte) HMAC secret. **Required** when `CAIRN_FABRIC_ENABLED=1` — boot aborts with `FabricError::Config` if unset (no silent degrade). Dev paths that don't want HMAC must use the in-memory runtime by leaving `CAIRN_FABRIC_ENABLED` unset. |
 | `CAIRN_FABRIC_WAITPOINT_HMAC_KID` | `k1` when secret set | env var | Kid for the HMAC secret. Must be non-empty and free of `:` (FF field-name delimiter). |
 | `CAIRN_FABRIC_WORKER_CAPABILITIES` | empty set | env var | Comma-separated capability tokens. Passed to `ff_scheduler::Scheduler::claim_for_worker`. Empty = matches only executions with no capability requirements. |
 | `CAIRN_FABRIC_HOST` / `_PORT` / `_TLS` / `_CLUSTER` | `localhost` / `6379` / off / off | env var | Valkey connection. `_CLUSTER=1` uses cluster mode; all FCALL KEYS on a single `{p:N}` hash tag so this is cluster-safe without extra wiring. |
@@ -74,7 +74,7 @@
 1. Run a Valkey 8+ instance reachable from cairn.
 2. Load the FlowFabric Lua library into Valkey (`scripts/run-fabric-integration-tests.sh` does this from a pinned FF checkout; production operators seed from their CI artefact).
 3. Generate a 32-byte HMAC secret: `openssl rand -hex 32`.
-4. Set env vars before boot:
+4. Set env vars before boot. The HMAC secret is **required** when Fabric is enabled — boot fails loud if it's missing:
    ```bash
    export CAIRN_FABRIC_ENABLED=1
    export CAIRN_FABRIC_HOST=valkey.internal
@@ -82,6 +82,7 @@
    export CAIRN_FABRIC_WAITPOINT_HMAC_SECRET=<64-hex>
    export CAIRN_FABRIC_WAITPOINT_HMAC_KID=prod-2026-04
    ```
+   Omitting `CAIRN_FABRIC_WAITPOINT_HMAC_SECRET` (or supplying an invalid length / non-hex value) aborts `FabricServices::start` with a typed `FabricError::Config` — we do not ship a runtime that would reject every `ff_suspend_execution` with `hmac_secret_not_initialized` at runtime. Dev / CI paths that don't want HMAC must unset `CAIRN_FABRIC_ENABLED` and use the in-memory dev path.
 5. Boot cairn-app. You should see:
    ```
    INFO connecting to valkey url=redis://valkey.internal:6379
@@ -203,6 +204,12 @@ Bugs of this shape are invisible to unit tests (services write to FF correctly) 
 *Location*: `crates/cairn-fabric/src/worker_sdk.rs:174-180`.
 
 `CairnTask` caches `run_id`, `session_id`, `project` extracted from FF exec_core tags at claim time. Struct-lifetime only, not persistent. Re-reading tags on every terminal call adds an HGET per call but eliminates a staleness risk if operator-directed reassignment ever enters scope. Keep as-is until that feature arrives.
+
+### LOW — `TaskLeaseClaimed.lease_expires_at_ms` is a snapshot
+
+*Location*: `crates/cairn-fabric/src/event_bridge.rs:56-62`.
+
+The `TaskLeaseClaimed` bridge event payload carries `lease_expires_at_ms`, which is also stored on FF's `exec_core` as `current_lease_expires_at`. This is a moment-in-time snapshot for projection display, not a cached field with invalidation semantics — consumers must not treat the value as tracked (FF can extend / renew the lease after the event is emitted). Documented here so future readers don't mistake it for live state.
 
 ## 7. Versioning
 

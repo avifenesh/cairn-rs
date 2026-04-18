@@ -20,6 +20,11 @@ pub enum BridgeEvent {
         run_id: RunId,
         session_id: SessionId,
         project: ProjectKey,
+        /// External correlation id (sqeq ingress etc.). Tagged onto the
+        /// resulting `EventEnvelope.correlation_id` so audit / SSE
+        /// downstreams can join back to the originating request. `None`
+        /// for internal starts.
+        correlation_id: Option<String>,
     },
     ExecutionCompleted {
         run_id: RunId,
@@ -144,11 +149,14 @@ impl EventBridge {
         append_failures: &AtomicU64,
     ) {
         let runtime_event = bridge_event_to_runtime_event(event);
-        let envelope = EventEnvelope::for_runtime_event(
+        let mut envelope = EventEnvelope::for_runtime_event(
             EventId::new(uuid::Uuid::new_v4().to_string()),
             EventSource::Runtime,
             runtime_event,
         );
+        if let Some(corr) = bridge_event_correlation_id(event) {
+            envelope = envelope.with_correlation_id(corr);
+        }
         let event_type = bridge_event_type_name(event);
 
         for attempt in 0..MAX_RETRY_ATTEMPTS {
@@ -213,12 +221,26 @@ fn bridge_event_type_name(event: &BridgeEvent) -> &'static str {
     }
 }
 
+/// External correlation id carried by the bridge event, if any. Only
+/// `ExecutionCreated` carries one today — sqeq ingress threads a
+/// request-level correlation through `start_with_correlation`.
+fn bridge_event_correlation_id(event: &BridgeEvent) -> Option<&str> {
+    match event {
+        BridgeEvent::ExecutionCreated {
+            correlation_id: Some(c),
+            ..
+        } => Some(c.as_str()),
+        _ => None,
+    }
+}
+
 fn bridge_event_to_runtime_event(event: &BridgeEvent) -> RuntimeEvent {
     match event {
         BridgeEvent::ExecutionCreated {
             run_id,
             session_id,
             project,
+            correlation_id: _,
         } => RuntimeEvent::RunCreated(RunCreated {
             project: project.clone(),
             session_id: session_id.clone(),
@@ -388,9 +410,36 @@ mod tests {
             run_id: RunId::new("run_1"),
             session_id: SessionId::new("sess_1"),
             project: ProjectKey::new("t", "w", "p"),
+            correlation_id: None,
         };
         let runtime = bridge_event_to_runtime_event(&event);
         assert!(matches!(runtime, RuntimeEvent::RunCreated(_)));
+    }
+
+    #[test]
+    fn bridge_event_correlation_id_extracts_execution_created() {
+        let with_corr = BridgeEvent::ExecutionCreated {
+            run_id: RunId::new("run_1"),
+            session_id: SessionId::new("sess_1"),
+            project: ProjectKey::new("t", "w", "p"),
+            correlation_id: Some("corr_xyz".to_owned()),
+        };
+        assert_eq!(bridge_event_correlation_id(&with_corr), Some("corr_xyz"));
+
+        let without_corr = BridgeEvent::ExecutionCreated {
+            run_id: RunId::new("run_1"),
+            session_id: SessionId::new("sess_1"),
+            project: ProjectKey::new("t", "w", "p"),
+            correlation_id: None,
+        };
+        assert_eq!(bridge_event_correlation_id(&without_corr), None);
+
+        // Other variants never carry a correlation today.
+        let other = BridgeEvent::SessionCreated {
+            session_id: SessionId::new("sess_1"),
+            project: ProjectKey::new("t", "w", "p"),
+        };
+        assert_eq!(bridge_event_correlation_id(&other), None);
     }
 
     #[test]

@@ -156,10 +156,13 @@ impl FabricRuntime {
 
 /// Seed the waitpoint HMAC secret across every execution partition.
 ///
-/// No-op when `config.waitpoint_hmac_secret` is `None` — logs a WARN so the
-/// operator knows suspend/signal paths will fail with
-/// `hmac_secret_not_initialized` until they either configure a secret or
-/// seed via FF admin tooling.
+/// Fails LOUD when `config.waitpoint_hmac_secret` is `None`. Production
+/// cannot ship without HMAC — every subsequent `ff_suspend_execution` would
+/// reject with `hmac_secret_not_initialized`, and the operator would only
+/// find out hours after boot when the first approval gate fires. Better to
+/// fail boot immediately with a clear error message. Dev / CI paths that
+/// don't need HMAC must boot with `CAIRN_FABRIC_ENABLED` unset — the
+/// in-memory runtime doesn't require it.
 ///
 /// The hash layout (per partition) is:
 ///   HSET waitpoint_hmac_secrets:{p:N} current_kid <kid>
@@ -181,12 +184,14 @@ async fn seed_waitpoint_hmac_secret_if_configured(
     ) {
         (Some(s), Some(k)) => (s, k),
         _ => {
-            tracing::warn!(
-                "no HMAC secret configured; ff_suspend_execution will fail \
-                 with hmac_secret_not_initialized until operator seeds \
-                 waitpoint_hmac_secrets on every execution partition"
-            );
-            return Ok(());
+            return Err(FabricError::Config(
+                "CAIRN_FABRIC_WAITPOINT_HMAC_SECRET is required when Fabric is \
+                 enabled — boot refuses to ship a runtime that would reject \
+                 every ff_suspend_execution with hmac_secret_not_initialized. \
+                 Set the secret (64 hex chars) plus CAIRN_FABRIC_WAITPOINT_HMAC_KID, \
+                 or unset CAIRN_FABRIC_ENABLED to use the in-memory dev path."
+                    .to_owned(),
+            ));
         }
     };
 

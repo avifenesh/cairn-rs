@@ -9,10 +9,58 @@
 // We use task_service.submit() + task_service.claim() to get an Active
 // execution, then call terminal operations on the task.
 
+use std::collections::HashMap;
+
 use cairn_domain::lifecycle::{FailureClass, TaskState};
 use cairn_domain::TaskId;
 
 use crate::TestHarness;
+
+/// Sqeq ingress threads a request-scoped correlation id through
+/// `start_with_correlation`. The adapter MUST preserve it end-to-end:
+///   1. Tagged onto FF's `exec_core:tags` as `cairn.correlation_id`.
+///   2. Threaded onto `BridgeEvent::ExecutionCreated` → envelope
+///      `correlation_id` in cairn-store (audit / SSE consumers rely on it).
+///
+/// Regression guard for the default-trait-impl fallthrough found in the
+/// finalization cross-review: if someone deletes the override, sqeq
+/// telemetry silently drops request correlation on the Fabric path.
+#[tokio::test]
+#[ignore]
+async fn test_start_with_correlation_tags_exec_core() {
+    let h = TestHarness::setup().await;
+    let session_id = h.unique_session_id();
+    let run_id = h.unique_run_id();
+    let corr = format!("sqeq-{}", uuid::Uuid::new_v4());
+
+    h.fabric
+        .runs
+        .start_with_correlation(&h.project, &session_id, run_id.clone(), None, Some(&corr))
+        .await
+        .expect("start_with_correlation failed");
+
+    // Read back the exec tags hash and verify `cairn.correlation_id` landed.
+    // Key layout matches FabricRunService::create_execution.
+    let eid = cairn_fabric::id_map::run_to_execution_id(&h.project, &run_id);
+    let partition =
+        ff_core::partition::execution_partition(&eid, &h.fabric.runtime.partition_config);
+    let ctx = ff_core::keys::ExecKeyContext::new(&partition, &eid);
+    let tags: HashMap<String, String> = h
+        .fabric
+        .runtime
+        .client
+        .hgetall(&ctx.tags())
+        .await
+        .expect("HGETALL exec_core:tags failed");
+
+    assert_eq!(
+        tags.get("cairn.correlation_id").map(String::as_str),
+        Some(corr.as_str()),
+        "correlation_id must be tagged on exec_core; got tags={tags:?}",
+    );
+
+    h.teardown().await;
+}
 
 #[tokio::test]
 #[ignore]

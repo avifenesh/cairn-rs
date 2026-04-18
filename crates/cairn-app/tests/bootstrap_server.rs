@@ -1676,18 +1676,12 @@ async fn mailbox_and_recovery_routes_round_trip() {
     // Fabric finalization: /v1/runs/:id/recover is a 202 deprecation stub.
     // FF's background scanners own recovery unconditionally; the endpoint
     // is kept for backwards-compatibility only. See CAIRN-FABRIC-FINALIZED.md §3.5.
+    //
+    // The companion /v1/runs/:id/recovery-status endpoint was deleted in the
+    // same round — it served only RecoveryAttempted/RecoveryCompleted events
+    // that no production code emits anymore (the producing RecoveryServiceImpl
+    // was removed when FF's scanners took over recovery).
     assert_eq!(recover_response.status(), StatusCode::ACCEPTED);
-
-    let status_response = send_empty_request(
-        &app,
-        "GET",
-        "/v1/runs/run_mailbox_http/recovery-status",
-        "test-token",
-    )
-    .await;
-    assert_eq!(status_response.status(), StatusCode::OK);
-    let status_json = response_json(status_response).await;
-    assert_eq!(status_json["runId"], "run_mailbox_http");
 }
 
 #[tokio::test]

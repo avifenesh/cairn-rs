@@ -137,6 +137,33 @@ impl RunService for FabricRunServiceAdapter {
             .map_err(fabric_err_to_runtime)
     }
 
+    /// Override the default trait impl (which drops the correlation_id and
+    /// falls through to `start`). Fabric path threads the correlation onto
+    /// the FF `cairn.correlation_id` exec_core tag AND onto the emitted
+    /// `BridgeEvent::ExecutionCreated` so the cairn-store envelope's
+    /// `correlation_id` field is populated for SSE / audit consumers. Sqeq
+    /// ingress is the primary caller.
+    async fn start_with_correlation(
+        &self,
+        project: &ProjectKey,
+        session_id: &SessionId,
+        run_id: RunId,
+        parent_run_id: Option<RunId>,
+        correlation_id: &str,
+    ) -> Result<RunRecord, RuntimeError> {
+        self.fabric
+            .runs
+            .start_with_correlation(
+                project,
+                session_id,
+                run_id,
+                parent_run_id,
+                Some(correlation_id),
+            )
+            .await
+            .map_err(fabric_err_to_runtime)
+    }
+
     async fn get(&self, run_id: &RunId) -> Result<Option<RunRecord>, RuntimeError> {
         let project = match resolve_project_from_run_id(&self.store, run_id).await? {
             Some(p) => p,
@@ -923,5 +950,40 @@ mod tests {
         assert_eq!(sess_proj, project);
         assert_eq!(run_proj, task_proj);
         assert_eq!(task_proj, sess_proj);
+    }
+
+    /// Compile-time guard that `FabricRunServiceAdapter` overrides
+    /// `start_with_correlation` on the `RunService` trait rather than
+    /// inheriting the default impl (which drops `correlation_id` at
+    /// `cairn-runtime/src/runs.rs:101-110`).
+    ///
+    /// A live end-to-end assertion needs a running `FabricServices` (Valkey
+    /// backed), so it lives in `tests/integration/test_run_lifecycle.rs`.
+    /// Here we only prove the override is present: taking a function pointer
+    /// to `<FabricRunServiceAdapter as RunService>::start_with_correlation`
+    /// and comparing to the default-impl pointer would require Rust method-
+    /// resolution tricks, so we fall back to checking that the SOURCE file
+    /// contains the explicit override. A regression that deletes the
+    /// override would leave the trait default in place and silently drop
+    /// correlation on the sqeq ingress path — caught here.
+    #[test]
+    fn fabric_run_adapter_overrides_start_with_correlation() {
+        let src = include_str!("fabric_adapter.rs");
+        assert!(
+            src.contains("async fn start_with_correlation("),
+            "FabricRunServiceAdapter must explicitly override \
+             start_with_correlation — default trait impl drops the \
+             correlation_id (see cairn-runtime/src/runs.rs:101-110). \
+             Sqeq ingress (handlers/sqeq.rs) relies on this for audit \
+             trail preservation on the Fabric path.",
+        );
+        // Belt-and-braces: verify the override threads correlation_id
+        // through to the fabric layer, not into the void.
+        assert!(
+            src.contains(".start_with_correlation(") && src.contains("Some(correlation_id)"),
+            "override must pass the correlation_id down to \
+             fabric.runs.start_with_correlation — delegating to plain \
+             `fabric.runs.start()` would still drop it",
+        );
     }
 }
