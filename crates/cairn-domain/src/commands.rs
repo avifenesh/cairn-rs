@@ -551,6 +551,11 @@ pub struct CompleteEvalRun {
 }
 
 /// Record the outcome of an agent run for confidence calibration.
+///
+/// **Invariant:** `predicted_confidence` MUST be finite (no `NaN`, no `inf`).
+/// The manual `Eq` impl below trusts this invariant; emitters that permit a
+/// `NaN` here will produce a value that violates the `Eq` reflexivity rule
+/// (`NaN != NaN`) and can silently break `HashSet`/`BTreeSet` containers.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct RecordOutcome {
     pub project: ProjectKey,
@@ -561,7 +566,9 @@ pub struct RecordOutcome {
     pub actual_outcome: crate::events::ActualOutcome,
 }
 
-// Manual Eq impl for f64 field (see OutcomeRecorded).
+// Manual `Eq` lets this struct be embedded in `RuntimeCommand` which derives
+// `Eq`. The `f64` field is safe here ONLY when the finite-value invariant on
+// `predicted_confidence` holds (see the struct-level docstring).
 impl Eq for RecordOutcome {}
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

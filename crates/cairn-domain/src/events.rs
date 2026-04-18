@@ -218,9 +218,10 @@ pub enum RuntimeEvent {
     TaskLeaseExpired(TaskLeaseExpired),
     TaskPriorityChanged(TaskPriorityChanged),
     ToolInvocationProgressUpdated(ToolInvocationProgressUpdated),
-    /// Go PR #1222: evaluator–optimizer feedback loop.
+    /// Evaluator–optimizer feedback loop: agents record observed outcomes
+    /// so downstream eval pipelines can compare against expected outcomes.
     OutcomeRecorded(OutcomeRecorded),
-    /// Go PR #1229: scheduled task registration.
+    /// A tenant-scoped scheduled task was registered.
     ScheduledTaskCreated(ScheduledTaskCreated),
     // ── Plan review events (RFC 018) ──────────────────────────────────────
     /// A Plan-mode run emitted a `<proposed_plan>` artifact.
@@ -748,9 +749,25 @@ pub struct MailboxMessageAppended {
     /// RFC 002: epoch-ms when the message was created by the sender.
     #[serde(default)]
     pub sent_at: Option<u64>,
-    /// RFC 002: delivery lifecycle state e.g. pending, delivered, failed.
+    /// Delivery lifecycle state.
     #[serde(default)]
-    pub delivery_status: Option<String>,
+    pub delivery_status: Option<MailboxDeliveryStatus>,
+}
+
+/// Mailbox delivery lifecycle.
+///
+/// Wire-compatible snake_case with the pre-enum `String` shape.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MailboxDeliveryStatus {
+    /// Message created, not yet delivered.
+    Pending,
+    /// Message deferred until `deliver_at_ms`.
+    Scheduled,
+    /// Delivered to the recipient's mailbox.
+    Delivered,
+    /// Delivery attempt failed terminally.
+    Failed,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -952,8 +969,8 @@ pub struct EvalRunCompleted {
 
 /// Actual outcome classification for an agent execution.
 ///
-/// Part of the evaluator–optimizer feedback loop (Go PR #1222): agents record
-/// predicted confidence before execution and actual outcome after, enabling
+/// Part of the evaluator–optimizer feedback loop: agents record predicted
+/// confidence before execution and actual outcome after, enabling
 /// self-correction of confidence calibration over time.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -967,6 +984,11 @@ pub enum ActualOutcome {
 ///
 /// Links a run to its predicted confidence and actual result, forming the
 /// feedback signal for confidence calibration and evaluator tuning.
+///
+/// **Invariant:** `predicted_confidence` MUST be finite and in `[0.0, 1.0]`.
+/// The manual `Eq` impl below trusts this — a `NaN` here violates `Eq`'s
+/// reflexivity rule (`NaN != NaN`) and silently corrupts any `HashSet` /
+/// `BTreeSet` containing this event.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct OutcomeRecorded {
     pub project: ProjectKey,
@@ -974,18 +996,19 @@ pub struct OutcomeRecorded {
     pub run_id: RunId,
     /// Agent type that produced this outcome (e.g. "code_review", "research").
     pub agent_type: String,
-    /// Confidence the agent predicted before execution [0.0, 1.0].
+    /// Confidence the agent predicted before execution [0.0, 1.0]. Must be finite.
     pub predicted_confidence: f64,
     /// What actually happened.
     pub actual_outcome: ActualOutcome,
     pub recorded_at: u64,
 }
 
-// Manual Eq: f64 doesn't impl Eq, but we need Eq for RuntimeEvent.
-// Confidence is a display-only metric; bit-exact equality is acceptable.
+// Manual `Eq` lets this struct be embedded in `RuntimeEvent` which derives
+// `Eq`. Safe only when the finite-value invariant on `predicted_confidence`
+// holds (see struct-level docstring).
 impl Eq for OutcomeRecorded {}
 
-/// A tenant-scoped scheduled task was registered (Go PR #1229).
+/// A tenant-scoped scheduled task was registered.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ScheduledTaskCreated {
     pub tenant_id: TenantId,

@@ -33,8 +33,6 @@ pub enum RuntimeEntityKind {
     MailboxMessage,
     Signal,
     ToolInvocation,
-    /// RFC 002: tool result as a first-class entity in error and correlation contexts.
-    ToolResult,
     IngestJob,
     EvalRun,
     PromptAsset,
@@ -63,51 +61,19 @@ impl RuntimeEntityKind {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "entity", rename_all = "snake_case")]
 pub enum RuntimeEntityRef {
-    Session {
-        session_id: SessionId,
-    },
-    Run {
-        run_id: RunId,
-    },
-    Task {
-        task_id: TaskId,
-    },
-    Approval {
-        approval_id: ApprovalId,
-    },
-    Checkpoint {
-        checkpoint_id: CheckpointId,
-    },
-    MailboxMessage {
-        message_id: MailboxMessageId,
-    },
-    Signal {
-        signal_id: SignalId,
-    },
-    ToolInvocation {
-        invocation_id: ToolInvocationId,
-    },
-    /// RFC 002: tool result reference — enables tool results to be cited in
-    /// error contexts and event correlation chains.
-    ToolResult {
-        invocation_id: ToolInvocationId,
-        tool_name: String,
-    },
-    IngestJob {
-        job_id: IngestJobId,
-    },
-    EvalRun {
-        eval_run_id: EvalRunId,
-    },
-    PromptAsset {
-        prompt_asset_id: PromptAssetId,
-    },
-    PromptVersion {
-        prompt_version_id: PromptVersionId,
-    },
-    PromptRelease {
-        prompt_release_id: PromptReleaseId,
-    },
+    Session { session_id: SessionId },
+    Run { run_id: RunId },
+    Task { task_id: TaskId },
+    Approval { approval_id: ApprovalId },
+    Checkpoint { checkpoint_id: CheckpointId },
+    MailboxMessage { message_id: MailboxMessageId },
+    Signal { signal_id: SignalId },
+    ToolInvocation { invocation_id: ToolInvocationId },
+    IngestJob { job_id: IngestJobId },
+    EvalRun { eval_run_id: EvalRunId },
+    PromptAsset { prompt_asset_id: PromptAssetId },
+    PromptVersion { prompt_version_id: PromptVersionId },
+    PromptRelease { prompt_release_id: PromptReleaseId },
 }
 
 impl RuntimeEntityRef {
@@ -121,7 +87,6 @@ impl RuntimeEntityRef {
             RuntimeEntityRef::MailboxMessage { .. } => RuntimeEntityKind::MailboxMessage,
             RuntimeEntityRef::Signal { .. } => RuntimeEntityKind::Signal,
             RuntimeEntityRef::ToolInvocation { .. } => RuntimeEntityKind::ToolInvocation,
-            RuntimeEntityRef::ToolResult { .. } => RuntimeEntityKind::ToolResult,
             RuntimeEntityRef::IngestJob { .. } => RuntimeEntityKind::IngestJob,
             RuntimeEntityRef::EvalRun { .. } => RuntimeEntityKind::EvalRun,
             RuntimeEntityRef::PromptAsset { .. } => RuntimeEntityKind::PromptAsset,

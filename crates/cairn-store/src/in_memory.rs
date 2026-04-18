@@ -432,7 +432,7 @@ impl InMemoryStore {
                         recipient: e.recipient.clone(),
                         body: e.body.clone(),
                         sent_at: e.sent_at,
-                        delivery_status: e.delivery_status.clone(),
+                        delivery_status: e.delivery_status,
                         version: 1,
                         created_at: now,
                     },

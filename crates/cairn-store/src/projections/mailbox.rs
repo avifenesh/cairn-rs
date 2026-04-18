@@ -1,10 +1,10 @@
 use async_trait::async_trait;
-use cairn_domain::{MailboxMessageId, ProjectKey, RunId, TaskId};
+use cairn_domain::{MailboxDeliveryStatus, MailboxMessageId, ProjectKey, RunId, TaskId};
 use serde::{Deserialize, Serialize};
 
 use crate::error::StoreError;
 
-/// Maximum content length per message (mirrors cairn Go `maxMessageContentLen = 4000`).
+/// Maximum content length per message.
 pub const MAX_MESSAGE_CONTENT_LEN: usize = 4000;
 
 /// Current-state record for a mailbox message.
@@ -38,9 +38,9 @@ pub struct MailboxRecord {
     /// RFC 002: epoch-ms when the message was sent by the sender.
     #[serde(default)]
     pub sent_at: Option<u64>,
-    /// RFC 002: delivery lifecycle state.
+    /// Delivery lifecycle state.
     #[serde(default)]
-    pub delivery_status: Option<String>,
+    pub delivery_status: Option<MailboxDeliveryStatus>,
     pub version: u64,
     pub created_at: u64,
 }

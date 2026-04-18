@@ -1,6 +1,5 @@
-//! Research + Digest Pipeline domain types (GAP-016).
+//! Research + Digest Pipeline domain types.
 //!
-//! Mirrors `cairn/internal/research/` + `internal/digest/`:
 //! - **Research pipeline:** LLM-curated document retrieval with relevance scoring.
 //! - **Digest engine:** Aggregates signals into a preference-aware structured summary.
 

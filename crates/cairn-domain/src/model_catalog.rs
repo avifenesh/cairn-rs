@@ -1,7 +1,5 @@
 //! Model catalog — per-model metadata including cost rates and capabilities.
 //!
-//! Mirrors `cairn/internal/modelreg/` (Go).
-//!
 //! The catalog is the source of truth for which models are available, their
 //! billing type, cost rates, and capability flags.
 //!
@@ -138,8 +136,7 @@ impl ModelEntry {
 
 /// In-process model catalog backed by a `HashMap<String, ModelEntry>`.
 ///
-/// User-supplied entries override bundled entries on ID conflict
-/// (same rule as `cairn/internal/modelreg`).
+/// User-supplied entries override bundled entries on ID conflict.
 #[derive(Clone, Debug, Default)]
 pub struct ModelRegistry {
     entries: std::collections::HashMap<String, ModelEntry>,

@@ -1,10 +1,8 @@
-//! Skill catalog domain types — GAP-012.
+//! Skill catalog domain types.
 //!
 //! A skill is a composable capability bundle that teaches the agent how to
 //! accomplish a category of tasks. Skills are registered in the `SkillCatalog`
 //! and can be invoked by the runtime.
-//!
-//! Mirrors `cairn/internal/skill/skill.go` and `service.go` at the domain level.
 
 use serde::{Deserialize, Serialize};
 
