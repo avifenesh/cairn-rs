@@ -173,11 +173,11 @@ impl TenantScope {
     }
 }
 
-pub(crate) struct WorkspaceRoleGuard<const MIN_ROLE: u8>;
+pub struct WorkspaceRoleGuard<const MIN_ROLE: u8>;
 #[allow(dead_code)]
 pub(crate) type MemberRoleGuard = WorkspaceRoleGuard<1>;
 pub(crate) type ReviewerRoleGuard = WorkspaceRoleGuard<2>;
-pub(crate) type AdminRoleGuard = WorkspaceRoleGuard<3>;
+pub type AdminRoleGuard = WorkspaceRoleGuard<3>;
 
 #[derive(Clone, Debug)]
 pub(crate) struct ProjectScope<T> {

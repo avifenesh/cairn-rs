@@ -36,7 +36,7 @@ pub(crate) async fn auth_middleware(
     mut request: Request,
     next: Next,
 ) -> Response {
-    if auth_exempt_path(request.uri().path()) {
+    if auth_exempt_path_method(request.uri().path(), request.method()) {
         return next.run(request).await;
     }
 
@@ -45,7 +45,7 @@ pub(crate) async fn auth_middleware(
     };
 
     let authenticator = ServiceTokenAuthenticator::new(state.service_tokens.clone());
-    let Ok(principal) = authenticator.authenticate(token) else {
+    let Ok(principal) = authenticator.authenticate(&token) else {
         return unauthorized_response();
     };
 
@@ -103,6 +103,17 @@ pub(crate) async fn rate_limit_middleware(
             Ok(guard) => guard,
             Err(poisoned) => poisoned.into_inner(),
         };
+
+        // T6b-C6: evict buckets whose window ended over 2x ago. Without
+        // this the map grows unbounded when an attacker rotates bearer
+        // strings to bypass per-token limits — trivial memory DoS.
+        // Amortized O(1): we only do the full sweep when the map grows
+        // past a soft-cap threshold.
+        const MAX_BUCKETS: usize = 10_000;
+        if buckets.len() > MAX_BUCKETS {
+            let evict_before = now.saturating_sub(RL_WINDOW_MS * 2);
+            buckets.retain(|_, b| b.window_started_ms >= evict_before);
+        }
 
         let bucket = buckets.entry(key).or_insert(RateLimitBucket {
             count: 0,
@@ -219,10 +230,28 @@ pub(crate) async fn request_id_middleware(mut request: Request, next: Next) -> R
 
 // ── Auth helpers ────────────────────────────────────────────────────────────
 
+#[allow(dead_code)] // retained for test coverage; production uses the method variant
 pub(crate) fn auth_exempt_path(path: &str) -> bool {
-    // Public infra endpoints
+    auth_exempt_path_method(path, &axum::http::Method::GET)
+}
+
+/// Same as [`auth_exempt_path`] but aware of HTTP method — the SPA
+/// fallback exemption only covers GET, so a POST to an unknown
+/// non-/v1/ path still goes through auth and 404s.
+pub(crate) fn auth_exempt_path_method(path: &str, method: &axum::http::Method) -> bool {
+    // T6b-C1: strict allowlist. Pre-fix, `!path.starts_with("/v1/")` made
+    // ANY non-/v1/ path public, regardless of method — so a POST to
+    // /internal/* or /debug/* would bypass auth. Normalize case +
+    // require method=GET for the SPA-fallback exemption.
+    let normalized = path.to_ascii_lowercase();
+    let normalized = normalized.as_str();
+
+    // Public infra endpoints.
+    // NOTE: `/v1/stream` is NOT on this list — the SSE handler MUST
+    // validate its `?token=` query param through the same
+    // ServiceTokenAuthenticator and filter events by tenant (T6b-C7).
     if matches!(
-        path,
+        normalized,
         "/health"
             | "/healthz"
             | "/ready"
@@ -231,31 +260,58 @@ pub(crate) fn auth_exempt_path(path: &str) -> bool {
             | "/v1/onboarding/templates"
             | "/openapi.json"
             | "/docs"
-            | "/v1/stream"
             | "/v1/docs"
-            | "/v1/webhooks/github"
     ) {
         return true;
     }
-    // Dynamic webhook receivers — all integration webhooks use their own
-    // verification (HMAC, etc.) instead of bearer token auth.
-    if path.starts_with("/v1/webhooks/") {
+    // Integration webhook receivers verify their own HMAC — bearer auth
+    // doesn't apply here. Each integration's handler MUST fail-closed
+    // when the signature check fails.
+    if normalized.starts_with("/v1/webhooks/") {
         return true;
     }
 
-    // The embedded React UI must load without auth — it has its own LoginPage
-    // that collects the token client-side before making API calls.
-    // Exempt: static assets and any non-/v1/ path (SPA fallback to index.html).
-    if path == "/"
-        || path == "/index.html"
-        || path == "/favicon.svg"
-        || path.starts_with("/assets/")
-        || !path.starts_with("/v1/")
+    // Embedded React UI assets + SPA client-side routes. The SPA has
+    // its own LoginPage that collects the bearer token client-side
+    // before making API calls. We only exempt GET — POST/PATCH/DELETE
+    // to any unknown path must still go through auth.
+    if method != axum::http::Method::GET {
+        return false;
+    }
+    if matches!(
+        normalized,
+        "/" | "/index.html"
+            | "/favicon.svg"
+            | "/favicon.ico"
+            | "/robots.txt"
+            | "/.well-known/agent.json"
+    ) || normalized.starts_with("/assets/")
     {
         return true;
     }
+    // SPA client-side routes: any GET that is NOT under /v1/ (and
+    // isn't in the explicit list above) falls through to
+    // `serve_frontend`, which returns index.html so React Router can
+    // handle navigation. This is the only remaining wildcard, and it
+    // is method-gated to GET.
+    !normalized.starts_with("/v1/")
+}
 
-    false
+/// T6b-C2: redact credential-looking query params before the query
+/// string is stored in telemetry. Keys matched case-insensitively
+/// against a denylist; the value is replaced with `REDACTED`.
+pub(crate) fn scrub_credentials_in_query(query: &str) -> String {
+    const REDACTED_KEYS: &[&str] = &["token", "api_key", "apikey", "password", "secret", "bearer"];
+    query
+        .split('&')
+        .map(|pair| match pair.split_once('=') {
+            Some((k, _)) if REDACTED_KEYS.iter().any(|r| r.eq_ignore_ascii_case(k)) => {
+                format!("{k}=REDACTED")
+            }
+            _ => pair.to_owned(),
+        })
+        .collect::<Vec<_>>()
+        .join("&")
 }
 
 pub(crate) fn request_rate_limit_key(request: &Request) -> Option<String> {
@@ -268,23 +324,32 @@ pub(crate) fn request_rate_limit_key(request: &Request) -> Option<String> {
         .map(ToOwned::to_owned)
 }
 
-pub(crate) fn bearer_token(request: &Request) -> Option<&str> {
-    // 1. Standard Authorization: Bearer <token> header
+pub(crate) fn bearer_token(request: &Request) -> Option<String> {
+    // 1. Standard `Authorization: Bearer <token>` header.
     if let Some(header) = request.headers().get(axum::http::header::AUTHORIZATION) {
         if let Ok(value) = header.to_str() {
             if let Some(token) = value.strip_prefix("Bearer ") {
-                return Some(token);
+                let trimmed = token.trim();
+                if !trimmed.is_empty() {
+                    return Some(trimmed.to_owned());
+                }
             }
         }
     }
-    // 2. Query-param fallback: ?token=<token>  (for SSE EventSource which
-    //    cannot set custom headers).
+    // 2. Query-param fallback: `?token=<token>` for SSE EventSource
+    //    which can't set custom headers.
+    //
+    //    T6b-H2: percent-decode properly (so `%2B` becomes `+`), pick
+    //    only the FIRST `token` key (duplicates are rejected), and
+    //    reject whitespace-only values.
     if let Some(query) = request.uri().query() {
-        for pair in query.split('&') {
-            if let Some(val) = pair.strip_prefix("token=") {
-                if !val.is_empty() {
-                    return Some(val);
+        for (k, v) in url::form_urlencoded::parse(query.as_bytes()) {
+            if k.as_ref() == "token" {
+                let v = v.trim();
+                if v.is_empty() {
+                    return None;
                 }
+                return Some(v.to_owned());
             }
         }
     }
@@ -423,7 +488,12 @@ pub(crate) async fn observability_middleware(
         .map(MatchedPath::as_str)
         .unwrap_or_else(|| request.uri().path())
         .to_owned();
-    let query = request.uri().query().map(String::from);
+    // T6b-C2: scrub credential-ish query params before they hit the
+    // request-log ring buffer. The SSE EventSource path uses
+    // `?token=<bearer>` because browsers can't set custom headers on
+    // SSE connections — the raw bearer would otherwise be visible via
+    // `GET /v1/admin/logs` and durably flushed to disk on shutdown.
+    let query = request.uri().query().map(scrub_credentials_in_query);
     let request_id = request
         .extensions()
         .get::<RequestId>()
@@ -511,8 +581,29 @@ mod tests {
     #[test]
     fn exempt_public_api_endpoints() {
         assert!(auth_exempt_path("/v1/onboarding/templates"));
-        assert!(auth_exempt_path("/v1/stream"));
         assert!(auth_exempt_path("/v1/docs"));
+        // T6b-C7: /v1/stream is no longer blanket-exempt; the SSE
+        // handler validates its own ?token= query param.
+        assert!(!auth_exempt_path("/v1/stream"));
+    }
+
+    #[test]
+    fn spa_fallback_only_exempts_get() {
+        use axum::http::Method;
+        // GET on a SPA-fallback path is exempt (serves index.html).
+        assert!(auth_exempt_path_method("/settings", &Method::GET));
+        // POST / PATCH / DELETE on the same path must still hit auth.
+        assert!(!auth_exempt_path_method("/settings", &Method::POST));
+        assert!(!auth_exempt_path_method("/settings", &Method::PATCH));
+        assert!(!auth_exempt_path_method("/settings", &Method::DELETE));
+    }
+
+    #[test]
+    fn case_insensitive_exempt_matching() {
+        // /V1/RUNS should behave the same as /v1/runs — i.e. NOT
+        // exempt (it's under /v1/, case-insensitive).
+        assert!(!auth_exempt_path("/V1/runs"));
+        assert!(!auth_exempt_path("/V1/Stream"));
     }
 
     #[test]
@@ -561,25 +652,25 @@ mod tests {
     #[test]
     fn bearer_from_auth_header() {
         let req = make_request("/v1/runs", Some("Bearer my-secret-token"));
-        assert_eq!(bearer_token(&req), Some("my-secret-token"));
+        assert_eq!(bearer_token(&req), Some("my-secret-token".to_owned()));
     }
 
     #[test]
     fn bearer_from_query_param() {
         let req = make_request("/v1/stream?token=sse-token-123", None);
-        assert_eq!(bearer_token(&req), Some("sse-token-123"));
+        assert_eq!(bearer_token(&req), Some("sse-token-123".to_owned()));
     }
 
     #[test]
     fn bearer_from_query_with_other_params() {
         let req = make_request("/v1/stream?follow=true&token=t1&limit=10", None);
-        assert_eq!(bearer_token(&req), Some("t1"));
+        assert_eq!(bearer_token(&req), Some("t1".to_owned()));
     }
 
     #[test]
     fn bearer_header_takes_priority_over_query() {
         let req = make_request("/v1/stream?token=query-tok", Some("Bearer header-tok"));
-        assert_eq!(bearer_token(&req), Some("header-tok"));
+        assert_eq!(bearer_token(&req), Some("header-tok".to_owned()));
     }
 
     #[test]

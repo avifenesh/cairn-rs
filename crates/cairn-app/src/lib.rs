@@ -29,6 +29,25 @@ pub mod triggers;
 // Re-exports for backward compatibility
 pub use bootstrap::{parse_args, parse_args_from, run_bootstrap};
 pub use errors::AppApiError;
+
+/// T6b-C3: redact the password component of a database connection URL
+/// so startup logs don't leak credentials to journald / CloudWatch.
+///
+/// Returns the input unchanged on parse error (falling back to logging
+/// the opaque URL is no worse than the pre-fix baseline, and the parse
+/// error itself is not actionable for the operator).
+pub fn redact_dsn(url: &str) -> String {
+    match url::Url::parse(url) {
+        Ok(mut parsed) if parsed.password().is_some() => {
+            // Ignore the result — Url::set_password returns Err only
+            // when the scheme forbids credentials, which can't happen
+            // for postgres:// / sqlite://.
+            let _ = parsed.set_password(Some("***"));
+            parsed.to_string()
+        }
+        _ => url.to_owned(),
+    }
+}
 #[allow(unused_imports)]
 pub(crate) use errors::*;
 #[allow(unused_imports)]
