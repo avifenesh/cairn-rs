@@ -104,7 +104,15 @@ fn fabric_err_to_runtime(err: FabricError) -> RuntimeError {
     match err {
         FabricError::NotFound { entity, id } => RuntimeError::NotFound { entity, id },
         FabricError::Validation { reason } => RuntimeError::Validation { reason },
-        other => RuntimeError::Internal(other.to_string()),
+        // SEC-007: Valkey / script / bridge / config / internal variants
+        // carry FCALL names, key names, and occasionally secret-hash
+        // references — none of which should reach the 500 response body.
+        // Log the detail for operators (journald / CloudWatch) and return
+        // an opaque message to the caller.
+        other => {
+            tracing::error!(fabric_err = %other, "fabric layer error");
+            RuntimeError::Internal("fabric layer error".into())
+        }
     }
 }
 
@@ -702,6 +710,60 @@ mod tests {
         assert_send_sync::<FabricRunServiceAdapter>();
         assert_send_sync::<FabricTaskServiceAdapter>();
         assert_send_sync::<FabricSessionServiceAdapter>();
+    }
+
+    /// SEC-007: Valkey error messages (FCALL names, key names, occasionally
+    /// secret-hash references) MUST NOT flow into the 500 response body.
+    /// The adapter's mapper genericizes the Internal variant to a fixed
+    /// string; operators still see the detail in `tracing::error!`. Any
+    /// regression that surfaces `other.to_string()` to the caller fires
+    /// this test.
+    #[test]
+    fn fabric_err_valkey_detail_does_not_leak_to_runtime_internal() {
+        let leaky = FabricError::Valkey(
+            "HGET waitpoint_hmac_secrets:{p:7} secret:abc123 — \
+             connection refused at 10.0.0.1:6379"
+                .into(),
+        );
+        match fabric_err_to_runtime(leaky) {
+            RuntimeError::Internal(msg) => {
+                assert_eq!(
+                    msg, "fabric layer error",
+                    "Internal message must be opaque; got leaky detail: {msg:?}"
+                );
+                assert!(!msg.contains("secret:"), "secret hash field leaked");
+                assert!(!msg.contains("HGET"), "FCALL detail leaked");
+                assert!(!msg.contains("10.0.0.1"), "connection endpoint leaked");
+            }
+            other => panic!("expected RuntimeError::Internal, got {other:?}"),
+        }
+    }
+
+    /// NotFound and Validation variants are user-facing and MUST keep
+    /// their detail (404 / 422 responses). Pin the pass-through so a
+    /// future refactor doesn't accidentally genericize these too.
+    #[test]
+    fn fabric_err_not_found_and_validation_pass_through() {
+        let nf = FabricError::NotFound {
+            entity: "run",
+            id: "run_abc".into(),
+        };
+        match fabric_err_to_runtime(nf) {
+            RuntimeError::NotFound { entity, id } => {
+                assert_eq!(entity, "run");
+                assert_eq!(id, "run_abc");
+            }
+            other => panic!("expected NotFound pass-through, got {other:?}"),
+        }
+        let val = FabricError::Validation {
+            reason: "limit must be positive".into(),
+        };
+        match fabric_err_to_runtime(val) {
+            RuntimeError::Validation { reason } => {
+                assert_eq!(reason, "limit must be positive");
+            }
+            other => panic!("expected Validation pass-through, got {other:?}"),
+        }
     }
 
     fn test_project() -> ProjectKey {
