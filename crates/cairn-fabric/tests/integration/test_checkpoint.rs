@@ -88,7 +88,7 @@ async fn test_checkpoint_restore_reads_frames() {
 
     h.fabric
         .tasks
-        .claim(&h.project, &task_id, "test-worker".into(), 30_000)
+        .claim(&h.project, Some(&session_id), &task_id, "test-worker".into(), 30_000)
         .await
         .expect("claim failed");
 

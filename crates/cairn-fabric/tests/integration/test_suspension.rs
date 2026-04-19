@@ -107,7 +107,7 @@ async fn test_suspend_and_resume_roundtrip() {
 
     h.fabric
         .tasks
-        .claim(&h.project, &task_id, "test-worker".into(), 30_000)
+        .claim(&h.project, Some(&session_id), &task_id, "test-worker".into(), 30_000)
         .await
         .expect("claim failed");
 
@@ -121,7 +121,7 @@ async fn test_suspend_and_resume_roundtrip() {
     let paused = h
         .fabric
         .tasks
-        .pause(&h.project, &task_id, pause_reason)
+        .pause(&h.project, Some(&session_id), &task_id, pause_reason)
         .await
         .expect("pause failed");
 
@@ -144,7 +144,7 @@ async fn test_suspend_and_resume_roundtrip() {
     let mid = h
         .fabric
         .tasks
-        .get(&h.project, &task_id)
+        .get(&h.project, Some(&session_id), &task_id)
         .await
         .expect("mid-flight get failed")
         .expect("task must be readable while paused");
@@ -159,6 +159,7 @@ async fn test_suspend_and_resume_roundtrip() {
         .tasks
         .resume(
             &h.project,
+            Some(&session_id),
             &task_id,
             ResumeTrigger::OperatorResume,
             TaskResumeTarget::Running,
@@ -211,13 +212,13 @@ async fn test_signal_delivery_resumes_waiter() {
     // runs.claim issues a grant + lease so lifecycle_phase flips to "active".
     h.fabric
         .runs
-        .claim(&h.project, &run_id)
+        .claim(&h.project, &session_id, &run_id)
         .await
         .expect("runs.claim failed");
 
     h.fabric
         .runs
-        .enter_waiting_approval(&h.project, &run_id)
+        .enter_waiting_approval(&h.project, &session_id, &run_id)
         .await
         .expect("enter_waiting_approval failed");
 
@@ -246,7 +247,7 @@ async fn test_signal_delivery_resumes_waiter() {
     let resolved = h
         .fabric
         .runs
-        .resolve_approval(&h.project, &run_id, ApprovalDecision::Approved)
+        .resolve_approval(&h.project, &session_id, &run_id, ApprovalDecision::Approved)
         .await
         .expect("resolve_approval failed");
     assert_eq!(resolved.run_id, run_id);
@@ -297,13 +298,13 @@ async fn test_signal_delivery_is_idempotent() {
 
     h.fabric
         .runs
-        .claim(&h.project, &run_id)
+        .claim(&h.project, &session_id, &run_id)
         .await
         .expect("runs.claim failed");
 
     h.fabric
         .runs
-        .enter_waiting_approval(&h.project, &run_id)
+        .enter_waiting_approval(&h.project, &session_id, &run_id)
         .await
         .expect("enter_waiting_approval failed");
 
@@ -389,13 +390,13 @@ async fn test_enter_approval_after_prior_approval_creates_fresh_waitpoint() {
 
     h.fabric
         .runs
-        .claim(&h.project, &run_id)
+        .claim(&h.project, &session_id, &run_id)
         .await
         .expect("runs.claim failed");
 
     h.fabric
         .runs
-        .enter_waiting_approval(&h.project, &run_id)
+        .enter_waiting_approval(&h.project, &session_id, &run_id)
         .await
         .expect("first enter_waiting_approval failed");
 
@@ -408,7 +409,7 @@ async fn test_enter_approval_after_prior_approval_creates_fresh_waitpoint() {
 
     h.fabric
         .runs
-        .resolve_approval(&h.project, &run_id, ApprovalDecision::Approved)
+        .resolve_approval(&h.project, &session_id, &run_id, ApprovalDecision::Approved)
         .await
         .expect("resolve_approval failed");
 
@@ -431,7 +432,7 @@ async fn test_enter_approval_after_prior_approval_creates_fresh_waitpoint() {
     // second suspend. This is the intended FF lifecycle, not a workaround.
     h.fabric
         .runs
-        .claim(&h.project, &run_id)
+        .claim(&h.project, &session_id, &run_id)
         .await
         .expect("runs.claim after resume failed");
 
@@ -440,7 +441,7 @@ async fn test_enter_approval_after_prior_approval_creates_fresh_waitpoint() {
     let second = h
         .fabric
         .runs
-        .enter_waiting_approval(&h.project, &run_id)
+        .enter_waiting_approval(&h.project, &session_id, &run_id)
         .await
         .expect("second enter_waiting_approval must succeed after resume");
     assert_eq!(
@@ -501,7 +502,7 @@ async fn task_pause_and_resume_emit_state_changed() {
 
     h.fabric
         .tasks
-        .claim(&h.project, &task_id, "test-worker".into(), 30_000)
+        .claim(&h.project, Some(&session_id), &task_id, "test-worker".into(), 30_000)
         .await
         .expect("claim failed");
 
@@ -515,7 +516,7 @@ async fn task_pause_and_resume_emit_state_changed() {
     let paused = h
         .fabric
         .tasks
-        .pause(&h.project, &task_id, pause_reason)
+        .pause(&h.project, Some(&session_id), &task_id, pause_reason)
         .await
         .expect("pause failed");
 
@@ -548,6 +549,7 @@ async fn task_pause_and_resume_emit_state_changed() {
         .tasks
         .resume(
             &h.project,
+            Some(&session_id),
             &task_id,
             ResumeTrigger::OperatorResume,
             TaskResumeTarget::Running,
