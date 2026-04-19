@@ -41,7 +41,7 @@ async fn test_start_with_correlation_tags_exec_core() {
 
     // Read back the exec tags hash and verify `cairn.correlation_id` landed.
     // Key layout matches FabricRunService::create_execution.
-    let eid = cairn_fabric::id_map::run_to_execution_id(&h.project, &run_id, h.partition_config());
+    let eid = cairn_fabric::id_map::session_run_to_execution_id(&h.project, &session_id, &run_id, h.partition_config());
     let partition = ff_core::partition::execution_partition(&eid, h.partition_config());
     let ctx = ff_core::keys::ExecKeyContext::new(&partition, &eid);
     let tags: HashMap<String, String> = h

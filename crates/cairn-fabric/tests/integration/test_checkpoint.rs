@@ -92,7 +92,7 @@ async fn test_checkpoint_restore_reads_frames() {
         .await
         .expect("claim failed");
 
-    let eid: ExecutionId = id_map::task_to_execution_id(&h.project, &task_id, h.partition_config());
+    let eid: ExecutionId = id_map::session_task_to_execution_id(&h.project, &session_id, &task_id, h.partition_config());
     let partition = execution_partition(&eid, h.partition_config());
     let ctx = ExecKeyContext::new(&partition, &eid);
     let (lease_id, lease_epoch, attempt_id, attempt_index) =

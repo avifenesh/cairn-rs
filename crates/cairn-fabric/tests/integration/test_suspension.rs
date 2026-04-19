@@ -67,9 +67,10 @@ where
 /// through the service's `tasks.get` (which itself HGETALLs Valkey).
 async fn read_exec_core_for_run(
     h: &TestHarness,
+    session_id: &cairn_domain::SessionId,
     run_id: &cairn_domain::RunId,
 ) -> HashMap<String, String> {
-    let eid = cairn_fabric::id_map::run_to_execution_id(&h.project, run_id, h.partition_config());
+    let eid = cairn_fabric::id_map::session_run_to_execution_id(&h.project, session_id, run_id, h.partition_config());
     let partition = execution_partition(&eid, h.partition_config());
     let ctx = ExecKeyContext::new(&partition, &eid);
     let fields: HashMap<String, String> = h
@@ -226,7 +227,7 @@ async fn test_signal_delivery_resumes_waiter() {
     // Per FF lua/suspension.lua:183-201, exec_core must have
     // public_state="suspended" and current_waitpoint_id set to a non-empty
     // value after ff_suspend_execution.
-    let pre = read_exec_core_for_run(&h, &run_id).await;
+    let pre = read_exec_core_for_run(&h, &session_id, &run_id).await;
     assert_eq!(
         pre.get("public_state").map(|s| s.as_str()),
         Some("suspended"),
@@ -256,7 +257,7 @@ async fn test_signal_delivery_resumes_waiter() {
     // current_waitpoint_id is cleared. Per FF signal.lua:228-229, the
     // resume path HSETs current_waitpoint_id="" and public_state to
     // "waiting" (resume_delay_ms=0) or "delayed" (resume_delay_ms>0).
-    let post = read_exec_core_for_run(&h, &run_id).await;
+    let post = read_exec_core_for_run(&h, &session_id, &run_id).await;
     let post_state = post.get("public_state").cloned().unwrap_or_default();
     assert!(
         post_state != "suspended",
@@ -310,14 +311,14 @@ async fn test_signal_delivery_is_idempotent() {
 
     // Read the active waitpoint id from exec_core (populated by
     // ff_suspend_execution at lua/suspension.lua:199).
-    let core = read_exec_core_for_run(&h, &run_id).await;
+    let core = read_exec_core_for_run(&h, &session_id, &run_id).await;
     let wp_id_str = core
         .get("current_waitpoint_id")
         .cloned()
         .filter(|s| !s.is_empty())
         .expect("current_waitpoint_id must be set after enter_waiting_approval");
     let wp_id = ff_core::types::WaitpointId::parse(&wp_id_str).expect("waitpoint_id must parse");
-    let eid = cairn_fabric::id_map::run_to_execution_id(&h.project, &run_id, h.partition_config());
+    let eid = cairn_fabric::id_map::session_run_to_execution_id(&h.project, &session_id, &run_id, h.partition_config());
 
     let invocation_id = format!("inv_{}", uuid::Uuid::new_v4());
 
@@ -400,7 +401,7 @@ async fn test_enter_approval_after_prior_approval_creates_fresh_waitpoint() {
         .await
         .expect("first enter_waiting_approval failed");
 
-    let first_wp = read_exec_core_for_run(&h, &run_id)
+    let first_wp = read_exec_core_for_run(&h, &session_id, &run_id)
         .await
         .get("current_waitpoint_id")
         .cloned()
@@ -415,7 +416,7 @@ async fn test_enter_approval_after_prior_approval_creates_fresh_waitpoint() {
 
     // After resume, exec_core.current_waitpoint_id is cleared
     // (signal.lua:229). Confirm that before proceeding.
-    let cleared = read_exec_core_for_run(&h, &run_id)
+    let cleared = read_exec_core_for_run(&h, &session_id, &run_id)
         .await
         .get("current_waitpoint_id")
         .cloned()
@@ -449,7 +450,7 @@ async fn test_enter_approval_after_prior_approval_creates_fresh_waitpoint() {
         "re-entered approval must return the same run record",
     );
 
-    let second_wp = read_exec_core_for_run(&h, &run_id)
+    let second_wp = read_exec_core_for_run(&h, &session_id, &run_id)
         .await
         .get("current_waitpoint_id")
         .cloned()

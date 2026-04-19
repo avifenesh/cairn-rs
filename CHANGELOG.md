@@ -20,6 +20,23 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- **RFC-011 phase-2 session-scoped execution IDs** — `ExecutionId` for runs
+  and tasks now derives from `session_id + run_id/task_id` via UUID-v5
+  (`session_run_to_execution_id` / `session_task_to_execution_id`), replacing
+  the previous `run_id`/`task_id`-only mints. All runs and tasks within the
+  same session now co-locate on the session's `FlowId` Valkey partition,
+  satisfying RFC-011's `{fp:N}:<uuid>` hash-tag invariant. **Breaking change,
+  flag-day cutover:** any existing execution records in Valkey mint under
+  the old scheme and will be unreachable post-upgrade. **Operator action
+  required:** drain all in-flight runs and flush the FF Valkey namespace
+  before deploying. Trait signatures on `RunService` / `TaskService` now
+  thread `session_id` through all mutation methods (`claim`, `complete`,
+  `fail`, `cancel`, `pause`, `resume`, `heartbeat`); `TaskService::submit`
+  gains a trailing `session_id: Option<&SessionId>` parameter. `BridgeEvent::TaskCreated`
+  gains `session_id: SessionId`. HTTP handlers resolve `session_id` from
+  the store projection (task → parent run → session) on each call; no new
+  round-trips in steady state (the HGETALL already carries the tag).
+
 - **RFC-011 phase-1 mechanical sweep** — FF rev bump `a098710` → `1b19dd10`
   (RFC-011 exec/flow hash-slot co-location, phases 1-3). Consumer-side
   adoptions in cairn-fabric:
