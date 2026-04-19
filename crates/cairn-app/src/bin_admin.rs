@@ -85,6 +85,8 @@ pub(crate) async fn db_status_handler(State(state): State<AppState>) -> Json<DbS
 /// The token registry is shared (same Arc) between the main.rs and lib.rs
 /// routers, so a single revoke+register updates both.
 pub(crate) async fn rotate_token_handler(
+    // T6c-C5: admin-only; AdminRoleGuard fails closed with 403.
+    _admin: cairn_app::extractors::AdminRoleGuard,
     State(state): State<AppState>,
     Json(body): Json<RotateTokenRequest>,
 ) -> impl IntoResponse {
@@ -122,7 +124,11 @@ pub(crate) struct RotateTokenRequest {
     new_token: String,
 }
 
-pub(crate) async fn admin_snapshot_handler(State(state): State<AppState>) -> impl IntoResponse {
+pub(crate) async fn admin_snapshot_handler(
+    // T6c-C5: snapshot exposes the full event log — admin only.
+    _admin: cairn_app::extractors::AdminRoleGuard,
+    State(state): State<AppState>,
+) -> impl IntoResponse {
     let snap = state.runtime.store.dump_events();
     let json = match serde_json::to_vec_pretty(&snap) {
         Ok(b) => b,
@@ -157,7 +163,11 @@ pub(crate) async fn admin_snapshot_handler(State(state): State<AppState>) -> imp
         .into_response()
 }
 
-pub(crate) async fn backup_handler(State(state): State<AppState>) -> impl IntoResponse {
+pub(crate) async fn backup_handler(
+    // T6c-C5: backup copies the DB file — admin only.
+    _admin: cairn_app::extractors::AdminRoleGuard,
+    State(state): State<AppState>,
+) -> impl IntoResponse {
     let Some(sqlite) = state.sqlite.as_ref() else {
         return not_found("SQLite backup is only available when the SQLite backend is active")
             .into_response();
@@ -195,6 +205,8 @@ pub(crate) async fn backup_handler(State(state): State<AppState>) -> impl IntoRe
 /// Clears all in-memory state and replays the uploaded event log. Returns the
 /// count of replayed events. This is irreversible — take a snapshot first.
 pub(crate) async fn admin_restore_handler(
+    // T6c-C5: restore replaces the event log — admin only.
+    _admin: cairn_app::extractors::AdminRoleGuard,
     State(state): State<AppState>,
     axum::Json(snap): axum::Json<cairn_store::snapshot::StoreSnapshot>,
 ) -> impl IntoResponse {
@@ -225,6 +237,8 @@ pub(crate) async fn admin_restore_handler(
 ///
 /// Returns: `{ events_replayed: N, duration_ms: N }`
 pub(crate) async fn rebuild_projections_handler(
+    // T6c-C5: projection rebuild touches every read model — admin only.
+    _admin: cairn_app::extractors::AdminRoleGuard,
     State(state): State<AppState>,
 ) -> impl IntoResponse {
     let t0 = std::time::Instant::now();
@@ -249,7 +263,11 @@ pub(crate) async fn rebuild_projections_handler(
 ///
 /// Useful for a quick health check on event log cardinality and for spotting
 /// unexpected event type distributions.
-pub(crate) async fn event_count_handler(State(state): State<AppState>) -> impl IntoResponse {
+pub(crate) async fn event_count_handler(
+    // T6c-C5: cross-tenant aggregate count — admin only.
+    _admin: cairn_app::extractors::AdminRoleGuard,
+    State(state): State<AppState>,
+) -> impl IntoResponse {
     let events = match state.runtime.store.read_stream(None, usize::MAX).await {
         Ok(v) => v,
         Err(e) => return Err(internal_error(e.to_string())),
@@ -300,6 +318,8 @@ pub(crate) fn default_event_log_limit() -> usize {
 }
 
 pub(crate) async fn admin_event_log_handler(
+    // T6c-C5: raw event log reveals every tenant's payloads — admin only.
+    _admin: cairn_app::extractors::AdminRoleGuard,
     State(state): State<AppState>,
     Query(q): Query<EventLogQuery>,
 ) -> impl IntoResponse {

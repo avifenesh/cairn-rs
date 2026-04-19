@@ -98,10 +98,42 @@ pub(crate) struct AppendResult {
 /// Returns an array of `AppendResult` in the same order as the input.
 pub(crate) async fn append_events_handler(
     State(state): State<AppState>,
+    axum::extract::Extension(principal): axum::extract::Extension<cairn_api::auth::AuthPrincipal>,
     Json(envelopes): Json<Vec<cairn_domain::EventEnvelope<cairn_domain::RuntimeEvent>>>,
 ) -> impl axum::response::IntoResponse {
     if envelopes.is_empty() {
         return Ok((StatusCode::OK, Json(Vec::<AppendResult>::new())));
+    }
+
+    // T6c-C4: raw event-log writes are a privileged operation — an
+    // operator could otherwise forge envelopes owned by any tenant,
+    // bypass state-machine invariants, or inject synthetic audit
+    // trails. Admins write freely; non-admins must own every envelope
+    // they submit (match on `ownership.tenant_id`). System principals
+    // (internal callers) also pass.
+    let is_admin = cairn_app::extractors::is_admin_principal(&principal);
+    if !is_admin {
+        let caller_tenant = principal.tenant().map(|t| t.tenant_id.clone());
+        let Some(caller_tenant) = caller_tenant else {
+            return Err(forbidden("missing tenant scope for event append"));
+        };
+        for envelope in &envelopes {
+            let ownership_tenant = match &envelope.ownership {
+                cairn_domain::tenancy::OwnershipKey::System => None,
+                cairn_domain::tenancy::OwnershipKey::Tenant(k) => Some(&k.tenant_id),
+                cairn_domain::tenancy::OwnershipKey::Workspace(k) => Some(&k.tenant_id),
+                cairn_domain::tenancy::OwnershipKey::Project(k) => Some(&k.tenant_id),
+            };
+            match ownership_tenant {
+                Some(t) if *t == caller_tenant => {}
+                _ => {
+                    return Err(forbidden(format!(
+                        "event {} carries ownership outside caller tenant",
+                        envelope.event_id.as_str(),
+                    )));
+                }
+            }
+        }
     }
 
     let mut results: Vec<AppendResult> = Vec::with_capacity(envelopes.len());

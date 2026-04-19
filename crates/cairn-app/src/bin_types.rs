@@ -58,6 +58,16 @@ pub(crate) fn bad_request(message: impl Into<String>) -> (StatusCode, Json<ApiEr
     )
 }
 
+pub(crate) fn forbidden(message: impl Into<String>) -> (StatusCode, Json<ApiError>) {
+    (
+        StatusCode::FORBIDDEN,
+        Json(ApiError {
+            code: "forbidden",
+            message: message.into(),
+        }),
+    )
+}
+
 // ── Pagination headers ────────────────────────────────────────────────────────
 
 /// Build the four standard pagination response headers.

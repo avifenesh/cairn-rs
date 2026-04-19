@@ -1731,6 +1731,9 @@ pub(crate) async fn orchestrate_run_handler(
                     "message":  message,
                 }),
                 id: None,
+                // NotificationSink has no scope context; keep tenant-agnostic.
+                // Filtering happens in the SSE handler.
+                tenant_id: None,
             };
             let seq = self.seq.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             let mut frame_with_id = frame.clone();

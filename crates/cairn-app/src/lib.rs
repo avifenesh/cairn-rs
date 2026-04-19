@@ -30,6 +30,12 @@ pub mod triggers;
 pub use bootstrap::{parse_args, parse_args_from, run_bootstrap};
 pub use errors::AppApiError;
 
+// T6c-C1/C2: re-export the tenant-scope helper used by the binary-side
+// WebSocket handler (`bin_websocket.rs`) so cross-tenant event fan-out
+// is gated there just like it is on the SSE path. The SSE tenant
+// helper is reached via `cairn_app::handlers::sse::ws_event_tenant_id`.
+pub use extractors::is_admin_principal;
+
 /// T6b-C3: redact the password component of a database connection URL
 /// so startup logs don't leak credentials to journald / CloudWatch.
 ///

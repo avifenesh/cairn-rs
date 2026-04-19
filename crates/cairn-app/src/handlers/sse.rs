@@ -25,8 +25,16 @@ pub(crate) const SSE_BUFFER_CAPACITY: usize = 10_000;
 
 pub(crate) async fn runtime_stream_handler(
     State(state): State<Arc<AppState>>,
+    axum::extract::Extension(principal): axum::extract::Extension<cairn_api::auth::AuthPrincipal>,
     headers: HeaderMap,
 ) -> Sse<impl tokio_stream::Stream<Item = Result<SseEvent, Infallible>>> {
+    // T6c-C1: fan out only frames whose tenant matches the subscriber's
+    // authenticated tenant (or unscoped frames, e.g. `ready`). Admin
+    // principals see every tenant — same semantics as the REST API.
+    let subscriber_tenant: Option<String> =
+        principal.tenant().map(|t| t.tenant_id.as_str().to_owned());
+    let is_admin = crate::extractors::is_admin_principal(&principal);
+
     // Subscribe to the live broadcast BEFORE reading the replay window so no
     // frames can be missed in the gap between replay and live subscription.
     let receiver = state.runtime_sse_tx.subscribe();
@@ -38,17 +46,19 @@ pub(crate) async fn runtime_stream_handler(
         .and_then(|v| v.to_str().ok())
         .and_then(|s| s.parse().ok());
 
-    // Collect all buffered frames after last_seq.
+    // Collect all buffered frames after last_seq, filtered by tenant.
     let replay_frames: Vec<SseFrame> = {
         let buf = state
             .sse_event_buffer
             .read()
-            .expect("sse_event_buffer poisoned");
+            .unwrap_or_else(|e| e.into_inner());
         match last_seq {
             None => vec![],
             Some(after) => buf
                 .iter()
-                .filter(|(seq, _)| *seq > after)
+                .filter(|(seq, frame)| {
+                    *seq > after && frame_visible_to(frame, subscriber_tenant.as_deref(), is_admin)
+                })
                 .map(|(_, frame)| frame.clone())
                 .collect(),
         }
@@ -58,9 +68,16 @@ pub(crate) async fn runtime_stream_handler(
     let replay = tokio_stream::iter(replay_frames)
         .map(|frame| Ok::<SseEvent, Infallible>(sse_event_from_frame(frame)));
 
-    // Live stream: new frames arriving via broadcast.
-    let live = BroadcastStream::new(receiver).filter_map(|message| match message {
-        Ok(frame) => Some(Ok(sse_event_from_frame(frame))),
+    // Live stream: new frames arriving via broadcast, tenant-filtered.
+    let subscriber_tenant_live = subscriber_tenant.clone();
+    let live = BroadcastStream::new(receiver).filter_map(move |message| match message {
+        Ok(frame) => {
+            if frame_visible_to(&frame, subscriber_tenant_live.as_deref(), is_admin) {
+                Some(Ok(sse_event_from_frame(frame)))
+            } else {
+                None
+            }
+        }
         Err(_) => None, // lagged receiver — client will reconnect
     });
 
@@ -71,6 +88,20 @@ pub(crate) async fn runtime_stream_handler(
             .interval(std::time::Duration::from_secs(15))
             .text("ping"),
     )
+}
+
+/// T6c-C1: a frame is visible to a subscriber when (a) the caller is
+/// an admin, (b) the frame is tenant-agnostic (None), or (c) the
+/// frame's tenant matches the subscriber's tenant.
+fn frame_visible_to(frame: &SseFrame, subscriber_tenant: Option<&str>, is_admin: bool) -> bool {
+    if is_admin {
+        return true;
+    }
+    match (frame.tenant_id.as_deref(), subscriber_tenant) {
+        (None, _) => true,
+        (Some(_), None) => false,
+        (Some(ft), Some(st)) => ft == st,
+    }
 }
 
 pub(crate) fn sse_event_from_frame(frame: SseFrame) -> SseEvent {
@@ -128,7 +159,7 @@ pub(crate) async fn publish_runtime_frames_since(
                 let mut buf = state
                     .sse_event_buffer
                     .write()
-                    .expect("sse_event_buffer poisoned");
+                    .unwrap_or_else(|e| e.into_inner());
                 if buf.len() >= SSE_BUFFER_CAPACITY {
                     buf.pop_front();
                 }
@@ -169,5 +200,45 @@ pub(crate) async fn build_runtime_sse_frame(
         }
     }
 
+    // T6c-C1: tag the frame with the originating event's tenant so the
+    // SSE handler can filter fan-out by the subscriber's principal.
+    frame.tenant_id =
+        project_key_from_event(&stored.envelope.payload).map(|pk| pk.tenant_id.as_str().to_owned());
+
     Some(frame)
+}
+
+/// T6c-C2: tenant-id helper for the WebSocket path. Shares the
+/// project-key lookup table with the SSE publisher; returns the
+/// `tenant_id` string so `bin_websocket::handle_ws_connection` can
+/// compare directly against `principal.tenant().tenant_id`.
+pub fn ws_event_tenant_id(payload: &cairn_domain::RuntimeEvent) -> Option<&str> {
+    project_key_from_event(payload).map(|pk| pk.tenant_id.as_str())
+}
+
+/// T6c-C1: extract the ProjectKey from a RuntimeEvent so the SSE
+/// publisher can tag the outgoing frame with its tenant. Returns None
+/// for tenant-agnostic events (if any); those frames broadcast to
+/// every authenticated subscriber.
+fn project_key_from_event(
+    payload: &cairn_domain::RuntimeEvent,
+) -> Option<&cairn_domain::ProjectKey> {
+    use cairn_domain::RuntimeEvent::*;
+    match payload {
+        RunCreated(e) => Some(&e.project),
+        RunStateChanged(e) => Some(&e.project),
+        TaskCreated(e) => Some(&e.project),
+        TaskStateChanged(e) => Some(&e.project),
+        TaskLeaseClaimed(e) => Some(&e.project),
+        ApprovalRequested(e) => Some(&e.project),
+        ApprovalResolved(e) => Some(&e.project),
+        SessionCreated(e) => Some(&e.project),
+        SessionStateChanged(e) => Some(&e.project),
+        MailboxMessageAppended(e) => Some(&e.project),
+        // Extensive — the full match is in `StoredEvent`'s ownership
+        // field. When new variants are added and don't fit the above,
+        // fall through to None (tenant-agnostic) and a CI test catches
+        // the divergence.
+        _ => None,
+    }
 }
