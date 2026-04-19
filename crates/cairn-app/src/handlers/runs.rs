@@ -1438,10 +1438,13 @@ pub(crate) async fn process_scheduled_run_resumes_handler(
     if resumed_count > 0 {
         publish_runtime_frames_since(&state, before).await;
     }
+    // Keep camelCase `resumedCount` for backward compat with the existing
+    // UI + integration test. Add `failures` as a new field so callers can
+    // opt in to per-run error visibility without breaking old parsers.
     (
         StatusCode::OK,
         Json(serde_json::json!({
-            "resumed_count": resumed_count,
+            "resumedCount": resumed_count,
             "failures": failures,
         })),
     )
