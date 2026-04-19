@@ -181,7 +181,9 @@ impl GatherPhase for StandardGatherPhase {
             graph_nodes,
             operator_settings,
             checkpoint,
-            step_history: vec![],
+            // T5-H1: surface the loop-maintained step history so
+            // LlmDecidePhase::build_user_message sees prior steps.
+            step_history: ctx.step_history.clone(),
         })
     }
 }

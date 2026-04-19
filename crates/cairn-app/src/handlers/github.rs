@@ -283,6 +283,7 @@ pub(crate) async fn webhook_trigger_orchestration(
         working_dir,
         run_mode: cairn_domain::decisions::RunMode::default(),
         discovered_tool_names: vec![],
+        step_history: vec![],
     };
 
     let model_id = {

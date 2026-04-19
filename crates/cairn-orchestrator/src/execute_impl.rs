@@ -52,9 +52,8 @@ pub struct RuntimeExecutePhase {
     checkpoint_service: Arc<dyn CheckpointService>,
     mailbox_service: Arc<dyn MailboxService>,
     tool_invocation_service: Arc<dyn ToolInvocationService>,
-    /// Registered built-in tools (memory_search, memory_store, …).
-    /// When `Some`, tool names are looked up here before falling back to the
-    /// stub dispatcher.
+    /// Registered built-in tools (memory_search, memory_store, …). Required
+    /// for tool dispatch; absent means every `InvokeTool` proposal fails loud.
     tool_registry: Option<Arc<BuiltinToolRegistry>>,
     /// Decision service for pre-dispatch policy evaluation (RFC 019).
     decision_service: Option<Arc<dyn DecisionService>>,
@@ -62,6 +61,11 @@ pub struct RuntimeExecutePhase {
     checkpoint_every_n_tool_calls: u32,
     /// Maximum size of tool output copied back into the LLM context.
     tool_output_token_limit: usize,
+    /// T5-H2: tool-call counter is cumulative across iterations so the
+    /// `checkpoint_every_n_tool_calls` cadence honours its name. A
+    /// per-iteration local counter never triggers when each iteration
+    /// contains a single tool call.
+    tool_call_count: std::sync::atomic::AtomicU32,
 }
 
 impl RuntimeExecutePhase {
@@ -143,6 +147,7 @@ impl RuntimeExecutePhaseBuilder {
             decision_service: self.decision_service,
             checkpoint_every_n_tool_calls: self.checkpoint_every_n_tool_calls.max(1),
             tool_output_token_limit: self.tool_output_token_limit.unwrap_or(2000),
+            tool_call_count: std::sync::atomic::AtomicU32::new(0),
         }
     }
 }
@@ -157,20 +162,13 @@ impl ExecutePhase for RuntimeExecutePhase {
         decide: &DecideOutput,
     ) -> Result<ExecuteOutcome, OrchestratorError> {
         let mut results: Vec<ActionResult> = Vec::with_capacity(decide.proposals.len());
-        let mut tool_call_count: u32 = 0;
         let mut loop_signal = LoopSignal::Continue;
 
         for proposal in &decide.proposals {
-            // Wrap the per-proposal dispatch so each ActionResult carries its
-            // own wall-clock duration rather than the loop re-computing a
-            // (averaged) value from the full `execute` wall-clock later.
-            // `dispatch_one` initialises `duration_ms: 0` at every return
-            // site; we overwrite with the real elapsed here. 0 stays only
-            // for results synthesised by tests that bypass this path.
+            // Per-proposal wall-clock; `dispatch_one` initialises
+            // `duration_ms: 0` and we overwrite with the real elapsed.
             let started_at = std::time::Instant::now();
-            let mut result = self
-                .dispatch_one(ctx, proposal, &mut tool_call_count)
-                .await?;
+            let mut result = self.dispatch_one(ctx, proposal).await?;
             result.duration_ms = started_at.elapsed().as_millis() as u64;
 
             // Capture any terminal loop signal from this action before pushing.
@@ -204,12 +202,68 @@ impl RuntimeExecutePhase {
         &self,
         ctx: &OrchestrationContext,
         proposal: &cairn_domain::ActionProposal,
-        tool_call_count: &mut u32,
     ) -> Result<ActionResult, OrchestratorError> {
         match proposal.action_type {
             // ── InvokeTool ─────────────────────────────────────────────────
             ActionType::InvokeTool => {
                 let tool_name = proposal.tool_name.clone().unwrap_or_default();
+
+                // T5-C1: approval gate MUST short-circuit before record_start
+                // or registry.execute_with_context. A proposal with
+                // requires_approval=true represents an operator-review
+                // decision; running the tool first and then reporting
+                // AwaitingApproval to the loop runner bypasses the gate.
+                if proposal.requires_approval {
+                    let approval_id = ApprovalId::new(new_id("appr"));
+                    let title = Some(format!("Agent requests approval for tool: {}", tool_name));
+                    let description = {
+                        let mut desc = format!(
+                            "**Run:** `{}`\n**Goal:** {}\n\n**Agent says:**\n{}\n\n**Tool:** `{}`",
+                            ctx.run_id.as_str(),
+                            ctx.goal,
+                            proposal.description,
+                            tool_name,
+                        );
+                        if let Some(ref args) = proposal.tool_args {
+                            let args_str = serde_json::to_string_pretty(args).unwrap_or_default();
+                            if args_str.len() < 2000 {
+                                desc.push_str(&format!("\n**Args:**\n```json\n{}\n```", args_str));
+                            }
+                        }
+                        Some(desc)
+                    };
+                    return match self
+                        .approval_service
+                        .request_with_context(
+                            &ctx.project,
+                            approval_id.clone(),
+                            Some(ctx.run_id.clone()),
+                            ctx.task_id.clone(),
+                            ApprovalRequirement::Required,
+                            title,
+                            description,
+                        )
+                        .await
+                    {
+                        Ok(_) => Ok(ActionResult {
+                            proposal: proposal.clone(),
+                            status: ActionStatus::AwaitingApproval { approval_id },
+                            tool_output: None,
+                            invocation_id: None,
+                            duration_ms: 0,
+                        }),
+                        Err(e) => Ok(ActionResult {
+                            proposal: proposal.clone(),
+                            status: ActionStatus::Failed {
+                                reason: e.to_string(),
+                            },
+                            tool_output: None,
+                            invocation_id: None,
+                            duration_ms: 0,
+                        }),
+                    };
+                }
+
                 let inv_id = ToolInvocationId::new(new_id("inv"));
 
                 self.tool_invocation_service
@@ -277,8 +331,18 @@ impl RuntimeExecutePhase {
                                 });
                             }
                         }
-                        Err(_) => {
-                            // Decision service error — fail open (allow).
+                        Err(e) => {
+                            // Decision service error — fail open (allow) but
+                            // log so the failure is observable. A silent
+                            // fail-open on a security-critical policy
+                            // evaluator (RFC 019) would remove the guard
+                            // without telemetry.
+                            tracing::warn!(
+                                error = %e,
+                                tool = %tool_name,
+                                run_id = %ctx.run_id,
+                                "decision service error — failing open"
+                            );
                         }
                     }
                 }
@@ -293,11 +357,12 @@ impl RuntimeExecutePhase {
                     &ctx.working_dir,
                     proposal.tool_args.clone(),
                 );
-                let tool_output_result = if let Some(ref registry) = self.tool_registry {
-                    // Look up the tool in the built-in registry.
-                    // `execute_with_context()` returns Result<ToolResult, ToolError>; map to
-                    // the flat Result<Value, String> expected below.
-                    registry
+                // T5-H5: tool_registry is required — no silent-Ok stub. If
+                // someone forgot to wire a registry, every tool invocation
+                // must fail loud rather than synthesise a fake success for
+                // mutating actions (write_document, http_post, send_message).
+                let tool_output_result = match self.tool_registry.as_ref() {
+                    Some(registry) => registry
                         .execute_with_context(
                             &tool_name,
                             &ctx.project,
@@ -306,9 +371,11 @@ impl RuntimeExecutePhase {
                         )
                         .await
                         .map(|r| r.output)
-                        .map_err(|e| e.to_string())
-                } else {
-                    dispatch_tool(&tool_name, Some(&tool_args))
+                        .map_err(|e| e.to_string()),
+                    None => Err(format!(
+                        "tool_registry not wired — cannot dispatch tool `{}`",
+                        tool_name
+                    )),
                 };
 
                 match tool_output_result {
@@ -323,8 +390,13 @@ impl RuntimeExecutePhase {
                             .await
                             .map_err(OrchestratorError::Runtime)?;
 
-                        *tool_call_count += 1;
-                        if (*tool_call_count).is_multiple_of(self.checkpoint_every_n_tool_calls) {
+                        // T5-H2: counter is cumulative across iterations.
+                        // fetch_add returns the pre-increment value; add 1.
+                        let n = self
+                            .tool_call_count
+                            .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+                            + 1;
+                        if n.is_multiple_of(self.checkpoint_every_n_tool_calls) {
                             let cp_id = CheckpointId::new(new_id("cp"));
                             self.checkpoint_service
                                 .save(&ctx.project, &ctx.run_id, cp_id)
@@ -585,28 +657,6 @@ fn first_failure_reason(results: &[ActionResult]) -> Option<String> {
     })
 }
 
-// ── Built-in tool dispatch stub ───────────────────────────────────────────────
-
-/// Dispatch a built-in tool call.
-///
-/// For v1 this returns a stub observation for known tools.  A real
-/// implementation looks up a `ToolRegistry` / `PluginHost`.
-fn dispatch_tool(
-    tool_name: &str,
-    args: Option<&serde_json::Value>,
-) -> Result<serde_json::Value, String> {
-    match tool_name {
-        "search_memory" | "read_document" | "write_document" | "send_message" | "list_tasks"
-        | "http_get" | "http_post" => Ok(serde_json::json!({
-            "tool":   tool_name,
-            "args":   args,
-            "result": null,
-            "note":   "stub — real dispatch not yet wired"
-        })),
-        other => Err(format!("unknown tool: {other}")),
-    }
-}
-
 // ── ID generation ─────────────────────────────────────────────────────────────
 
 fn new_id(prefix: &str) -> String {
@@ -748,6 +798,7 @@ mod tests {
     /// immediately visible across services.
     fn make_phase(svc: &Arc<InMemoryServices>) -> RuntimeExecutePhase {
         let store = svc.store.clone();
+        let registry = BuiltinToolRegistry::new().register(Arc::new(SearchMemoryStub));
         RuntimeExecutePhase::builder()
             .run_service(Arc::new(RunServiceImpl::new(store.clone())))
             .task_service(Arc::new(TaskServiceImpl::new(store.clone())))
@@ -755,6 +806,7 @@ mod tests {
             .checkpoint_service(Arc::new(CheckpointServiceImpl::new(store.clone())))
             .mailbox_service(Arc::new(MailboxServiceImpl::new(store.clone())))
             .tool_invocation_service(Arc::new(ToolInvocationServiceImpl::new(store)))
+            .tool_registry(Arc::new(registry))
             .checkpoint_every_n_tool_calls(1)
             .build()
     }
@@ -772,6 +824,7 @@ mod tests {
             working_dir: PathBuf::from("."),
             run_mode: cairn_domain::decisions::RunMode::Direct,
             discovered_tool_names: vec![],
+            step_history: vec![],
         }
     }
 
@@ -785,6 +838,37 @@ mod tests {
             latency_ms: 0,
             input_tokens: None,
             output_tokens: None,
+        }
+    }
+
+    /// Minimal test stand-in for the real `search_memory` tool. Exists so the
+    /// dispatcher tests exercise the real registry path (T5-H5 removed the
+    /// implicit stub fallback).
+    struct SearchMemoryStub;
+
+    #[async_trait::async_trait]
+    impl ToolHandler for SearchMemoryStub {
+        fn name(&self) -> &str {
+            "search_memory"
+        }
+        fn tier(&self) -> ToolTier {
+            ToolTier::Core
+        }
+        fn description(&self) -> &str {
+            "Stubbed search_memory for orchestrator execute tests."
+        }
+        fn parameters_schema(&self) -> Value {
+            serde_json::json!({
+                "type": "object",
+                "properties": { "q": { "type": "string" } }
+            })
+        }
+        async fn execute(&self, _: &ProjectKey, args: Value) -> Result<ToolResult, ToolError> {
+            Ok(ToolResult::ok(serde_json::json!({
+                "tool": "search_memory",
+                "args": args,
+                "result": null
+            })))
         }
     }
 

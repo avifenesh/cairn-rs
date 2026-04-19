@@ -763,14 +763,11 @@ fn parse_one(v: serde_json::Value) -> Option<ActionProposal> {
     })
 }
 
-/// Returns true when `proposals` is exactly a single `EscalateToOperator`
-/// whose description starts with "LLM returned a non-JSON response" —
-/// i.e. the fallback we emit on parse failure.
 /// Return `true` when an action proposal is inherently safe (read-only) and
 /// should never require approval, regardless of what the model returned.
 ///
 /// Models sometimes over-cautiously set `requires_approval=true` for memory
-/// searches or HTTP GETs.  This guard corrects that before the approval gate.
+/// searches or HTTP GETs. This guard corrects that before the approval gate.
 fn is_safe_read_action(proposal: &ActionProposal) -> bool {
     use ActionType::{CompleteRun, CreateMemory, InvokeTool};
     match proposal.action_type {
@@ -802,6 +799,9 @@ fn is_safe_read_action(proposal: &ActionProposal) -> bool {
     }
 }
 
+/// Returns true when `proposals` is the zero-confidence single-action
+/// fallback the decide phase emits on parse failure (one
+/// `EscalateToOperator` with `confidence == 0.0`).
 fn is_fallback_escalation(proposals: &[ActionProposal]) -> bool {
     proposals.len() == 1
         && proposals[0].action_type == ActionType::EscalateToOperator
@@ -884,6 +884,7 @@ mod tests {
             working_dir: PathBuf::from("."),
             run_mode: cairn_domain::decisions::RunMode::Direct,
             discovered_tool_names: vec![],
+            step_history: vec![],
         }
     }
 

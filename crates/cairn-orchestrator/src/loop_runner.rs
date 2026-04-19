@@ -82,6 +82,12 @@ impl CheckpointHook for NoOpCheckpointHook {
     }
 }
 
+/// Reason string carried on `LoopTermination::Failed` when the loop
+/// aborts because the underlying FF lease renewal failed 3+ times.
+/// Downstream code (handler error-mapping, FF `fail_with_retry`) matches
+/// on this exact string — use the const to avoid typo-driven breakage.
+pub const LEASE_UNHEALTHY_REASON: &str = "lease unhealthy";
+
 // ── OrchestratorLoop ──────────────────────────────────────────────────────────
 
 /// Drives the GATHER → DECIDE → EXECUTE loop for a single run.
@@ -175,12 +181,15 @@ where
     ) -> Result<LoopTermination, OrchestratorError> {
         self.emitter.on_started(&ctx).await;
         let result = self.run_inner(&mut ctx).await;
-        // Emit on_finished for every terminal outcome (Ok or infrastructure Err).
+        // Emit on_finished for every terminal outcome. For the Err branch
+        // propagate the underlying OrchestratorError's Display string so
+        // dashboards see the real cause (e.g. "decide: model 404",
+        // "memory: kb unavailable") rather than "infrastructure error".
         match &result {
             Ok(t) => self.emitter.on_finished(&ctx, t).await,
-            Err(_) => {
+            Err(e) => {
                 let term = LoopTermination::Failed {
-                    reason: "infrastructure error".to_owned(),
+                    reason: e.to_string(),
                 };
                 self.emitter.on_finished(&ctx, &term).await;
             }
@@ -235,7 +244,7 @@ where
                     "lease unhealthy (3+ renewal failures) — aborting loop"
                 );
                 return Ok(LoopTermination::Failed {
-                    reason: "lease unhealthy".to_owned(),
+                    reason: LEASE_UNHEALTHY_REASON.to_owned(),
                 });
             }
 
@@ -249,6 +258,11 @@ where
             );
 
             // ── (2) GATHER ────────────────────────────────────────────────────
+            // T5-H1: surface the loop-maintained step_history so
+            // `StandardGatherPhase::gather` threads it into `GatherOutput.step_history`
+            // and `LlmDecidePhase::build_user_message` can render prior
+            // iterations into the LLM context.
+            ctx.step_history = step_history.clone();
             let gather_output = self.gather.gather(ctx).await.map_err(|e| {
                 tracing::error!(run_id = %ctx.run_id, iteration = ctx.iteration, error = %e, "gather failed");
                 e
@@ -392,13 +406,35 @@ where
                     }
                 }
 
-                let outcome = self.execute.execute(ctx, &decide_output).await.map_err(|e| {
+                let execute_outcome = self.execute.execute(ctx, &decide_output).await.map_err(|e| {
                     tracing::error!(run_id = %ctx.run_id, error = %e, "execute (approval gate) failed");
                     e
                 })?;
 
+                // T5-M8: mirror the main-path post-execute bookkeeping so
+                // resuming from a checkpointed approval-suspended run sees a
+                // step_summary, a persisted checkpoint, and a step_completed
+                // emission for this iteration.
+                let step_summary = build_step_summary(ctx, &decide_output, &execute_outcome);
+                step_history.push(step_summary);
+                if let Err(e) = self
+                    .checkpoint_hook
+                    .save(ctx, &gather_output, &decide_output, &execute_outcome)
+                    .await
+                {
+                    tracing::warn!(
+                        run_id = %ctx.run_id,
+                        iteration = ctx.iteration,
+                        error = %e,
+                        "approval gate: checkpoint save failed — continuing without checkpoint"
+                    );
+                }
+                self.emitter
+                    .on_step_completed(ctx, &decide_output, &execute_outcome)
+                    .await;
+
                 // The execute phase returns AwaitingApproval for the relevant action.
-                for result in &outcome.results {
+                for result in &execute_outcome.results {
                     if let ActionStatus::AwaitingApproval { approval_id } = &result.status {
                         tracing::info!(
                             run_id      = %ctx.run_id,
@@ -482,18 +518,26 @@ where
             // NOT "zero time." Downstream consumers MUST treat 0 as no-signal.
             // The `ActionResult.duration_ms` rustdoc is the canonical reference.
             for result in &execute_outcome.results {
-                let tool_name = result
-                    .proposal
-                    .tool_name
-                    .as_deref()
-                    .unwrap_or(result.proposal.description.as_str());
+                // T5-M4: only emit tool_called/tool_result for proposals
+                // that actually carry a tool_name. CompleteRun /
+                // EscalateToOperator / CreateMemory have no tool_name and
+                // previously leaked `tool_name = description` (e.g.
+                // `"all done"`) into the SSE stream, producing a misleading
+                // tool-call timeline.
+                let Some(tool_name) = result.proposal.tool_name.as_deref() else {
+                    continue;
+                };
                 self.emitter
                     .on_tool_called(ctx, tool_name, result.proposal.tool_args.as_ref())
                     .await;
                 let (succeeded, error) = match &result.status {
                     ActionStatus::Succeeded => (true, None),
                     ActionStatus::Failed { reason } => (false, Some(reason.as_str())),
-                    _ => (true, None),
+                    // AwaitingApproval / SubagentSpawned are not
+                    // success/failure terminal states for the tool; report
+                    // succeeded=false without an error string so the
+                    // dashboard doesn't claim the tool ran.
+                    _ => (false, None),
                 };
                 self.emitter
                     .on_tool_result(
@@ -569,11 +613,11 @@ where
             }
 
             // ── (6b) FF stream: checkpoint frame ─────────────────────────────
-            // Matches the write half of PR #27's `restore_frames()` read path.
-            // Serializes the per-iteration context snapshot (iteration number,
-            // run/session ids, the step summary just pushed, and the
-            // loop_signal) as JSON and appends it as a `checkpoint` frame on
-            // the attempt stream. A cross-process resumer reads the stream
+            // Write half of the `restore_frames()` read path. Serializes the
+            // per-iteration context snapshot (iteration number, run/session
+            // ids, the step summary just pushed, and the loop_signal) as
+            // JSON and appends it as a `checkpoint` frame on the attempt
+            // stream. A cross-process resumer reads the stream
             // via `restore_frames()` and rebuilds enough context to pick up
             // where the previous attempt left off.
             //
@@ -992,6 +1036,7 @@ mod tests {
             working_dir: PathBuf::from("."),
             run_mode: cairn_domain::decisions::RunMode::Direct,
             discovered_tool_names: vec![],
+            step_history: vec![],
         }
     }
 
