@@ -425,6 +425,13 @@ fn field_str(arr: &[Result<ferriskey::Value, ferriskey::Error>], index: usize) -
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ff_core::partition::PartitionConfig;
+    use ff_core::types::LaneId;
+
+    fn test_eid(seed: &str) -> ExecutionId {
+        let uuid = uuid::Uuid::new_v5(&uuid::Uuid::NAMESPACE_DNS, seed.as_bytes());
+        ExecutionId::deterministic_solo(&LaneId::new("test"), &PartitionConfig::default(), uuid)
+    }
 
     #[test]
     fn spend_result_ok_variant() {
@@ -453,7 +460,7 @@ mod tests {
     #[test]
     fn idempotency_key_stable_for_same_inputs() {
         let bid = BudgetId::new();
-        let eid = ExecutionId::new();
+        let eid = test_eid("stable");
         let k1 = compute_spend_idempotency_key(&bid, &eid, &[("tokens", 50)]);
         let k2 = compute_spend_idempotency_key(&bid, &eid, &[("tokens", 50)]);
         assert_eq!(k1, k2);
@@ -464,7 +471,7 @@ mod tests {
     #[test]
     fn idempotency_key_differs_when_inputs_change() {
         let bid = BudgetId::new();
-        let eid = ExecutionId::new();
+        let eid = test_eid("differs");
         let k_tokens = compute_spend_idempotency_key(&bid, &eid, &[("tokens", 50)]);
         let k_cost = compute_spend_idempotency_key(&bid, &eid, &[("cost", 50)]);
         let k_amount = compute_spend_idempotency_key(&bid, &eid, &[("tokens", 51)]);
@@ -475,7 +482,7 @@ mod tests {
     #[test]
     fn idempotency_key_order_independent_for_same_dimension_set() {
         let bid = BudgetId::new();
-        let eid = ExecutionId::new();
+        let eid = test_eid("order");
         let k_ab = compute_spend_idempotency_key(&bid, &eid, &[("a", 1), ("b", 2)]);
         let k_ba = compute_spend_idempotency_key(&bid, &eid, &[("b", 2), ("a", 1)]);
         assert_eq!(k_ab, k_ba);
@@ -484,8 +491,8 @@ mod tests {
     #[test]
     fn idempotency_key_isolates_execution() {
         let bid = BudgetId::new();
-        let eid1 = ExecutionId::new();
-        let eid2 = ExecutionId::new();
+        let eid1 = test_eid("exec1");
+        let eid2 = test_eid("exec2");
         let k1 = compute_spend_idempotency_key(&bid, &eid1, &[("tokens", 50)]);
         let k2 = compute_spend_idempotency_key(&bid, &eid2, &[("tokens", 50)]);
         assert_ne!(k1, k2);
@@ -495,7 +502,7 @@ mod tests {
     fn idempotency_key_isolates_budget() {
         let b1 = BudgetId::new();
         let b2 = BudgetId::new();
-        let eid = ExecutionId::new();
+        let eid = test_eid("budget_iso");
         let k1 = compute_spend_idempotency_key(&b1, &eid, &[("tokens", 50)]);
         let k2 = compute_spend_idempotency_key(&b2, &eid, &[("tokens", 50)]);
         assert_ne!(k1, k2);
@@ -506,7 +513,7 @@ mod tests {
         // Null-byte delimiters prevent "a:b"+"c" vs "a"+"b:c" style collisions,
         // same pattern id_map.rs guards against.
         let bid = BudgetId::new();
-        let eid = ExecutionId::new();
+        let eid = test_eid("delim");
         let k1 = compute_spend_idempotency_key(&bid, &eid, &[("a:b", 1), ("c", 2)]);
         let k2 = compute_spend_idempotency_key(&bid, &eid, &[("a", 1), ("b:c", 2)]);
         assert_ne!(k1, k2);
