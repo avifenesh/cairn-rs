@@ -57,15 +57,6 @@ impl<Q: BindingQuery> SimpleRouteResolver<Q> {
     }
 }
 
-// Allow constructing SimpleRouteResolver with two identical args (store acts as both BindingQuery source).
-// Used by tests that pass (store, store) to the constructor.
-impl<Q: BindingQuery + Clone> SimpleRouteResolver<Q> {
-    #[allow(dead_code)]
-    pub fn with_store(bindings: Q, _store: Q) -> Self {
-        Self { bindings }
-    }
-}
-
 // Implement BindingQuery for Arc<InMemoryStore> so tests can pass the store directly.
 #[cfg(test)]
 mod inmemory_binding_query {
@@ -209,7 +200,7 @@ pub struct RankedBinding {
 /// Resolver that tries bindings in rank order, performing capability checks and
 /// recording a `RouteAttemptRecord` for every candidate considered.
 ///
-/// Mirrors `cairn/internal/llm/registry.go` `WithRetryAndFallback`:
+/// Retry-and-fallback semantics:
 /// - Iterates through ranked bindings left-to-right.
 /// - Skips (Vetoed) any binding whose `required_capabilities` are not met.
 /// - Selects the first binding that passes capability checks.

@@ -97,7 +97,7 @@ impl ProviderHealthTracker {
 
     /// Record a successful provider call.
     pub fn record_success(&self, connection_id: &ProviderConnectionId, latency_ms: u64) {
-        let mut map = self.stats.write().unwrap();
+        let mut map = self.stats.write().unwrap_or_else(|e| e.into_inner());
         let entry = map
             .entry(connection_id.clone())
             .or_insert_with(ProviderHealthStats::new);
@@ -114,7 +114,7 @@ impl ProviderHealthTracker {
         latency_ms: u64,
         error: String,
     ) {
-        let mut map = self.stats.write().unwrap();
+        let mut map = self.stats.write().unwrap_or_else(|e| e.into_inner());
         let entry = map
             .entry(connection_id.clone())
             .or_insert_with(ProviderHealthStats::new);
@@ -127,7 +127,7 @@ impl ProviderHealthTracker {
 
     /// Snapshot current stats for a provider. Returns `None` if never tracked.
     pub fn get(&self, connection_id: &ProviderConnectionId) -> Option<ProviderHealthStats> {
-        let map = self.stats.read().unwrap();
+        let map = self.stats.read().unwrap_or_else(|e| e.into_inner());
         map.get(connection_id).cloned()
     }
 
@@ -136,7 +136,7 @@ impl ProviderHealthTracker {
     /// A provider is unhealthy when it has 3+ consecutive failures OR
     /// its success rate drops below 50% (with at least 10 calls recorded).
     pub fn is_healthy(&self, connection_id: &ProviderConnectionId) -> bool {
-        let map = self.stats.read().unwrap();
+        let map = self.stats.read().unwrap_or_else(|e| e.into_inner());
         match map.get(connection_id) {
             None => true, // unknown = assume healthy
             Some(stats) => {
@@ -154,7 +154,7 @@ impl ProviderHealthTracker {
 
     /// Snapshot all tracked providers.
     pub fn all(&self) -> HashMap<ProviderConnectionId, ProviderHealthStats> {
-        self.stats.read().unwrap().clone()
+        self.stats.read().unwrap_or_else(|e| e.into_inner()).clone()
     }
 }
 

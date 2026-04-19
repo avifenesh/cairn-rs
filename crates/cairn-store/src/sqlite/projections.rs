@@ -50,9 +50,15 @@ impl SqliteSyncProjection {
 
         match &event.envelope.payload {
             RuntimeEvent::SessionCreated(e) => {
+                // Idempotent: a second SessionCreated event for the same id
+                // must not blow up the transaction. The event log is the
+                // durable source of truth; the projection is derived and
+                // should tolerate duplicates (mirrors PG's ON CONFLICT
+                // DO NOTHING shape). Matches pg/projections.rs.
                 sqlx::query(
                     "INSERT INTO sessions (session_id, tenant_id, workspace_id, project_id, state, version, created_at, updated_at)
-                     VALUES (?, ?, ?, ?, 'open', 1, ?, ?)",
+                     VALUES (?, ?, ?, ?, 'open', 1, ?, ?)
+                     ON CONFLICT(session_id) DO NOTHING",
                 )
                 .bind(e.session_id.as_str())
                 .bind(e.project.tenant_id.as_str())

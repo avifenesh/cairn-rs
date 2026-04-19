@@ -294,7 +294,7 @@ pub(crate) async fn create_tenant_handler(
     {
         Ok(record) => match state
             .runtime
-            .audit
+            .audits
             .record(
                 record.tenant_id.clone(),
                 audit_actor_id(&principal),

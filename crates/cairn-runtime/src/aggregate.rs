@@ -88,15 +88,13 @@ pub struct InMemoryServices {
 
     // ── Observability ──────────────────────────────────────────────────────
     //
-    // Recovery is NOT on this struct. FF's 14 background scanners
+    // Recovery is NOT on this struct. FF's background scanners
     // (DelayedPromoter, LeaseExpiryScanner, AttemptTimeoutScanner,
     // ExecutionDeadlineScanner, SuspensionTimeoutScanner,
     // PendingWaitpointExpiryScanner, BudgetResetScanner, BudgetReconciler,
     // QuotaReconciler, DependencyReconciler, FlowProjector,
     // IndexReconciler, RetentionTrimmer, UnblockScanner) own recovery
-    // unconditionally — on either cargo feature path, there is no
-    // cairn-side recovery sweep worth running. The pre-Fabric
-    // `RecoveryServiceImpl` was removed in the finalization round.
+    // unconditionally. This crate holds no recovery sweep.
     pub observability: LlmObservabilityServiceImpl<InMemoryStore>,
 
     // ── Provider & routing ─────────────────────────────────────────────────
@@ -123,8 +121,6 @@ pub struct InMemoryServices {
     pub operator_profiles: OperatorProfileServiceImpl<InMemoryStore>,
     pub workspace_memberships: WorkspaceMembershipServiceImpl<InMemoryStore>,
     pub audits: AuditServiceImpl<InMemoryStore>,
-    /// Alias for audits — cairn-app uses this name.
-    pub audit: AuditServiceImpl<InMemoryStore>,
     pub tool_invocations: crate::services::ToolInvocationServiceImpl<InMemoryStore>,
 
     // ── Resource sharing ──────────────────────────────────────────────────
@@ -231,7 +227,6 @@ impl InMemoryServices {
             operator_profiles: OperatorProfileServiceImpl::new(store.clone()),
             workspace_memberships: WorkspaceMembershipServiceImpl::new(store.clone()),
             audits: AuditServiceImpl::new(store.clone()),
-            audit: AuditServiceImpl::new(store.clone()),
             tool_invocations: ToolInvocationServiceImpl::new(store.clone()),
             resource_sharing: ResourceSharingServiceImpl::new(store.clone()),
             fabric: None,

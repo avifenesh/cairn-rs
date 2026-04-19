@@ -41,7 +41,10 @@ impl PluginEventRouter {
     /// This is in addition to subscriptions registered via the capability
     /// registry. Useful for dynamic subscription changes.
     pub fn subscribe(&self, plugin_id: &str, event_type: &str) {
-        let mut subs = self.subscriptions.write().unwrap();
+        let mut subs = self
+            .subscriptions
+            .write()
+            .unwrap_or_else(|e| e.into_inner());
         subs.entry(event_type.to_owned())
             .or_default()
             .insert(plugin_id.to_owned());
@@ -49,7 +52,10 @@ impl PluginEventRouter {
 
     /// Remove an explicit subscription.
     pub fn unsubscribe(&self, plugin_id: &str, event_type: &str) {
-        let mut subs = self.subscriptions.write().unwrap();
+        let mut subs = self
+            .subscriptions
+            .write()
+            .unwrap_or_else(|e| e.into_inner());
         if let Some(set) = subs.get_mut(event_type) {
             set.remove(plugin_id);
             if set.is_empty() {
@@ -60,7 +66,10 @@ impl PluginEventRouter {
 
     /// Remove all subscriptions for a plugin (on stop/uninstall).
     pub fn unsubscribe_all(&self, plugin_id: &str) {
-        let mut subs = self.subscriptions.write().unwrap();
+        let mut subs = self
+            .subscriptions
+            .write()
+            .unwrap_or_else(|e| e.into_inner());
         subs.retain(|_, set| {
             set.remove(plugin_id);
             !set.is_empty()
@@ -80,7 +89,7 @@ impl PluginEventRouter {
         }
 
         // From explicit subscriptions.
-        let subs = self.subscriptions.read().unwrap();
+        let subs = self.subscriptions.read().unwrap_or_else(|e| e.into_inner());
         if let Some(set) = subs.get(event_type) {
             for id in set {
                 result.insert(id.clone());

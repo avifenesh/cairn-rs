@@ -222,7 +222,7 @@ mod tests {
             .await
             .unwrap();
 
-        let resolver = SimpleRouteResolver::with_store(store.clone(), store.clone());
+        let resolver = SimpleRouteResolver::new(store.clone());
         let err = resolver
             .resolve(
                 &project,

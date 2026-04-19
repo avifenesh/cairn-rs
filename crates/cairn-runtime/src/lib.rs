@@ -60,7 +60,6 @@ pub mod signal_routing;
 pub mod signals;
 pub mod skill_catalog;
 pub mod soul_guard;
-pub mod spend_alert;
 pub mod startup;
 pub mod tasks;
 pub mod telemetry;

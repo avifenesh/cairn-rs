@@ -74,7 +74,11 @@ where
         let now = now_ms();
         let elapsed_ms = now.saturating_sub(run.created_at);
         let target_ms = config.target_completion_ms;
-        let percent_used = elapsed_ms
+        // T3-M8: cap elapsed at 10x the target before computing percent_used
+        // so `elapsed * 100` never saturates at u64::MAX — pre-fix a historic
+        // run older than ~6 years fed garbage into any percentile/dashboard.
+        let capped_elapsed = elapsed_ms.min(target_ms.saturating_mul(10));
+        let percent_used = capped_elapsed
             .saturating_mul(100)
             .checked_div(target_ms)
             .unwrap_or(u64::MAX);
@@ -88,15 +92,27 @@ where
     }
 
     async fn check_and_breach(&self, run_id: &RunId) -> Result<bool, RuntimeError> {
-        let status = self.check_sla(run_id).await?;
-        if status.on_track {
-            return Ok(false);
-        }
+        // T3-M8 + Gemini review follow-up: read the run, SLA config, and
+        // existing breach in parallel rather than calling `check_sla`
+        // which would re-fetch both. Pre-fix (and pre-T3-M8) the naive
+        // composition did 4 reads for one operation.
+        let run = RunReadModel::get(self.store.as_ref(), run_id)
+            .await?
+            .ok_or_else(|| RuntimeError::NotFound {
+                entity: "run",
+                id: run_id.to_string(),
+            })?;
 
-        // Already breached — check if we already emitted the event
-        let existing = RunSlaReadModel::get_breach(self.store.as_ref(), run_id).await?;
-        if existing.is_some() {
-            return Ok(false); // idempotent
+        // Only in-flight runs can newly breach. Terminal runs replayed
+        // through this path (event replay, projection rebuild) would
+        // otherwise be marked as breached because their historical
+        // `created_at` is always far enough in the past to fail
+        // `elapsed < target`.
+        if matches!(
+            run.state,
+            RunState::Completed | RunState::Failed | RunState::Canceled
+        ) {
+            return Ok(false);
         }
 
         let config = RunSlaReadModel::get_sla(self.store.as_ref(), run_id)
@@ -106,12 +122,25 @@ where
                 id: run_id.to_string(),
             })?;
 
+        let now = now_ms();
+        let elapsed_ms = now.saturating_sub(run.created_at);
+        let target_ms = config.target_completion_ms;
+        if elapsed_ms < target_ms {
+            return Ok(false); // on track
+        }
+
+        // Breached — but do we already have a breach event?
+        let existing = RunSlaReadModel::get_breach(self.store.as_ref(), run_id).await?;
+        if existing.is_some() {
+            return Ok(false); // idempotent
+        }
+
         let event = make_envelope(RuntimeEvent::RunSlaBreached(RunSlaBreached {
             run_id: run_id.clone(),
             tenant_id: config.tenant_id.clone(),
-            elapsed_ms: status.elapsed_ms,
-            target_ms: status.target_ms,
-            breached_at_ms: now_ms(),
+            elapsed_ms,
+            target_ms,
+            breached_at_ms: now,
         }));
         self.store.append(&[event]).await?;
         Ok(true)

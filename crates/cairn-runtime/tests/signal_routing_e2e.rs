@@ -132,12 +132,17 @@ async fn ingest_and_route_creates_mailbox_message() {
         result.routed_count, 1,
         "one subscription should receive the signal"
     );
-    assert_eq!(
-        result.mailbox_message_ids,
-        vec![MailboxMessageId::new("mbox_route_1")]
-    );
+    // T3-C1: mailbox message id is
+    // `signal_route_{subscription_id}_{target_mailbox_id}_{signal_id}` so
+    // multiple subscriptions + signals can target the same mailbox
+    // without collision.
+    let expected_id = MailboxMessageId::new(format!(
+        "signal_route_{}_mbox_route_1_sig_route_1",
+        sub.subscription_id
+    ));
+    assert_eq!(result.mailbox_message_ids, vec![expected_id.clone()]);
 
-    let msg = MailboxReadModel::get(store.as_ref(), &MailboxMessageId::new("mbox_route_1"))
+    let msg = MailboxReadModel::get(store.as_ref(), &expected_id)
         .await
         .unwrap();
     assert!(
@@ -203,7 +208,7 @@ async fn filter_expression_passes_matching_signal() {
     let (store, sessions, runs, signals, router) = setup().await;
     seed_run(&sessions, &runs, "sess_filter_ok", "run_filter_ok").await;
 
-    router
+    let sub = router
         .subscribe(
             project(),
             "metric".to_owned(),
@@ -231,7 +236,11 @@ async fn filter_expression_passes_matching_signal() {
         .unwrap();
 
     assert_eq!(result.routed_count, 1, "matching signal must be routed");
-    let msg = MailboxReadModel::get(store.as_ref(), &MailboxMessageId::new("mbox_filter_ok"))
+    let expected_id = MailboxMessageId::new(format!(
+        "signal_route_{}_mbox_filter_ok_sig_filter_match",
+        sub.subscription_id
+    ));
+    let msg = MailboxReadModel::get(store.as_ref(), &expected_id)
         .await
         .unwrap();
     assert!(

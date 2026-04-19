@@ -180,7 +180,12 @@ impl ReadinessState {
 
     /// Get the current progress snapshot for /health/ready.
     pub fn progress(&self) -> StartupProgress {
-        let mut p = self.inner.progress.read().unwrap().clone();
+        let mut p = self
+            .inner
+            .progress
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone();
         self.update_elapsed(&mut p);
         p
     }

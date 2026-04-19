@@ -197,7 +197,7 @@ pub(crate) async fn approve_approval_handler(
     {
         Ok(record) => match state
             .runtime
-            .audit
+            .audits
             .record(
                 record.project.tenant_id.clone(),
                 audit_actor_id(&principal),
@@ -233,7 +233,7 @@ pub(crate) async fn reject_approval_handler(
     {
         Ok(record) => match state
             .runtime
-            .audit
+            .audits
             .record(
                 record.project.tenant_id.clone(),
                 audit_actor_id(&principal),
@@ -269,7 +269,7 @@ pub(crate) async fn deny_approval_handler(
     {
         Ok(record) => match state
             .runtime
-            .audit
+            .audits
             .record(
                 record.project.tenant_id.clone(),
                 audit_actor_id(&principal),

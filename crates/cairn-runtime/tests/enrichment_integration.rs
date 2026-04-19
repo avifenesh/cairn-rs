@@ -7,8 +7,8 @@ use std::sync::Arc;
 
 use cairn_domain::*;
 use cairn_runtime::{
-    ApprovalService, ApprovalServiceImpl, RuntimeEnrichment, SessionService, SessionServiceImpl,
-    StoreBackedEnrichment, TaskService, TaskServiceImpl,
+    ApprovalService, ApprovalServiceImpl, RunServiceImpl, RuntimeEnrichment, SessionService,
+    SessionServiceImpl, StoreBackedEnrichment, TaskService, TaskServiceImpl,
 };
 use cairn_store::InMemoryStore;
 
@@ -109,9 +109,20 @@ async fn enrichment_returns_session_state() {
 #[tokio::test]
 async fn approval_enrichment_composes_under_repeated_exercise() {
     let store = Arc::new(InMemoryStore::new());
+    let session_svc = SessionServiceImpl::new(store.clone());
+    let run_svc = RunServiceImpl::new(store.clone());
     let approval_svc = ApprovalServiceImpl::new(store.clone());
     let enrichment = StoreBackedEnrichment::new(store.clone());
     let p = project();
+
+    // T3-L7: `request` with `Some(run_id)` now rejects if the run does
+    // not exist. Stand up the referenced run before requesting approvals.
+    let session_id = SessionId::new("s_approval");
+    session_svc.create(&p, session_id.clone()).await.unwrap();
+    run_svc
+        .start(&p, &session_id, RunId::new("r1"), None)
+        .await
+        .unwrap();
 
     // Create 3 approvals
     for i in 1..=3 {

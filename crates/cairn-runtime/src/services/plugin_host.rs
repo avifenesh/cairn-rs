@@ -196,7 +196,7 @@ impl PluginHost {
 
         // Check for duplicate.
         {
-            let handles = self.handles.read().unwrap();
+            let handles = self.handles.read().unwrap_or_else(|e| e.into_inner());
             if handles.contains_key(&plugin_id) {
                 return Err(PluginError::AlreadyExists(plugin_id));
             }
@@ -252,7 +252,7 @@ impl PluginHost {
 
         // Store handle.
         {
-            let mut handles = self.handles.write().unwrap();
+            let mut handles = self.handles.write().unwrap_or_else(|e| e.into_inner());
             handles.insert(plugin_id, Mutex::new(handle));
         }
 
@@ -263,12 +263,12 @@ impl PluginHost {
     ///
     /// Sends `shutdown`, waits briefly, then kills if still alive.
     pub fn stop_plugin(&self, plugin_id: &str) -> Result<(), PluginError> {
-        let handles = self.handles.read().unwrap();
+        let handles = self.handles.read().unwrap_or_else(|e| e.into_inner());
         let handle_mutex = handles
             .get(plugin_id)
             .ok_or_else(|| PluginError::NotRunning(plugin_id.to_owned()))?;
 
-        let mut handle = handle_mutex.lock().unwrap();
+        let mut handle = handle_mutex.lock().unwrap_or_else(|e| e.into_inner());
 
         // Try graceful shutdown.
         let _ = handle.rpc_call(wire::methods::SHUTDOWN, serde_json::json!({}));
@@ -283,7 +283,7 @@ impl PluginHost {
         drop(handles);
 
         // Remove from handles map.
-        let mut handles = self.handles.write().unwrap();
+        let mut handles = self.handles.write().unwrap_or_else(|e| e.into_inner());
         handles.remove(plugin_id);
 
         Ok(())
@@ -292,18 +292,18 @@ impl PluginHost {
     /// Restart a plugin: kill the existing process and re-spawn from manifest.
     pub fn restart_plugin(&self, plugin_id: &str) -> Result<(), PluginError> {
         let manifest = {
-            let handles = self.handles.read().unwrap();
+            let handles = self.handles.read().unwrap_or_else(|e| e.into_inner());
             let handle_mutex = handles
                 .get(plugin_id)
                 .ok_or_else(|| PluginError::NotRunning(plugin_id.to_owned()))?;
-            let mut handle = handle_mutex.lock().unwrap();
+            let mut handle = handle_mutex.lock().unwrap_or_else(|e| e.into_inner());
             handle.kill()?;
             handle.manifest.clone()
         };
 
         // Remove old handle.
         {
-            let mut handles = self.handles.write().unwrap();
+            let mut handles = self.handles.write().unwrap_or_else(|e| e.into_inner());
             handles.remove(plugin_id);
         }
 
@@ -320,11 +320,11 @@ impl PluginHost {
     /// Call this periodically. Crashed plugins have their state set to
     /// `PluginState::Crashed` and an error recorded in the health monitor.
     pub fn detect_crashes(&self) -> Vec<String> {
-        let handles = self.handles.read().unwrap();
+        let handles = self.handles.read().unwrap_or_else(|e| e.into_inner());
         let mut crashed = Vec::new();
 
         for (id, handle_mutex) in handles.iter() {
-            let mut handle = handle_mutex.lock().unwrap();
+            let mut handle = handle_mutex.lock().unwrap_or_else(|e| e.into_inner());
             if handle.state == PluginState::Running && !handle.is_alive() {
                 handle.state = PluginState::Crashed;
                 self.health
@@ -338,12 +338,12 @@ impl PluginHost {
 
     /// Send a health check ping to a plugin and update the health monitor.
     pub fn health_check(&self, plugin_id: &str) -> Result<(), PluginError> {
-        let handles = self.handles.read().unwrap();
+        let handles = self.handles.read().unwrap_or_else(|e| e.into_inner());
         let handle_mutex = handles
             .get(plugin_id)
             .ok_or_else(|| PluginError::NotRunning(plugin_id.to_owned()))?;
 
-        let mut handle = handle_mutex.lock().unwrap();
+        let mut handle = handle_mutex.lock().unwrap_or_else(|e| e.into_inner());
         match handle.rpc_call(wire::methods::HEALTH_CHECK, serde_json::json!({})) {
             Ok(_) => {
                 self.health.record_heartbeat(plugin_id);
@@ -360,22 +360,32 @@ impl PluginHost {
 
     /// Get the current state of a plugin.
     pub fn plugin_state(&self, plugin_id: &str) -> Option<PluginState> {
-        let handles = self.handles.read().unwrap();
-        handles.get(plugin_id).map(|h| h.lock().unwrap().state)
+        let handles = self.handles.read().unwrap_or_else(|e| e.into_inner());
+        handles
+            .get(plugin_id)
+            .map(|h| h.lock().unwrap_or_else(|e| e.into_inner()).state)
     }
 
     /// List all managed plugin IDs.
     pub fn plugin_ids(&self) -> Vec<String> {
-        self.handles.read().unwrap().keys().cloned().collect()
+        self.handles
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .keys()
+            .cloned()
+            .collect()
     }
 
     /// Number of managed plugins.
     pub fn len(&self) -> usize {
-        self.handles.read().unwrap().len()
+        self.handles.read().unwrap_or_else(|e| e.into_inner()).len()
     }
 
     pub fn is_empty(&self) -> bool {
-        self.handles.read().unwrap().is_empty()
+        self.handles
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .is_empty()
     }
 
     /// Send a JSON-RPC notification to a specific plugin (fire-and-forget).
@@ -387,12 +397,12 @@ impl PluginHost {
         method: &str,
         params: serde_json::Value,
     ) -> Result<(), PluginError> {
-        let handles = self.handles.read().unwrap();
+        let handles = self.handles.read().unwrap_or_else(|e| e.into_inner());
         let handle_mutex = handles
             .get(plugin_id)
             .ok_or_else(|| PluginError::NotRunning(plugin_id.to_owned()))?;
 
-        let mut handle = handle_mutex.lock().unwrap();
+        let mut handle = handle_mutex.lock().unwrap_or_else(|e| e.into_inner());
         let child = handle
             .child
             .as_mut()

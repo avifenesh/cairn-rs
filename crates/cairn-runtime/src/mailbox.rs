@@ -1,9 +1,9 @@
-//! Mailbox service boundary per RFC 002 + GAP-004 push-based inter-agent coordination.
+//! Mailbox service boundary per RFC 002 — push-based inter-agent coordination.
 //!
 //! Mailbox messages are durable runtime records for coordination.
 //! Durability belongs to the Rust runtime store, not a sidecar queue.
 //!
-//! The `send`/`receive` extension mirrors `cairn/internal/agent/mailbox.go`:
+//! The `send`/`receive` extension:
 //! - `send(from, to, content)` truncates content to 4000 chars and appends durably.
 //! - `receive(to)` reads all messages for the recipient task.
 //! - `format_for_injection` produces a text block suitable for LLM context injection.
@@ -55,13 +55,11 @@ pub trait MailboxService: Send + Sync {
         offset: usize,
     ) -> Result<Vec<MailboxRecord>, RuntimeError>;
 
-    /// Push a content message from one task to another (GAP-004 inter-agent mailbox).
+    /// Push a content message from one task to another (inter-agent mailbox).
     ///
     /// - `from` is the sender's task ID (recorded on the message for context).
     /// - `to` is the recipient's task ID (message is retrievable via `receive`).
     /// - `content` is truncated to `MAX_MESSAGE_CONTENT_LEN` chars.
-    ///
-    /// Mirrors `cairn/internal/agent/mailbox.go` `Send()`.
     async fn send(
         &self,
         project: &ProjectKey,
@@ -72,9 +70,8 @@ pub trait MailboxService: Send + Sync {
 
     /// Retrieve all messages addressed to `task_id`.
     ///
-    /// Returns messages in chronological order (oldest first).
-    /// Mirrors `cairn/internal/agent/mailbox.go` `Receive()` (read-only; callers
-    /// must track their own read cursor to avoid re-processing).
+    /// Returns messages in chronological order (oldest first). Read-only —
+    /// callers must track their own read cursor to avoid re-processing.
     async fn receive(
         &self,
         task_id: &TaskId,
@@ -83,8 +80,6 @@ pub trait MailboxService: Send + Sync {
 }
 
 /// Truncate message content to `MAX_MESSAGE_CONTENT_LEN`, appending a marker if cut.
-///
-/// Mirrors `cairn/internal/agent/mailbox.go` content truncation.
 pub fn truncate_message_content(content: &str) -> String {
     if content.len() <= MAX_MESSAGE_CONTENT_LEN {
         return content.to_owned();
@@ -97,7 +92,6 @@ pub fn truncate_message_content(content: &str) -> String {
 /// Format mailbox messages for injection into an LLM prompt.
 ///
 /// Returns an empty string if `messages` is empty.
-/// Mirrors `cairn/internal/agent/mailbox.go` `FormatForInjection()`.
 pub fn format_for_injection(messages: &[MailboxRecord]) -> String {
     if messages.is_empty() {
         return String::new();

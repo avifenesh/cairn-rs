@@ -495,7 +495,7 @@ pub(crate) async fn cancel_task_handler(
         Ok(record) => {
             let _ = state
                 .runtime
-                .audit
+                .audits
                 .record(
                     task.project.tenant_id.clone(),
                     audit_actor_id(&principal),
