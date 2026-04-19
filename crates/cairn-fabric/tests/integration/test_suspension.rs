@@ -82,13 +82,9 @@ async fn read_exec_core_for_run(
     fields
 }
 
-/// #1 from the coverage audit: suspend + resume roundtrip.
-///
-/// Exercises `ff_suspend_execution` and `ff_resume_execution` — the paired
-/// spine of every approval / timer / signal-wait path.
-///
-/// Beyond asserting the Rust return values, this test also reads back the
-/// task state mid-flight (GAP #4 from cross-review) — proving Valkey
+/// Suspend + resume roundtrip: exercises `ff_suspend_execution` and
+/// `ff_resume_execution` — the paired spine of every approval / timer /
+/// signal-wait path. Reads the task state mid-flight to prove Valkey
 /// persistence, not just the in-process return.
 #[tokio::test]
 async fn test_suspend_and_resume_roundtrip() {
@@ -142,9 +138,9 @@ async fn test_suspend_and_resume_roundtrip() {
         paused.state
     );
 
-    // GAP #4: verify persistence by reading the task state back through the
-    // service (which HGETALLs Valkey). If Rust returned Paused but Valkey
-    // wasn't written, a follow-up get would disagree.
+    // Verify Valkey persistence by reading the task state back through the
+    // service. If Rust returned Paused but Valkey wasn't written, a
+    // follow-up get would disagree.
     let mid = h
         .fabric
         .tasks
@@ -170,9 +166,9 @@ async fn test_suspend_and_resume_roundtrip() {
         .await
         .expect("resume failed");
 
-    // GAP #5: POSITIVE assertion, not negative. After resume the task must
-    // be in an actionable state (queued or running). Accepting both because
-    // the delayed_promoter / claim machinery can race the resume write.
+    // After resume the task must be in an actionable state (queued or
+    // running). Accepting both because the delayed_promoter / claim
+    // machinery can race the resume write.
     assert!(
         matches!(
             resumed.state,
@@ -276,36 +272,17 @@ async fn test_signal_delivery_resumes_waiter() {
     h.teardown().await;
 }
 
-/// Dedup half of #2. Goes directly through `SignalBridge` so the waitpoint
-/// id is passed explicitly — sidesteps the problem that
-/// `runs.resolve_approval` re-reads `current_waitpoint_id` from exec_core
-/// on each call (and the first call clears it).
+/// Dedup: goes directly through `SignalBridge` so the waitpoint id is
+/// passed explicitly — `runs.resolve_approval` clears
+/// `current_waitpoint_id` on the first call, so a second resolve would
+/// error before hitting the idempotency guard.
 ///
-/// Dispute of cross-review BUG #2: worker-2 proposed
-/// "second resolve_approval with ApprovalDecision::Rejected" to detect
-/// broken dedup. That does NOT work against live FF:
-///
-///   1. After the first `Approved` call, `ff_deliver_signal` at
-///      signal.lua:228-229 clears `current_waitpoint_id` in exec_core.
-///      Re-reading in the second `resolve_approval` produces an empty
-///      waitpoint id, parsed via `unwrap_or_default()` in
-///      `run_service.rs:998-1002` to a default/zero WaitpointId.
-///   2. The Lua then fails one of two checks BEFORE reaching the
-///      idempotency guard on signal.lua:117:
-///        - signal.lua:82-85: waitpoint_hash empty → target_not_signalable
-///        - signal.lua:97-99: wp_condition empty → waitpoint_not_found
-///   3. Either way the call returns a `FabricError::Internal(...)`, and
-///      the test's `.expect("...")` panics. The reviewer's test does not
-///      prove dedup works or is broken — it proves the call errors.
-///
-/// Real dedup test requires: (a) waitpoint that stays OPEN between two
-/// calls, and (b) identical idempotency_key. Use
-/// `deliver_tool_result_signal` — its signal_name `tool_result:<inv_id>`
-/// does NOT match the approval waitpoint's `approval_granted|rejected`
-/// matchers, so the first delivery records the signal and evaluates to
-/// `no_op` (signal.lua:276-278); waitpoint stays open. Second delivery
-/// with same idempotency_key hits the SET NX on signal.lua:117-124 and
-/// returns `ok_duplicate`, parsed by ff-sdk as `SignalOutcome::Duplicate`.
+/// Uses `deliver_tool_result_signal` because its signal_name
+/// `tool_result:<inv_id>` does NOT match the approval waitpoint's
+/// `approval_granted|rejected` matchers. The first delivery records a
+/// no-op and the waitpoint stays open; the second delivery with the same
+/// idempotency_key trips the SET NX in signal.lua and returns
+/// `SignalOutcome::Duplicate`.
 #[tokio::test]
 async fn test_signal_delivery_is_idempotent() {
     let h = TestHarness::setup().await;

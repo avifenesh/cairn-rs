@@ -931,11 +931,9 @@ dependencies = [
 name = "cairn-fabric"
 version = "0.1.0"
 dependencies = [
- "async-trait",
  "cairn-domain",
  "cairn-orchestrator",
  "cairn-store",
- "dashmap",
  "ferriskey",
  "ff-core",
  "ff-engine",
@@ -943,7 +941,6 @@ dependencies = [
  "ff-script",
  "ff-sdk",
  "once_cell",
- "serde",
  "serde_json",
  "testcontainers",
  "thiserror 2.0.18",

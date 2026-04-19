@@ -87,17 +87,10 @@ impl FabricRuntime {
         let partition_config = PartitionConfig::default();
 
         // Seed the waitpoint HMAC secret BEFORE Engine::start so any
-        // suspend-path FCALL the engine scanners trigger (e.g. auto-resume
-        // on a pre-existing suspended execution) finds an initialized
-        // secrets hash. FF's mint_waitpoint_token at lua/helpers.lua:204-218
-        // requires current_kid + secret:<kid> on every execution partition.
-        //
-        // Mirrors the install path from FF's own ff-test fixtures
-        // (ff-test/src/fixtures.rs:141-157). Cluster-safe: each HSET targets
-        // a distinct {p:N} hash tag, so every write lands on its own slot —
-        // no CROSSSLOT risk. Serial issuance rather than parallel because
-        // 256 HSETs against localhost are sub-second and bursting them in
-        // parallel offers no operator benefit (boot is rare).
+        // suspend-path FCALL the engine scanners trigger finds an
+        // initialized secrets hash. Idempotent: re-running boot with the
+        // same secret is safe; HSETs are per-partition hash-tagged so no
+        // CROSSSLOT risk under cluster.
         seed_waitpoint_hmac_secret_if_configured(&client, &config, &partition_config).await?;
 
         let engine_config = EngineConfig {
@@ -155,24 +148,17 @@ impl FabricRuntime {
 }
 
 /// Seed the waitpoint HMAC secret across every execution partition.
+/// Fails loud if `config.waitpoint_hmac_secret` is `None` — production
+/// can't ship without it because every `ff_suspend_execution` would
+/// reject with `hmac_secret_not_initialized`. Dev / CI paths that don't
+/// need HMAC should build cairn-app with `--features in-memory-runtime`.
 ///
-/// Fails LOUD when `config.waitpoint_hmac_secret` is `None`. Production
-/// cannot ship without HMAC — every subsequent `ff_suspend_execution` would
-/// reject with `hmac_secret_not_initialized`, and the operator would only
-/// find out hours after boot when the first approval gate fires. Better to
-/// fail boot immediately with a clear error message. Dev / CI paths that
-/// don't need HMAC must build cairn-app with `--features in-memory-runtime`
-/// so Fabric boot is skipped entirely.
-///
-/// The hash layout (per partition) is:
+/// Hash layout per partition:
 ///   HSET waitpoint_hmac_secrets:{p:N} current_kid <kid>
 ///   HSET waitpoint_hmac_secrets:{p:N} secret:<kid> <secret_hex>
 ///
-/// Matches `ff_test::fixtures::install_waitpoint_hmac_secret` in
-/// FF @a098710 (crates/ff-test/src/fixtures.rs:141-157) which is the
-/// authoritative pattern. Idempotent: HSET overwrites; re-running boot with
-/// a new secret rotates in-place (NOT a safe rotation — use FF's
-/// rotate_waitpoint_hmac_secret helper for live rotations).
+/// Idempotent on re-run with the same secret. **Not** a live rotation —
+/// use FF's `rotate_waitpoint_hmac_secret` for that.
 async fn seed_waitpoint_hmac_secret_if_configured(
     client: &Client,
     config: &FabricConfig,

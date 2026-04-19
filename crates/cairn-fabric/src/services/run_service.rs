@@ -400,6 +400,7 @@ impl FabricRunService {
                     run_id: run_id.clone(),
                     session_id: session_id.clone(),
                     project: project.clone(),
+                    parent_run_id: parent_run_id.clone(),
                     correlation_id: correlation_id.map(str::to_owned),
                 })
                 .await;
@@ -546,23 +547,18 @@ impl FabricRunService {
                 .unwrap_or("cairn"),
         );
 
-        let reason = format!("{failure_class:?}");
-        let category = match failure_class {
-            FailureClass::TimedOut => "timeout",
-            FailureClass::DependencyFailed => "dependency",
-            FailureClass::ApprovalRejected => "policy",
-            FailureClass::PolicyDenied => "policy",
-            FailureClass::ExecutionError => "execution",
-            FailureClass::LeaseExpired => "lease",
-            FailureClass::CanceledByOperator => "operator",
-        };
+        let category = crate::state_map::failure_class_category(failure_class);
+        let reason = category;
 
+        // Fail loud on Valkey errors: a silent `unwrap_or_default()` here
+        // turns a transient blip into "FF falls back to its own retry
+        // default", which may disable retries entirely for this run.
         let retry_policy_json: String = self
             .runtime
             .client
             .get(&ctx.policy())
             .await
-            .unwrap_or(None)
+            .map_err(|e| FabricError::Valkey(format!("GET retry_policy: {e}")))?
             .unwrap_or_default();
 
         let keys: Vec<String> = vec![
@@ -584,7 +580,7 @@ impl FabricRunService {
             lease_id_str.unwrap_or_default(),
             lease_epoch_str.unwrap_or_else(|| "1".to_owned()),
             attempt_id_str.unwrap_or_default(),
-            reason,
+            reason.to_owned(),
             category.to_owned(),
             retry_policy_json,
         ];
@@ -805,18 +801,17 @@ impl FabricRunService {
 
         check_fcall_success(&raw, crate::fcall::names::FF_SUSPEND_EXECUTION)?;
 
-        // Emit unconditionally — see the rationale on FabricTaskService::pause
-        // for why the prior `!is_already_satisfied(&raw)` guard was retry-
-        // unsafe. Projection is idempotent on EventId; a duplicate emit on
-        // benign back-to-back replay is a harmless re-write, while guarding
-        // would silently lose the event if the process crashed between the
-        // FCALL commit and this emit.
+        // Emit unconditionally — the prior `!is_already_satisfied(&raw)` guard
+        // was retry-unsafe. Projection is idempotent on EventId, so a duplicate
+        // emit on replay is a harmless re-write; guarding would silently lose
+        // the event if the process crashed between the FCALL and the emit.
         let record = self.read_run_record(project, run_id).await?;
         self.bridge
             .emit(BridgeEvent::ExecutionSuspended {
                 run_id: run_id.clone(),
                 project: record.project.clone(),
                 prev_state: Some(prev_run_state),
+                to: record.state,
             })
             .await;
         Ok(record)
@@ -1021,16 +1016,18 @@ impl FabricRunService {
 
         check_fcall_success(&raw, crate::fcall::names::FF_SUSPEND_EXECUTION)?;
 
-        // Emit unconditionally — see rationale on FabricRunService::pause
-        // (and FabricTaskService::pause) for why the prior guard was
-        // retry-unsafe. Idempotent projection on EventId absorbs the benign
-        // double-emit case.
+        // Emit unconditionally — the prior `!is_already_satisfied(&raw)` guard
+        // was retry-unsafe. Projection is idempotent on EventId, so duplicate
+        // emits on replay are harmless re-writes. `record.state` is already
+        // `WaitingApproval` here because `adjust_run_state_for_blocking_reason`
+        // mapped FF's `waiting_for_approval` reason code.
         let record = self.read_run_record(project, run_id).await?;
         self.bridge
             .emit(BridgeEvent::ExecutionSuspended {
                 run_id: run_id.clone(),
                 project: record.project.clone(),
                 prev_state: Some(prev_run_state),
+                to: record.state,
             })
             .await;
         Ok(record)

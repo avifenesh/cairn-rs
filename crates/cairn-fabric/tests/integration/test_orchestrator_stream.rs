@@ -13,12 +13,10 @@
 //!   §6b   save_checkpoint   (post-CheckpointHook::save)
 //! ```
 //!
-//! XRANGE preserves insertion order in Valkey streams, so if the
-//! assertion matches it means the loop wrote the frames in the
-//! correct order — not that Valkey sorts them. That distinction was
-//! the B2 finding from cross-review: the earlier version of this
-//! test drove the sink directly and only proved the Valkey
-//! invariant, not the cairn-side emission order.
+//! XRANGE preserves insertion order in Valkey streams, so matching the
+//! asserted order means the loop wrote the frames in the correct order
+//! — not that Valkey sorted them. Driving the sink directly would only
+//! prove the Valkey invariant, not the cairn-side emission order.
 //!
 //! # Why `insecure-direct-claim`?
 //!

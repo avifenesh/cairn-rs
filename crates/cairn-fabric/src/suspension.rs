@@ -13,7 +13,7 @@ pub struct SuspensionParams {
 pub fn for_approval(approval_id: &str, timeout_ms: Option<u64>) -> SuspensionParams {
     let safe_id = sanitize_signal_component(approval_id);
     SuspensionParams {
-        reason_code: "waiting_for_approval".into(),
+        reason_code: crate::constants::BLOCKING_WAITING_FOR_APPROVAL.to_owned(),
         condition_matchers: vec![
             ConditionMatcher {
                 signal_name: format!("approval_granted:{safe_id}"),

@@ -476,7 +476,7 @@ impl FabricTaskService {
             lid.to_string(),
             epoch.to_string(),
             lease_extension_ms.to_string(),
-            "5000".to_owned(),
+            crate::constants::DEFAULT_LEASE_HISTORY_GRACE_MS.to_owned(),
         ];
 
         let key_refs: Vec<&str> = keys.iter().map(|s| s.as_str()).collect();
@@ -607,15 +607,8 @@ impl FabricTaskService {
 
         let worker_instance_id = &self.runtime.config.worker_instance_id;
 
-        let reason = format!("{failure_class:?}");
-        let category = match failure_class {
-            FailureClass::TimedOut => "timeout",
-            FailureClass::DependencyFailed => "dependency",
-            FailureClass::ApprovalRejected | FailureClass::PolicyDenied => "policy",
-            FailureClass::ExecutionError => "execution",
-            FailureClass::LeaseExpired => "lease",
-            FailureClass::CanceledByOperator => "operator",
-        };
+        let category = crate::state_map::failure_class_category(failure_class);
+        let reason = category;
 
         let attempt_id_str: Option<String> = self
             .runtime
@@ -624,12 +617,13 @@ impl FabricTaskService {
             .await
             .unwrap_or(None);
 
+        // Fail loud on Valkey errors — see T4-M10 rationale in run_service::fail.
         let retry_policy_json: String = self
             .runtime
             .client
             .get(&ctx.policy())
             .await
-            .unwrap_or(None)
+            .map_err(|e| FabricError::Valkey(format!("GET retry_policy: {e}")))?
             .unwrap_or_default();
 
         let keys: Vec<String> = vec![
@@ -651,7 +645,7 @@ impl FabricTaskService {
             lid.to_string(),
             epoch.to_string(),
             attempt_id_str.unwrap_or_default(),
-            reason,
+            reason.to_owned(),
             category.to_owned(),
             retry_policy_json,
         ];
@@ -950,28 +944,15 @@ impl FabricTaskService {
 
         check_fcall_success(&raw, crate::fcall::names::FF_SUSPEND_EXECUTION)?;
 
-        // Emit TaskStateChanged so the cairn-store projection + SSE subscribers
-        // observe the suspension. Fixes audit gap G1
-        // (docs/design/bridge-event-audit.md §3.1).
-        //
-        // `record.state` carries FF's post-commit truth — FF's
-        // map_reason_to_blocking can route OperatorPause to either
-        // operator_hold (→ TaskState::Paused) or waiting_for_approval
-        // (→ TaskState::WaitingApproval) per reason_code. Reading from the
-        // fresh HGETALL in read_task_record avoids hard-coding a single state.
-        //
-        // Emit is UNCONDITIONAL. An earlier draft of this fix guarded on
-        // `!is_already_satisfied(&raw)` to skip replays (mirroring a pattern
-        // that existed in FabricRunService). That guard is retry-unsafe: if
-        // the FCALL committed on FF but the cairn process crashed before
-        // reaching the emit, a subsequent retry sees ALREADY_SATISFIED and
-        // skips emission forever — the projection permanently drifts. The
-        // projection is idempotent on EventId (EventBridge mints a fresh
-        // v4 UUID per emit; cairn-store's sync projection upserts by
-        // (task_id, event_id) — see crates/cairn-store/src/in_memory.rs:350),
-        // so a double-emit on benign back-to-back replay is a harmless
-        // re-write. Given the asymmetric risk (silent permanent drift vs
-        // a duplicate projection write), unconditional is strictly safer.
+        // Emit TaskStateChanged so the cairn-store projection + SSE
+        // subscribers observe the suspension. `record.state` carries FF's
+        // post-commit truth — FF's `map_reason_to_blocking` can route
+        // OperatorPause to either `operator_hold` (→ Paused) or
+        // `waiting_for_approval` (→ WaitingApproval). Emission is
+        // unconditional: a `!is_already_satisfied(&raw)` guard would be
+        // retry-unsafe (silent permanent drift if the process crashes
+        // between the FCALL and the emit), while projection idempotency
+        // on EventId makes the double-emit replay case harmless.
         let record = self.read_task_record(project, task_id).await?;
         self.bridge
             .emit(BridgeEvent::TaskStateChanged {

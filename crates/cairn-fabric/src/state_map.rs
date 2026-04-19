@@ -35,6 +35,21 @@ pub fn adjust_task_state_for_blocking_reason(state: TaskState, blocking_reason: 
     }
 }
 
+/// Stable string label for a `FailureClass`. Used as both the FF-visible
+/// `reason` and the `category` field on `ff_fail_execution`. Prefer this
+/// over `format!("{failure_class:?}")`, which exposes the unstable Debug
+/// representation to downstream consumers.
+pub fn failure_class_category(failure_class: FailureClass) -> &'static str {
+    match failure_class {
+        FailureClass::TimedOut => "timeout",
+        FailureClass::DependencyFailed => "dependency",
+        FailureClass::ApprovalRejected | FailureClass::PolicyDenied => "policy",
+        FailureClass::ExecutionError => "execution",
+        FailureClass::LeaseExpired => "lease",
+        FailureClass::CanceledByOperator => "operator",
+    }
+}
+
 pub fn ff_public_state_to_task_state(state: PublicState) -> (TaskState, Option<FailureClass>) {
     match state {
         // FF `Waiting` = claim-eligible (public_state written by promoter after backoff).

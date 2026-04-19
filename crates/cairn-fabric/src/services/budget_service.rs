@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::error::FabricError;
+use crate::helpers::check_fcall_success;
 use ff_core::contracts::ReportUsageResult;
 use ff_core::keys::{budget_policies_index, budget_resets_key, BudgetKeyContext};
 use ff_core::partition::budget_partition;
@@ -130,10 +131,11 @@ impl FabricBudgetService {
         let key_refs: Vec<&str> = keys.iter().map(|s| s.as_str()).collect();
         let argv_refs: Vec<&str> = argv.iter().map(|s| s.as_str()).collect();
 
-        let _: ferriskey::Value = self
+        let raw: ferriskey::Value = self
             .runtime
             .fcall(crate::fcall::names::FF_CREATE_BUDGET, &key_refs, &argv_refs)
             .await?;
+        check_fcall_success(&raw, crate::fcall::names::FF_CREATE_BUDGET)?;
 
         Ok(budget_id)
     }
@@ -197,10 +199,11 @@ impl FabricBudgetService {
         let key_refs: Vec<&str> = keys.iter().map(|s| s.as_str()).collect();
         let argv_refs: Vec<&str> = argv.iter().map(|s| s.as_str()).collect();
 
-        let _: ferriskey::Value = self
+        let raw: ferriskey::Value = self
             .runtime
             .fcall(crate::fcall::names::FF_RESET_BUDGET, &key_refs, &argv_refs)
             .await?;
+        check_fcall_success(&raw, crate::fcall::names::FF_RESET_BUDGET)?;
 
         Ok(())
     }

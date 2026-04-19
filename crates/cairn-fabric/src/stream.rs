@@ -4,6 +4,7 @@ use ff_core::types::{AttemptIndex, ExecutionId};
 use ff_sdk::task::{read_stream, AppendFrameOutcome, ClaimedTask};
 
 use crate::error::FabricError;
+use crate::helpers::now_ms;
 
 pub const FRAME_TOOL_CALL: &str = "tool_call";
 pub const FRAME_TOOL_RESULT: &str = "tool_result";
@@ -139,13 +140,6 @@ impl<'a> StreamWriter<'a> {
     }
 }
 
-fn now_ms() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis() as u64
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -156,12 +150,6 @@ mod tests {
         assert_eq!(FRAME_TOOL_RESULT, "tool_result");
         assert_eq!(FRAME_LLM_RESPONSE, "llm_response");
         assert_eq!(FRAME_CHECKPOINT, "checkpoint");
-    }
-
-    #[test]
-    fn now_ms_returns_positive() {
-        let ts = now_ms();
-        assert!(ts > 1_700_000_000_000);
     }
 
     #[test]

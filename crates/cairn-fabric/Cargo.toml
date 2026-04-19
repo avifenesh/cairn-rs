@@ -24,11 +24,8 @@ uuid = { version = "1", features = ["v4", "v5", "serde"] }
 tokio = { version = "1", features = ["rt", "sync", "macros", "time"] }
 tokio-util = "0.7"
 tracing = "0.1"
-serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"
-dashmap = "6"
-async-trait = "0.1"
 
 [features]
 # Direct (scheduler-bypassing) claim path. Forwards to ff-sdk's

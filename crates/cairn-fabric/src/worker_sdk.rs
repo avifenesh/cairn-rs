@@ -1,42 +1,22 @@
 //! Thin worker wrapper over `ff_sdk::FlowFabricWorker`.
 //!
-//! # Claim path: dispute note (FF @a09871000574388256b1dd7c910239e992c0d3a6)
+//! # Claim paths
 //!
-//! Manager's round-1 brief proposed routing `CairnWorker::claim_next` through
-//! `ff_scheduler::Scheduler::claim_for_worker` + a public
-//! `FlowFabricWorker::claim_from_grant` entry point on ff-sdk. That entry
-//! point does **not** exist in FF @a09871000574388256b1dd7c910239e992c0d3a6:
+//! Upstream FF gates `ff_sdk::worker::{claim_next, issue_claim_grant,
+//! claim_execution, claim_resumed_execution}` behind
+//! `#[cfg(feature = "insecure-direct-claim")]`, and `ClaimedTask::new` is
+//! `pub(crate)` — so cairn cannot build a `ClaimedTask` from a
+//! scheduler-issued `ClaimGrant` without that feature.
 //!
-//!   - `ff_sdk::worker::claim_next`        → `#[cfg(feature = "insecure-direct-claim")]`
-//!   - `ff_sdk::worker::issue_claim_grant` → `#[cfg(feature = "insecure-direct-claim")]`
-//!   - `ff_sdk::worker::claim_execution`   → `#[cfg(feature = "insecure-direct-claim")]`
-//!   - `ff_sdk::worker::claim_resumed_execution` → same
-//!   - `ff_sdk::task::ClaimedTask::new`    → `pub(crate)` — not constructable from cairn
-//!
-//! Without a `pub fn claim_from_grant` (or a `pub` `ClaimedTask::new`),
-//! cairn cannot build a `ClaimedTask` from a scheduler-issued `ClaimGrant`.
-//! The wrapper relies on `ClaimedTask` for `complete`, `fail`, `cancel`,
-//! `suspend`, lease renewal, stream writes, progress — every operator
-//! endpoint past claim. Re-implementing those atop the raw `Client` would
-//! duplicate state FF owns (explicit violation of the THIN BRIDGE design
-//! principle in the round brief).
-//!
-//! Chosen compromise until FF publishes a scheduler-mediated public path:
-//!   1. Production claim path: `FabricSchedulerService::claim_for_worker`
-//!      is always available (returns a `ff_scheduler::ClaimGrant`). Callers
-//!      that only need a grant (and drive their own claim FCALL) use it.
-//!      The Valkey-direct claim already used by `task_service::claim` is
-//!      that same pattern.
-//!   2. Legacy direct path: `CairnWorker::claim_next` is now gated behind
-//!      the cairn feature `insecure-direct-claim`, which forwards to
-//!      `ff-sdk/insecure-direct-claim`. Off by default. Available for
-//!      integration tests and local dev that want a ClaimedTask with all
-//!      the stream/progress/lease machinery pre-wired.
-//!
-//! Follow-up: file a FF issue asking for `pub fn FlowFabricWorker::claim_from_grant`
-//! (or a pub constructor on `ClaimedTask`) so cairn can route the production
-//! path through the scheduler without forcing the `insecure-direct-claim`
-//! feature on every worker binary.
+//! Two paths:
+//!   1. Production: `FabricSchedulerService::claim_for_worker` returns a
+//!      `ff_scheduler::ClaimGrant`. Callers that only need a grant (and
+//!      drive their own claim FCALL) go through this. Same pattern as
+//!      `task_service::claim`.
+//!   2. Legacy direct: `CairnWorker::claim_next` — gated behind the cairn
+//!      feature `insecure-direct-claim`, forwards to
+//!      `ff-sdk/insecure-direct-claim`. Off by default. For integration
+//!      tests and local dev only; skips budget/quota admission.
 
 use std::sync::Arc;
 
@@ -179,13 +159,11 @@ impl CairnTask {
     /// typed error (swallowed by the orchestrator's frame-sink
     /// log-and-continue contract) rather than bringing down the loop.
     ///
-    /// Issue #32 (L3 from PR #30 R2 audit): the blanket
-    /// `impl TaskFrameSink for CairnTask` previously hit `self.task()`
-    /// via `stream_writer()` on every log_tool_call / log_tool_result /
-    /// log_llm_response / save_checkpoint. With the trait object's
-    /// wider exposure through Arc<dyn TaskFrameSink>, a consumed-task
-    /// panic would have crashed the orchestrator's panic-catch boundary;
-    /// this helper gives those paths an `Err` to return instead.
+    /// The blanket `impl TaskFrameSink for CairnTask` routes every
+    /// `log_tool_call` / `log_tool_result` / `log_llm_response` /
+    /// `save_checkpoint` through this helper instead of `task()`, so a
+    /// consumed task yields `Err` rather than panicking inside the
+    /// frame-sink trait object.
     fn try_task(&self) -> Result<&ClaimedTask, FabricError> {
         self.task
             .as_ref()
@@ -358,6 +336,11 @@ impl CairnTask {
                             run_id: rid,
                             project: proj,
                             attempt,
+                            // Worker SDK only runs while the task is in
+                            // Running; FF can also re-schedule retries from
+                            // Suspended/Delayed, but those paths go through
+                            // FF's own scheduler loop, not this SDK call.
+                            prev_state: Some(RunState::Running),
                         })
                         .await;
                 }
@@ -412,6 +395,7 @@ impl CairnTask {
                         run_id: rid,
                         project: proj,
                         prev_state: Some(RunState::Running),
+                        to: RunState::WaitingApproval,
                     })
                     .await;
             }
@@ -445,6 +429,7 @@ impl CairnTask {
                         run_id: rid,
                         project: proj,
                         prev_state: Some(RunState::Running),
+                        to: RunState::Paused,
                     })
                     .await;
             }
@@ -477,6 +462,7 @@ impl CairnTask {
                         run_id: rid,
                         project: proj,
                         prev_state: Some(RunState::Running),
+                        to: RunState::Paused,
                     })
                     .await;
             }
@@ -580,12 +566,10 @@ mod tests {
         );
     }
 
-    /// Issue #32: consumed-task None-branch for the async log_* +
-    /// save_checkpoint path must return `FabricError::Bridge("task
-    /// already consumed")`, not panic. Pins the try_task / try_stream_writer
-    /// routing so a regression that goes back to `self.task()` on any
-    /// of the 5 async methods fails this test instead of crashing the
-    /// orchestrator's panic-catch boundary at runtime.
+    /// A consumed-task None-branch for the async `log_*` and
+    /// `save_checkpoint` path must return `FabricError::Bridge("task
+    /// already consumed")`, not panic — otherwise a stray call after a
+    /// terminal op crashes the orchestrator's panic-catch boundary.
     #[tokio::test]
     async fn log_methods_on_consumed_task_return_bridge_error() {
         let (bridge, _handle) = EventBridge::start(Arc::new(cairn_store::InMemoryStore::default()));

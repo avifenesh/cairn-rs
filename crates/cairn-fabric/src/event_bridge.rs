@@ -20,6 +20,11 @@ pub enum BridgeEvent {
         run_id: RunId,
         session_id: SessionId,
         project: ProjectKey,
+        /// Parent run id for subagent / child runs. `None` for top-level.
+        /// FF's exec_core already carries this in the `cairn.parent_run_id`
+        /// tag, but the bridge must thread it through to `RunCreated` so the
+        /// cairn-store projection can reconstruct the run tree.
+        parent_run_id: Option<RunId>,
         /// External correlation id (sqeq ingress etc.). Tagged onto the
         /// resulting `EventEnvelope.correlation_id` so audit / SSE
         /// downstreams can join back to the originating request. `None`
@@ -46,6 +51,12 @@ pub enum BridgeEvent {
         run_id: RunId,
         project: ProjectKey,
         prev_state: Option<RunState>,
+        /// Post-suspension state from the service's `read_run_record`
+        /// (already adjusted for FF blocking_reason). Callers emit the
+        /// observed state so projection/SSE don't drift from HGETALL.
+        /// Approval-gated suspensions become `WaitingApproval`; plain
+        /// operator pauses stay `Paused`.
+        to: RunState,
     },
     ExecutionResumed {
         run_id: RunId,
@@ -74,7 +85,14 @@ pub enum BridgeEvent {
     ExecutionRetryScheduled {
         run_id: RunId,
         project: ProjectKey,
+        /// FF attempt counter. Carried so downstream observability can
+        /// show retry progress; not persisted in RunStateChanged today.
         attempt: u32,
+        /// Previous public_state before retry was scheduled. FF can retry
+        /// from `Running`, `Suspended` (waitpoint expiry), or `Delayed`
+        /// (chained retries) — hardcoding `Running` falsifies history in
+        /// the projection.
+        prev_state: Option<RunState>,
     },
     SessionCreated {
         session_id: SessionId,
@@ -90,6 +108,11 @@ pub struct EventBridge {
     tx: mpsc::Sender<BridgeEvent>,
     cancel: CancellationToken,
     append_failures: Arc<AtomicU64>,
+    /// Counts events dropped because the consumer channel was closed
+    /// (i.e. the bridge background task exited before the producer).
+    /// Distinct from `append_failures`, which counts events that reached
+    /// the consumer but failed to persist to the event log.
+    emit_failures: Arc<AtomicU64>,
 }
 
 const MAX_RETRY_ATTEMPTS: u32 = 3;
@@ -112,8 +135,15 @@ impl EventBridge {
             tx,
             cancel,
             append_failures,
+            emit_failures: Arc::new(AtomicU64::new(0)),
         };
         (bridge, handle)
+    }
+
+    /// Number of events dropped because the consumer channel was closed.
+    /// Exposed so tests and operator metrics can observe bridge-side loss.
+    pub fn emit_failures(&self) -> u64 {
+        self.emit_failures.load(Ordering::Relaxed)
     }
 
     async fn run_consumer(
@@ -191,7 +221,13 @@ impl EventBridge {
     pub async fn emit(&self, event: BridgeEvent) {
         let event_type = bridge_event_type_name(&event);
         if let Err(e) = self.tx.send(event).await {
-            tracing::error!(event_type, error = %e, "event bridge: channel closed");
+            self.emit_failures.fetch_add(1, Ordering::Relaxed);
+            tracing::error!(
+                event_type,
+                error = %e,
+                total_emit_failures = self.emit_failures.load(Ordering::Relaxed),
+                "event bridge: channel closed — event dropped, projection will have a gap"
+            );
         }
     }
 
@@ -240,12 +276,13 @@ fn bridge_event_to_runtime_event(event: &BridgeEvent) -> RuntimeEvent {
             run_id,
             session_id,
             project,
+            parent_run_id,
             correlation_id: _,
         } => RuntimeEvent::RunCreated(RunCreated {
             project: project.clone(),
             session_id: session_id.clone(),
             run_id: run_id.clone(),
-            parent_run_id: None,
+            parent_run_id: parent_run_id.clone(),
             prompt_release_id: None,
             agent_role_id: None,
         }),
@@ -299,12 +336,13 @@ fn bridge_event_to_runtime_event(event: &BridgeEvent) -> RuntimeEvent {
             run_id,
             project,
             prev_state,
+            to,
         } => RuntimeEvent::RunStateChanged(RunStateChanged {
             project: project.clone(),
             run_id: run_id.clone(),
             transition: StateTransition {
                 from: *prev_state,
-                to: RunState::Paused,
+                to: *to,
             },
             failure_class: None,
             pause_reason: None,
@@ -367,12 +405,15 @@ fn bridge_event_to_runtime_event(event: &BridgeEvent) -> RuntimeEvent {
             resume_trigger: None,
         }),
         BridgeEvent::ExecutionRetryScheduled {
-            run_id, project, ..
+            run_id,
+            project,
+            prev_state,
+            attempt: _,
         } => RuntimeEvent::RunStateChanged(RunStateChanged {
             project: project.clone(),
             run_id: run_id.clone(),
             transition: StateTransition {
-                from: Some(RunState::Running),
+                from: *prev_state,
                 to: RunState::Pending,
             },
             failure_class: None,
@@ -410,10 +451,30 @@ mod tests {
             run_id: RunId::new("run_1"),
             session_id: SessionId::new("sess_1"),
             project: ProjectKey::new("t", "w", "p"),
+            parent_run_id: None,
             correlation_id: None,
         };
         let runtime = bridge_event_to_runtime_event(&event);
         assert!(matches!(runtime, RuntimeEvent::RunCreated(_)));
+    }
+
+    // T4-C2 regression: parent_run_id threads through to the RunCreated
+    // projection so subagent run trees don't orphan.
+    #[test]
+    fn bridge_event_to_runtime_created_propagates_parent_run_id() {
+        let event = BridgeEvent::ExecutionCreated {
+            run_id: RunId::new("child_run"),
+            session_id: SessionId::new("sess_1"),
+            project: ProjectKey::new("t", "w", "p"),
+            parent_run_id: Some(RunId::new("parent_run")),
+            correlation_id: None,
+        };
+        match bridge_event_to_runtime_event(&event) {
+            RuntimeEvent::RunCreated(rc) => {
+                assert_eq!(rc.parent_run_id, Some(RunId::new("parent_run")));
+            }
+            _ => panic!("expected RunCreated"),
+        }
     }
 
     #[test]
@@ -422,6 +483,7 @@ mod tests {
             run_id: RunId::new("run_1"),
             session_id: SessionId::new("sess_1"),
             project: ProjectKey::new("t", "w", "p"),
+            parent_run_id: None,
             correlation_id: Some("corr_xyz".to_owned()),
         };
         assert_eq!(bridge_event_correlation_id(&with_corr), Some("corr_xyz"));
@@ -430,6 +492,7 @@ mod tests {
             run_id: RunId::new("run_1"),
             session_id: SessionId::new("sess_1"),
             project: ProjectKey::new("t", "w", "p"),
+            parent_run_id: None,
             correlation_id: None,
         };
         assert_eq!(bridge_event_correlation_id(&without_corr), None);
@@ -514,17 +577,38 @@ mod tests {
     }
 
     #[test]
-    fn bridge_event_to_runtime_suspended() {
+    fn bridge_event_to_runtime_suspended_pauses_by_default() {
         let event = BridgeEvent::ExecutionSuspended {
             run_id: RunId::new("run_1"),
             project: ProjectKey::new("t", "w", "p"),
             prev_state: Some(RunState::Running),
+            to: RunState::Paused,
         };
         let runtime = bridge_event_to_runtime_event(&event);
         match runtime {
             RuntimeEvent::RunStateChanged(rsc) => {
                 assert_eq!(rsc.transition.from, Some(RunState::Running));
                 assert_eq!(rsc.transition.to, RunState::Paused);
+            }
+            _ => panic!("expected RunStateChanged"),
+        }
+    }
+
+    // T4-C1 regression: suspended-for-approval must land as WaitingApproval
+    // in the projection, not Paused.
+    #[test]
+    fn bridge_event_to_runtime_suspended_for_approval() {
+        let event = BridgeEvent::ExecutionSuspended {
+            run_id: RunId::new("run_1"),
+            project: ProjectKey::new("t", "w", "p"),
+            prev_state: Some(RunState::Running),
+            to: RunState::WaitingApproval,
+        };
+        let runtime = bridge_event_to_runtime_event(&event);
+        match runtime {
+            RuntimeEvent::RunStateChanged(rsc) => {
+                assert_eq!(rsc.transition.from, Some(RunState::Running));
+                assert_eq!(rsc.transition.to, RunState::WaitingApproval);
             }
             _ => panic!("expected RunStateChanged"),
         }
@@ -681,12 +765,8 @@ mod tests {
 
     #[test]
     fn bridge_session_created_emits_session_created_envelope() {
-        // Regression guard for the finalization-round smoke-test bug:
-        // session creation was failing to populate the cairn-store
-        // projection because no BridgeEvent for it existed. If this
-        // variant is ever renamed or the mapping drops the ids, the
-        // whole fabric path breaks every handler that reads sessions by
-        // id before starting a run.
+        // SessionCreated must map to a SessionCreated envelope — handlers
+        // that read a session by id before starting a run depend on this.
         let event = BridgeEvent::SessionCreated {
             session_id: SessionId::new("sess_brand_new"),
             project: ProjectKey::new("tenant_x", "workspace_y", "project_z"),
