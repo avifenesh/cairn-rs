@@ -429,7 +429,10 @@ impl CairnTask {
                         run_id: rid,
                         project: proj,
                         prev_state: Some(RunState::Running),
-                        to: RunState::Paused,
+                        // `suspension::for_subagent` sets FF blocking_reason
+                        // `waiting_for_children`; the corresponding cairn
+                        // domain state is WaitingDependency.
+                        to: RunState::WaitingDependency,
                     })
                     .await;
             }
@@ -462,6 +465,10 @@ impl CairnTask {
                         run_id: rid,
                         project: proj,
                         prev_state: Some(RunState::Running),
+                        // `suspension::for_tool_result` uses FF blocking_reason
+                        // `waiting_for_tool_result`. cairn domain has no
+                        // dedicated state for that today; it collapses to
+                        // Paused. See T4-M7 for the tracked follow-up.
                         to: RunState::Paused,
                     })
                     .await;

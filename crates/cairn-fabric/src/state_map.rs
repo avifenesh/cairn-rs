@@ -35,10 +35,9 @@ pub fn adjust_task_state_for_blocking_reason(state: TaskState, blocking_reason: 
     }
 }
 
-/// Stable string label for a `FailureClass`. Used as both the FF-visible
-/// `reason` and the `category` field on `ff_fail_execution`. Prefer this
-/// over `format!("{failure_class:?}")`, which exposes the unstable Debug
-/// representation to downstream consumers.
+/// Stable string category for a `FailureClass`. Groups related variants
+/// together (e.g. `ApprovalRejected` + `PolicyDenied` → `"policy"`) for
+/// FF's `category` column which is used for bucket-level filtering.
 pub fn failure_class_category(failure_class: FailureClass) -> &'static str {
     match failure_class {
         FailureClass::TimedOut => "timeout",
@@ -47,6 +46,24 @@ pub fn failure_class_category(failure_class: FailureClass) -> &'static str {
         FailureClass::ExecutionError => "execution",
         FailureClass::LeaseExpired => "lease",
         FailureClass::CanceledByOperator => "operator",
+    }
+}
+
+/// Stable per-variant label for a `FailureClass`. Distinct from
+/// [`failure_class_category`] because the FF-visible `reason` field
+/// should preserve the exact variant for operator debugging —
+/// `ApprovalRejected` and `PolicyDenied` both have category `"policy"`
+/// but a different root cause. Use this for `reason`, not
+/// `format!("{failure_class:?}")` (which leaks unstable `Debug` output).
+pub fn failure_class_reason(failure_class: FailureClass) -> &'static str {
+    match failure_class {
+        FailureClass::TimedOut => "timed_out",
+        FailureClass::DependencyFailed => "dependency_failed",
+        FailureClass::ApprovalRejected => "approval_rejected",
+        FailureClass::PolicyDenied => "policy_denied",
+        FailureClass::ExecutionError => "execution_error",
+        FailureClass::LeaseExpired => "lease_expired",
+        FailureClass::CanceledByOperator => "canceled_by_operator",
     }
 }
 

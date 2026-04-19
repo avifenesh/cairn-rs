@@ -221,11 +221,13 @@ impl EventBridge {
     pub async fn emit(&self, event: BridgeEvent) {
         let event_type = bridge_event_type_name(&event);
         if let Err(e) = self.tx.send(event).await {
-            self.emit_failures.fetch_add(1, Ordering::Relaxed);
+            // `fetch_add` returns the previous value; add 1 for the
+            // post-increment count without a separate (race-prone) load.
+            let total = self.emit_failures.fetch_add(1, Ordering::Relaxed) + 1;
             tracing::error!(
                 event_type,
                 error = %e,
-                total_emit_failures = self.emit_failures.load(Ordering::Relaxed),
+                total_emit_failures = total,
                 "event bridge: channel closed — event dropped, projection will have a gap"
             );
         }

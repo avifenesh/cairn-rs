@@ -608,7 +608,7 @@ impl FabricTaskService {
         let worker_instance_id = &self.runtime.config.worker_instance_id;
 
         let category = crate::state_map::failure_class_category(failure_class);
-        let reason = category;
+        let reason = crate::state_map::failure_class_reason(failure_class);
 
         let attempt_id_str: Option<String> = self
             .runtime
