@@ -51,7 +51,6 @@ use cairn_store::projections::{RunRecord, TaskRecord};
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
-
 // ── DTOs ─────────────────────────────────────────────────────────────────────
 
 #[derive(Clone, Debug, serde::Serialize)]
@@ -91,6 +90,7 @@ pub(crate) struct RunInterventionResponse {
 
 #[derive(Clone, Debug, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
+#[allow(dead_code)] // T6a-H10: response shape widened to include `failures: Vec`.
 pub(crate) struct ScheduledResumeProcessResponse {
     pub(crate) resumed_count: usize,
 }
@@ -964,6 +964,21 @@ pub(crate) async fn intervene_run_handler(
                 return validation_error_response("inject_message requires message_body");
             };
 
+            // T6a-H11: reject message injection into a terminal run. A
+            // Completed/Failed/Canceled run has no consumer for the
+            // mailbox row, so the write would dangle forever.
+            if run.state.is_terminal() {
+                return AppApiError::new(
+                    StatusCode::CONFLICT,
+                    "run_terminal",
+                    format!(
+                        "cannot inject message into run in terminal state {:?}",
+                        run.state
+                    ),
+                )
+                .into_response();
+            }
+
             let message_id = MailboxMessageId::new(format!("msg_intervention_{}", Uuid::new_v4()));
             match state
                 .runtime
@@ -1382,6 +1397,10 @@ pub(crate) async fn process_scheduled_run_resumes_handler(
 
     let before = current_event_head(&state).await;
     let mut resumed_count = 0usize;
+    // T6a-H10: aggregate per-run failures rather than short-circuiting.
+    // Bailing mid-loop leaves already-resumed runs without a published
+    // SSE frame and leaves the caller guessing about partial success.
+    let mut failures: Vec<serde_json::Value> = Vec::new();
     for record in due {
         if record.project.tenant_id != *tenant_scope.tenant_id() {
             continue;
@@ -1397,16 +1416,34 @@ pub(crate) async fn process_scheduled_run_resumes_handler(
             .await
         {
             Ok(_) => resumed_count += 1,
-            Err(RuntimeError::InvalidTransition { .. }) | Err(RuntimeError::NotFound { .. }) => {}
-            Err(err) => return runtime_error_response(err),
+            Err(RuntimeError::InvalidTransition { .. }) | Err(RuntimeError::NotFound { .. }) => {
+                // Non-fatal per-run skip: run moved to terminal state
+                // or disappeared between list_due and resume. Ignored
+                // silently to match the prior contract.
+            }
+            Err(err) => {
+                tracing::warn!(
+                    run_id = %record.run_id,
+                    error = %err,
+                    "scheduled resume failed — continuing with remaining runs"
+                );
+                failures.push(serde_json::json!({
+                    "run_id": record.run_id.to_string(),
+                    "error": err.to_string(),
+                }));
+            }
         }
     }
+    // Always publish whatever did succeed, even on partial failure.
     if resumed_count > 0 {
         publish_runtime_frames_since(&state, before).await;
     }
     (
         StatusCode::OK,
-        Json(ScheduledResumeProcessResponse { resumed_count }),
+        Json(serde_json::json!({
+            "resumed_count": resumed_count,
+            "failures": failures,
+        })),
     )
         .into_response()
 }
@@ -1696,7 +1733,7 @@ pub(crate) async fn orchestrate_run_handler(
             let mut frame_with_id = frame.clone();
             frame_with_id.id = Some(seq.to_string());
             {
-                let mut buf = self.buf.write().unwrap();
+                let mut buf = self.buf.write().unwrap_or_else(|e| e.into_inner());
                 if buf.len() >= 10_000 {
                     buf.pop_front();
                 }
@@ -2216,6 +2253,8 @@ pub(crate) async fn list_tenant_costs_handler(
 /// POST /v1/runs/:plan_run_id/approve
 pub(crate) async fn approve_plan_handler(
     State(state): State<Arc<AppState>>,
+    tenant_scope: TenantScope,
+    Extension(principal): Extension<AuthPrincipal>,
     Path(plan_run_id): Path<String>,
     Json(body): Json<serde_json::Value>,
 ) -> impl IntoResponse {
@@ -2223,24 +2262,16 @@ pub(crate) async fn approve_plan_handler(
     use cairn_runtime::make_envelope;
 
     let run_id = RunId::new(&plan_run_id);
-    let run =
-        match cairn_store::projections::RunReadModel::get(state.runtime.store.as_ref(), &run_id)
-            .await
-        {
-            Ok(Some(r)) => r,
-            Ok(None) => {
-                return AppApiError::new(StatusCode::NOT_FOUND, "not_found", "run not found")
-                    .into_response();
-            }
-            Err(e) => {
-                return AppApiError::new(
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    "store_error",
-                    e.to_string(),
-                )
+
+    // T6a-C2: tenant scope check.
+    let run = match load_run_visible_to_tenant(state.as_ref(), &tenant_scope, &run_id).await {
+        Ok(Some(r)) => r,
+        Ok(None) => {
+            return AppApiError::new(StatusCode::NOT_FOUND, "not_found", "run not found")
                 .into_response();
-            }
-        };
+        }
+        Err(response) => return response,
+    };
 
     let reviewer_comments = body
         .get("reviewer_comments")
@@ -2251,10 +2282,16 @@ pub(crate) async fn approve_plan_handler(
         .unwrap_or_default()
         .as_millis() as u64;
 
+    // T6a-H7: use the authenticated principal as the actor rather than a
+    // hardcoded "operator" literal. Pre-fix, every plan approval was
+    // attributed to a fake user — breaking audit integrity in team
+    // deployments where multiple operators review plans.
     let evt = make_envelope(cairn_domain::RuntimeEvent::PlanApproved(PlanApproved {
         project: run.project.clone(),
         plan_run_id: run_id,
-        approved_by: cairn_domain::OperatorId::new("operator"),
+        approved_by: cairn_domain::OperatorId::new(crate::handlers::admin::audit_actor_id(
+            &principal,
+        )),
         reviewer_comments,
         approved_at: now_ms,
     }));
@@ -2282,6 +2319,8 @@ pub(crate) async fn approve_plan_handler(
 /// POST /v1/runs/:plan_run_id/reject
 pub(crate) async fn reject_plan_handler(
     State(state): State<Arc<AppState>>,
+    tenant_scope: TenantScope,
+    Extension(principal): Extension<AuthPrincipal>,
     Path(plan_run_id): Path<String>,
     Json(body): Json<serde_json::Value>,
 ) -> impl IntoResponse {
@@ -2289,24 +2328,16 @@ pub(crate) async fn reject_plan_handler(
     use cairn_runtime::make_envelope;
 
     let run_id = RunId::new(&plan_run_id);
-    let run =
-        match cairn_store::projections::RunReadModel::get(state.runtime.store.as_ref(), &run_id)
-            .await
-        {
-            Ok(Some(r)) => r,
-            Ok(None) => {
-                return AppApiError::new(StatusCode::NOT_FOUND, "not_found", "run not found")
-                    .into_response();
-            }
-            Err(e) => {
-                return AppApiError::new(
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    "store_error",
-                    e.to_string(),
-                )
+
+    // T6a-C2: tenant scope check.
+    let run = match load_run_visible_to_tenant(state.as_ref(), &tenant_scope, &run_id).await {
+        Ok(Some(r)) => r,
+        Ok(None) => {
+            return AppApiError::new(StatusCode::NOT_FOUND, "not_found", "run not found")
                 .into_response();
-            }
-        };
+        }
+        Err(response) => return response,
+    };
 
     let reason = body
         .get("reason")
@@ -2318,10 +2349,13 @@ pub(crate) async fn reject_plan_handler(
         .unwrap_or_default()
         .as_millis() as u64;
 
+    // T6a-H7: audit with the real principal, not a hardcoded "operator".
     let evt = make_envelope(cairn_domain::RuntimeEvent::PlanRejected(PlanRejected {
         project: run.project.clone(),
         plan_run_id: run_id,
-        rejected_by: cairn_domain::OperatorId::new("operator"),
+        rejected_by: cairn_domain::OperatorId::new(crate::handlers::admin::audit_actor_id(
+            &principal,
+        )),
         reason,
         rejected_at: now_ms,
     }));
@@ -2348,6 +2382,7 @@ pub(crate) async fn reject_plan_handler(
 /// POST /v1/runs/:plan_run_id/revise
 pub(crate) async fn revise_plan_handler(
     State(state): State<Arc<AppState>>,
+    tenant_scope: TenantScope,
     Path(plan_run_id): Path<String>,
     Json(body): Json<serde_json::Value>,
 ) -> impl IntoResponse {
@@ -2355,26 +2390,17 @@ pub(crate) async fn revise_plan_handler(
     use cairn_runtime::make_envelope;
 
     let original_run_id = RunId::new(&plan_run_id);
-    let original_run = match cairn_store::projections::RunReadModel::get(
-        state.runtime.store.as_ref(),
-        &original_run_id,
-    )
-    .await
-    {
-        Ok(Some(r)) => r,
-        Ok(None) => {
-            return AppApiError::new(StatusCode::NOT_FOUND, "not_found", "run not found")
-                .into_response();
-        }
-        Err(e) => {
-            return AppApiError::new(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "store_error",
-                e.to_string(),
-            )
-            .into_response();
-        }
-    };
+
+    // T6a-C2: tenant scope check.
+    let original_run =
+        match load_run_visible_to_tenant(state.as_ref(), &tenant_scope, &original_run_id).await {
+            Ok(Some(r)) => r,
+            Ok(None) => {
+                return AppApiError::new(StatusCode::NOT_FOUND, "not_found", "run not found")
+                    .into_response();
+            }
+            Err(response) => return response,
+        };
 
     let reviewer_comments = body
         .get("reviewer_comments")

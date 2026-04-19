@@ -34,6 +34,14 @@ pub(crate) struct CreateAuthTokenRequest {
 /// `POST /v1/auth/tokens` — create an operator API token.
 /// Only the admin service account or System principal may call this.
 /// Returns the raw token once — it cannot be retrieved again.
+///
+/// **Persistence (T6a-H8):** tokens are currently held only in the
+/// in-memory service-token map and are lost on server restart. The
+/// response includes a `Warning: 110 - "token-is-ephemeral"` header so
+/// clients can surface this to operators. Durable persistence (via a
+/// dedicated `RuntimeEvent::OperatorTokenIssued` replayed at startup)
+/// is tracked as a follow-up; until then, operators re-issuing tokens
+/// after restart is expected.
 pub(crate) async fn create_auth_token_handler(
     State(state): State<Arc<AppState>>,
     Extension(principal): Extension<AuthPrincipal>,
@@ -83,7 +91,10 @@ pub(crate) async fn create_auth_token_handler(
     );
     state.operator_tokens.insert(raw_token.clone(), record);
 
-    (
+    // T6a-H8: signal that the token is not durable across restarts so
+    // clients can surface a re-issue warning. Remove this header once
+    // RuntimeEvent-backed persistence lands.
+    let mut response = (
         StatusCode::CREATED,
         Json(serde_json::json!({
             "token":       raw_token,
@@ -95,7 +106,14 @@ pub(crate) async fn create_auth_token_handler(
             "expires_at":  body.expires_at,
         })),
     )
-        .into_response()
+        .into_response();
+    response.headers_mut().insert(
+        "warning",
+        axum::http::HeaderValue::from_static(
+            "110 - \"token-is-ephemeral: tokens are lost on server restart\"",
+        ),
+    );
+    response
 }
 
 /// `GET /v1/auth/tokens` — list operator tokens (raw token redacted).

@@ -248,8 +248,12 @@ pub(crate) async fn workspace_key_for_id(
 
 pub(crate) async fn list_tenants_handler(
     State(state): State<Arc<AppState>>,
+    _role: AdminRoleGuard,
     Query(query): Query<PaginationQuery>,
 ) -> impl IntoResponse {
+    // T6a-H3 + T6a-C4: listing every tenant is an admin-only operation.
+    // Non-admins enumerating the tenant topology is a cross-tenant
+    // metadata leak.
     match state
         .runtime
         .tenants
@@ -283,6 +287,7 @@ pub(crate) async fn list_tenants_handler(
 )]
 pub(crate) async fn create_tenant_handler(
     State(state): State<Arc<AppState>>,
+    _role: AdminRoleGuard,
     Extension(principal): Extension<AuthPrincipal>,
     Json(body): Json<CreateTenantRequest>,
 ) -> impl IntoResponse {
@@ -431,6 +436,7 @@ pub(crate) async fn get_tenant_quota_handler(
 
 pub(crate) async fn set_tenant_quota_handler(
     State(state): State<Arc<AppState>>,
+    _role: AdminRoleGuard,
     Path(tenant_id): Path<String>,
     Json(body): Json<SetTenantQuotaRequest>,
 ) -> impl IntoResponse {
@@ -473,6 +479,7 @@ pub(crate) async fn get_retention_policy_handler(
 
 pub(crate) async fn set_retention_policy_handler(
     State(state): State<Arc<AppState>>,
+    _role: AdminRoleGuard,
     Path(tenant_id): Path<String>,
     Json(body): Json<SetRetentionPolicyRequest>,
 ) -> impl IntoResponse {
@@ -494,6 +501,7 @@ pub(crate) async fn set_retention_policy_handler(
 
 pub(crate) async fn apply_retention_handler(
     State(state): State<Arc<AppState>>,
+    _role: AdminRoleGuard,
     Path(tenant_id): Path<String>,
 ) -> impl IntoResponse {
     match state
@@ -607,8 +615,10 @@ pub(crate) async fn list_audit_log_for_resource_handler(
 /// log tail from the in-memory ring buffer populated by observability middleware.
 pub(crate) async fn list_request_logs_handler(
     State(state): State<Arc<AppState>>,
+    _role: AdminRoleGuard,
     Query(q): Query<RequestLogsQuery>,
 ) -> impl IntoResponse {
+    // T6a-H3: request logs span every tenant — admin-only.
     let limit = q.limit.min(500);
     let level_filter: Vec<&'static str> = q
         .level
@@ -631,7 +641,12 @@ pub(crate) async fn list_request_logs_handler(
             .into_iter()
             .cloned()
             .collect(),
-        Err(_) => vec![],
+        Err(poisoned) => poisoned
+            .into_inner()
+            .tail(limit, &level_filter)
+            .into_iter()
+            .cloned()
+            .collect(),
     };
 
     let total = entries.len();
@@ -649,6 +664,7 @@ pub(crate) async fn list_request_logs_handler(
 
 pub(crate) async fn compact_event_log_handler(
     State(state): State<Arc<AppState>>,
+    _role: AdminRoleGuard,
     Path(id): Path<String>,
     Json(body): Json<CompactEventLogRequest>,
 ) -> impl IntoResponse {
@@ -662,6 +678,7 @@ pub(crate) async fn compact_event_log_handler(
 
 pub(crate) async fn create_snapshot_handler(
     State(state): State<Arc<AppState>>,
+    _role: AdminRoleGuard,
     Path(id): Path<String>,
 ) -> axum::response::Response {
     let tenant_id = TenantId::new(id);
@@ -726,6 +743,7 @@ pub(crate) async fn list_snapshots_handler(
 
 pub(crate) async fn restore_from_snapshot_handler(
     State(state): State<Arc<AppState>>,
+    _role: AdminRoleGuard,
     Path(id): Path<String>,
 ) -> impl IntoResponse {
     use cairn_store::projections::SnapshotReadModel;
@@ -768,6 +786,7 @@ pub(crate) async fn restore_from_snapshot_handler(
 )]
 pub(crate) async fn create_workspace_handler(
     State(state): State<Arc<AppState>>,
+    _role: AdminRoleGuard,
     Path(tenant_id): Path<String>,
     Json(body): Json<CreateWorkspaceRequest>,
 ) -> impl IntoResponse {
@@ -828,6 +847,7 @@ pub(crate) async fn list_workspaces_handler(
 )]
 pub(crate) async fn create_project_handler(
     State(state): State<Arc<AppState>>,
+    _role: AdminRoleGuard,
     Path(workspace_id): Path<String>,
     Json(body): Json<CreateProjectRequest>,
 ) -> impl IntoResponse {
@@ -967,6 +987,7 @@ pub(crate) async fn remove_workspace_member_handler(
 
 pub(crate) async fn create_workspace_share_handler(
     State(state): State<Arc<AppState>>,
+    _role: AdminRoleGuard,
     Path(workspace_id): Path<String>,
     Json(body): Json<CreateShareRequest>,
 ) -> impl IntoResponse {
@@ -1019,6 +1040,7 @@ pub(crate) async fn list_workspace_shares_handler(
 
 pub(crate) async fn revoke_workspace_share_handler(
     State(state): State<Arc<AppState>>,
+    _role: AdminRoleGuard,
     Path((_workspace_id, share_id)): Path<(String, String)>,
 ) -> impl IntoResponse {
     use cairn_runtime::ResourceSharingService;
@@ -1032,6 +1054,7 @@ pub(crate) async fn revoke_workspace_share_handler(
 
 pub(crate) async fn store_credential_handler(
     State(state): State<Arc<AppState>>,
+    _role: AdminRoleGuard,
     Path(tenant_id): Path<String>,
     Json(body): Json<StoreCredentialRequest>,
 ) -> impl IntoResponse {
@@ -1085,6 +1108,7 @@ pub(crate) async fn list_credentials_handler(
 
 pub(crate) async fn revoke_credential_handler(
     State(state): State<Arc<AppState>>,
+    _role: AdminRoleGuard,
     Path((tenant_id, id)): Path<(String, String)>,
 ) -> impl IntoResponse {
     let credential_id = CredentialId::new(id);
@@ -1110,6 +1134,7 @@ pub(crate) async fn revoke_credential_handler(
 
 pub(crate) async fn rotate_credential_key_handler(
     State(state): State<Arc<AppState>>,
+    _role: AdminRoleGuard,
     Path(tenant_id): Path<String>,
     Json(body): Json<RotateCredentialKeyRequest>,
 ) -> impl IntoResponse {
@@ -1128,6 +1153,7 @@ pub(crate) async fn rotate_credential_key_handler(
 
 pub(crate) async fn create_operator_profile_handler(
     State(state): State<Arc<AppState>>,
+    _role: AdminRoleGuard,
     Path(tenant_id): Path<String>,
     Json(body): Json<CreateOperatorProfileRequest>,
 ) -> impl IntoResponse {
@@ -1174,6 +1200,7 @@ pub(crate) async fn list_operator_profiles_handler(
 
 pub(crate) async fn set_operator_notifications_handler(
     State(state): State<Arc<AppState>>,
+    _role: AdminRoleGuard,
     Path(operator_id): Path<String>,
     Json(body): Json<SetNotificationPreferencesRequest>,
 ) -> impl IntoResponse {

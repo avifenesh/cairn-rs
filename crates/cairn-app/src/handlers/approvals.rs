@@ -21,9 +21,31 @@ use cairn_domain::{
 use cairn_runtime::{ApprovalPolicyService, ApprovalService, AuditService};
 
 use crate::errors::{runtime_error_response, AppApiError};
-use crate::extractors::OptionalProjectScopedQuery;
+use crate::extractors::{OptionalProjectScopedQuery, TenantScope};
 use crate::handlers::admin::audit_actor_id;
 use crate::state::AppState;
+
+/// T6a-C1 helper: load approval and verify it belongs to the caller's tenant.
+/// Returns 404 on missing; 404 (not 403) on cross-tenant mismatch so the
+/// handler doesn't leak approval existence across tenants.
+async fn load_approval_visible_to_tenant(
+    state: &AppState,
+    tenant_scope: &TenantScope,
+    approval_id: &ApprovalId,
+) -> Result<cairn_store::projections::ApprovalRecord, axum::response::Response> {
+    match state.runtime.approvals.get(approval_id).await {
+        Ok(Some(record))
+            if tenant_scope.is_admin || record.project.tenant_id == *tenant_scope.tenant_id() =>
+        {
+            Ok(record)
+        }
+        Ok(_) => Err(
+            AppApiError::new(StatusCode::NOT_FOUND, "not_found", "approval not found")
+                .into_response(),
+        ),
+        Err(err) => Err(runtime_error_response(err)),
+    }
+}
 
 const DEFAULT_TENANT_ID: &str = "default_tenant";
 
@@ -160,14 +182,21 @@ pub(crate) async fn list_approval_policies_handler(
 
 pub(crate) async fn request_approval_handler(
     State(state): State<Arc<AppState>>,
+    tenant_scope: TenantScope,
     Json(body): Json<RequestApprovalRequest>,
 ) -> impl IntoResponse {
+    let project = body.project();
+    // T6a-C1: the body-supplied project MUST match the authenticated tenant.
+    // Admin bypass is allowed.
+    if !tenant_scope.is_admin && project.tenant_id != *tenant_scope.tenant_id() {
+        return crate::errors::tenant_scope_mismatch_error().into_response();
+    }
     let before = crate::handlers::sse::current_event_head(&state).await;
     match state
         .runtime
         .approvals
         .request(
-            &body.project(),
+            &project,
             ApprovalId::new(body.approval_id),
             body.run_id.map(RunId::new),
             body.task_id.map(TaskId::new),
@@ -185,14 +214,22 @@ pub(crate) async fn request_approval_handler(
 
 pub(crate) async fn approve_approval_handler(
     State(state): State<Arc<AppState>>,
+    tenant_scope: TenantScope,
     Extension(principal): Extension<AuthPrincipal>,
     Path(id): Path<String>,
 ) -> impl IntoResponse {
+    let approval_id = ApprovalId::new(id);
+    // T6a-C1: verify tenant scope before any mutation.
+    if let Err(response) =
+        load_approval_visible_to_tenant(state.as_ref(), &tenant_scope, &approval_id).await
+    {
+        return response;
+    }
     let before = crate::handlers::sse::current_event_head(&state).await;
     match state
         .runtime
         .approvals
-        .resolve(&ApprovalId::new(id), ApprovalDecision::Approved)
+        .resolve(&approval_id, ApprovalDecision::Approved)
         .await
     {
         Ok(record) => match state
@@ -221,14 +258,21 @@ pub(crate) async fn approve_approval_handler(
 
 pub(crate) async fn reject_approval_handler(
     State(state): State<Arc<AppState>>,
+    tenant_scope: TenantScope,
     Extension(principal): Extension<AuthPrincipal>,
     Path(id): Path<String>,
 ) -> impl IntoResponse {
+    let approval_id = ApprovalId::new(id);
+    if let Err(response) =
+        load_approval_visible_to_tenant(state.as_ref(), &tenant_scope, &approval_id).await
+    {
+        return response;
+    }
     let before = crate::handlers::sse::current_event_head(&state).await;
     match state
         .runtime
         .approvals
-        .resolve(&ApprovalId::new(id), ApprovalDecision::Rejected)
+        .resolve(&approval_id, ApprovalDecision::Rejected)
         .await
     {
         Ok(record) => match state
@@ -257,14 +301,21 @@ pub(crate) async fn reject_approval_handler(
 
 pub(crate) async fn deny_approval_handler(
     State(state): State<Arc<AppState>>,
+    tenant_scope: TenantScope,
     Extension(principal): Extension<AuthPrincipal>,
     Path(id): Path<String>,
 ) -> impl IntoResponse {
+    let approval_id = ApprovalId::new(id);
+    if let Err(response) =
+        load_approval_visible_to_tenant(state.as_ref(), &tenant_scope, &approval_id).await
+    {
+        return response;
+    }
     let before = crate::handlers::sse::current_event_head(&state).await;
     match state
         .runtime
         .approvals
-        .resolve(&ApprovalId::new(id), ApprovalDecision::Rejected)
+        .resolve(&approval_id, ApprovalDecision::Rejected)
         .await
     {
         Ok(record) => match state

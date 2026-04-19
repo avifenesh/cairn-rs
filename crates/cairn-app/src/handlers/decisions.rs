@@ -7,15 +7,17 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use axum::{
-    extract::{Path, State},
+    extract::{Extension, Path, State},
     http::StatusCode,
     response::IntoResponse,
     Json,
 };
 
+use cairn_api::auth::AuthPrincipal;
 use cairn_runtime::DecisionService;
 
 use crate::errors::{bad_request_response, AppApiError};
+use crate::handlers::admin::audit_actor_id;
 use crate::state::AppState;
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
@@ -112,6 +114,7 @@ pub(crate) async fn get_decision_handler(
 /// POST /v1/decisions/:id/invalidate — invalidate a specific cached decision.
 pub(crate) async fn invalidate_decision_handler(
     State(state): State<Arc<AppState>>,
+    Extension(principal): Extension<AuthPrincipal>,
     Path(id): Path<String>,
     Json(body): Json<serde_json::Value>,
 ) -> impl IntoResponse {
@@ -122,6 +125,7 @@ pub(crate) async fn invalidate_decision_handler(
         .and_then(|v| v.as_str())
         .unwrap_or("operator_invalidation")
         .to_owned();
+    // T6a-H7: real principal for audit, not the hardcoded "operator".
     match state
         .runtime
         .decisions
@@ -129,7 +133,7 @@ pub(crate) async fn invalidate_decision_handler(
             &DecisionId::new(id),
             &reason,
             ActorRef::Operator {
-                operator_id: cairn_domain::OperatorId::new("operator"),
+                operator_id: cairn_domain::OperatorId::new(audit_actor_id(&principal)),
             },
         )
         .await
@@ -146,6 +150,7 @@ pub(crate) async fn invalidate_decision_handler(
 /// POST /v1/decisions/invalidate — bulk invalidation by scope.
 pub(crate) async fn bulk_invalidate_decisions_handler(
     State(state): State<Arc<AppState>>,
+    Extension(principal): Extension<AuthPrincipal>,
     Json(body): Json<serde_json::Value>,
 ) -> impl IntoResponse {
     use cairn_domain::decisions::{ActorRef, DecisionScopeRef};
@@ -177,7 +182,7 @@ pub(crate) async fn bulk_invalidate_decisions_handler(
             kind_filter,
             &reason,
             ActorRef::Operator {
-                operator_id: cairn_domain::OperatorId::new("operator"),
+                operator_id: cairn_domain::OperatorId::new(audit_actor_id(&principal)),
             },
         )
         .await

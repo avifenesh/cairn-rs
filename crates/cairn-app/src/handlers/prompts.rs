@@ -12,10 +12,9 @@ use axum::{
 
 use cairn_api::auth::AuthPrincipal;
 use cairn_api::http::ListResponse;
-use cairn_domain::providers::ProviderModelCapability;
 use cairn_domain::{
     AuditOutcome, ProjectKey, PromptAssetId, PromptReleaseId, PromptTemplateVar, PromptVersionId,
-    ProviderConnectionId, TenantId, WorkspaceKey,
+    WorkspaceKey,
 };
 use cairn_runtime::{AuditService, PromptAssetService, PromptReleaseService, PromptVersionService};
 use cairn_store::projections::{PromptReleaseReadModel, PromptVersionReadModel};
@@ -161,6 +160,7 @@ pub(crate) struct RenderPromptVersionResponse {
 }
 
 #[derive(Clone, Debug, serde::Deserialize)]
+#[allow(dead_code)] // T6a-H2: preserved for schema compat while the handler returns 501
 pub(crate) struct RegisterModelRequest {
     pub(crate) model_id: String,
     pub(crate) operation_kinds: Vec<String>,
@@ -280,13 +280,17 @@ pub(crate) async fn create_prompt_version_handler(
     {
         Ok(record) => {
             // Cache content and template vars (not carried in the event).
-            state.version_content.lock().unwrap().insert(
-                version_id_str,
-                AppVersionContent {
-                    content,
-                    template_vars,
-                },
-            );
+            state
+                .version_content
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .insert(
+                    version_id_str,
+                    AppVersionContent {
+                        content,
+                        template_vars,
+                    },
+                );
             (StatusCode::CREATED, Json(record)).into_response()
         }
         Err(err) => runtime_error_response(err),
@@ -327,7 +331,7 @@ pub(crate) async fn render_prompt_version_handler(
     let cached = state
         .version_content
         .lock()
-        .unwrap()
+        .unwrap_or_else(|e| e.into_inner())
         .get(&version_id)
         .cloned();
     let (content_template, template_vars) = match cached {
@@ -382,7 +386,7 @@ pub(crate) async fn list_prompt_template_vars_handler(
             let vars = state
                 .version_content
                 .lock()
-                .unwrap()
+                .unwrap_or_else(|e| e.into_inner())
                 .get(&version_id)
                 .map(|vc| vc.template_vars.clone())
                 .unwrap_or_default();
@@ -549,53 +553,34 @@ pub(crate) async fn request_prompt_release_approval_handler(
 
 pub(crate) async fn register_provider_model_handler(
     State(_state): State<Arc<AppState>>,
-    Path(connection_id): Path<String>,
-    Json(body): Json<RegisterModelRequest>,
+    Path(_connection_id): Path<String>,
+    Json(_body): Json<RegisterModelRequest>,
 ) -> impl IntoResponse {
-    use cairn_domain::providers::{OperationKind, ProviderModelCapability};
-    let conn_id = ProviderConnectionId::new(connection_id.clone());
-    let tenant_id = TenantId::new("default");
-
-    let ops: Vec<OperationKind> = body
-        .operation_kinds
-        .iter()
-        .filter_map(|k| serde_json::from_value(serde_json::Value::String(k.clone())).ok())
-        .collect();
-
-    let caps = ProviderModelCapability {
-        model_id: cairn_domain::ProviderModelId::new(body.model_id.clone()),
-        capabilities: vec![],
-        provider_id: connection_id.clone(),
-        operation_kinds: ops,
-        context_window_tokens: body.context_window_tokens,
-        max_output_tokens: body.max_output_tokens,
-        supports_streaming: body.supports_streaming,
-        cost_per_1k_input_tokens: body.cost_per_1k_input_tokens.map(|v| v as f64),
-        cost_per_1k_output_tokens: body.cost_per_1k_output_tokens.map(|v| v as f64),
-    };
-
-    // ProviderModelServiceImpl requires ProviderModelReadModel which InMemoryStore does not implement;
-    // return the capability record directly as a stub.
-    let _ = (tenant_id, conn_id);
-    (
-        StatusCode::OK,
-        Json(serde_json::to_value(&caps).unwrap_or_default()),
+    // T6a-H2: ProviderModelServiceImpl requires a ProviderModelReadModel
+    // which InMemoryStore does not implement. Returning 200 + the
+    // echoed body led operators to believe models had been registered.
+    // Surface 501 Not Implemented so the UI can render a clear state
+    // and an operator doesn't silently lose model config.
+    AppApiError::new(
+        StatusCode::NOT_IMPLEMENTED,
+        "not_implemented",
+        "provider model registration is not yet wired through ProviderModelServiceImpl",
     )
-        .into_response()
+    .into_response()
 }
 
 pub(crate) async fn list_provider_models_handler(
     State(_state): State<Arc<AppState>>,
     Path(_connection_id): Path<String>,
 ) -> impl IntoResponse {
-    // ProviderModelServiceImpl requires ProviderModelReadModel which InMemoryStore does not implement;
-    // return empty list as stub.
-    let models: Vec<ProviderModelCapability> = vec![];
-    (
-        StatusCode::OK,
-        Json(serde_json::to_value(&models).unwrap_or_default()),
+    // T6a-H2: same as register_provider_model_handler — return 501 so
+    // callers don't mistake an empty array for "no models registered yet".
+    AppApiError::new(
+        StatusCode::NOT_IMPLEMENTED,
+        "not_implemented",
+        "provider model listing is not yet wired through ProviderModelServiceImpl",
     )
-        .into_response()
+    .into_response()
 }
 
 pub(crate) async fn start_prompt_rollout_handler(
@@ -756,7 +741,10 @@ pub(crate) async fn diff_prompt_versions_handler(
     Path((_asset_id, version_id)): Path<(String, String)>,
     Query(query): Query<PromptVersionDiffQuery>,
 ) -> impl IntoResponse {
-    let cache = state.version_content.lock().unwrap();
+    let cache = state
+        .version_content
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
     let content_a = cache
         .get(&version_id)
         .map(|vc| vc.content.clone())

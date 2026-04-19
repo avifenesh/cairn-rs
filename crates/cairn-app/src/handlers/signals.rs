@@ -116,7 +116,7 @@ pub(crate) async fn ingest_signal_handler(
 
             // RFC 022: evaluate triggers for this signal
             let decision_candidates = {
-                let triggers = state.triggers.lock().unwrap();
+                let triggers = state.triggers.lock().unwrap_or_else(|e| e.into_inner());
                 triggers.decision_candidates_for_signal(
                     &project,
                     &record.id,
@@ -140,7 +140,7 @@ pub(crate) async fn ingest_signal_handler(
             let prepared_trigger_ids: HashSet<_> =
                 trigger_decision_outcomes.keys().cloned().collect();
             let (pending_runs, persisted_trigger_events) = {
-                let mut triggers = state.triggers.lock().unwrap();
+                let mut triggers = state.triggers.lock().unwrap_or_else(|e| e.into_inner());
                 let trigger_events = triggers.evaluate_signal_for_candidates(
                     &project,
                     &record.id,
