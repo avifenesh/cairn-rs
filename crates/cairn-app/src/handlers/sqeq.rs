@@ -408,7 +408,7 @@ pub(crate) async fn a2a_submit_task_handler(
     match state
         .runtime
         .tasks
-        .submit(&project, task_key.clone(), None, None, 0)
+        .submit(&project, None, task_key.clone(), None, None, 0)
         .await
     {
         Ok(_) => {

@@ -58,17 +58,21 @@ pub(crate) async fn seed_demo_data(state: &AppState) {
             tracing::warn!("seed: run {run}: {e}");
         }
     }
-    let _ = state.runtime.runs.complete(&RunId::new("run_a")).await;
-    let _ = state.runtime.runs.complete(&RunId::new("run_b")).await;
+    let sess_alpha = SessionId::new("sess_alpha");
+    let sess_beta = SessionId::new("sess_beta");
+    let sess_gamma = SessionId::new("sess_gamma");
+    let _ = state.runtime.runs.complete(&sess_alpha, &RunId::new("run_a")).await;
+    let _ = state.runtime.runs.complete(&sess_alpha, &RunId::new("run_b")).await;
     let _ = state
         .runtime
         .runs
-        .fail(&RunId::new("run_d"), FailureClass::ExecutionError)
+        .fail(&sess_beta, &RunId::new("run_d"), FailureClass::ExecutionError)
         .await;
     let _ = state
         .runtime
         .runs
         .pause(
+            &sess_gamma,
             &RunId::new("run_e"),
             PauseReason {
                 kind: PauseReasonKind::OperatorPause,
@@ -95,11 +99,33 @@ pub(crate) async fn seed_demo_data(state: &AppState) {
         ("task_11", "run_d"),
         ("task_12", "run_e"),
     ];
+    // task_id → session_id map derived from task_defs's parent run and run_defs.
+    let task_session = |tid: &str| -> SessionId {
+        let parent_run = task_defs
+            .iter()
+            .find(|(t, _)| *t == tid)
+            .map(|(_, r)| *r)
+            .unwrap_or("run_a");
+        let sess = run_defs
+            .iter()
+            .find(|(r, _)| *r == parent_run)
+            .map(|(_, s)| *s)
+            .unwrap_or("sess_alpha");
+        SessionId::new(sess)
+    };
     for (tid, rid) in task_defs {
+        let sess = task_session(tid);
         if let Err(e) = state
             .runtime
             .tasks
-            .submit(&project, TaskId::new(*tid), Some(RunId::new(*rid)), None, 0)
+            .submit(
+                &project,
+                Some(&sess),
+                TaskId::new(*tid),
+                Some(RunId::new(*rid)),
+                None,
+                0,
+            )
             .await
         {
             tracing::warn!("seed: task {tid}: {e}");
@@ -107,45 +133,50 @@ pub(crate) async fn seed_demo_data(state: &AppState) {
     }
     // Complete task_01–04
     for tid in &["task_01", "task_02", "task_03", "task_04"] {
+        let sess = task_session(tid);
         let _ = state
             .runtime
             .tasks
-            .claim(&TaskId::new(*tid), "demo-worker".to_owned(), 300_000)
+            .claim(Some(&sess), &TaskId::new(*tid), "demo-worker".to_owned(), 300_000)
             .await;
-        let _ = state.runtime.tasks.start(&TaskId::new(*tid)).await;
-        let _ = state.runtime.tasks.complete(&TaskId::new(*tid)).await;
+        let _ = state.runtime.tasks.start(Some(&sess), &TaskId::new(*tid)).await;
+        let _ = state.runtime.tasks.complete(Some(&sess), &TaskId::new(*tid)).await;
     }
     // Running: task_05, task_06
     for tid in &["task_05", "task_06"] {
+        let sess = task_session(tid);
         let _ = state
             .runtime
             .tasks
-            .claim(&TaskId::new(*tid), "demo-worker".to_owned(), 300_000)
+            .claim(Some(&sess), &TaskId::new(*tid), "demo-worker".to_owned(), 300_000)
             .await;
-        let _ = state.runtime.tasks.start(&TaskId::new(*tid)).await;
+        let _ = state.runtime.tasks.start(Some(&sess), &TaskId::new(*tid)).await;
     }
     // Claimed: task_07, task_08
     for tid in &["task_07", "task_08"] {
+        let sess = task_session(tid);
         let _ = state
             .runtime
             .tasks
-            .claim(&TaskId::new(*tid), "demo-worker".to_owned(), 300_000)
+            .claim(Some(&sess), &TaskId::new(*tid), "demo-worker".to_owned(), 300_000)
             .await;
     }
     // task_09, task_12 remain queued
     // Fail task_10, cancel task_11
+    let sess_10 = task_session("task_10");
     let _ = state
         .runtime
         .tasks
-        .claim(&TaskId::new("task_10"), "demo-worker".to_owned(), 300_000)
+        .claim(Some(&sess_10), &TaskId::new("task_10"), "demo-worker".to_owned(), 300_000)
         .await;
-    let _ = state.runtime.tasks.start(&TaskId::new("task_10")).await;
+    let _ = state.runtime.tasks.start(Some(&sess_10), &TaskId::new("task_10")).await;
     let _ = state
         .runtime
         .tasks
-        .fail(&TaskId::new("task_10"), FailureClass::ExecutionError)
+        .fail(Some(&sess_10), &TaskId::new("task_10"), FailureClass::ExecutionError)
         .await;
-    let _ = state.runtime.tasks.cancel(&TaskId::new("task_11")).await;
+    let sess_11 = task_session("task_11");
+    let _ = state.runtime.tasks.cancel(Some(&sess_11), &TaskId::new("task_11")).await;
 
     // ── 3 Approvals ───────────────────────────────────────────────────────────
     // appr_01: pending (run_c)

@@ -844,7 +844,7 @@ pub(crate) async fn intervene_run_handler(
 
     let before = current_event_head(&state).await;
     match body.action {
-        RunInterventionAction::ForceComplete => match state.runtime.runs.complete(&run_id).await {
+        RunInterventionAction::ForceComplete => match state.runtime.runs.complete(&run.session_id, &run_id).await {
             Ok(updated_run) => {
                 if let Err(err) = append_run_intervention_event(
                     &state,
@@ -1057,17 +1057,17 @@ pub(crate) async fn cancel_run_handler(
     let run_id = RunId::new(&id);
 
     // T6a-C2: verify tenant scope before any mutation.
-    match load_run_visible_to_tenant(state.as_ref(), &tenant_scope, &run_id).await {
-        Ok(Some(_)) => {}
+    let run = match load_run_visible_to_tenant(state.as_ref(), &tenant_scope, &run_id).await {
+        Ok(Some(run)) => run,
         Ok(None) => {
             return AppApiError::new(StatusCode::NOT_FOUND, "not_found", "run not found")
                 .into_response();
         }
         Err(response) => return response,
-    }
+    };
 
     let before = current_event_head(&state).await;
-    match state.runtime.runs.cancel(&run_id).await {
+    match state.runtime.runs.cancel(&run.session_id, &run_id).await {
         Ok(record) => {
             publish_runtime_frames_since(&state, before).await;
             (StatusCode::OK, Json(record)).into_response()
@@ -1114,17 +1114,17 @@ pub(crate) async fn claim_run_handler(
 
     // T6a-C2: tenant scope + explicit 404 before the adapter call so the
     // 404 path is isolated from future adapter changes.
-    match load_run_visible_to_tenant(state.as_ref(), &tenant_scope, &run_id).await {
-        Ok(Some(_)) => {}
+    let run = match load_run_visible_to_tenant(state.as_ref(), &tenant_scope, &run_id).await {
+        Ok(Some(run)) => run,
         Ok(None) => {
             return AppApiError::new(StatusCode::NOT_FOUND, "not_found", "run not found")
                 .into_response();
         }
         Err(response) => return response,
-    }
+    };
 
     let before = current_event_head(&state).await;
-    match state.runtime.runs.claim(&run_id).await {
+    match state.runtime.runs.claim(&run.session_id, &run_id).await {
         Ok(record) => {
             publish_runtime_frames_since(&state, before).await;
             (StatusCode::OK, Json(record)).into_response()
@@ -1142,14 +1142,14 @@ pub(crate) async fn pause_run_handler(
     let run_id = RunId::new(id);
 
     // T6a-C2: tenant scope check before any mutation.
-    match load_run_visible_to_tenant(state.as_ref(), &tenant_scope, &run_id).await {
-        Ok(Some(_)) => {}
+    let run = match load_run_visible_to_tenant(state.as_ref(), &tenant_scope, &run_id).await {
+        Ok(Some(run)) => run,
         Ok(None) => {
             return AppApiError::new(StatusCode::NOT_FOUND, "not_found", "run not found")
                 .into_response();
         }
         Err(response) => return response,
-    }
+    };
 
     let before = current_event_head(&state).await;
     let reason = PauseReason {
@@ -1159,7 +1159,7 @@ pub(crate) async fn pause_run_handler(
         actor: body.actor,
     };
 
-    match state.runtime.runs.pause(&run_id, reason).await {
+    match state.runtime.runs.pause(&run.session_id, &run_id, reason).await {
         Ok(run) => {
             publish_runtime_frames_since(&state, before).await;
             (StatusCode::OK, Json(run)).into_response()
@@ -1177,20 +1177,21 @@ pub(crate) async fn resume_run_handler(
     let run_id = RunId::new(id);
 
     // T6a-C2: tenant scope check before any mutation.
-    match load_run_visible_to_tenant(state.as_ref(), &tenant_scope, &run_id).await {
-        Ok(Some(_)) => {}
+    let run = match load_run_visible_to_tenant(state.as_ref(), &tenant_scope, &run_id).await {
+        Ok(Some(run)) => run,
         Ok(None) => {
             return AppApiError::new(StatusCode::NOT_FOUND, "not_found", "run not found")
                 .into_response();
         }
         Err(response) => return response,
-    }
+    };
 
     let before = current_event_head(&state).await;
     match state
         .runtime
         .runs
         .resume(
+            &run.session_id,
             &run_id,
             body.trigger.unwrap_or(ResumeTrigger::OperatorResume),
             body.target.unwrap_or(RunResumeTarget::Running),
@@ -1428,10 +1429,24 @@ pub(crate) async fn process_scheduled_run_resumes_handler(
         if record.project.tenant_id != *tenant_scope.tenant_id() {
             continue;
         }
+        // RFC-011 Phase 2: resume needs session_id; fetch from the run projection.
+        let session_id = match state.runtime.runs.get(&record.run_id).await {
+            Ok(Some(run)) => run.session_id,
+            Ok(None) => continue,
+            Err(err) => {
+                tracing::warn!(
+                    run_id = %record.run_id,
+                    error = %err,
+                    "failed to load run for scheduled resume; skipping",
+                );
+                continue;
+            }
+        };
         match state
             .runtime
             .runs
             .resume(
+                &session_id,
                 &record.run_id,
                 ResumeTrigger::ResumeAfterTimer,
                 RunResumeTarget::Running,

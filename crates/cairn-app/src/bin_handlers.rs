@@ -265,7 +265,7 @@ pub(crate) async fn create_run_task_handler(
     match state
         .runtime
         .tasks
-        .submit(&run.project, task_id, Some(run_id), None, 0)
+        .submit(&run.project, Some(&run.session_id), task_id, Some(run_id), None, 0)
         .await
     {
         Ok(record) => {
@@ -293,7 +293,8 @@ pub(crate) async fn start_task_handler(
     Path(id): Path<String>,
 ) -> impl axum::response::IntoResponse {
     let task_id = TaskId::new(id.clone());
-    match state.runtime.tasks.start(&task_id).await {
+    let session_id = resolve_bin_task_session(&state, &task_id).await;
+    match state.runtime.tasks.start(session_id.as_ref(), &task_id).await {
         Ok(record) => Ok((StatusCode::OK, Json(record))),
         Err(e) => {
             let msg = e.to_string();
@@ -304,6 +305,22 @@ pub(crate) async fn start_task_handler(
             }
         }
     }
+}
+
+async fn resolve_bin_task_session(
+    state: &AppState,
+    task_id: &TaskId,
+) -> Option<cairn_domain::SessionId> {
+    let task = state.runtime.tasks.get(task_id).await.ok().flatten()?;
+    let parent_run_id = task.parent_run_id.as_ref()?;
+    state
+        .runtime
+        .runs
+        .get(parent_run_id)
+        .await
+        .ok()
+        .flatten()
+        .map(|r| r.session_id)
 }
 
 #[derive(Deserialize)]
@@ -317,10 +334,11 @@ pub(crate) async fn fail_task_handler(
     Json(body): Json<FailTaskBody>,
 ) -> impl axum::response::IntoResponse {
     let task_id = TaskId::new(id.clone());
+    let session_id = resolve_bin_task_session(&state, &task_id).await;
     match state
         .runtime
         .tasks
-        .fail(&task_id, cairn_domain::FailureClass::ExecutionError)
+        .fail(session_id.as_ref(), &task_id, cairn_domain::FailureClass::ExecutionError)
         .await
     {
         Ok(record) => {
@@ -500,7 +518,8 @@ pub(crate) async fn batch_cancel_tasks_handler(
 
     for raw_id in body.task_ids {
         let task_id = TaskId::new(&raw_id);
-        match state.runtime.tasks.cancel(&task_id).await {
+        let session_id = resolve_bin_task_session(&state, &task_id).await;
+        match state.runtime.tasks.cancel(session_id.as_ref(), &task_id).await {
             Ok(_) => cancelled += 1,
             Err(e) => {
                 let reason = e.to_string();
