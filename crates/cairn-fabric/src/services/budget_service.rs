@@ -7,6 +7,7 @@ use ff_core::contracts::ReportUsageResult;
 use ff_core::keys::{budget_policies_index, budget_resets_key, BudgetKeyContext};
 use ff_core::partition::budget_partition;
 use ff_core::types::{BudgetId, ExecutionId, TimestampMs};
+use ff_sdk::task::parse_report_usage_result;
 use uuid::Uuid;
 
 use crate::boot::FabricRuntime;
@@ -262,7 +263,12 @@ impl FabricBudgetService {
             )
             .await?;
 
-        parse_spend_result(&raw)
+        // FF owns the wire format for ff_report_usage_and_check; cairn just
+        // surfaces the result. `parse_report_usage_result` is strict —
+        // malformed u64 fields fail loudly instead of silently coercing to 0,
+        // which matches the semantics we want (drift = error, not fake
+        // zero-usage breach).
+        parse_report_usage_result(&raw).map_err(|e| FabricError::Internal(e.to_string()))
     }
 
     pub async fn get_budget_status(
@@ -352,76 +358,6 @@ impl FabricBudgetService {
     }
 }
 
-/// Parse `ff_report_usage_and_check` wire format:
-/// `{1, "OK"}`, `{1, "SOFT_BREACH", dim, current, limit}`,
-/// `{1, "HARD_BREACH", dim, current, limit}`, `{1, "ALREADY_APPLIED"}`.
-/// Mirrors `parse_report_usage_result` in
-/// `ff-sdk/src/task.rs` (that parser is private, so we keep ours in sync by hand).
-fn parse_spend_result(raw: &ferriskey::Value) -> Result<ReportUsageResult, FabricError> {
-    let arr = match raw {
-        ferriskey::Value::Array(arr) => arr,
-        _ => {
-            return Err(FabricError::Internal(
-                "ff_report_usage_and_check: expected Array".to_owned(),
-            ))
-        }
-    };
-
-    let status_code = match arr.first() {
-        Some(Ok(ferriskey::Value::Int(n))) => *n,
-        _ => {
-            return Err(FabricError::Internal(
-                "ff_report_usage_and_check: expected Int status code".to_owned(),
-            ))
-        }
-    };
-
-    if status_code != 1 {
-        let error_code = field_str(arr, 1);
-        return Err(FabricError::Internal(format!(
-            "ff_report_usage_and_check failed: {error_code}"
-        )));
-    }
-
-    let sub_status = field_str(arr, 1);
-    match sub_status.as_str() {
-        "OK" => Ok(ReportUsageResult::Ok),
-        "ALREADY_APPLIED" => Ok(ReportUsageResult::AlreadyApplied),
-        "SOFT_BREACH" => {
-            let dimension = field_str(arr, 2);
-            let current_usage: u64 = field_str(arr, 3).parse().unwrap_or(0);
-            let soft_limit: u64 = field_str(arr, 4).parse().unwrap_or(0);
-            Ok(ReportUsageResult::SoftBreach {
-                dimension,
-                current_usage,
-                soft_limit,
-            })
-        }
-        "HARD_BREACH" => {
-            let dimension = field_str(arr, 2);
-            let current_usage: u64 = field_str(arr, 3).parse().unwrap_or(0);
-            let hard_limit: u64 = field_str(arr, 4).parse().unwrap_or(0);
-            Ok(ReportUsageResult::HardBreach {
-                dimension,
-                current_usage,
-                hard_limit,
-            })
-        }
-        _ => Err(FabricError::Internal(format!(
-            "ff_report_usage_and_check: unknown sub-status: {sub_status}"
-        ))),
-    }
-}
-
-fn field_str(arr: &[Result<ferriskey::Value, ferriskey::Error>], index: usize) -> String {
-    match arr.get(index) {
-        Some(Ok(ferriskey::Value::BulkString(b))) => String::from_utf8_lossy(b).into_owned(),
-        Some(Ok(ferriskey::Value::SimpleString(s))) => s.clone(),
-        Some(Ok(ferriskey::Value::Int(n))) => n.to_string(),
-        _ => String::new(),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -431,30 +367,6 @@ mod tests {
     fn test_eid(seed: &str) -> ExecutionId {
         let uuid = uuid::Uuid::new_v5(&uuid::Uuid::NAMESPACE_DNS, seed.as_bytes());
         ExecutionId::deterministic_solo(&LaneId::new("test"), &PartitionConfig::default(), uuid)
-    }
-
-    #[test]
-    fn spend_result_ok_variant() {
-        let raw = ferriskey::Value::Array(vec![
-            Ok(ferriskey::Value::Int(1)),
-            Ok(ferriskey::Value::SimpleString("OK".to_owned())),
-        ]);
-        let result = parse_spend_result(&raw).unwrap();
-        assert_eq!(result, ReportUsageResult::Ok);
-    }
-
-    #[test]
-    fn spend_result_already_applied_is_separate_variant() {
-        // FF emits a distinct ALREADY_APPLIED sub-status when the dedup key
-        // matches a prior spend — the budget was NOT double-decremented.
-        // Callers that need to distinguish fresh-Ok from retry-Ok match on
-        // `ReportUsageResult::AlreadyApplied` directly.
-        let raw = ferriskey::Value::Array(vec![
-            Ok(ferriskey::Value::Int(1)),
-            Ok(ferriskey::Value::SimpleString("ALREADY_APPLIED".to_owned())),
-        ]);
-        let result = parse_spend_result(&raw).unwrap();
-        assert_eq!(result, ReportUsageResult::AlreadyApplied);
     }
 
     #[test]
@@ -517,83 +429,6 @@ mod tests {
         let k1 = compute_spend_idempotency_key(&bid, &eid, &[("a:b", 1), ("c", 2)]);
         let k2 = compute_spend_idempotency_key(&bid, &eid, &[("a", 1), ("b:c", 2)]);
         assert_ne!(k1, k2);
-    }
-
-    #[test]
-    fn spend_result_soft_breach() {
-        let raw = ferriskey::Value::Array(vec![
-            Ok(ferriskey::Value::Int(1)),
-            Ok(ferriskey::Value::SimpleString("SOFT_BREACH".to_owned())),
-            Ok(ferriskey::Value::BulkString(b"tokens".to_vec().into())),
-            Ok(ferriskey::Value::BulkString(b"850".to_vec().into())),
-            Ok(ferriskey::Value::BulkString(b"800".to_vec().into())),
-        ]);
-        let result = parse_spend_result(&raw).unwrap();
-        assert_eq!(
-            result,
-            ReportUsageResult::SoftBreach {
-                dimension: "tokens".to_owned(),
-                current_usage: 850,
-                soft_limit: 800,
-            }
-        );
-    }
-
-    #[test]
-    fn spend_result_hard_breach() {
-        let raw = ferriskey::Value::Array(vec![
-            Ok(ferriskey::Value::Int(1)),
-            Ok(ferriskey::Value::SimpleString("HARD_BREACH".to_owned())),
-            Ok(ferriskey::Value::BulkString(
-                b"cost_microdollars".to_vec().into(),
-            )),
-            Ok(ferriskey::Value::BulkString(b"5000".to_vec().into())),
-            Ok(ferriskey::Value::BulkString(b"4000".to_vec().into())),
-        ]);
-        let result = parse_spend_result(&raw).unwrap();
-        assert_eq!(
-            result,
-            ReportUsageResult::HardBreach {
-                dimension: "cost_microdollars".to_owned(),
-                current_usage: 5000,
-                hard_limit: 4000,
-            }
-        );
-    }
-
-    #[test]
-    fn spend_result_unknown_sub_status_errors() {
-        let raw = ferriskey::Value::Array(vec![
-            Ok(ferriskey::Value::Int(1)),
-            Ok(ferriskey::Value::SimpleString("GARBAGE".to_owned())),
-        ]);
-        let result = parse_spend_result(&raw);
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn spend_result_non_ok_status_code_errors() {
-        // status_code != 1 means FF bubbled an error envelope — we surface it
-        // as FabricError::Internal with the code payload.
-        let raw = ferriskey::Value::Array(vec![
-            Ok(ferriskey::Value::Int(0)),
-            Ok(ferriskey::Value::SimpleString(
-                "budget_not_found".to_owned(),
-            )),
-        ]);
-        let result = parse_spend_result(&raw);
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn field_str_extracts_bulk_string() {
-        let arr = vec![
-            Ok(ferriskey::Value::BulkString(b"hello".to_vec().into())),
-            Ok(ferriskey::Value::Int(42)),
-        ];
-        assert_eq!(field_str(&arr, 0), "hello");
-        assert_eq!(field_str(&arr, 1), "42");
-        assert_eq!(field_str(&arr, 99), "");
     }
 
     #[test]
