@@ -54,6 +54,12 @@ pub struct OrchestrationContext {
     /// making discovered tools visible to the LLM without permanently promoting
     /// them to Registered tier.
     pub discovered_tool_names: Vec<String>,
+    /// T5-H1: step summaries from prior iterations of this run, threaded
+    /// from the loop runner into each iteration's gather phase so the
+    /// LLM sees its own recent history. The loop mutates this in place
+    /// after every iteration; gather copies it into `GatherOutput.step_history`
+    /// (optionally merged with checkpointed entries on resume).
+    pub step_history: Vec<StepSummary>,
 }
 
 // ── GatherOutput ─────────────────────────────────────────────────────────────
@@ -159,8 +165,7 @@ pub struct ActionResult {
     /// trust 0-as-measured will under-report latency. The same convention
     /// applies to the `tool_result` frame the loop emits to FF's
     /// attempt_stream — see `loop_runner.rs` where this field feeds
-    /// `log_tool_result`. Closes the "Better fix" follow-up on #33; replaces
-    /// the previous wall-clock-divided-by-result-count approximation.
+    /// `log_tool_result`.
     pub duration_ms: u64,
 }
 
@@ -198,6 +203,21 @@ pub enum LoopSignal {
     WaitSubagent { child_task_id: TaskId },
     /// Plan-mode run: agent emitted a `<proposed_plan>` block (RFC 018).
     PlanProposed { plan_markdown: String },
+}
+
+impl LoopSignal {
+    /// Canonical snake_case tag for telemetry/SSE, matching the rest of
+    /// the cairn-domain `#[serde(rename_all = "snake_case")]` convention.
+    pub fn kind(&self) -> &'static str {
+        match self {
+            LoopSignal::Continue => "continue",
+            LoopSignal::Done => "done",
+            LoopSignal::Failed { .. } => "failed",
+            LoopSignal::WaitApproval { .. } => "wait_approval",
+            LoopSignal::WaitSubagent { .. } => "wait_subagent",
+            LoopSignal::PlanProposed { .. } => "plan_proposed",
+        }
+    }
 }
 
 // ── LoopTermination ──────────────────────────────────────────────────────────

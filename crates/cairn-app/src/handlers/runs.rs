@@ -1529,6 +1529,7 @@ pub(crate) async fn orchestrate_run_handler(
         working_dir: working_dir.clone(),
         run_mode: body.mode.clone().or(default_run_mode).unwrap_or_default(),
         discovered_tool_names: vec![],
+        step_history: vec![],
     };
 
     let model_id = match body.model_id {

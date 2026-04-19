@@ -222,8 +222,15 @@ impl ChannelEmitter {
     }
 
     fn send(&self, event: OrchestratorEvent) {
-        if let Ok(json) = serde_json::to_string(&event) {
-            let _ = self.tx.send(json); // ignore "no receivers" errors
+        match serde_json::to_string(&event) {
+            Ok(json) => {
+                let _ = self.tx.send(json); // "no receivers" is expected
+            }
+            Err(e) => {
+                // Unreachable in practice (every field derives Serialize),
+                // but consistent with the crate's log-and-continue policy.
+                tracing::warn!(error = %e, "failed to serialize OrchestratorEvent — dropping");
+            }
         }
     }
 }
@@ -256,7 +263,7 @@ impl OrchestratorEventEmitter for ChannelEmitter {
             first_action: decide
                 .proposals
                 .first()
-                .map(|p| format!("{:?}", p.action_type).to_lowercase())
+                .map(|p| action_type_snake_case(&p.action_type))
                 .unwrap_or_else(|| "none".to_owned()),
             confidence: decide.calibrated_confidence,
             latency_ms: decide.latency_ms,
@@ -314,7 +321,7 @@ impl OrchestratorEventEmitter for ChannelEmitter {
             .iter()
             .filter(|r| matches!(r.status, ActionStatus::Failed { .. }))
             .count();
-        let signal = format!("{:?}", execute.loop_signal).to_lowercase();
+        let signal = loop_signal_snake_case(&execute.loop_signal);
         self.send(OrchestratorEvent::StepCompleted {
             run_id: ctx.run_id.clone(),
             iteration: ctx.iteration,
@@ -379,6 +386,24 @@ impl OrchestratorEventEmitter for ChannelEmitter {
     }
 }
 
+// ── Canonical snake_case helpers (T5-M5) ─────────────────────────────────────
+//
+// `format!("{:?}", variant).to_lowercase()` produces `"invoketool"` and
+// `"waitapproval"` — not the canonical snake_case the rest of the SSE
+// protocol uses. Route through serde so we match
+// `#[serde(rename_all = "snake_case")]` on the domain types.
+
+fn action_type_snake_case(action_type: &cairn_domain::ActionType) -> String {
+    serde_json::to_value(action_type)
+        .ok()
+        .and_then(|v| v.as_str().map(str::to_owned))
+        .unwrap_or_else(|| format!("{:?}", action_type).to_lowercase())
+}
+
+fn loop_signal_snake_case(signal: &crate::context::LoopSignal) -> String {
+    signal.kind().to_owned()
+}
+
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -405,6 +430,7 @@ mod tests {
             working_dir: PathBuf::from("."),
             run_mode: cairn_domain::decisions::RunMode::Direct,
             discovered_tool_names: vec![],
+            step_history: vec![],
         }
     }
 

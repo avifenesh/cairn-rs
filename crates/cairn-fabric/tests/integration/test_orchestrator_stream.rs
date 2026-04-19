@@ -158,6 +158,7 @@ async fn orchestrator_loop_emits_four_frames_in_per_iteration_order() {
         working_dir: PathBuf::from("/tmp"),
         run_mode: RunMode::Direct,
         discovered_tool_names: Vec::new(),
+        step_history: Vec::new(),
     };
 
     let decide_output = DecideOutput {

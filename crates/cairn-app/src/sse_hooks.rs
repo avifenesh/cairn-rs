@@ -387,6 +387,7 @@ mod sse_orchestrator_tests {
             working_dir: PathBuf::from("."),
             run_mode: cairn_domain::decisions::RunMode::Direct,
             discovered_tool_names: vec![],
+            step_history: vec![],
         }
     }
 
