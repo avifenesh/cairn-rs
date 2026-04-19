@@ -86,6 +86,20 @@ impl FabricRuntime {
 
         let partition_config = PartitionConfig::default();
 
+        // PERF#5/#6: operators need to see the partition counts on boot
+        // so a mis-set cluster (e.g. half the nodes at 64, half at 256)
+        // is obvious before any ExecutionId is minted. ExecutionId
+        // stability depends on keeping `num_flow_partitions` fixed across
+        // the cluster lifetime (RFC-011 bumped the default from 64 → 256).
+        tracing::info!(
+            num_flow_partitions = partition_config.num_flow_partitions,
+            num_budget_partitions = partition_config.num_budget_partitions,
+            num_quota_partitions = partition_config.num_quota_partitions,
+            "fabric: initialised with partition config (default changed \
+             64→256 in RFC-011; ExecutionId stability depends on keeping \
+             this count fixed across the cluster lifetime)"
+        );
+
         // Seed the waitpoint HMAC secret BEFORE Engine::start so any
         // suspend-path FCALL the engine scanners trigger finds an
         // initialized secrets hash. Idempotent: re-running boot with the
@@ -182,7 +196,7 @@ async fn seed_waitpoint_hmac_secret_if_configured(
         }
     };
 
-    let num_partitions = partition_config.num_execution_partitions;
+    let num_partitions = partition_config.num_flow_partitions;
     let secret_field = format!("secret:{kid}");
 
     for index in 0..num_partitions {

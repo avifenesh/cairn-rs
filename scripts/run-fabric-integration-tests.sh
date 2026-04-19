@@ -55,7 +55,7 @@ FF_PATH="${FF_PATH:-/tmp/FlowFabric}"
 FF_BRANCH="${FF_BRANCH:-main}"
 FF_REPO="${FF_REPO:-https://github.com/avifenesh/FlowFabric.git}"
 # Keep in lockstep with crates/cairn-fabric/Cargo.toml `rev = ...`.
-FF_REV="${FF_REV:-a09871000574388256b1dd7c910239e992c0d3a6}"
+FF_REV="${FF_REV:-1b19dd108ec0f9af7c344d2e129d053449edcb6f}"
 TEST_URL="${CAIRN_TEST_VALKEY_URL:-redis://localhost:${VALKEY_PORT}}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

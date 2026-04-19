@@ -25,6 +25,7 @@ pub mod tokens;
 pub mod tool_impls;
 pub mod trigger_routes;
 pub mod triggers;
+pub mod validate;
 
 // Re-exports for backward compatibility
 pub use bootstrap::{parse_args, parse_args_from, run_bootstrap};

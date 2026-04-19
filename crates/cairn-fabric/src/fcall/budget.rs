@@ -57,10 +57,10 @@ pub fn build_create_budget(
 /// `dedup_key` is REQUIRED. FF reads `ARGV[2 * dim_count + 3]`; if the slot is
 /// empty or missing, server-side dedup is silently disabled and a double-submit
 /// will double-decrement the budget. Callers must pass a caller-prefixed key
-/// (typically `"ff:usagededup:{hash_tag}:{uuid}"`) so FF's SET lands on the
-/// same slot as the budget itself. Pass `""` only when you explicitly want to
-/// disable dedup (integration tests, one-off admin spends) — never for
-/// production run-service spend paths.
+/// via `ff_core::keys::usage_dedup_key(budget_ctx.hash_tag(), &idempotency_uuid)`
+/// so FF's SET lands on the same slot as the budget itself. Pass `""` only
+/// when you explicitly want to disable dedup (integration tests, one-off admin
+/// spends) — never for production run-service spend paths.
 pub fn build_report_usage(
     ctx: &BudgetKeyContext,
     dimension_deltas: &[(&str, u64)],
@@ -93,6 +93,7 @@ pub const REPORT_USAGE_FIXED_ARGS: usize = 3;
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ff_core::keys::usage_dedup_key;
     use ff_core::partition::{budget_partition, PartitionConfig};
 
     #[test]
@@ -127,16 +128,17 @@ mod tests {
         let pc = PartitionConfig::default();
         let partition = budget_partition(&bid, &pc);
         let ctx = BudgetKeyContext::new(&partition, &bid);
+        let dedup = usage_dedup_key("{b:0}", "test-key");
         let (keys, args) = build_report_usage(
             &ctx,
             &[("tokens", 100), ("cost", 50)],
             TimestampMs::now(),
-            "ff:usagededup:{b:0}:test-key",
+            &dedup,
         );
         assert_eq!(keys.len(), REPORT_USAGE_KEYS);
         // dim_count + 2 dims + 2 deltas + now + dedup_key = 7
         assert_eq!(args.len(), REPORT_USAGE_FIXED_ARGS + 2 * 2);
-        assert_eq!(args.last().unwrap(), "ff:usagededup:{b:0}:test-key");
+        assert_eq!(args.last().unwrap(), &dedup);
     }
 
     #[test]

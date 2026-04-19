@@ -12,7 +12,7 @@
 // test gets a uuid-scoped `ProjectKey` via `TestHarness::setup()`, and
 // every id inside the test is generated with `uuid::Uuid::new_v4()`
 // (`unique_run_id`, `unique_task_id`, `unique_session_id`,
-// `ExecutionId::new()`, `BudgetId::new()`, …). Keyspaces therefore do
+// `ExecutionId::deterministic_solo(...)`, `BudgetId::new()`, …). Keyspaces therefore do
 // not collide across parallel tests — each test operates in its own
 // project partition and FF's `{p:N}` hashtags route their FCALLs to
 // disjoint slots.
@@ -200,6 +200,16 @@ impl TestHarness {
             project,
             event_log,
         }
+    }
+
+    /// Borrow the runtime's `PartitionConfig` for id_map helpers.
+    ///
+    /// Tests thread this into `run_to_execution_id`, `task_to_execution_id`,
+    /// etc., so every ExecutionId minted inside a test lands in the same
+    /// partition scheme the runtime enforces (see id_map.rs's
+    /// partition-count stability contract).
+    pub fn partition_config(&self) -> &ff_core::partition::PartitionConfig {
+        &self.fabric.runtime.partition_config
     }
 
     pub fn unique_run_id(&self) -> RunId {

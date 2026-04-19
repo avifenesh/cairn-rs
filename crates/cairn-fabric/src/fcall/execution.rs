@@ -174,10 +174,11 @@ pub const CANCEL_EXECUTION_ARGS: usize = 5;
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support::test_eid;
     use ff_core::partition::{execution_partition, PartitionConfig};
 
     fn test_ctx() -> (ExecKeyContext, IndexKeys, ExecutionId) {
-        let eid = ExecutionId::from_uuid(uuid::Uuid::nil());
+        let eid = test_eid("execution");
         let pc = PartitionConfig::default();
         let partition = execution_partition(&eid, &pc);
         let ctx = ExecKeyContext::new(&partition, &eid);

@@ -63,6 +63,7 @@ pub const CHECK_ADMISSION_ARGS: usize = 6;
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support::test_eid;
     use ff_core::partition::{quota_partition, PartitionConfig};
 
     #[test]
@@ -91,7 +92,7 @@ mod tests {
         let pc = PartitionConfig::default();
         let partition = quota_partition(&qid, &pc);
         let ctx = QuotaKeyContext::new(&partition, &qid);
-        let eid = ExecutionId::from_uuid(uuid::Uuid::nil());
+        let eid = test_eid("check_admission");
         let (keys, args) =
             build_check_admission(&ctx, &eid, TimestampMs::now(), 60, 100, 10, "default");
         assert_eq!(keys.len(), CHECK_ADMISSION_KEYS);

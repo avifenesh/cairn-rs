@@ -29,7 +29,7 @@ impl FabricRunService {
     }
 
     fn execution_id(&self, project: &ProjectKey, run_id: &RunId) -> ExecutionId {
-        id_map::run_to_execution_id(project, run_id)
+        id_map::run_to_execution_id(project, run_id, &self.runtime.partition_config)
     }
 
     fn partition(&self, eid: &ExecutionId) -> Partition {

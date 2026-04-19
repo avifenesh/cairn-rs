@@ -4,9 +4,10 @@ use std::sync::Arc;
 use crate::error::FabricError;
 use crate::helpers::check_fcall_success;
 use ff_core::contracts::ReportUsageResult;
-use ff_core::keys::{budget_policies_index, budget_resets_key, BudgetKeyContext};
+use ff_core::keys::{budget_policies_index, budget_resets_key, usage_dedup_key, BudgetKeyContext};
 use ff_core::partition::budget_partition;
 use ff_core::types::{BudgetId, ExecutionId, TimestampMs};
+use ff_sdk::task::parse_report_usage_result;
 use uuid::Uuid;
 
 use crate::boot::FabricRuntime;
@@ -19,6 +20,38 @@ const SPEND_NAMESPACE: Uuid = Uuid::from_bytes([
 ]);
 
 const SPEND_NAMESPACE_VERSION: u8 = 1;
+
+/// Maximum byte length for `scope_type` / `scope_id` fields passed into
+/// `ff_create_budget`. Matches `cairn-app::validate::MAX_ID_LEN` (128) ×2 to
+/// leave headroom for scoped identifiers without hard-coding a cross-crate
+/// constant dependency.
+const SCOPE_FIELD_MAX_LEN: usize = 256;
+
+/// Validate a scope field (scope_type / scope_id) passed to `create_budget`.
+///
+/// SEC-008 guard: cairn-fabric does not import cairn-app's `validate`
+/// module, but it still must reject control-character and oversized inputs
+/// before they reach FF's Valkey key builders (where they become opaque
+/// hash-tag components). Empty / zero-length rejected so a blank scope
+/// never silently collides with a legitimate bootstrap "default".
+pub(crate) fn validate_scope_field(field: &str, name: &str) -> Result<(), FabricError> {
+    if field.is_empty() {
+        return Err(FabricError::Validation {
+            reason: format!("{name} is empty"),
+        });
+    }
+    if field.len() > SCOPE_FIELD_MAX_LEN {
+        return Err(FabricError::Validation {
+            reason: format!("{name} exceeds {SCOPE_FIELD_MAX_LEN} chars"),
+        });
+    }
+    if field.chars().any(|c| c.is_control()) {
+        return Err(FabricError::Validation {
+            reason: format!("{name} contains control characters"),
+        });
+    }
+    Ok(())
+}
 
 /// Derive a stable idempotency key for a spend call.
 ///
@@ -104,6 +137,10 @@ impl FabricBudgetService {
                 reason: "dimensions, hard_limits, soft_limits must have equal length".to_owned(),
             });
         }
+        // SEC-008: reject control characters / empty / oversized scope
+        // inputs before they flow into FF key builders.
+        validate_scope_field(scope_type, "scope_type")?;
+        validate_scope_field(scope_id, "scope_id")?;
 
         let budget_id = BudgetId::new();
         let partition = budget_partition(&budget_id, &self.runtime.partition_config);
@@ -220,7 +257,8 @@ impl FabricBudgetService {
     /// double-decremented). The key's caller-identity component comes from
     /// the ExecutionId, so every distinct logical spend MUST present a
     /// distinct ExecutionId. Tests without a real execution must mint a
-    /// throwaway ([`ExecutionId::new`]); silently falling back to a
+    /// throwaway via [`ExecutionId::deterministic_solo`] with a fresh
+    /// UUID; silently falling back to a
     /// sentinel (`Uuid::nil`) would make two unrelated process-level
     /// retries collide into a single FF dedup slot and suppress a
     /// legitimate spend.
@@ -245,7 +283,7 @@ impl FabricBudgetService {
 
         // Prefix with the budget's `{b:M}` hash tag so FF's SET lands on the
         // same slot as the budget itself — matches ff-sdk task.rs:699-702.
-        let dedup_key = format!("ff:usagededup:{}:{}", ctx.hash_tag(), idempotency_key);
+        let dedup_key = usage_dedup_key(ctx.hash_tag(), &idempotency_key);
 
         let (keys, argv) =
             crate::fcall::budget::build_report_usage(&ctx, dimension_deltas, now, &dedup_key);
@@ -262,7 +300,12 @@ impl FabricBudgetService {
             )
             .await?;
 
-        parse_spend_result(&raw)
+        // FF owns the wire format for ff_report_usage_and_check; cairn just
+        // surfaces the result. `parse_report_usage_result` is strict —
+        // malformed u64 fields fail loudly instead of silently coercing to 0,
+        // which matches the semantics we want (drift = error, not fake
+        // zero-usage breach).
+        parse_report_usage_result(&raw).map_err(|e| FabricError::Internal(e.to_string()))
     }
 
     pub async fn get_budget_status(
@@ -352,108 +395,15 @@ impl FabricBudgetService {
     }
 }
 
-/// Parse `ff_report_usage_and_check` wire format:
-/// `{1, "OK"}`, `{1, "SOFT_BREACH", dim, current, limit}`,
-/// `{1, "HARD_BREACH", dim, current, limit}`, `{1, "ALREADY_APPLIED"}`.
-/// Mirrors `parse_report_usage_result` in
-/// `ff-sdk/src/task.rs` (that parser is private, so we keep ours in sync by hand).
-fn parse_spend_result(raw: &ferriskey::Value) -> Result<ReportUsageResult, FabricError> {
-    let arr = match raw {
-        ferriskey::Value::Array(arr) => arr,
-        _ => {
-            return Err(FabricError::Internal(
-                "ff_report_usage_and_check: expected Array".to_owned(),
-            ))
-        }
-    };
-
-    let status_code = match arr.first() {
-        Some(Ok(ferriskey::Value::Int(n))) => *n,
-        _ => {
-            return Err(FabricError::Internal(
-                "ff_report_usage_and_check: expected Int status code".to_owned(),
-            ))
-        }
-    };
-
-    if status_code != 1 {
-        let error_code = field_str(arr, 1);
-        return Err(FabricError::Internal(format!(
-            "ff_report_usage_and_check failed: {error_code}"
-        )));
-    }
-
-    let sub_status = field_str(arr, 1);
-    match sub_status.as_str() {
-        "OK" => Ok(ReportUsageResult::Ok),
-        "ALREADY_APPLIED" => Ok(ReportUsageResult::AlreadyApplied),
-        "SOFT_BREACH" => {
-            let dimension = field_str(arr, 2);
-            let current_usage: u64 = field_str(arr, 3).parse().unwrap_or(0);
-            let soft_limit: u64 = field_str(arr, 4).parse().unwrap_or(0);
-            Ok(ReportUsageResult::SoftBreach {
-                dimension,
-                current_usage,
-                soft_limit,
-            })
-        }
-        "HARD_BREACH" => {
-            let dimension = field_str(arr, 2);
-            let current_usage: u64 = field_str(arr, 3).parse().unwrap_or(0);
-            let hard_limit: u64 = field_str(arr, 4).parse().unwrap_or(0);
-            Ok(ReportUsageResult::HardBreach {
-                dimension,
-                current_usage,
-                hard_limit,
-            })
-        }
-        _ => Err(FabricError::Internal(format!(
-            "ff_report_usage_and_check: unknown sub-status: {sub_status}"
-        ))),
-    }
-}
-
-fn field_str(arr: &[Result<ferriskey::Value, ferriskey::Error>], index: usize) -> String {
-    match arr.get(index) {
-        Some(Ok(ferriskey::Value::BulkString(b))) => String::from_utf8_lossy(b).into_owned(),
-        Some(Ok(ferriskey::Value::SimpleString(s))) => s.clone(),
-        Some(Ok(ferriskey::Value::Int(n))) => n.to_string(),
-        _ => String::new(),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn spend_result_ok_variant() {
-        let raw = ferriskey::Value::Array(vec![
-            Ok(ferriskey::Value::Int(1)),
-            Ok(ferriskey::Value::SimpleString("OK".to_owned())),
-        ]);
-        let result = parse_spend_result(&raw).unwrap();
-        assert_eq!(result, ReportUsageResult::Ok);
-    }
-
-    #[test]
-    fn spend_result_already_applied_is_separate_variant() {
-        // FF emits a distinct ALREADY_APPLIED sub-status when the dedup key
-        // matches a prior spend — the budget was NOT double-decremented.
-        // Callers that need to distinguish fresh-Ok from retry-Ok match on
-        // `ReportUsageResult::AlreadyApplied` directly.
-        let raw = ferriskey::Value::Array(vec![
-            Ok(ferriskey::Value::Int(1)),
-            Ok(ferriskey::Value::SimpleString("ALREADY_APPLIED".to_owned())),
-        ]);
-        let result = parse_spend_result(&raw).unwrap();
-        assert_eq!(result, ReportUsageResult::AlreadyApplied);
-    }
+    use crate::test_support::test_eid;
 
     #[test]
     fn idempotency_key_stable_for_same_inputs() {
         let bid = BudgetId::new();
-        let eid = ExecutionId::new();
+        let eid = test_eid("stable");
         let k1 = compute_spend_idempotency_key(&bid, &eid, &[("tokens", 50)]);
         let k2 = compute_spend_idempotency_key(&bid, &eid, &[("tokens", 50)]);
         assert_eq!(k1, k2);
@@ -464,7 +414,7 @@ mod tests {
     #[test]
     fn idempotency_key_differs_when_inputs_change() {
         let bid = BudgetId::new();
-        let eid = ExecutionId::new();
+        let eid = test_eid("differs");
         let k_tokens = compute_spend_idempotency_key(&bid, &eid, &[("tokens", 50)]);
         let k_cost = compute_spend_idempotency_key(&bid, &eid, &[("cost", 50)]);
         let k_amount = compute_spend_idempotency_key(&bid, &eid, &[("tokens", 51)]);
@@ -475,7 +425,7 @@ mod tests {
     #[test]
     fn idempotency_key_order_independent_for_same_dimension_set() {
         let bid = BudgetId::new();
-        let eid = ExecutionId::new();
+        let eid = test_eid("order");
         let k_ab = compute_spend_idempotency_key(&bid, &eid, &[("a", 1), ("b", 2)]);
         let k_ba = compute_spend_idempotency_key(&bid, &eid, &[("b", 2), ("a", 1)]);
         assert_eq!(k_ab, k_ba);
@@ -484,8 +434,8 @@ mod tests {
     #[test]
     fn idempotency_key_isolates_execution() {
         let bid = BudgetId::new();
-        let eid1 = ExecutionId::new();
-        let eid2 = ExecutionId::new();
+        let eid1 = test_eid("exec1");
+        let eid2 = test_eid("exec2");
         let k1 = compute_spend_idempotency_key(&bid, &eid1, &[("tokens", 50)]);
         let k2 = compute_spend_idempotency_key(&bid, &eid2, &[("tokens", 50)]);
         assert_ne!(k1, k2);
@@ -495,7 +445,7 @@ mod tests {
     fn idempotency_key_isolates_budget() {
         let b1 = BudgetId::new();
         let b2 = BudgetId::new();
-        let eid = ExecutionId::new();
+        let eid = test_eid("budget_iso");
         let k1 = compute_spend_idempotency_key(&b1, &eid, &[("tokens", 50)]);
         let k2 = compute_spend_idempotency_key(&b2, &eid, &[("tokens", 50)]);
         assert_ne!(k1, k2);
@@ -506,87 +456,10 @@ mod tests {
         // Null-byte delimiters prevent "a:b"+"c" vs "a"+"b:c" style collisions,
         // same pattern id_map.rs guards against.
         let bid = BudgetId::new();
-        let eid = ExecutionId::new();
+        let eid = test_eid("delim");
         let k1 = compute_spend_idempotency_key(&bid, &eid, &[("a:b", 1), ("c", 2)]);
         let k2 = compute_spend_idempotency_key(&bid, &eid, &[("a", 1), ("b:c", 2)]);
         assert_ne!(k1, k2);
-    }
-
-    #[test]
-    fn spend_result_soft_breach() {
-        let raw = ferriskey::Value::Array(vec![
-            Ok(ferriskey::Value::Int(1)),
-            Ok(ferriskey::Value::SimpleString("SOFT_BREACH".to_owned())),
-            Ok(ferriskey::Value::BulkString(b"tokens".to_vec().into())),
-            Ok(ferriskey::Value::BulkString(b"850".to_vec().into())),
-            Ok(ferriskey::Value::BulkString(b"800".to_vec().into())),
-        ]);
-        let result = parse_spend_result(&raw).unwrap();
-        assert_eq!(
-            result,
-            ReportUsageResult::SoftBreach {
-                dimension: "tokens".to_owned(),
-                current_usage: 850,
-                soft_limit: 800,
-            }
-        );
-    }
-
-    #[test]
-    fn spend_result_hard_breach() {
-        let raw = ferriskey::Value::Array(vec![
-            Ok(ferriskey::Value::Int(1)),
-            Ok(ferriskey::Value::SimpleString("HARD_BREACH".to_owned())),
-            Ok(ferriskey::Value::BulkString(
-                b"cost_microdollars".to_vec().into(),
-            )),
-            Ok(ferriskey::Value::BulkString(b"5000".to_vec().into())),
-            Ok(ferriskey::Value::BulkString(b"4000".to_vec().into())),
-        ]);
-        let result = parse_spend_result(&raw).unwrap();
-        assert_eq!(
-            result,
-            ReportUsageResult::HardBreach {
-                dimension: "cost_microdollars".to_owned(),
-                current_usage: 5000,
-                hard_limit: 4000,
-            }
-        );
-    }
-
-    #[test]
-    fn spend_result_unknown_sub_status_errors() {
-        let raw = ferriskey::Value::Array(vec![
-            Ok(ferriskey::Value::Int(1)),
-            Ok(ferriskey::Value::SimpleString("GARBAGE".to_owned())),
-        ]);
-        let result = parse_spend_result(&raw);
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn spend_result_non_ok_status_code_errors() {
-        // status_code != 1 means FF bubbled an error envelope — we surface it
-        // as FabricError::Internal with the code payload.
-        let raw = ferriskey::Value::Array(vec![
-            Ok(ferriskey::Value::Int(0)),
-            Ok(ferriskey::Value::SimpleString(
-                "budget_not_found".to_owned(),
-            )),
-        ]);
-        let result = parse_spend_result(&raw);
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn field_str_extracts_bulk_string() {
-        let arr = vec![
-            Ok(ferriskey::Value::BulkString(b"hello".to_vec().into())),
-            Ok(ferriskey::Value::Int(42)),
-        ];
-        assert_eq!(field_str(&arr, 0), "hello");
-        assert_eq!(field_str(&arr, 1), "42");
-        assert_eq!(field_str(&arr, 99), "");
     }
 
     #[test]
@@ -604,6 +477,96 @@ mod tests {
         };
         assert_eq!(status.scope_type, "run");
         assert!(status.usage.is_empty());
+    }
+
+    // ── SEC-008 validate_scope_field ───────────────────────────────────
+
+    #[test]
+    fn validate_scope_field_rejects_empty() {
+        let err = validate_scope_field("", "scope_id").unwrap_err();
+        match err {
+            FabricError::Validation { reason } => assert!(reason.contains("empty")),
+            other => panic!("expected Validation, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn validate_scope_field_rejects_control_chars() {
+        let err = validate_scope_field("run\x01id", "scope_id").unwrap_err();
+        match err {
+            FabricError::Validation { reason } => assert!(reason.contains("control characters")),
+            other => panic!("expected Validation, got {other:?}"),
+        }
+        // Null byte is the most dangerous control char because FF keys use
+        // it as a delimiter under RFC-011 — must be rejected.
+        let err = validate_scope_field("run\x00id", "scope_id").unwrap_err();
+        assert!(matches!(err, FabricError::Validation { .. }));
+    }
+
+    #[test]
+    fn validate_scope_field_rejects_oversized() {
+        let long = "x".repeat(SCOPE_FIELD_MAX_LEN + 1);
+        let err = validate_scope_field(&long, "scope_id").unwrap_err();
+        match err {
+            FabricError::Validation { reason } => assert!(reason.contains("exceeds")),
+            other => panic!("expected Validation, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn validate_scope_field_accepts_at_max_len() {
+        let exact = "a".repeat(SCOPE_FIELD_MAX_LEN);
+        assert!(validate_scope_field(&exact, "scope_id").is_ok());
+    }
+
+    #[test]
+    fn validate_scope_field_accepts_normal_id() {
+        assert!(validate_scope_field("run_abc_123", "scope_id").is_ok());
+        assert!(validate_scope_field("run", "scope_type").is_ok());
+        // Embedded colons / slashes are fine — they are not control chars
+        // and cairn callers use them inside scope ids (e.g. "tenant:ws").
+        assert!(validate_scope_field("a:b/c", "scope_id").is_ok());
+    }
+
+    // ── TC#5 parse_report_usage_result error propagation ──────────────
+
+    /// Passing a non-`Array` ferriskey Value to
+    /// `ff_sdk::task::parse_report_usage_result` MUST return `Err`, and the
+    /// `record_spend` mapping MUST surface it as `FabricError::Internal`
+    /// (not silently coerce to `ReportUsageResult::Ok`).
+    ///
+    /// We can't unit-test `record_spend` itself without Valkey, but we
+    /// CAN prove the two parts that compose inside it:
+    ///   1. `parse_report_usage_result(malformed)` is Err, and
+    ///   2. `.map_err(|e| FabricError::Internal(e.to_string()))` produces
+    ///      the Internal variant.
+    ///      If FF ever changes the parser to silently accept unexpected shapes,
+    ///      this test fires.
+    #[test]
+    fn parse_report_usage_result_err_maps_to_fabric_internal() {
+        // SimpleString is the shape FF's parser rejects first (it expects
+        // Array). No FF-side Array variant produces Err deterministically
+        // in a test without Valkey, so we target the outer shape guard.
+        let malformed = ferriskey::Value::SimpleString("not_an_array".into());
+
+        let parse_result = parse_report_usage_result(&malformed);
+        assert!(
+            parse_result.is_err(),
+            "parser must reject non-Array values; got {parse_result:?}"
+        );
+
+        let mapped: Result<ReportUsageResult, FabricError> =
+            parse_result.map_err(|e| FabricError::Internal(e.to_string()));
+        let err = mapped.expect_err("mapping err-ok branch flipped");
+        match err {
+            FabricError::Internal(msg) => assert!(
+                !msg.is_empty(),
+                "Internal variant must carry the parser's detail, got empty"
+            ),
+            other => panic!(
+                "parse_report_usage_result Err must map to FabricError::Internal, got {other:?}"
+            ),
+        }
     }
 
     #[test]

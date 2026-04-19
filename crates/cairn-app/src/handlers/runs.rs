@@ -198,6 +198,23 @@ impl CreateRunRequest {
             self.project_id.as_str(),
         )
     }
+
+    /// SEC-002: reject control-character / empty / oversized inputs at
+    /// the HTTP boundary before any id flows into FF's key builders
+    /// (where a null-byte is a delimiter — see id_map.rs F02 fix). Must
+    /// be called explicitly by every handler that consumes this struct;
+    /// the `project()` accessor intentionally stays infallible so it can
+    /// continue serving as the `HasProjectScope` impl.
+    pub(crate) fn validate(&self) -> Result<(), String> {
+        crate::validate::check_all(&[
+            crate::validate::require_id("tenant_id", &self.tenant_id),
+            crate::validate::require_id("workspace_id", &self.workspace_id),
+            crate::validate::require_id("project_id", &self.project_id),
+            crate::validate::require_id("session_id", &self.session_id),
+            crate::validate::require_id("run_id", &self.run_id),
+            crate::validate::valid_id("parent_run_id", &self.parent_run_id),
+        ])
+    }
 }
 
 impl HasProjectScope for CreateRunRequest {
@@ -379,6 +396,12 @@ pub(crate) async fn create_run_handler(
     project_scope: ProjectJson<CreateRunRequest>,
 ) -> impl IntoResponse {
     let body = project_scope.into_inner();
+    // SEC-002: validate tenant / workspace / project / session / run ids
+    // before they flow through FF — null bytes, newlines, and oversized
+    // fields must return 422, not propagate into Valkey key builders.
+    if let Err(msg) = body.validate() {
+        return validation_error_response(msg);
+    }
     let project = CreateRunRequest::project(&body);
     if let Err(response) = ensure_workspace_role_for_project(
         state.as_ref(),
@@ -2489,4 +2512,99 @@ pub(crate) async fn record_checkpoint_handler(
     body: Json<crate::SaveCheckpointRequest>,
 ) -> impl IntoResponse {
     crate::save_checkpoint_handler(state, path, body).await
+}
+
+// ── Tests ────────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn req(
+        tenant: &str,
+        workspace: &str,
+        project: &str,
+        session: &str,
+        run: &str,
+    ) -> CreateRunRequest {
+        CreateRunRequest {
+            tenant_id: tenant.into(),
+            workspace_id: workspace.into(),
+            project_id: project.into(),
+            session_id: session.into(),
+            run_id: run.into(),
+            parent_run_id: None,
+            mode: None,
+        }
+    }
+
+    #[test]
+    fn validate_accepts_normal_ids() {
+        assert!(req("t1", "w1", "p1", "s1", "r1").validate().is_ok());
+    }
+
+    /// SEC-002: embedded NUL bytes are FF delimiters under RFC-011; rejecting
+    /// them at the HTTP boundary prevents tenant-scope collapse via id_map.
+    #[test]
+    fn validate_rejects_tenant_id_with_null_byte() {
+        let r = req("tenant\0bad", "w1", "p1", "s1", "r1");
+        let err = r.validate().unwrap_err();
+        assert!(err.contains("tenant_id"));
+        assert!(err.contains("control characters"));
+    }
+
+    #[test]
+    fn validate_rejects_workspace_id_with_soh() {
+        let r = req("t1", "ws\x01bad", "p1", "s1", "r1");
+        let err = r.validate().unwrap_err();
+        assert!(err.contains("workspace_id"));
+        assert!(err.contains("control characters"));
+    }
+
+    #[test]
+    fn validate_rejects_project_id_with_newline() {
+        let r = req("t1", "w1", "proj\nbad", "s1", "r1");
+        let err = r.validate().unwrap_err();
+        assert!(err.contains("project_id"));
+        assert!(err.contains("control characters"));
+    }
+
+    #[test]
+    fn validate_rejects_empty_run_id() {
+        let r = req("t1", "w1", "p1", "s1", "");
+        let err = r.validate().unwrap_err();
+        assert!(err.contains("run_id"));
+        assert!(err.contains("required"));
+    }
+
+    #[test]
+    fn validate_rejects_empty_session_id() {
+        let r = req("t1", "w1", "p1", "", "r1");
+        let err = r.validate().unwrap_err();
+        assert!(err.contains("session_id"));
+        assert!(err.contains("required"));
+    }
+
+    #[test]
+    fn validate_rejects_oversized_tenant_id() {
+        let r = req(
+            &"x".repeat(crate::validate::MAX_ID_LEN + 1),
+            "w1",
+            "p1",
+            "s1",
+            "r1",
+        );
+        let err = r.validate().unwrap_err();
+        assert!(err.contains("tenant_id"));
+        assert!(err.contains("maximum length"));
+    }
+
+    /// parent_run_id is optional — absent or empty is ok, control-chars are not.
+    #[test]
+    fn validate_parent_run_id_optional_but_checked() {
+        let mut r = req("t1", "w1", "p1", "s1", "r1");
+        assert!(r.validate().is_ok());
+        r.parent_run_id = Some("parent\x07id".into());
+        assert!(r.validate().is_err());
+    }
 }

@@ -195,7 +195,7 @@ impl FabricQuotaService {
         rate_limit: u64,
         concurrency_cap: u64,
     ) -> Result<AdmissionResult, FabricError> {
-        let eid = id_map::run_to_execution_id(project, run_id);
+        let eid = id_map::run_to_execution_id(project, run_id, &self.runtime.partition_config);
         self.check_admission(
             quota_policy_id,
             &eid,

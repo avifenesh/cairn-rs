@@ -110,10 +110,11 @@ pub const RENEW_LEASE_ARGS: usize = 7;
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support::test_eid;
     use ff_core::partition::{execution_partition, PartitionConfig};
 
     fn test_ctx() -> (ExecKeyContext, IndexKeys, ExecutionId) {
-        let eid = ExecutionId::from_uuid(uuid::Uuid::nil());
+        let eid = test_eid("claim");
         let pc = PartitionConfig::default();
         let partition = execution_partition(&eid, &pc);
         (

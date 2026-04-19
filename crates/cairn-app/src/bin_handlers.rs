@@ -424,6 +424,22 @@ pub(crate) async fn batch_create_runs_handler(
     let mut results: Vec<serde_json::Value> = Vec::with_capacity(body.runs.len());
 
     for run_body in body.runs {
+        // SEC-002: validate any supplied ids (control chars / oversized)
+        // before they reach FF. `valid_id` accepts None/empty (the default
+        // fallback is applied below), so we only reject hostile content in
+        // values actually provided.
+        let validation = crate::validate::check_all(&[
+            crate::validate::valid_id("tenant_id", &run_body.tenant_id),
+            crate::validate::valid_id("workspace_id", &run_body.workspace_id),
+            crate::validate::valid_id("project_id", &run_body.project_id),
+            crate::validate::valid_id("session_id", &run_body.session_id),
+            crate::validate::valid_id("run_id", &run_body.run_id),
+            crate::validate::valid_id("parent_run_id", &run_body.parent_run_id),
+        ]);
+        if let Err(msg) = validation {
+            results.push(serde_json::json!({ "ok": false, "error": msg }));
+            continue;
+        }
         let project = ProjectKey::new(
             run_body.tenant_id.as_deref().unwrap_or("default"),
             run_body.workspace_id.as_deref().unwrap_or("default"),

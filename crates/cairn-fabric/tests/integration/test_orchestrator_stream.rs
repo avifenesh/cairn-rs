@@ -208,10 +208,11 @@ async fn orchestrator_loop_emits_four_frames_in_per_iteration_order() {
     //    tool_result → checkpoint. XRANGE preserves insertion order;
     //    an out-of-order result proves the loop emitted in the wrong
     //    sequence (or the sink dropped one frame).
-    let eid = cairn_fabric::id_map::task_to_execution_id(&h.project, &task_id);
+    let eid =
+        cairn_fabric::id_map::task_to_execution_id(&h.project, &task_id, h.partition_config());
     let frames: Vec<StreamFrame> = cairn_fabric::stream::restore_frames(
         &h.fabric.runtime.client,
-        &h.fabric.runtime.partition_config,
+        h.partition_config(),
         &eid,
         ff_core::types::AttemptIndex::new(0),
         100,

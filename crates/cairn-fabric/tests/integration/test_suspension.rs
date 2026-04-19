@@ -6,9 +6,9 @@
 //   - ff_deliver_signal      (via runs.resolve_approval, signals.deliver_*)
 //
 // Runs against a testcontainers-provisioned Valkey (see tests/integration.rs).
-// `TestHarness::setup()` issues FLUSHDB between tests so index zsets do not
-// leak across runs — the earlier uuid-scoped ids stay only as defense in
-// depth.
+// Each test gets a uuid-scoped ProjectKey from `TestHarness::setup()` for
+// parallel-safe isolation — there is NO FLUSHDB between tests (would wipe
+// sibling tests' in-flight state on the shared container).
 
 use std::collections::HashMap;
 use std::time::Duration;
@@ -69,8 +69,8 @@ async fn read_exec_core_for_run(
     h: &TestHarness,
     run_id: &cairn_domain::RunId,
 ) -> HashMap<String, String> {
-    let eid = cairn_fabric::id_map::run_to_execution_id(&h.project, run_id);
-    let partition = execution_partition(&eid, &h.fabric.runtime.partition_config);
+    let eid = cairn_fabric::id_map::run_to_execution_id(&h.project, run_id, h.partition_config());
+    let partition = execution_partition(&eid, h.partition_config());
     let ctx = ExecKeyContext::new(&partition, &eid);
     let fields: HashMap<String, String> = h
         .fabric
@@ -316,7 +316,7 @@ async fn test_signal_delivery_is_idempotent() {
         .filter(|s| !s.is_empty())
         .expect("current_waitpoint_id must be set after enter_waiting_approval");
     let wp_id = ff_core::types::WaitpointId::parse(&wp_id_str).expect("waitpoint_id must parse");
-    let eid = cairn_fabric::id_map::run_to_execution_id(&h.project, &run_id);
+    let eid = cairn_fabric::id_map::run_to_execution_id(&h.project, &run_id, h.partition_config());
 
     let invocation_id = format!("inv_{}", uuid::Uuid::new_v4());
 

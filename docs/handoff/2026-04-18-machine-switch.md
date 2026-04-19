@@ -85,9 +85,9 @@ FF is Avi's own project; we file issues against `github.com/avifenesh/FlowFabric
 |------|-------|---|
 | #9 | Batch C — ff-sdk polish before crate publish | Allows publishing cairn-fabric without path-deps; enables external worker SDK. |
 | #11 | RFC-009: cap-routing convergence — V2 options | Capability routing (`RoutingRequirements.required_capabilities`) wiring in `FabricSchedulerService`. Multi-worker deployments need this. |
-| #14 | Publish `pub fn claim_from_grant` (scheduler-mediated claim outside insecure-direct-claim) | Replaces the `insecure-direct-claim` dev feature with a real scheduler-mediated path for production workers. |
-| #15 | Publish `pub fn claim_from_reclaim_grant` (symmetric to #14 for resumed executions) | Same as #14 for resume-after-suspend. |
-| #16 | Publish `parse_report_usage_result` to avoid parallel parser duplication | Removes the duplicate parser we carry in `cairn-fabric/src/services/budget_service.rs`. |
+| ~~#14~~ | ~~Publish `pub fn claim_from_grant`~~ | **CLOSED upstream.** Landed in cairn via the rev-1b19dd10 bump (RFC-011 phase 1, mechanical sweep). Consumer-side adoption — replacing the `insecure-direct-claim` feature-gated path with the real grant-flow — is still pending as RFC-011 phase 2. |
+| ~~#15~~ | ~~Publish `pub fn claim_from_reclaim_grant`~~ | **CLOSED upstream.** Same status as #14. Grant-flow resume adoption tracked under RFC-011 phase 2. |
+| ~~#16~~ | ~~Publish `parse_report_usage_result`~~ | **CLOSED upstream and adopted.** `budget_service.rs` now calls `ff_sdk::task::parse_report_usage_result` directly; the parallel parser was deleted in RFC-011 phase 1. |
 | #21 | Crash-recovery scanner for `flow_id` / flow membership consistency (cairn P3.6 §5.5) | Documented timeout-split-brain reconciliation path. |
 | #22 | perf-invest: cairn P3.6 bridge-event audit (reports) | Input to our bridge-event completeness audit. |
 
@@ -120,7 +120,7 @@ PR #35 review flagged but deferred: `ff_claim_resumed_execution`, `ff_issue_clai
 
 **2. Issue #33 "Better fix" — thread per-call duration through `ActionResult`.** The minimum fix landed in PR #37; the follow-up removes the averaging math entirely by carrying real per-call duration. Touches `crates/cairn-orchestrator/src/execute_impl.rs` + `loop_runner.rs` + test stubs (~10 call sites per the deferral reasoning in the PR #37 commit). Estimate: small refactor, worth doing in one tight commit with test updates.
 
-**3. Close remaining FF asks.** When FF #14/#15 land (`pub claim_from_grant` / `claim_from_reclaim_grant`), replace cairn-fabric's `insecure-direct-claim` feature-gated path with the real scheduler-mediated claim. This is the biggest win — unlocks a real external worker SDK and removes the feature gate we've been carrying.
+**3. RFC-011 phase 2 — adopt grant-flow on the consumer side.** FF #14/#15/#16 all landed in cairn via the rev-1b19dd10 bump (phase 1, mechanical sweep). Phase 2 replaces cairn-fabric's `insecure-direct-claim` feature-gated path with the real `claim_from_grant` / `claim_from_reclaim_grant` scheduler-mediated flow. This is the biggest remaining win — unlocks a real external worker SDK and removes the feature gate we've been carrying.
 
 **4. External worker SDK** (`worker_sdk.rs` in `cairn-fabric`). Blocked on #3. Goal: cairn-ergonomic wrapper around `ff-sdk` `FlowFabricWorker`. Pattern: `CairnWorker::claim_next() → CairnTask` with typed helpers. See earlier memory for the sketch.
 
@@ -262,7 +262,7 @@ Runs: rust lib tests (`in-memory-runtime` feature), rust integration tests, **fa
 ## 11. FlowFabric Context (for the new session)
 
 - **Repo:** `github.com/avifenesh/FlowFabric`
-- **Branch we pin against:** `feat/execution-engine` (last pinned commit in cairn-rs session memory: `a098710` — check `crates/cairn-fabric/Cargo.toml` for current git dep rev).
+- **Branch we pin against:** `feat/execution-engine` (last pinned commit in cairn-rs session memory: `1b19dd10` — check `crates/cairn-fabric/Cargo.toml` for current git dep rev).
 - **Relationship:** cairn-rs depends on FF via git dependency. When FF lands a needed fix, bump the rev in Cargo.toml; rebuild; test.
 - **Filing FF issues:** `gh issue create --repo avifenesh/FlowFabric --title "..." --body "..."`.
 - **FF internals to know:**
