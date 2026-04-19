@@ -80,12 +80,12 @@ async fn external_worker_claim_progress_complete_lifecycle() {
 
     // ── Step 2: Submit a task and claim it ────────────────────────────────
     task_svc
-        .submit(&project(), task_id.clone(), None, None, 0)
+        .submit(&project(), None, task_id.clone(), None, None, 0)
         .await
         .unwrap();
 
     let claimed = task_svc
-        .claim(&task_id, worker_id.as_str().to_owned(), 30_000)
+        .claim(None, &task_id, worker_id.as_str().to_owned(), 30_000)
         .await
         .unwrap();
 
@@ -109,7 +109,7 @@ async fn external_worker_claim_progress_complete_lifecycle() {
     // ── Step 3: Extend the lease via heartbeat ────────────────────────────
     let before_hb = claimed.lease_expires_at.unwrap();
     // Small sleep not needed — just check the heartbeat event is accepted.
-    let after_hb_task = task_svc.heartbeat(&task_id, 60_000).await.unwrap();
+    let after_hb_task = task_svc.heartbeat(None, &task_id, 60_000).await.unwrap();
 
     assert_eq!(
         after_hb_task.state,
@@ -240,11 +240,11 @@ async fn external_worker_reports_task_failure() {
         .unwrap();
 
     task_svc
-        .submit(&project(), task_id.clone(), None, None, 0)
+        .submit(&project(), None, task_id.clone(), None, None, 0)
         .await
         .unwrap();
     let claimed = task_svc
-        .claim(&task_id, worker_id.as_str().to_owned(), 30_000)
+        .claim(None, &task_id, worker_id.as_str().to_owned(), 30_000)
         .await
         .unwrap();
 
@@ -305,11 +305,11 @@ async fn reporting_on_terminal_task_returns_error() {
         .unwrap();
 
     task_svc
-        .submit(&project(), task_id.clone(), None, None, 0)
+        .submit(&project(), None, task_id.clone(), None, None, 0)
         .await
         .unwrap();
     let claimed = task_svc
-        .claim(&task_id, worker_id.as_str().to_owned(), 30_000)
+        .claim(None, &task_id, worker_id.as_str().to_owned(), 30_000)
         .await
         .unwrap();
     let lease_token = claimed.version;

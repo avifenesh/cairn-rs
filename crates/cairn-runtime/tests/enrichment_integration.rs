@@ -23,14 +23,14 @@ async fn enrichment_returns_task_title_and_state() {
     let enrichment = StoreBackedEnrichment::new(store.clone());
 
     task_svc
-        .submit(&project(), TaskId::new("t1"), None, None, 0)
+        .submit(&project(), None, TaskId::new("t1"), None, None, 0)
         .await
         .unwrap();
     task_svc
-        .claim(&TaskId::new("t1"), "w".to_owned(), 60_000)
+        .claim(None, &TaskId::new("t1"), "w".to_owned(), 60_000)
         .await
         .unwrap();
-    task_svc.start(&TaskId::new("t1")).await.unwrap();
+    task_svc.start(None, &TaskId::new("t1")).await.unwrap();
 
     let enriched = enrichment
         .enrich_task(&TaskId::new("t1"))
@@ -200,7 +200,7 @@ async fn task_enrichment_tracks_lifecycle_churn() {
     let p = project();
 
     task_svc
-        .submit(&p, TaskId::new("t1"), None, None, 0)
+        .submit(&p, None, TaskId::new("t1"), None, None, 0)
         .await
         .unwrap();
 
@@ -213,7 +213,7 @@ async fn task_enrichment_tracks_lifecycle_churn() {
     assert!(e.lease_owner.is_none());
 
     task_svc
-        .claim(&TaskId::new("t1"), "worker-x".to_owned(), 60_000)
+        .claim(None, &TaskId::new("t1"), "worker-x".to_owned(), 60_000)
         .await
         .unwrap();
 
@@ -225,7 +225,7 @@ async fn task_enrichment_tracks_lifecycle_churn() {
     assert_eq!(e.state, TaskState::Leased);
     assert_eq!(e.lease_owner.as_deref(), Some("worker-x"));
 
-    task_svc.start(&TaskId::new("t1")).await.unwrap();
+    task_svc.start(None, &TaskId::new("t1")).await.unwrap();
 
     let e = enrichment
         .enrich_task(&TaskId::new("t1"))
@@ -234,7 +234,7 @@ async fn task_enrichment_tracks_lifecycle_churn() {
         .unwrap();
     assert_eq!(e.state, TaskState::Running);
 
-    task_svc.complete(&TaskId::new("t1")).await.unwrap();
+    task_svc.complete(None, &TaskId::new("t1")).await.unwrap();
 
     let e = enrichment
         .enrich_task(&TaskId::new("t1"))

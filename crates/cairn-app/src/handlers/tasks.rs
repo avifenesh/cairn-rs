@@ -247,13 +247,9 @@ pub(crate) async fn create_task_handler(
     if let Some(parent_task_id) = body.parent_task_id.as_ref().map(TaskId::new) {
         match state.runtime.tasks.get(&parent_task_id).await {
             Ok(Some(parent_task)) if parent_task.project == project => {
-                // Inherit session from parent task's parent_run_id if not already set.
                 if session_id.is_none() {
-                    if let Some(parent_run_id) = parent_task.parent_run_id.as_ref() {
-                        if let Ok(Some(run)) = state.runtime.runs.get(parent_run_id).await {
-                            session_id = Some(run.session_id.clone());
-                        }
-                    }
+                    session_id =
+                        resolve_session_for_task_record(state.as_ref(), &parent_task).await;
                 }
             }
             Ok(Some(_)) | Ok(None) => {
@@ -617,7 +613,13 @@ pub(crate) async fn complete_task_handler(
             Ok(t) => t,
             Err(response) => return response,
         };
-    let session_id = resolve_session_for_task_record(state.as_ref(), &current_task).await;
+    // Fetch the parent run once: we need its session_id to drive task
+    // completion and, if the run becomes eligible, to complete it below.
+    let parent_run = match current_task.parent_run_id.as_ref() {
+        Some(rid) => state.runtime.runs.get(rid).await.ok().flatten(),
+        None => None,
+    };
+    let session_id = parent_run.as_ref().map(|r| r.session_id.clone());
 
     if current_task.state == TaskState::Leased {
         if let Err(err) = state.runtime.tasks.start(session_id.as_ref(), &task_id).await {
@@ -638,7 +640,7 @@ pub(crate) async fn complete_task_handler(
                 .await
                 {
                     Ok(false) => {
-                        if let Ok(Some(run)) = state.runtime.runs.get(&parent_run_id).await {
+                        if let Some(run) = parent_run.as_ref() {
                             if run.state == RunState::Running {
                                 if let Err(err) = state.runtime.runs.complete(&run.session_id, &parent_run_id).await
                                 {

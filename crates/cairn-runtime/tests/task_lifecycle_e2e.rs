@@ -62,7 +62,7 @@ async fn step2_submit_task_starts_queued() {
     let task_id = TaskId::new("task_lc2");
 
     let record = tasks
-        .submit(&project(), task_id.clone(), None, None, 0)
+        .submit(&project(), None, task_id.clone(), None, None, 0)
         .await
         .unwrap();
 
@@ -83,12 +83,12 @@ async fn step3_claim_moves_to_leased() {
     let task_id = TaskId::new("task_lc3");
 
     tasks
-        .submit(&project(), task_id.clone(), None, None, 0)
+        .submit(&project(), None, task_id.clone(), None, None, 0)
         .await
         .unwrap();
 
     let leased = tasks
-        .claim(&task_id, "worker_01".to_owned(), 60_000)
+        .claim(None, &task_id, "worker_01".to_owned(), 60_000)
         .await
         .unwrap();
 
@@ -109,7 +109,7 @@ async fn step3_claim_moves_to_leased() {
 
     // Claiming an already-leased task must fail.
     let double_claim = tasks
-        .claim(&task_id, "other_worker".to_owned(), 60_000)
+        .claim(None, &task_id, "other_worker".to_owned(), 60_000)
         .await;
     assert!(
         double_claim.is_err(),
@@ -124,17 +124,17 @@ async fn step4_heartbeat_extends_lease() {
     let task_id = TaskId::new("task_lc4");
 
     tasks
-        .submit(&project(), task_id.clone(), None, None, 0)
+        .submit(&project(), None, task_id.clone(), None, None, 0)
         .await
         .unwrap();
     let leased = tasks
-        .claim(&task_id, "worker_01".to_owned(), 60_000)
+        .claim(None, &task_id, "worker_01".to_owned(), 60_000)
         .await
         .unwrap();
     let original_expiry = leased.lease_expires_at.unwrap();
 
     // Heartbeat with a large extension to guarantee the new expiry is strictly later.
-    let after_hb = tasks.heartbeat(&task_id, 120_000).await.unwrap();
+    let after_hb = tasks.heartbeat(None, &task_id, 120_000).await.unwrap();
 
     assert!(
         after_hb.lease_expires_at.unwrap() > original_expiry,
@@ -144,10 +144,10 @@ async fn step4_heartbeat_extends_lease() {
     // Heartbeat on a Queued task (not leased) must fail.
     let task2 = TaskId::new("task_lc4b");
     tasks
-        .submit(&project(), task2.clone(), None, None, 0)
+        .submit(&project(), None, task2.clone(), None, None, 0)
         .await
         .unwrap();
-    let queued_hb = tasks.heartbeat(&task2, 60_000).await;
+    let queued_hb = tasks.heartbeat(None, &task2, 60_000).await;
     assert!(
         queued_hb.is_err(),
         "heartbeat on a Queued task must be rejected"
@@ -161,22 +161,22 @@ async fn step5_start_then_complete() {
     let task_id = TaskId::new("task_lc5");
 
     tasks
-        .submit(&project(), task_id.clone(), None, None, 0)
+        .submit(&project(), None, task_id.clone(), None, None, 0)
         .await
         .unwrap();
     tasks
-        .claim(&task_id, "worker_01".to_owned(), 60_000)
+        .claim(None, &task_id, "worker_01".to_owned(), 60_000)
         .await
         .unwrap();
 
-    let running = tasks.start(&task_id).await.unwrap();
+    let running = tasks.start(None, &task_id).await.unwrap();
     assert_eq!(
         running.state,
         TaskState::Running,
         "start must move task to Running"
     );
 
-    let completed = tasks.complete(&task_id).await.unwrap();
+    let completed = tasks.complete(None, &task_id).await.unwrap();
     assert_eq!(
         completed.state,
         TaskState::Completed,
@@ -185,7 +185,7 @@ async fn step5_start_then_complete() {
     assert!(completed.state.is_terminal());
 
     // Completing an already-terminal task must fail.
-    let double_complete = tasks.complete(&task_id).await;
+    let double_complete = tasks.complete(None, &task_id).await;
     assert!(double_complete.is_err(), "double-complete must be rejected");
 }
 
@@ -197,13 +197,13 @@ async fn step6_lease_expiry_detection() {
     let task_id = TaskId::new("task_lc6");
 
     tasks
-        .submit(&project(), task_id.clone(), None, None, 0)
+        .submit(&project(), None, task_id.clone(), None, None, 0)
         .await
         .unwrap();
 
     // Claim with a 30-second lease.
     let leased = tasks
-        .claim(&task_id, "worker_01".to_owned(), 30_000)
+        .claim(None, &task_id, "worker_01".to_owned(), 30_000)
         .await
         .unwrap();
     assert_eq!(leased.state, TaskState::Leased);
@@ -248,7 +248,7 @@ async fn full_task_lifecycle() {
     // (2) Submit → Queued.
     let task_id = TaskId::new("task_full_1");
     let queued = tasks
-        .submit(&project(), task_id.clone(), Some(run_id.clone()), None, 0)
+        .submit(&project(), None, task_id.clone(), Some(run_id.clone()), None, 0)
         .await
         .unwrap();
     assert_eq!(queued.state, TaskState::Queued);
@@ -256,7 +256,7 @@ async fn full_task_lifecycle() {
 
     // (3) Claim → Leased.
     let leased = tasks
-        .claim(&task_id, "worker_01".to_owned(), 60_000)
+        .claim(None, &task_id, "worker_01".to_owned(), 60_000)
         .await
         .unwrap();
     assert_eq!(leased.state, TaskState::Leased);
@@ -264,28 +264,28 @@ async fn full_task_lifecycle() {
     let original_expiry = leased.lease_expires_at.unwrap();
 
     // (4) Heartbeat → extends expiry.
-    let after_hb = tasks.heartbeat(&task_id, 120_000).await.unwrap();
+    let after_hb = tasks.heartbeat(None, &task_id, 120_000).await.unwrap();
     assert!(
         after_hb.lease_expires_at.unwrap() > original_expiry,
         "heartbeat must extend lease"
     );
 
     // (5) Start → Running, complete → Completed.
-    let running = tasks.start(&task_id).await.unwrap();
+    let running = tasks.start(None, &task_id).await.unwrap();
     assert_eq!(running.state, TaskState::Running);
 
-    let completed = tasks.complete(&task_id).await.unwrap();
+    let completed = tasks.complete(None, &task_id).await.unwrap();
     assert_eq!(completed.state, TaskState::Completed);
     assert!(completed.state.is_terminal());
 
     // (6) Second task: claim and verify expiry detection.
     let task2_id = TaskId::new("task_full_2");
     tasks
-        .submit(&project(), task2_id.clone(), Some(run_id), None, 0)
+        .submit(&project(), None, task2_id.clone(), Some(run_id), None, 0)
         .await
         .unwrap();
     let leased2 = tasks
-        .claim(&task2_id, "worker_01".to_owned(), 5_000)
+        .claim(None, &task2_id, "worker_01".to_owned(), 5_000)
         .await
         .unwrap();
     let expiry2 = leased2.lease_expires_at.unwrap();
@@ -305,11 +305,11 @@ async fn cancel_queued_task() {
     let (_, _, _, tasks) = services();
     let task_id = TaskId::new("task_cancel");
     tasks
-        .submit(&project(), task_id.clone(), None, None, 0)
+        .submit(&project(), None, task_id.clone(), None, None, 0)
         .await
         .unwrap();
 
-    let canceled = tasks.cancel(&task_id).await.unwrap();
+    let canceled = tasks.cancel(None, &task_id).await.unwrap();
     assert_eq!(canceled.state, TaskState::Canceled);
     assert!(canceled.state.is_terminal());
 }
@@ -322,28 +322,28 @@ async fn fail_task_uses_correct_failure_class() {
     // Retryable failure.
     let t1 = TaskId::new("task_fail_retry");
     tasks
-        .submit(&project(), t1.clone(), None, None, 0)
+        .submit(&project(), None, t1.clone(), None, None, 0)
         .await
         .unwrap();
     tasks
-        .claim(&t1, "worker_01".to_owned(), 60_000)
+        .claim(None, &t1, "worker_01".to_owned(), 60_000)
         .await
         .unwrap();
-    let retryable = tasks.fail(&t1, FailureClass::LeaseExpired).await.unwrap();
+    let retryable = tasks.fail(None, &t1, FailureClass::LeaseExpired).await.unwrap();
     assert_eq!(retryable.state, TaskState::RetryableFailed);
     assert!(!retryable.state.is_terminal());
 
     // Non-retryable failure.
     let t2 = TaskId::new("task_fail_terminal");
     tasks
-        .submit(&project(), t2.clone(), None, None, 0)
+        .submit(&project(), None, t2.clone(), None, None, 0)
         .await
         .unwrap();
     tasks
-        .claim(&t2, "worker_01".to_owned(), 60_000)
+        .claim(None, &t2, "worker_01".to_owned(), 60_000)
         .await
         .unwrap();
-    let failed = tasks.fail(&t2, FailureClass::ExecutionError).await.unwrap();
+    let failed = tasks.fail(None, &t2, FailureClass::ExecutionError).await.unwrap();
     assert_eq!(failed.state, TaskState::Failed);
     assert!(failed.state.is_terminal());
 }
@@ -355,10 +355,10 @@ async fn dead_letter_and_query() {
     let task_id = TaskId::new("task_dlq");
 
     tasks
-        .submit(&project(), task_id.clone(), None, None, 0)
+        .submit(&project(), None, task_id.clone(), None, None, 0)
         .await
         .unwrap();
-    let dl = tasks.dead_letter(&task_id).await.unwrap();
+    let dl = tasks.dead_letter(None, &task_id).await.unwrap();
     assert_eq!(dl.state, TaskState::DeadLettered);
 
     let dlq = tasks.list_dead_lettered(&project(), 100, 0).await.unwrap();

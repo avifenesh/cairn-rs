@@ -246,6 +246,9 @@ async fn run_with_approval_gate() {
         .expect("run must exist");
     assert_eq!(run.state, RunState::Running);
 
-    let run = run_svc.complete(&RunId::new("run_1")).await.unwrap();
+    let run = run_svc
+        .complete(&SessionId::new("sess_1"), &RunId::new("run_1"))
+        .await
+        .unwrap();
     assert_eq!(run.state, RunState::Completed);
 }

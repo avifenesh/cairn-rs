@@ -370,6 +370,7 @@ impl FabricTaskServiceAdapter {
 
 // Error type for the bare-ID path: either the projection failed to find the
 // record (returns NotFound) or the resolver hit a real store error.
+#[allow(dead_code)]
 async fn resolve_task_project(
     store: &Arc<InMemoryStore>,
     task_id: &TaskId,
@@ -494,6 +495,7 @@ async fn resolve_task_project_and_session(
     Ok((task.project, derived_session_id))
 }
 
+#[allow(dead_code)]
 async fn resolve_run_project(
     store: &Arc<InMemoryStore>,
     run_id: &RunId,

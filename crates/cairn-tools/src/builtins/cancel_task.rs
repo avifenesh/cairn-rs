@@ -127,7 +127,7 @@ mod tests {
     async fn cancels_queued_task() {
         let svc = svc().await;
         svc.tasks
-            .submit(&project(), TaskId::new("task_ct"), None, None, 0)
+            .submit(&project(), None, TaskId::new("task_ct"), None, None, 0)
             .await
             .unwrap();
 

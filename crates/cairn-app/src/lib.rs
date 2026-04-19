@@ -579,6 +579,7 @@ mod tests {
             .runtime
             .runs
             .pause(
+                &session_id,
                 &run_id,
                 PauseReason {
                     kind: PauseReasonKind::OperatorPause,
@@ -594,6 +595,7 @@ mod tests {
             .runtime
             .runs
             .resume(
+                &session_id,
                 &run_id,
                 ResumeTrigger::OperatorResume,
                 RunResumeTarget::Running,
@@ -601,7 +603,12 @@ mod tests {
             .await
             .unwrap();
 
-        state.runtime.runs.complete(&run_id).await.unwrap();
+        state
+            .runtime
+            .runs
+            .complete(&session_id, &run_id)
+            .await
+            .unwrap();
 
         // GET audit trail
         let response = AppBootstrap::build_router(state.clone())
@@ -713,6 +720,7 @@ mod tests {
             .tasks
             .submit(
                 &project_key,
+                Some(&session_id),
                 task_id_1.clone(),
                 Some(run_id_1.clone()),
                 None,
@@ -725,6 +733,7 @@ mod tests {
             .tasks
             .submit(
                 &project_key,
+                Some(&session_id),
                 task_id_2.clone(),
                 Some(run_id_2.clone()),
                 None,
@@ -1215,13 +1224,20 @@ mod tests {
         state
             .runtime
             .tasks
-            .submit(&project_key, task_id.clone(), Some(run_id.clone()), None, 0)
+            .submit(
+                &project_key,
+                Some(&session_id),
+                task_id.clone(),
+                Some(run_id.clone()),
+                None,
+                0,
+            )
             .await
             .unwrap();
         state
             .runtime
             .tasks
-            .claim(&task_id, "worker_tle".to_owned(), 50)
+            .claim(Some(&session_id), &task_id, "worker_tle".to_owned(), 50)
             .await
             .unwrap();
 
@@ -1358,6 +1374,7 @@ mod tests {
             .tasks
             .submit(
                 &project_key,
+                Some(&session_id),
                 task_id_1.clone(),
                 Some(run_id.clone()),
                 None,
@@ -1370,6 +1387,7 @@ mod tests {
             .tasks
             .submit(
                 &project_key,
+                Some(&session_id),
                 task_id_2.clone(),
                 Some(run_id.clone()),
                 None,
@@ -1380,13 +1398,13 @@ mod tests {
         state
             .runtime
             .tasks
-            .claim(&task_id_1, "worker_rac".to_owned(), 60_000)
+            .claim(Some(&session_id), &task_id_1, "worker_rac".to_owned(), 60_000)
             .await
             .unwrap();
         state
             .runtime
             .tasks
-            .claim(&task_id_2, "worker_rac".to_owned(), 60_000)
+            .claim(Some(&session_id), &task_id_2, "worker_rac".to_owned(), 60_000)
             .await
             .unwrap();
 
@@ -2082,7 +2100,7 @@ mod tests {
         state
             .runtime
             .tasks
-            .submit(&project, task_id.clone(), None, None, 0)
+            .submit(&project, Some(&session_id), task_id.clone(), None, None, 0)
             .await
             .unwrap();
 

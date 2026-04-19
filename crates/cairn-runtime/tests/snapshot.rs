@@ -52,9 +52,7 @@ async fn snapshot_create_restore_preserves_run_state() {
         .await
         .unwrap();
     task_svc
-        .submit(
-            &project,
-            TaskId::new("task_snap"),
+        .submit(&project, None, TaskId::new("task_snap"),
             Some(run_id.clone()),
             None,
             0,

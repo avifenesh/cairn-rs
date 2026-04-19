@@ -58,9 +58,7 @@ async fn event_log_compaction_retains_state() {
     // Create a task for the final run — put it in Leased state (events ~6-7)
     let final_task_id = TaskId::new("task_final");
     task_svc
-        .submit(
-            &project,
-            final_task_id.clone(),
+        .submit(&project, None, final_task_id.clone(),
             Some(final_run_id.clone()),
             None,
             0,
@@ -68,7 +66,7 @@ async fn event_log_compaction_retains_state() {
         .await
         .unwrap();
     task_svc
-        .claim(&final_task_id, "worker_compact".to_owned(), 60_000)
+        .claim(None, &final_task_id, "worker_compact".to_owned(), 60_000)
         .await
         .unwrap();
 

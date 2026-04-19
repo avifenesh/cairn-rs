@@ -20,6 +20,13 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+<!--
+  Note on "phase-2" nomenclature: "RFC-011 phase-2" refers specifically
+  to the *second* mechanical-sweep slice of the FlowFabric co-location
+  migration (RFC-011), and is unrelated to `docs/design/phase2-implementation-plan.md`,
+  which tracks the separate RFC 015-022 batch. The two "phase 2" labels
+  share a number by coincidence only.
+-->
 - **RFC-011 phase-2 session-scoped execution IDs** — `ExecutionId` for runs
   and tasks now derives from `session_id + run_id/task_id` via UUID-v5
   (`session_run_to_execution_id` / `session_task_to_execution_id`), replacing
@@ -36,6 +43,29 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   gains `session_id: SessionId`. HTTP handlers resolve `session_id` from
   the store projection (task → parent run → session) on each call; no new
   round-trips in steady state (the HGETALL already carries the tag).
+
+  **Migration procedure:**
+
+  1. Stop accepting new runs (set the gateway to 503 or drain at the LB).
+  2. Wait for in-flight runs to reach a terminal state (`Completed`,
+     `Failed`, `Cancelled`). Monitor via `GET /v1/runs?state=running`.
+  3. Flush the FF Valkey namespace: `redis-cli -n <db> FLUSHDB` against
+     the Fabric Valkey instance. The event log (Postgres/SQLite) is
+     authoritative and untouched — only the FF execution-state cache is
+     invalidated.
+  4. Deploy the new binary.
+  5. Resume traffic.
+
+  **Rollback:** revert the binary. The old scheme's execution IDs are
+  deterministic from `run_id` alone, so a post-rollback Valkey is still
+  reachable from the old code path. Any new runs created *after* the
+  upgrade will have execution IDs derived from `session_id + run_id` and
+  will be dead-lettered by the old binary — these must be re-issued.
+
+  **Caveat:** historical events in the event log reference pre-upgrade
+  `ExecutionId` values. Replay against a fresh Valkey will not find them;
+  this is expected. Event-log semantics (durability, causality) are
+  unaffected — only ephemeral FF state is scoped to the new mint.
 
 - **RFC-011 phase-1 mechanical sweep** — FF rev bump `a098710` → `1b19dd10`
   (RFC-011 exec/flow hash-slot co-location, phases 1-3). Consumer-side
