@@ -460,9 +460,18 @@ async fn resolve_task_project_and_session(
     // (no parent_run_id) carry no session binding and must be minted
     // via the solo `task_to_execution_id` path.
     let derived_session_id = match &task.parent_run_id {
-        Some(parent_run_id) => RunReadModel::get(store.as_ref(), parent_run_id)
-            .await?
-            .map(|r| r.session_id),
+        Some(parent_run_id) => {
+            // Parent run is mandatory for session-scoped ExecutionId minting
+            // under RFC-011. A silent None fallback would route to the solo
+            // mint path and land on the wrong Valkey partition.
+            let run = RunReadModel::get(store.as_ref(), parent_run_id)
+                .await?
+                .ok_or_else(|| RuntimeError::NotFound {
+                    entity: "run",
+                    id: parent_run_id.to_string(),
+                })?;
+            Some(run.session_id)
+        }
         None => None,
     };
 
@@ -593,9 +602,18 @@ impl TaskService for FabricTaskServiceAdapter {
         let resolved_session = match session_id {
             Some(sid) => Some(sid.clone()),
             None => match &parent_run_id {
-                Some(prid) => RunReadModel::get(self.store.as_ref(), prid)
-                    .await?
-                    .map(|r| r.session_id),
+                Some(prid) => {
+                    // Parent run is mandatory for RFC-011 co-location —
+                    // silently falling back to solo mint would drop the
+                    // task on the wrong Valkey partition.
+                    let run = RunReadModel::get(self.store.as_ref(), prid)
+                        .await?
+                        .ok_or_else(|| RuntimeError::NotFound {
+                            entity: "run",
+                            id: prid.to_string(),
+                        })?;
+                    Some(run.session_id)
+                }
                 None => None,
             },
         };

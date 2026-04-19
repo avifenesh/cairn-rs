@@ -347,14 +347,20 @@ async fn load_task_with_session_for_tenant(
     let Some(parent_run_id) = task.parent_run_id.as_ref() else {
         return Ok(None);
     };
-    Ok(state
+    // Task has a parent run — its session_id is mandatory for session-scoped
+    // ExecutionId minting under RFC-011. A silent `None` fallback would hit
+    // the wrong Valkey partition; propagate store errors and 404 on missing
+    // projection row instead.
+    let run = state
         .runtime
         .runs
         .get(parent_run_id)
         .await
-        .ok()
-        .flatten()
-        .map(|r| r.session_id))
+        .map_err(|e| internal_error(e.to_string()).into_response())?
+        .ok_or_else(|| {
+            not_found(format!("parent run {} not found", parent_run_id.as_str())).into_response()
+        })?;
+    Ok(Some(run.session_id))
 }
 
 #[derive(Deserialize)]

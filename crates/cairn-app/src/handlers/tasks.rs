@@ -249,7 +249,10 @@ pub(crate) async fn create_task_handler(
             Ok(Some(parent_task)) if parent_task.project == project => {
                 if session_id.is_none() {
                     session_id =
-                        resolve_session_for_task_record(state.as_ref(), &parent_task).await;
+                        match resolve_session_for_task_record(state.as_ref(), &parent_task).await {
+                            Ok(sid) => sid,
+                            Err(response) => return response,
+                        };
                 }
             }
             Ok(Some(_)) | Ok(None) => {
@@ -486,7 +489,10 @@ pub(crate) async fn claim_task_handler(
         Ok(t) => t,
         Err(resp) => return resp,
     };
-    let session_id = resolve_session_for_task_record(state.as_ref(), &task).await;
+    let session_id = match resolve_session_for_task_record(state.as_ref(), &task).await {
+        Ok(sid) => sid,
+        Err(response) => return response,
+    };
 
     let before = current_event_head(&state).await;
     match state
@@ -519,7 +525,10 @@ pub(crate) async fn heartbeat_task_handler(
         Ok(t) => t,
         Err(resp) => return resp,
     };
-    let session_id = resolve_session_for_task_record(state.as_ref(), &task).await;
+    let session_id = match resolve_session_for_task_record(state.as_ref(), &task).await {
+        Ok(sid) => sid,
+        Err(response) => return response,
+    };
 
     let before = current_event_head(&state).await;
     match state
@@ -554,7 +563,10 @@ pub(crate) async fn release_task_lease_handler(
         }
         Err(err) => return runtime_error_response(err),
     };
-    let session_id = resolve_session_for_task_record(state.as_ref(), &task).await;
+    let session_id = match resolve_session_for_task_record(state.as_ref(), &task).await {
+        Ok(sid) => sid,
+        Err(response) => return response,
+    };
 
     let before = current_event_head(&state).await;
     match state
@@ -584,7 +596,10 @@ pub(crate) async fn cancel_task_handler(
         Ok(t) => t,
         Err(response) => return response,
     };
-    let session_id = resolve_session_for_task_record(state.as_ref(), &task).await;
+    let session_id = match resolve_session_for_task_record(state.as_ref(), &task).await {
+        Ok(sid) => sid,
+        Err(response) => return response,
+    };
 
     let before = current_event_head(&state).await;
     match state
@@ -629,8 +644,23 @@ pub(crate) async fn complete_task_handler(
         };
     // Fetch the parent run once: we need its session_id to drive task
     // completion and, if the run becomes eligible, to complete it below.
+    // Propagate store errors and surface a 404 when the task references a
+    // parent run that is not in the projection — silently minting a solo
+    // ExecutionId in that case would violate RFC-011 co-location and produce
+    // an unexplained NotFound from the Fabric layer.
     let parent_run = match current_task.parent_run_id.as_ref() {
-        Some(rid) => state.runtime.runs.get(rid).await.ok().flatten(),
+        Some(rid) => match state.runtime.runs.get(rid).await {
+            Ok(Some(run)) => Some(run),
+            Ok(None) => {
+                return AppApiError::new(
+                    StatusCode::NOT_FOUND,
+                    "not_found",
+                    format!("parent run {} not found", rid.as_str()),
+                )
+                .into_response();
+            }
+            Err(err) => return runtime_error_response(err),
+        },
         None => None,
     };
     let session_id = parent_run.as_ref().map(|r| r.session_id.clone());

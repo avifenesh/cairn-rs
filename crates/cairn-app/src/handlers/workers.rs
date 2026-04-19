@@ -234,7 +234,11 @@ pub(crate) async fn worker_claim_task_handler(
     }
 
     let task_id = TaskId::new(body.task_id);
-    let session_id = crate::helpers::resolve_session_for_task_id(state.as_ref(), &task_id).await;
+    let session_id =
+        match crate::helpers::resolve_session_for_task_id(state.as_ref(), &task_id).await {
+            Ok(sid) => sid,
+            Err(response) => return response,
+        };
     match state
         .runtime
         .tasks
@@ -303,7 +307,10 @@ pub(crate) async fn worker_heartbeat_handler(
 
     let hb_task_id = TaskId::new(body.task_id.clone());
     let hb_session_id =
-        crate::helpers::resolve_session_for_task_id(state.as_ref(), &hb_task_id).await;
+        match crate::helpers::resolve_session_for_task_id(state.as_ref(), &hb_task_id).await {
+            Ok(sid) => sid,
+            Err(response) => return response,
+        };
     match state
         .runtime
         .tasks
