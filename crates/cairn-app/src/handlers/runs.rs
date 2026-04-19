@@ -51,7 +51,6 @@ use cairn_store::projections::{RunRecord, TaskRecord};
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
-use crate::DEFAULT_TENANT_ID;
 
 // ── DTOs ─────────────────────────────────────────────────────────────────────
 
@@ -249,13 +248,19 @@ pub(crate) struct RunInterventionRequest {
 
 #[derive(Clone, Debug, serde::Deserialize)]
 pub(crate) struct SetRunCostAlertRequest {
-    pub(crate) tenant_id: Option<String>,
+    /// T6a-C2: tenant_id is accepted in the body for schema compat but
+    /// ignored — the handler uses the resolved run's tenant_id instead.
+    #[serde(default, rename = "tenant_id")]
+    pub(crate) _tenant_id_deprecated: Option<String>,
     pub(crate) threshold_micros: u64,
 }
 
 #[derive(Clone, Debug, serde::Deserialize)]
 pub(crate) struct SetRunSlaRequest {
-    pub(crate) tenant_id: Option<String>,
+    /// T6a-C2: tenant_id is accepted in the body for schema compat but
+    /// ignored — the handler uses the resolved run's tenant_id instead.
+    #[serde(default, rename = "tenant_id")]
+    pub(crate) _tenant_id_deprecated: Option<String>,
     pub(crate) target_completion_ms: u64,
     #[serde(default = "default_alert_pct")]
     pub(crate) alert_at_percent: u8,
