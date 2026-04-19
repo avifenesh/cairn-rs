@@ -202,6 +202,16 @@ impl TestHarness {
         }
     }
 
+    /// Borrow the runtime's `PartitionConfig` for id_map helpers.
+    ///
+    /// Tests thread this into `run_to_execution_id`, `task_to_execution_id`,
+    /// etc., so every ExecutionId minted inside a test lands in the same
+    /// partition scheme the runtime enforces (see id_map.rs's
+    /// partition-count stability contract).
+    pub fn partition_config(&self) -> &ff_core::partition::PartitionConfig {
+        &self.fabric.runtime.partition_config
+    }
+
     pub fn unique_run_id(&self) -> RunId {
         RunId::new(format!("integ_run_{}", uuid::Uuid::new_v4()))
     }
