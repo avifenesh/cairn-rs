@@ -186,16 +186,30 @@ impl FabricQuotaService {
         parse_admission_result(&raw)
     }
 
+    /// Quota admission check for a session-scoped run.
+    ///
+    /// RFC-011 Phase 2: the mint routes through
+    /// `id_map::session_run_to_execution_id` so the quota's concurrency
+    /// counters hit the same FF flow partition as the run itself. The
+    /// caller MUST supply the same `session_id` that the run was started
+    /// with — a mismatch mints a different `ExecutionId` and the quota
+    /// counter is incremented against a non-existent execution.
     pub async fn check_admission_for_run(
         &self,
         quota_policy_id: &QuotaPolicyId,
         project: &cairn_domain::tenancy::ProjectKey,
+        session_id: &cairn_domain::SessionId,
         run_id: &cairn_domain::RunId,
         window_seconds: u64,
         rate_limit: u64,
         concurrency_cap: u64,
     ) -> Result<AdmissionResult, FabricError> {
-        let eid = id_map::run_to_execution_id(project, run_id, &self.runtime.partition_config);
+        let eid = id_map::session_run_to_execution_id(
+            project,
+            session_id,
+            run_id,
+            &self.runtime.partition_config,
+        );
         self.check_admission(
             quota_policy_id,
             &eid,

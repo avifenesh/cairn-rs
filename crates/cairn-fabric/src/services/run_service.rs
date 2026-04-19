@@ -28,8 +28,25 @@ impl FabricRunService {
         Self { runtime, bridge }
     }
 
-    fn execution_id(&self, project: &ProjectKey, run_id: &RunId) -> ExecutionId {
-        id_map::run_to_execution_id(project, run_id, &self.runtime.partition_config)
+    /// Mint the session-scoped `ExecutionId` for a cairn run.
+    ///
+    /// RFC-011 Phase 2: routes through `id_map::session_run_to_execution_id`
+    /// so every run of a session co-locates on the session's FlowId
+    /// partition. The caller MUST supply the session binding that was
+    /// used at run create time; mismatched sessions mint a different
+    /// ExecutionId and the lookup misses FF's state entirely.
+    fn execution_id(
+        &self,
+        project: &ProjectKey,
+        session_id: &SessionId,
+        run_id: &RunId,
+    ) -> ExecutionId {
+        id_map::session_run_to_execution_id(
+            project,
+            session_id,
+            run_id,
+            &self.runtime.partition_config,
+        )
     }
 
     fn partition(&self, eid: &ExecutionId) -> Partition {
@@ -47,9 +64,10 @@ impl FabricRunService {
     async fn read_run_record(
         &self,
         project: &ProjectKey,
+        session_id: &SessionId,
         run_id: &RunId,
     ) -> Result<RunRecord, FabricError> {
-        let eid = self.execution_id(project, run_id);
+        let eid = self.execution_id(project, session_id, run_id);
         let partition = self.partition(&eid);
         let ctx = ExecKeyContext::new(&partition, &eid);
 
@@ -142,7 +160,7 @@ impl FabricRunService {
         parent_run_id: Option<&RunId>,
         correlation_id: Option<&str>,
     ) -> Result<bool, FabricError> {
-        let eid = self.execution_id(project, run_id);
+        let eid = self.execution_id(project, session_id, run_id);
         let partition = self.partition(&eid);
         let ctx = ExecKeyContext::new(&partition, &eid);
         let idx = IndexKeys::new(&partition);
@@ -221,10 +239,11 @@ impl FabricRunService {
     async fn terminal_execution(
         &self,
         project: &ProjectKey,
+        session_id: &SessionId,
         run_id: &RunId,
         function: &str,
     ) -> Result<RunState, FabricError> {
-        let eid = self.execution_id(project, run_id);
+        let eid = self.execution_id(project, session_id, run_id);
         let partition = self.partition(&eid);
         let ctx = ExecKeyContext::new(&partition, &eid);
         let idx = IndexKeys::new(&partition);
@@ -406,15 +425,16 @@ impl FabricRunService {
                 .await;
         }
 
-        self.read_run_record(project, &run_id).await
+        self.read_run_record(project, session_id, &run_id).await
     }
 
     pub async fn get(
         &self,
         project: &ProjectKey,
+        session_id: &SessionId,
         run_id: &RunId,
     ) -> Result<Option<RunRecord>, FabricError> {
-        match self.read_run_record(project, run_id).await {
+        match self.read_run_record(project, session_id, run_id).await {
             Ok(record) => Ok(Some(record)),
             Err(FabricError::NotFound { .. }) => Ok(None),
             Err(e) => Err(e),
@@ -448,9 +468,10 @@ impl FabricRunService {
     pub async fn claim(
         &self,
         project: &ProjectKey,
+        session_id: &SessionId,
         run_id: &RunId,
     ) -> Result<RunRecord, FabricError> {
-        let eid = self.execution_id(project, run_id);
+        let eid = self.execution_id(project, session_id, run_id);
         let partition = self.partition(&eid);
         let ctx = ExecKeyContext::new(&partition, &eid);
         let idx = IndexKeys::new(&partition);
@@ -478,19 +499,25 @@ impl FabricRunService {
 
         // No cairn-side cache. `enter_waiting_approval`, `fail`, `cancel`,
         // etc. all read the lease triple back from exec_core directly.
-        self.read_run_record(project, run_id).await
+        self.read_run_record(project, session_id, run_id).await
     }
 
     pub async fn complete(
         &self,
         project: &ProjectKey,
+        session_id: &SessionId,
         run_id: &RunId,
     ) -> Result<RunRecord, FabricError> {
         let prev = self
-            .terminal_execution(project, run_id, crate::fcall::names::FF_COMPLETE_EXECUTION)
+            .terminal_execution(
+                project,
+                session_id,
+                run_id,
+                crate::fcall::names::FF_COMPLETE_EXECUTION,
+            )
             .await?;
 
-        let record = self.read_run_record(project, run_id).await?;
+        let record = self.read_run_record(project, session_id, run_id).await?;
         self.bridge
             .emit(BridgeEvent::ExecutionCompleted {
                 run_id: run_id.clone(),
@@ -504,10 +531,11 @@ impl FabricRunService {
     pub async fn fail(
         &self,
         project: &ProjectKey,
+        session_id: &SessionId,
         run_id: &RunId,
         failure_class: FailureClass,
     ) -> Result<RunRecord, FabricError> {
-        let eid = self.execution_id(project, run_id);
+        let eid = self.execution_id(project, session_id, run_id);
         let partition = self.partition(&eid);
         let ctx = ExecKeyContext::new(&partition, &eid);
         let idx = IndexKeys::new(&partition);
@@ -596,7 +624,7 @@ impl FabricRunService {
 
         check_fcall_success(&raw, crate::fcall::names::FF_FAIL_EXECUTION)?;
 
-        let record = self.read_run_record(project, run_id).await?;
+        let record = self.read_run_record(project, session_id, run_id).await?;
         if parse_fail_outcome(&raw) == FailOutcome::TerminalFailed {
             self.bridge
                 .emit(BridgeEvent::ExecutionFailed {
@@ -613,13 +641,19 @@ impl FabricRunService {
     pub async fn cancel(
         &self,
         project: &ProjectKey,
+        session_id: &SessionId,
         run_id: &RunId,
     ) -> Result<RunRecord, FabricError> {
         let prev = self
-            .terminal_execution(project, run_id, crate::fcall::names::FF_CANCEL_EXECUTION)
+            .terminal_execution(
+                project,
+                session_id,
+                run_id,
+                crate::fcall::names::FF_CANCEL_EXECUTION,
+            )
             .await?;
 
-        let record = self.read_run_record(project, run_id).await?;
+        let record = self.read_run_record(project, session_id, run_id).await?;
         self.bridge
             .emit(BridgeEvent::ExecutionCancelled {
                 run_id: run_id.clone(),
@@ -633,10 +667,11 @@ impl FabricRunService {
     pub async fn pause(
         &self,
         project: &ProjectKey,
+        session_id: &SessionId,
         run_id: &RunId,
         reason: PauseReason,
     ) -> Result<RunRecord, FabricError> {
-        let eid = self.execution_id(project, run_id);
+        let eid = self.execution_id(project, session_id, run_id);
         let partition = self.partition(&eid);
         let ctx = ExecKeyContext::new(&partition, &eid);
         let idx = IndexKeys::new(&partition);
@@ -811,7 +846,7 @@ impl FabricRunService {
         // wrong-but-valid state in the projection than a permanent gap.
         // The operator's next read will correct via the FF-backed
         // adjust_run_state_for_blocking_reason path.
-        let record_result = self.read_run_record(project, run_id).await;
+        let record_result = self.read_run_record(project, session_id, run_id).await;
         let (to_state, project_for_emit) = match &record_result {
             Ok(r) => (r.state, r.project.clone()),
             Err(e) => {
@@ -838,11 +873,12 @@ impl FabricRunService {
     pub async fn resume(
         &self,
         project: &ProjectKey,
+        session_id: &SessionId,
         run_id: &RunId,
         _trigger: ResumeTrigger,
         _target: RunResumeTarget,
     ) -> Result<RunRecord, FabricError> {
-        let eid = self.execution_id(project, run_id);
+        let eid = self.execution_id(project, session_id, run_id);
         let partition = self.partition(&eid);
         let ctx = ExecKeyContext::new(&partition, &eid);
         let idx = IndexKeys::new(&partition);
@@ -906,7 +942,7 @@ impl FabricRunService {
 
         check_fcall_success(&raw, crate::fcall::names::FF_RESUME_EXECUTION)?;
 
-        let record = self.read_run_record(project, run_id).await?;
+        let record = self.read_run_record(project, session_id, run_id).await?;
         self.bridge
             .emit(BridgeEvent::ExecutionResumed {
                 run_id: run_id.clone(),
@@ -920,11 +956,12 @@ impl FabricRunService {
     pub async fn enter_waiting_approval(
         &self,
         project: &ProjectKey,
+        session_id: &SessionId,
         run_id: &RunId,
     ) -> Result<RunRecord, FabricError> {
         let params = crate::suspension::for_approval(run_id.as_str(), None);
 
-        let eid = self.execution_id(project, run_id);
+        let eid = self.execution_id(project, session_id, run_id);
         let partition = self.partition(&eid);
         let ctx = ExecKeyContext::new(&partition, &eid);
         let idx = IndexKeys::new(&partition);
@@ -1038,7 +1075,7 @@ impl FabricRunService {
         // If `read_run_record` fails after the FCALL committed, emit with
         // `WaitingApproval` (the blocking_reason we just set) as the fallback
         // so the projection still gets the state change.
-        let record_result = self.read_run_record(project, run_id).await;
+        let record_result = self.read_run_record(project, session_id, run_id).await;
         let (to_state, project_for_emit) = match &record_result {
             Ok(r) => (r.state, r.project.clone()),
             Err(e) => {
@@ -1065,10 +1102,11 @@ impl FabricRunService {
     pub async fn resolve_approval(
         &self,
         project: &ProjectKey,
+        session_id: &SessionId,
         run_id: &RunId,
         decision: ApprovalDecision,
     ) -> Result<RunRecord, FabricError> {
-        let eid = self.execution_id(project, run_id);
+        let eid = self.execution_id(project, session_id, run_id);
         let partition = self.partition(&eid);
         let ctx = ExecKeyContext::new(&partition, &eid);
         let idx = IndexKeys::new(&partition);
@@ -1161,7 +1199,7 @@ impl FabricRunService {
 
         match decision {
             ApprovalDecision::Approved => {
-                let record = self.read_run_record(project, run_id).await?;
+                let record = self.read_run_record(project, session_id, run_id).await?;
                 self.bridge
                     .emit(BridgeEvent::ExecutionResumed {
                         run_id: run_id.clone(),
@@ -1172,7 +1210,7 @@ impl FabricRunService {
                 Ok(record)
             }
             ApprovalDecision::Rejected => {
-                self.fail(project, run_id, FailureClass::ApprovalRejected)
+                self.fail(project, session_id, run_id, FailureClass::ApprovalRejected)
                     .await
             }
         }

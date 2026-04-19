@@ -30,6 +30,11 @@ pub trait RunService: Send + Sync {
     ) -> Result<RunRecord, RuntimeError>;
 
     /// Get a run by ID.
+    ///
+    /// Read-only projection lookup: no `session_id` parameter because the
+    /// projection is keyed by `run_id` and carries `session_id` on the
+    /// record. RFC-011 Phase 2 only changes the mint path, not the
+    /// projection read path.
     async fn get(&self, run_id: &RunId) -> Result<Option<RunRecord>, RuntimeError>;
 
     /// List runs in a session.
@@ -41,24 +46,46 @@ pub trait RunService: Send + Sync {
     ) -> Result<Vec<RunRecord>, RuntimeError>;
 
     /// Complete a run (terminal).
-    async fn complete(&self, run_id: &RunId) -> Result<RunRecord, RuntimeError>;
+    ///
+    /// RFC-011 Phase 2: `session_id` is required because the FF
+    /// `ExecutionId` is minted from `(project, session_id, run_id)` via
+    /// [`cairn_fabric::id_map::session_run_to_execution_id`]. Callers on
+    /// the HTTP path fetch `session_id` from the cairn-store projection
+    /// (`RunRecord::session_id`) before invoking this method; a mismatch
+    /// means the FCALL targets a non-existent execution.
+    async fn complete(
+        &self,
+        session_id: &SessionId,
+        run_id: &RunId,
+    ) -> Result<RunRecord, RuntimeError>;
 
     /// Fail a run (terminal).
     async fn fail(
         &self,
+        session_id: &SessionId,
         run_id: &RunId,
         failure_class: FailureClass,
     ) -> Result<RunRecord, RuntimeError>;
 
     /// Cancel a run (terminal).
-    async fn cancel(&self, run_id: &RunId) -> Result<RunRecord, RuntimeError>;
+    async fn cancel(
+        &self,
+        session_id: &SessionId,
+        run_id: &RunId,
+    ) -> Result<RunRecord, RuntimeError>;
 
     /// Pause a run.
-    async fn pause(&self, run_id: &RunId, reason: PauseReason) -> Result<RunRecord, RuntimeError>;
+    async fn pause(
+        &self,
+        session_id: &SessionId,
+        run_id: &RunId,
+        reason: PauseReason,
+    ) -> Result<RunRecord, RuntimeError>;
 
     /// Resume a paused run.
     async fn resume(
         &self,
+        session_id: &SessionId,
         run_id: &RunId,
         trigger: ResumeTrigger,
         target: RunResumeTarget,
@@ -75,10 +102,18 @@ pub trait RunService: Send + Sync {
     /// at the adapter's eligibility gate. Claim once per lifecycle; do
     /// not retry on success. A second claim is only legitimate after a
     /// suspend/resume cycle has made the run eligible again.
-    async fn claim(&self, run_id: &RunId) -> Result<RunRecord, RuntimeError>;
+    async fn claim(
+        &self,
+        session_id: &SessionId,
+        run_id: &RunId,
+    ) -> Result<RunRecord, RuntimeError>;
 
     /// Transition a run to WaitingApproval (approval gate).
-    async fn enter_waiting_approval(&self, run_id: &RunId) -> Result<RunRecord, RuntimeError>;
+    async fn enter_waiting_approval(
+        &self,
+        session_id: &SessionId,
+        run_id: &RunId,
+    ) -> Result<RunRecord, RuntimeError>;
 
     /// Transition a run out of WaitingApproval after approval resolution.
     ///
@@ -86,6 +121,7 @@ pub trait RunService: Send + Sync {
     /// On reject: fails with FailureClass::ApprovalRejected.
     async fn resolve_approval(
         &self,
+        session_id: &SessionId,
         run_id: &RunId,
         decision: cairn_domain::ApprovalDecision,
     ) -> Result<RunRecord, RuntimeError>;
