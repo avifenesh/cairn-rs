@@ -4,7 +4,7 @@ use std::sync::Arc;
 use crate::error::FabricError;
 use crate::helpers::check_fcall_success;
 use ff_core::contracts::ReportUsageResult;
-use ff_core::keys::{budget_policies_index, budget_resets_key, BudgetKeyContext};
+use ff_core::keys::{budget_policies_index, budget_resets_key, usage_dedup_key, BudgetKeyContext};
 use ff_core::partition::budget_partition;
 use ff_core::types::{BudgetId, ExecutionId, TimestampMs};
 use ff_sdk::task::parse_report_usage_result;
@@ -246,7 +246,7 @@ impl FabricBudgetService {
 
         // Prefix with the budget's `{b:M}` hash tag so FF's SET lands on the
         // same slot as the budget itself — matches ff-sdk task.rs:699-702.
-        let dedup_key = format!("ff:usagededup:{}:{}", ctx.hash_tag(), idempotency_key);
+        let dedup_key = usage_dedup_key(ctx.hash_tag(), &idempotency_key);
 
         let (keys, argv) =
             crate::fcall::budget::build_report_usage(&ctx, dimension_deltas, now, &dedup_key);

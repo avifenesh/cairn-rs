@@ -93,6 +93,7 @@ pub const REPORT_USAGE_FIXED_ARGS: usize = 3;
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ff_core::keys::usage_dedup_key;
     use ff_core::partition::{budget_partition, PartitionConfig};
 
     #[test]
@@ -127,16 +128,17 @@ mod tests {
         let pc = PartitionConfig::default();
         let partition = budget_partition(&bid, &pc);
         let ctx = BudgetKeyContext::new(&partition, &bid);
+        let dedup = usage_dedup_key("{b:0}", "test-key");
         let (keys, args) = build_report_usage(
             &ctx,
             &[("tokens", 100), ("cost", 50)],
             TimestampMs::now(),
-            "ff:usagededup:{b:0}:test-key",
+            &dedup,
         );
         assert_eq!(keys.len(), REPORT_USAGE_KEYS);
         // dim_count + 2 dims + 2 deltas + now + dedup_key = 7
         assert_eq!(args.len(), REPORT_USAGE_FIXED_ARGS + 2 * 2);
-        assert_eq!(args.last().unwrap(), "ff:usagededup:{b:0}:test-key");
+        assert_eq!(args.last().unwrap(), &dedup);
     }
 
     #[test]
