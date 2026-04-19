@@ -1191,7 +1191,7 @@ checksum = "9f1f227452a390804cdb637b74a86990f2a7d7ba4b7d5693aac9b4dd6defd8d6"
 [[package]]
 name = "ferriskey"
 version = "0.1.0"
-source = "git+https://github.com/avifenesh/FlowFabric.git?rev=1b19dd108e#1b19dd108ec0f9af7c344d2e129d053449edcb6f"
+source = "git+https://github.com/avifenesh/FlowFabric.git?rev=1b19dd108ec0f9af7c344d2e129d053449edcb6f#1b19dd108ec0f9af7c344d2e129d053449edcb6f"
 dependencies = [
  "arc-swap",
  "async-trait",
@@ -1235,7 +1235,7 @@ dependencies = [
 [[package]]
 name = "ff-core"
 version = "0.1.0"
-source = "git+https://github.com/avifenesh/FlowFabric.git?rev=1b19dd108e#1b19dd108ec0f9af7c344d2e129d053449edcb6f"
+source = "git+https://github.com/avifenesh/FlowFabric.git?rev=1b19dd108ec0f9af7c344d2e129d053449edcb6f#1b19dd108ec0f9af7c344d2e129d053449edcb6f"
 dependencies = [
  "crc16",
  "serde",
@@ -1247,7 +1247,7 @@ dependencies = [
 [[package]]
 name = "ff-engine"
 version = "0.1.0"
-source = "git+https://github.com/avifenesh/FlowFabric.git?rev=1b19dd108e#1b19dd108ec0f9af7c344d2e129d053449edcb6f"
+source = "git+https://github.com/avifenesh/FlowFabric.git?rev=1b19dd108ec0f9af7c344d2e129d053449edcb6f#1b19dd108ec0f9af7c344d2e129d053449edcb6f"
 dependencies = [
  "ferriskey",
  "ff-core",
@@ -1260,7 +1260,7 @@ dependencies = [
 [[package]]
 name = "ff-scheduler"
 version = "0.1.0"
-source = "git+https://github.com/avifenesh/FlowFabric.git?rev=1b19dd108e#1b19dd108ec0f9af7c344d2e129d053449edcb6f"
+source = "git+https://github.com/avifenesh/FlowFabric.git?rev=1b19dd108ec0f9af7c344d2e129d053449edcb6f#1b19dd108ec0f9af7c344d2e129d053449edcb6f"
 dependencies = [
  "ferriskey",
  "ff-core",
@@ -1272,7 +1272,7 @@ dependencies = [
 [[package]]
 name = "ff-script"
 version = "0.1.0"
-source = "git+https://github.com/avifenesh/FlowFabric.git?rev=1b19dd108e#1b19dd108ec0f9af7c344d2e129d053449edcb6f"
+source = "git+https://github.com/avifenesh/FlowFabric.git?rev=1b19dd108ec0f9af7c344d2e129d053449edcb6f#1b19dd108ec0f9af7c344d2e129d053449edcb6f"
 dependencies = [
  "ferriskey",
  "ff-core",
@@ -1285,7 +1285,7 @@ dependencies = [
 [[package]]
 name = "ff-sdk"
 version = "0.1.0"
-source = "git+https://github.com/avifenesh/FlowFabric.git?rev=1b19dd108e#1b19dd108ec0f9af7c344d2e129d053449edcb6f"
+source = "git+https://github.com/avifenesh/FlowFabric.git?rev=1b19dd108ec0f9af7c344d2e129d053449edcb6f#1b19dd108ec0f9af7c344d2e129d053449edcb6f"
 dependencies = [
  "ferriskey",
  "ff-core",

@@ -8,12 +8,12 @@ publish = false
 [dependencies]
 # FlowFabric crates — pinned to upstream main until FF publishes to crates.io.
 # Bump rev in lockstep across all six entries when FF moves forward.
-ff-core = { git = "https://github.com/avifenesh/FlowFabric.git", rev = "1b19dd108e" }
-ff-sdk = { git = "https://github.com/avifenesh/FlowFabric.git", rev = "1b19dd108e" }
-ff-engine = { git = "https://github.com/avifenesh/FlowFabric.git", rev = "1b19dd108e" }
-ff-scheduler = { git = "https://github.com/avifenesh/FlowFabric.git", rev = "1b19dd108e" }
-ff-script = { git = "https://github.com/avifenesh/FlowFabric.git", rev = "1b19dd108e" }
-ferriskey = { git = "https://github.com/avifenesh/FlowFabric.git", rev = "1b19dd108e" }
+ff-core = { git = "https://github.com/avifenesh/FlowFabric.git", rev = "1b19dd108ec0f9af7c344d2e129d053449edcb6f" }
+ff-sdk = { git = "https://github.com/avifenesh/FlowFabric.git", rev = "1b19dd108ec0f9af7c344d2e129d053449edcb6f" }
+ff-engine = { git = "https://github.com/avifenesh/FlowFabric.git", rev = "1b19dd108ec0f9af7c344d2e129d053449edcb6f" }
+ff-scheduler = { git = "https://github.com/avifenesh/FlowFabric.git", rev = "1b19dd108ec0f9af7c344d2e129d053449edcb6f" }
+ff-script = { git = "https://github.com/avifenesh/FlowFabric.git", rev = "1b19dd108ec0f9af7c344d2e129d053449edcb6f" }
+ferriskey = { git = "https://github.com/avifenesh/FlowFabric.git", rev = "1b19dd108ec0f9af7c344d2e129d053449edcb6f" }
 
 # Cairn crates
 cairn-domain = { path = "../cairn-domain" }
