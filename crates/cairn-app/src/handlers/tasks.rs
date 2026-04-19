@@ -37,6 +37,26 @@ use crate::{
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
+/// T6a-C3 helper: load a task and verify it belongs to the caller's tenant.
+/// Returns 404 on both missing and cross-tenant so existence doesn't leak.
+async fn load_task_visible_to_tenant(
+    state: &AppState,
+    tenant_scope: &TenantScope,
+    task_id: &TaskId,
+) -> Result<TaskRecord, axum::response::Response> {
+    match state.runtime.tasks.get(task_id).await {
+        Ok(Some(task))
+            if tenant_scope.is_admin || task.project.tenant_id == *tenant_scope.tenant_id() =>
+        {
+            Ok(task)
+        }
+        Ok(_) => Err(
+            AppApiError::new(StatusCode::NOT_FOUND, "not_found", "task not found").into_response(),
+        ),
+        Err(err) => Err(runtime_error_response(err)),
+    }
+}
+
 // ── DTOs ─────────────────────────────────────────────────────────────────────
 
 #[derive(Clone, Debug, serde::Deserialize)]
@@ -285,14 +305,27 @@ pub(crate) async fn get_task_handler(
 
 pub(crate) async fn add_task_dependency_handler(
     State(state): State<Arc<AppState>>,
+    tenant_scope: TenantScope,
     Path(id): Path<String>,
     Json(body): Json<AddTaskDependencyRequest>,
 ) -> impl IntoResponse {
+    let task_id = TaskId::new(id);
+    let depends_on = TaskId::new(body.depends_on_task_id);
+
+    // T6a-C3: both tasks must be in the caller's tenant.
+    if let Err(resp) = load_task_visible_to_tenant(state.as_ref(), &tenant_scope, &task_id).await {
+        return resp;
+    }
+    if let Err(resp) = load_task_visible_to_tenant(state.as_ref(), &tenant_scope, &depends_on).await
+    {
+        return resp;
+    }
+
     let before = current_event_head(&state).await;
     match state
         .runtime
         .tasks
-        .declare_dependency(&TaskId::new(id), &TaskId::new(body.depends_on_task_id))
+        .declare_dependency(&task_id, &depends_on)
         .await
     {
         Ok(record) => {
@@ -327,17 +360,21 @@ pub(crate) async fn list_task_dependencies_handler(
 
 pub(crate) async fn set_task_priority_handler(
     State(state): State<Arc<AppState>>,
+    tenant_scope: TenantScope,
     Path(id): Path<String>,
     Json(_body): Json<SetTaskPriorityRequest>,
 ) -> impl IntoResponse {
     let task_id = TaskId::new(id);
-    // set_priority is not yet implemented in TaskService; return task as-is
-    match state.runtime.tasks.get(&task_id).await {
-        Ok(Some(record)) => (StatusCode::OK, Json(record)).into_response(),
-        Ok(None) => {
-            AppApiError::new(StatusCode::NOT_FOUND, "not_found", "task not found").into_response()
-        }
-        Err(err) => runtime_error_response(err),
+    // T6a-C3 scope + T6a-L7: set_priority isn't implemented in
+    // TaskService, so surface 501 rather than lying with 200+record.
+    match load_task_visible_to_tenant(state.as_ref(), &tenant_scope, &task_id).await {
+        Ok(_) => AppApiError::new(
+            StatusCode::NOT_IMPLEMENTED,
+            "not_implemented",
+            "task priority mutation is not yet implemented",
+        )
+        .into_response(),
+        Err(response) => response,
     }
 }
 
@@ -363,7 +400,11 @@ pub(crate) async fn list_expired_tasks_handler(
 
 pub(crate) async fn expire_task_leases_handler(
     State(state): State<Arc<AppState>>,
+    _role: crate::extractors::AdminRoleGuard,
 ) -> impl IntoResponse {
+    // T6a-C3: this is an admin-level operation — it scans every tenant's
+    // expired leases and requeues them. Gate on AdminRoleGuard so a
+    // non-admin operator can't force cross-tenant requeues.
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
@@ -408,15 +449,21 @@ pub(crate) async fn expire_task_leases_handler(
 
 pub(crate) async fn claim_task_handler(
     State(state): State<Arc<AppState>>,
+    tenant_scope: TenantScope,
     Path(id): Path<String>,
     Json(body): Json<ClaimTaskRequest>,
 ) -> impl IntoResponse {
+    let task_id = TaskId::new(id);
+    if let Err(resp) = load_task_visible_to_tenant(state.as_ref(), &tenant_scope, &task_id).await {
+        return resp;
+    }
+
     let before = current_event_head(&state).await;
     match state
         .runtime
         .tasks
         .claim(
-            &TaskId::new(id),
+            &task_id,
             body.worker_id,
             body.lease_duration_ms.unwrap_or(60_000),
         )
@@ -432,14 +479,20 @@ pub(crate) async fn claim_task_handler(
 
 pub(crate) async fn heartbeat_task_handler(
     State(state): State<Arc<AppState>>,
+    tenant_scope: TenantScope,
     Path(id): Path<String>,
     Json(body): Json<HeartbeatTaskRequest>,
 ) -> impl IntoResponse {
+    let task_id = TaskId::new(id);
+    if let Err(resp) = load_task_visible_to_tenant(state.as_ref(), &tenant_scope, &task_id).await {
+        return resp;
+    }
+
     let before = current_event_head(&state).await;
     match state
         .runtime
         .tasks
-        .heartbeat(&TaskId::new(id), body.lease_extension_ms.unwrap_or(60_000))
+        .heartbeat(&task_id, body.lease_extension_ms.unwrap_or(60_000))
         .await
     {
         Ok(task) => {
@@ -477,17 +530,16 @@ pub(crate) async fn release_task_lease_handler(
 
 pub(crate) async fn cancel_task_handler(
     State(state): State<Arc<AppState>>,
+    tenant_scope: TenantScope,
     Extension(principal): Extension<AuthPrincipal>,
     Path(id): Path<String>,
 ) -> impl IntoResponse {
     let task_id = TaskId::new(id);
-    let task = match state.runtime.tasks.get(&task_id).await {
-        Ok(Some(t)) => t,
-        Ok(None) => {
-            return AppApiError::new(StatusCode::NOT_FOUND, "not_found", "task not found")
-                .into_response();
-        }
-        Err(err) => return runtime_error_response(err),
+    // T6a-C3: tenant scope enforced via helper (replaces the prior
+    // get-only check that audited the task's own tenant without auth).
+    let task = match load_task_visible_to_tenant(state.as_ref(), &tenant_scope, &task_id).await {
+        Ok(t) => t,
+        Err(response) => return response,
     };
 
     let before = current_event_head(&state).await;
@@ -515,18 +567,17 @@ pub(crate) async fn cancel_task_handler(
 
 pub(crate) async fn complete_task_handler(
     State(state): State<Arc<AppState>>,
+    tenant_scope: TenantScope,
     Path(id): Path<String>,
 ) -> impl IntoResponse {
     let before = current_event_head(&state).await;
     let task_id = TaskId::new(id);
-    let current_task = match state.runtime.tasks.get(&task_id).await {
-        Ok(Some(task)) => task,
-        Ok(None) => {
-            return AppApiError::new(StatusCode::NOT_FOUND, "not_found", "task not found")
-                .into_response()
-        }
-        Err(err) => return runtime_error_response(err),
-    };
+    // T6a-C3: tenant scope check.
+    let current_task =
+        match load_task_visible_to_tenant(state.as_ref(), &tenant_scope, &task_id).await {
+            Ok(t) => t,
+            Err(response) => return response,
+        };
 
     if current_task.state == TaskState::Leased {
         if let Err(err) = state.runtime.tasks.start(&task_id).await {

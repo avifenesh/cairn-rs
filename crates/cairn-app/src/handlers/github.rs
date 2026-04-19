@@ -18,8 +18,8 @@ use cairn_store::EventLog;
 
 use crate::errors::AppApiError;
 use crate::state::{
-    AppState, GitHubEventAction, GitHubIntegration, IssueQueueEntry, IssueQueueStatus,
-    WebhookAction,
+    default_github_project_from_env, AppState, GitHubEventAction, GitHubIntegration,
+    IssueQueueEntry, IssueQueueStatus, WebhookAction,
 };
 
 // ── DTOs ────────────────────────────────────────────────────────────────────
@@ -131,7 +131,7 @@ pub(crate) async fn process_webhook_orchestrate(
     github: &GitHubIntegration,
     event: &cairn_github::WebhookEvent,
 ) -> Result<(), String> {
-    use cairn_domain::{ProjectKey, RunId, SessionId};
+    use cairn_domain::{RunId, SessionId};
     use cairn_store::projections::SessionReadModel;
 
     let repo_full = event.repository().unwrap_or("unknown/unknown");
@@ -172,7 +172,35 @@ pub(crate) async fn process_webhook_orchestrate(
         ),
     };
 
-    let project = ProjectKey::new("default_tenant", "default_workspace", "default_project");
+    // T6a-C5: derive the project from the GitHub installation_id. Fall
+    // back to an operator-configured default (env) only when no explicit
+    // mapping exists. Never route an unmapped webhook into the legacy
+    // "default_tenant" / "default_workspace" / "default_project" triple —
+    // doing so commingles events across tenants and lets any operator in
+    // that default tenant intervene in every tenant's GitHub pipeline.
+    let project = match github.project_for_installation(installation_id).await {
+        Some(p) => p,
+        None => match default_github_project_from_env() {
+            Some(p) => {
+                tracing::warn!(
+                    installation_id,
+                    %repo_full,
+                    "webhook routed to CAIRN_GITHUB_DEFAULT_PROJECT — operator should \
+                     configure an explicit installation→project mapping"
+                );
+                p
+            }
+            None => {
+                tracing::error!(
+                    installation_id,
+                    %repo_full,
+                    "rejecting webhook: no project mapping for installation and no \
+                     CAIRN_GITHUB_DEFAULT_PROJECT env set"
+                );
+                return Err("installation has no mapped project".to_owned());
+            }
+        },
+    };
 
     let session_id_str = match issue_number {
         Some(n) => format!("gh-{}-{}-issue-{}", owner, repo_name, n),
@@ -872,8 +900,35 @@ pub(crate) async fn github_scan_handler(
         .filter(|i| !i.html_url.contains("/pull/"))
         .collect();
     let issue_count = issues.len();
-    let project =
-        cairn_domain::ProjectKey::new("default_tenant", "default_workspace", "default_project");
+    // T6a-C5: same per-installation mapping as the webhook path — reject
+    // when no mapping exists rather than leaking scans into a shared
+    // default_tenant project.
+    let project = match github.project_for_installation(installation_id).await {
+        Some(p) => p,
+        None => match default_github_project_from_env() {
+            Some(p) => {
+                tracing::warn!(
+                    installation_id,
+                    repo = %body.repo,
+                    "scan routed to CAIRN_GITHUB_DEFAULT_PROJECT — configure \
+                     CAIRN_GITHUB_INSTALLATION_<id>_PROJECT for proper tenant routing"
+                );
+                p
+            }
+            None => {
+                return AppApiError::new(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    "no_installation_project",
+                    format!(
+                        "No project mapping for installation {installation_id}. \
+                         Set CAIRN_GITHUB_INSTALLATION_{installation_id}_PROJECT or \
+                         CAIRN_GITHUB_DEFAULT_PROJECT (tenant/workspace/project)."
+                    ),
+                )
+                .into_response();
+            }
+        },
+    };
     let mut queued = Vec::new();
     for issue in &issues {
         let session_id_str = format!("gh-{}-{}-issue-{}", owner, repo_name, issue.number);

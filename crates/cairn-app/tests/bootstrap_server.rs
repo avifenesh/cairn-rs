@@ -2125,7 +2125,10 @@ async fn prompt_assets_and_approvals_routes_round_trip() {
         },
     );
 
-    let project = ProjectKey::new("default_tenant", "default_workspace", "default_project");
+    // T6a-C1: approval must live in the caller's tenant for the approve
+    // endpoint to succeed. The test token above is scoped to
+    // `tenant_e2e_http`, so the approval has to match.
+    let project = ProjectKey::new("tenant_e2e_http", "default_workspace", "default_project");
     runtime
         .approvals
         .request(

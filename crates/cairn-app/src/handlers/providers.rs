@@ -279,9 +279,15 @@ pub(crate) async fn set_provider_budget_handler(
 
 pub(crate) async fn manual_provider_health_check_handler(
     State(state): State<Arc<AppState>>,
+    _role: crate::extractors::AdminRoleGuard,
     Path(connection_id): Path<String>,
     Json(body): Json<ManualProviderHealthCheckRequest>,
 ) -> impl IntoResponse {
+    // T6a-H12: provider health is tenant-shared state. A hostile tenant
+    // could otherwise poison the shared provider's health record,
+    // triggering fallback routing for every other tenant. Gate on
+    // AdminRoleGuard until the service gains a principal-aware
+    // `record_check_for_tenant` variant.
     match state
         .runtime
         .provider_health

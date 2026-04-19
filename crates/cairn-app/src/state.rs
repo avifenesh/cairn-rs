@@ -303,6 +303,29 @@ pub struct AppState {
 
 // ── GitHubIntegration ────────────────────────────────────────────────────────
 
+/// Parse a `tenant/workspace/project` env value into a `ProjectKey`.
+/// Returns `None` when unset or malformed (missing parts, empty segments).
+fn parse_triple_env(env_var: &str) -> Option<cairn_domain::ProjectKey> {
+    let raw = std::env::var(env_var).ok()?;
+    let parts: Vec<&str> = raw.split('/').collect();
+    if parts.len() != 3 || parts.iter().any(|p| p.trim().is_empty()) {
+        return None;
+    }
+    Some(cairn_domain::ProjectKey::new(
+        parts[0].trim(),
+        parts[1].trim(),
+        parts[2].trim(),
+    ))
+}
+
+/// T6a-C5: fallback project for unmapped GitHub installations, read from
+/// `CAIRN_GITHUB_DEFAULT_PROJECT` in `tenant/workspace/project` form.
+/// Returns `None` when unset — callers MUST reject the webhook in that
+/// case rather than fall through to the old `default_tenant` triple.
+pub(crate) fn default_github_project_from_env() -> Option<cairn_domain::ProjectKey> {
+    parse_triple_env("CAIRN_GITHUB_DEFAULT_PROJECT")
+}
+
 /// GitHub App integration state.
 pub struct GitHubIntegration {
     pub credentials: cairn_github::AppCredentials,
@@ -334,6 +357,24 @@ impl std::fmt::Debug for GitHubIntegration {
 }
 
 impl GitHubIntegration {
+    /// T6a-C5: resolve the ProjectKey for a GitHub App installation.
+    ///
+    /// Today this reads the per-installation env var
+    /// `CAIRN_GITHUB_INSTALLATION_<id>_PROJECT` in the canonical
+    /// `tenant/workspace/project` form. When no env exists, callers fall
+    /// back to `default_github_project_from_env()` (or reject entirely).
+    ///
+    /// A future iteration will move this mapping into the event log via
+    /// a dedicated `GitHubInstallationMapping` projection; this env
+    /// shim is a placeholder so webhooks stop commingling tenants.
+    pub async fn project_for_installation(
+        &self,
+        installation_id: u64,
+    ) -> Option<cairn_domain::ProjectKey> {
+        let key = format!("CAIRN_GITHUB_INSTALLATION_{installation_id}_PROJECT");
+        parse_triple_env(&key)
+    }
+
     /// Get or create an InstallationToken for the given installation ID.
     pub async fn token_for_installation(
         &self,
