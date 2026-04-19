@@ -29,7 +29,7 @@ impl FabricTaskService {
     }
 
     fn task_to_execution_id(&self, project: &ProjectKey, task_id: &TaskId) -> ExecutionId {
-        id_map::task_to_execution_id(project, task_id)
+        id_map::task_to_execution_id(project, task_id, &self.runtime.partition_config)
     }
 
     async fn read_valkey_lease_fields(
