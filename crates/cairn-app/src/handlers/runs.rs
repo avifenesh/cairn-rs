@@ -2156,32 +2156,35 @@ pub(crate) async fn orchestrate_run_handler(
         )
             .into_response(),
         Err(e) => {
-            // T6a-H9: map user-caused orchestration errors to 4xx. Keep
-            // infrastructure errors at 500 but strip provider-specific
-            // details from the client-visible message — the full Display
-            // goes to tracing.
+            // T6a-H9: log the full error details (for ops) but send a
+            // sanitized stable message to the client. The full Display
+            // may embed provider URLs, model names, partial LLM output,
+            // credential fragments, etc. — none of which belong in a 5xx
+            // body. User-caused errors (NotFound, InvalidTransition)
+            // still surface a friendly code + short message.
             tracing::warn!(run_id = %run_id, error = %e, "orchestration failed");
-            let msg = e.to_string();
-            let (status, code) = if matches!(
-                e,
+            let (status, code, msg): (_, &'static str, String) = match &e {
                 cairn_orchestrator::OrchestratorError::Runtime(
-                    cairn_runtime::error::RuntimeError::NotFound { .. }
-                )
-            ) {
-                (StatusCode::NOT_FOUND, "not_found")
-            } else if matches!(
-                e,
+                    cairn_runtime::error::RuntimeError::NotFound { .. },
+                ) => (StatusCode::NOT_FOUND, "not_found", e.to_string()),
                 cairn_orchestrator::OrchestratorError::Runtime(
-                    cairn_runtime::error::RuntimeError::InvalidTransition { .. }
-                )
-            ) {
-                (StatusCode::CONFLICT, "invalid_transition")
-            } else if matches!(e, cairn_orchestrator::OrchestratorError::Gather(_)) {
-                (StatusCode::BAD_GATEWAY, "gather_error")
-            } else if matches!(e, cairn_orchestrator::OrchestratorError::Decide(_)) {
-                (StatusCode::BAD_GATEWAY, "decide_error")
-            } else {
-                (StatusCode::INTERNAL_SERVER_ERROR, "orchestration_error")
+                    cairn_runtime::error::RuntimeError::InvalidTransition { .. },
+                ) => (StatusCode::CONFLICT, "invalid_transition", e.to_string()),
+                cairn_orchestrator::OrchestratorError::Gather(_) => (
+                    StatusCode::BAD_GATEWAY,
+                    "gather_error",
+                    "upstream gather phase failed".to_owned(),
+                ),
+                cairn_orchestrator::OrchestratorError::Decide(_) => (
+                    StatusCode::BAD_GATEWAY,
+                    "decide_error",
+                    "upstream decide phase failed".to_owned(),
+                ),
+                _ => (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "orchestration_error",
+                    "orchestration failed — see server logs".to_owned(),
+                ),
             };
             AppApiError::new(status, code, msg).into_response()
         }
