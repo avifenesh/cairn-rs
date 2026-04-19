@@ -16,7 +16,9 @@ use cairn_api::{
     bootstrap::BootstrapConfig,
 };
 use cairn_app::AppBootstrap;
-use cairn_domain::{tenancy::TenantKey, OperatorId};
+use cairn_domain::tenancy::TenantKey;
+#[allow(unused_imports)]
+use cairn_domain::OperatorId;
 use serde_json::{json, Value};
 use tower::ServiceExt;
 
@@ -24,10 +26,12 @@ const TEST_TOKEN: &str = "provider-lifecycle-token";
 const TEST_MODEL: &str = "openrouter/test-model";
 
 fn register_token(tokens: &Arc<ServiceTokenRegistry>) {
+    // Admin-gated credential-store route requires the admin service
+    // account under the fail-closed `AdminRoleGuard` (T6b-C4).
     tokens.register(
         TEST_TOKEN.to_owned(),
-        AuthPrincipal::Operator {
-            operator_id: OperatorId::new("provider_lifecycle_operator"),
+        AuthPrincipal::ServiceAccount {
+            name: "admin".to_owned(),
             tenant: TenantKey::new("default_tenant"),
         },
     );

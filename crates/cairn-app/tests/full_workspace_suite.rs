@@ -9,6 +9,7 @@ use cairn_api::auth::AuthPrincipal;
 use cairn_api::bootstrap::BootstrapConfig;
 use cairn_app::AppBootstrap;
 use cairn_domain::tenancy::TenantKey;
+#[allow(unused_imports)]
 use cairn_domain::OperatorId;
 use tower::ServiceExt;
 
