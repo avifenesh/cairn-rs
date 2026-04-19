@@ -1008,9 +1008,20 @@ pub(crate) async fn intervene_run_handler(
 /// Transitions the run to `Canceled` state and updates the parent session.
 pub(crate) async fn cancel_run_handler(
     State(state): State<Arc<AppState>>,
+    tenant_scope: TenantScope,
     Path(id): Path<String>,
 ) -> impl IntoResponse {
     let run_id = RunId::new(&id);
+
+    // T6a-C2: verify tenant scope before any mutation.
+    match load_run_visible_to_tenant(state.as_ref(), &tenant_scope, &run_id).await {
+        Ok(Some(_)) => {}
+        Ok(None) => {
+            return AppApiError::new(StatusCode::NOT_FOUND, "not_found", "run not found")
+                .into_response();
+        }
+        Err(response) => return response,
+    }
 
     let before = current_event_head(&state).await;
     match state.runtime.runs.cancel(&run_id).await {
@@ -1053,23 +1064,20 @@ pub(crate) async fn cancel_run_handler(
 /// process config.
 pub(crate) async fn claim_run_handler(
     State(state): State<Arc<AppState>>,
+    tenant_scope: TenantScope,
     Path(id): Path<String>,
 ) -> impl IntoResponse {
     let run_id = RunId::new(&id);
 
-    // Belt-and-suspenders: the adapter's resolve_run_project already
-    // maps missing-in-store to RuntimeError::NotFound → 404 (see
-    // errors.rs::runtime_error_response), but the explicit lookup
-    // here isolates the 404 response from any future change in the
-    // adapter layer. Pattern mirrors `cancel_task_handler` and
-    // `release_task_lease_handler` in handlers/tasks.rs.
-    match state.runtime.runs.get(&run_id).await {
+    // T6a-C2: tenant scope + explicit 404 before the adapter call so the
+    // 404 path is isolated from future adapter changes.
+    match load_run_visible_to_tenant(state.as_ref(), &tenant_scope, &run_id).await {
         Ok(Some(_)) => {}
         Ok(None) => {
             return AppApiError::new(StatusCode::NOT_FOUND, "not_found", "run not found")
                 .into_response();
         }
-        Err(err) => return runtime_error_response(err),
+        Err(response) => return response,
     }
 
     let before = current_event_head(&state).await;
@@ -1084,9 +1092,22 @@ pub(crate) async fn claim_run_handler(
 
 pub(crate) async fn pause_run_handler(
     State(state): State<Arc<AppState>>,
+    tenant_scope: TenantScope,
     Path(id): Path<String>,
     Json(body): Json<PauseRunRequest>,
 ) -> impl IntoResponse {
+    let run_id = RunId::new(id);
+
+    // T6a-C2: tenant scope check before any mutation.
+    match load_run_visible_to_tenant(state.as_ref(), &tenant_scope, &run_id).await {
+        Ok(Some(_)) => {}
+        Ok(None) => {
+            return AppApiError::new(StatusCode::NOT_FOUND, "not_found", "run not found")
+                .into_response();
+        }
+        Err(response) => return response,
+    }
+
     let before = current_event_head(&state).await;
     let reason = PauseReason {
         kind: body.reason_kind.unwrap_or(PauseReasonKind::OperatorPause),
@@ -1095,7 +1116,7 @@ pub(crate) async fn pause_run_handler(
         actor: body.actor,
     };
 
-    match state.runtime.runs.pause(&RunId::new(id), reason).await {
+    match state.runtime.runs.pause(&run_id, reason).await {
         Ok(run) => {
             publish_runtime_frames_since(&state, before).await;
             (StatusCode::OK, Json(run)).into_response()
@@ -1106,15 +1127,28 @@ pub(crate) async fn pause_run_handler(
 
 pub(crate) async fn resume_run_handler(
     State(state): State<Arc<AppState>>,
+    tenant_scope: TenantScope,
     Path(id): Path<String>,
     Json(body): Json<ResumeRunRequest>,
 ) -> impl IntoResponse {
+    let run_id = RunId::new(id);
+
+    // T6a-C2: tenant scope check before any mutation.
+    match load_run_visible_to_tenant(state.as_ref(), &tenant_scope, &run_id).await {
+        Ok(Some(_)) => {}
+        Ok(None) => {
+            return AppApiError::new(StatusCode::NOT_FOUND, "not_found", "run not found")
+                .into_response();
+        }
+        Err(response) => return response,
+    }
+
     let before = current_event_head(&state).await;
     match state
         .runtime
         .runs
         .resume(
-            &RunId::new(id),
+            &run_id,
             body.trigger.unwrap_or(ResumeTrigger::OperatorResume),
             body.target.unwrap_or(RunResumeTarget::Running),
         )
@@ -1166,16 +1200,28 @@ pub(crate) async fn get_run_cost_handler(
 
 pub(crate) async fn set_run_cost_alert_handler(
     State(state): State<Arc<AppState>>,
+    tenant_scope: TenantScope,
     Path(id): Path<String>,
     Json(body): Json<SetRunCostAlertRequest>,
 ) -> impl IntoResponse {
     let run_id = RunId::new(id);
-    let tenant_id =
-        cairn_domain::TenantId::new(body.tenant_id.as_deref().unwrap_or(DEFAULT_TENANT_ID));
+
+    // T6a-C2: resolve the run under tenant scope and use the run's
+    // actual tenant_id — not a body-supplied one, which lets callers
+    // forge cross-tenant alerts.
+    let run = match load_run_visible_to_tenant(state.as_ref(), &tenant_scope, &run_id).await {
+        Ok(Some(r)) => r,
+        Ok(None) => {
+            return AppApiError::new(StatusCode::NOT_FOUND, "not_found", "run not found")
+                .into_response();
+        }
+        Err(response) => return response,
+    };
+
     match state
         .runtime
         .run_cost_alerts
-        .set_alert(run_id, tenant_id, body.threshold_micros)
+        .set_alert(run_id, run.project.tenant_id.clone(), body.threshold_micros)
         .await
     {
         Ok(()) => (StatusCode::CREATED, Json(serde_json::json!({ "ok": true }))).into_response(),
@@ -1207,18 +1253,28 @@ pub(crate) async fn list_run_cost_alerts_handler(
 
 pub(crate) async fn set_run_sla_handler(
     State(state): State<Arc<AppState>>,
+    tenant_scope: TenantScope,
     Path(id): Path<String>,
     Json(body): Json<SetRunSlaRequest>,
 ) -> impl IntoResponse {
     let run_id = RunId::new(id);
-    let tenant_id =
-        cairn_domain::TenantId::new(body.tenant_id.as_deref().unwrap_or(DEFAULT_TENANT_ID));
+
+    // T6a-C2: tenant scope + use run's actual tenant_id.
+    let run = match load_run_visible_to_tenant(state.as_ref(), &tenant_scope, &run_id).await {
+        Ok(Some(r)) => r,
+        Ok(None) => {
+            return AppApiError::new(StatusCode::NOT_FOUND, "not_found", "run not found")
+                .into_response();
+        }
+        Err(response) => return response,
+    };
+
     match state
         .runtime
         .run_sla
         .set_sla(
             run_id,
-            tenant_id,
+            run.project.tenant_id.clone(),
             body.target_completion_ms,
             body.alert_at_percent,
         )
@@ -1231,9 +1287,21 @@ pub(crate) async fn set_run_sla_handler(
 
 pub(crate) async fn get_run_sla_handler(
     State(state): State<Arc<AppState>>,
+    tenant_scope: TenantScope,
     Path(id): Path<String>,
 ) -> impl IntoResponse {
     let run_id = RunId::new(id);
+
+    // T6a-C2: tenant scope before the read.
+    match load_run_visible_to_tenant(state.as_ref(), &tenant_scope, &run_id).await {
+        Ok(Some(_)) => {}
+        Ok(None) => {
+            return AppApiError::new(StatusCode::NOT_FOUND, "not_found", "run not found")
+                .into_response();
+        }
+        Err(response) => return response,
+    }
+
     match state.runtime.run_sla.check_sla(&run_id).await {
         Ok(status) => (StatusCode::OK, Json(status)).into_response(),
         Err(RuntimeError::NotFound { .. }) => AppApiError::new(
@@ -1438,6 +1506,7 @@ pub(crate) async fn list_child_runs_handler(
 /// POST /v1/runs/:id/orchestrate -- trigger the GATHER -> DECIDE -> EXECUTE loop.
 pub(crate) async fn orchestrate_run_handler(
     State(state): State<Arc<AppState>>,
+    tenant_scope: TenantScope,
     Path(run_id_str): Path<String>,
     Json(body): Json<OrchestrateRequest>,
 ) -> impl IntoResponse {
@@ -1449,7 +1518,6 @@ pub(crate) async fn orchestrate_run_handler(
     use cairn_runtime::services::{
         ApprovalServiceImpl, CheckpointServiceImpl, MailboxServiceImpl, ToolInvocationServiceImpl,
     };
-    use cairn_store::projections::RunReadModel;
     use cairn_tools::{
         BuiltinToolRegistry, CalculateTool, CancelTaskTool, CreateTaskTool, FileReadTool,
         FileWriteTool, GetApprovalsTool, GetRunTool, GetTaskTool, GitOperationsTool, GlobFindTool,
@@ -1460,20 +1528,16 @@ pub(crate) async fn orchestrate_run_handler(
     };
 
     let run_id = RunId::new(run_id_str);
-    let run = match RunReadModel::get(state.runtime.store.as_ref(), &run_id).await {
+
+    // T6a-C2: tenant scope MUST gate orchestration — this kicks off LLM calls
+    // and burns provider budget. Cross-tenant orchestrate is a budget DoS.
+    let run = match load_run_visible_to_tenant(state.as_ref(), &tenant_scope, &run_id).await {
         Ok(Some(r)) => r,
         Ok(None) => {
             return AppApiError::new(StatusCode::NOT_FOUND, "not_found", "run not found")
                 .into_response();
         }
-        Err(e) => {
-            return AppApiError::new(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "store_error",
-                e.to_string(),
-            )
-            .into_response();
-        }
+        Err(response) => return response,
     };
 
     // Transition run to Running if it's still Pending
@@ -2046,12 +2110,36 @@ pub(crate) async fn orchestrate_run_handler(
             })),
         )
             .into_response(),
-        Err(e) => AppApiError::new(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "orchestration_error",
-            format!("{e}"),
-        )
-        .into_response(),
+        Err(e) => {
+            // T6a-H9: map user-caused orchestration errors to 4xx. Keep
+            // infrastructure errors at 500 but strip provider-specific
+            // details from the client-visible message — the full Display
+            // goes to tracing.
+            tracing::warn!(run_id = %run_id, error = %e, "orchestration failed");
+            let msg = e.to_string();
+            let (status, code) = if matches!(
+                e,
+                cairn_orchestrator::OrchestratorError::Runtime(
+                    cairn_runtime::error::RuntimeError::NotFound { .. }
+                )
+            ) {
+                (StatusCode::NOT_FOUND, "not_found")
+            } else if matches!(
+                e,
+                cairn_orchestrator::OrchestratorError::Runtime(
+                    cairn_runtime::error::RuntimeError::InvalidTransition { .. }
+                )
+            ) {
+                (StatusCode::CONFLICT, "invalid_transition")
+            } else if matches!(e, cairn_orchestrator::OrchestratorError::Gather(_)) {
+                (StatusCode::BAD_GATEWAY, "gather_error")
+            } else if matches!(e, cairn_orchestrator::OrchestratorError::Decide(_)) {
+                (StatusCode::BAD_GATEWAY, "decide_error")
+            } else {
+                (StatusCode::INTERNAL_SERVER_ERROR, "orchestration_error")
+            };
+            AppApiError::new(status, code, msg).into_response()
+        }
     }
 }
 
