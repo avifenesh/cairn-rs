@@ -31,6 +31,7 @@ use crate::extractors::{HasProjectScope, ProjectJson, ProjectScope, TenantScope}
 use crate::state::AppState;
 #[allow(unused_imports)]
 use crate::TaskRecordDoc;
+use crate::helpers::resolve_session_for_task_record;
 use crate::{
     append_runtime_event, audit_actor_id, current_event_head, publish_runtime_frames_since,
 };
@@ -55,29 +56,6 @@ async fn load_task_visible_to_tenant(
         ),
         Err(err) => Err(runtime_error_response(err)),
     }
-}
-
-/// RFC-011 Phase 2: resolve a task's session_id from its parent run (if any).
-///
-/// Task mutations mint the FF ExecutionId from
-/// `(project, session_id, task_id)`; the handler layer fetches
-/// `session_id` from the run projection before each mutation so the
-/// minted ExecutionId matches what was used at `submit` time. Returns
-/// `None` for top-level tasks (no parent_run_id) — those were
-/// submitted with `None` and must continue to pass `None`.
-async fn resolve_task_session_id(
-    state: &AppState,
-    task: &TaskRecord,
-) -> Option<cairn_domain::SessionId> {
-    let parent_run_id = task.parent_run_id.as_ref()?;
-    state
-        .runtime
-        .runs
-        .get(parent_run_id)
-        .await
-        .ok()
-        .flatten()
-        .map(|run| run.session_id)
 }
 
 // ── DTOs ─────────────────────────────────────────────────────────────────────
@@ -231,8 +209,6 @@ pub(crate) async fn create_task_handler(
 ) -> impl IntoResponse {
     let body = project_scope.into_inner();
     let project = CreateTaskRequest::project(&body);
-    // RFC-011 Phase 2: resolve session_id from parent_run (if present) so
-    // the FF ExecutionId derives from the session's FlowId partition.
     let mut session_id: Option<cairn_domain::SessionId> = None;
     if let Some(parent_run_id) = body.parent_run_id.as_ref().map(RunId::new) {
         match state.runtime.runs.get(&parent_run_id).await {
@@ -496,7 +472,7 @@ pub(crate) async fn claim_task_handler(
         Ok(t) => t,
         Err(resp) => return resp,
     };
-    let session_id = resolve_task_session_id(state.as_ref(), &task).await;
+    let session_id = resolve_session_for_task_record(state.as_ref(), &task).await;
 
     let before = current_event_head(&state).await;
     match state
@@ -529,7 +505,7 @@ pub(crate) async fn heartbeat_task_handler(
         Ok(t) => t,
         Err(resp) => return resp,
     };
-    let session_id = resolve_task_session_id(state.as_ref(), &task).await;
+    let session_id = resolve_session_for_task_record(state.as_ref(), &task).await;
 
     let before = current_event_head(&state).await;
     match state
@@ -560,7 +536,7 @@ pub(crate) async fn release_task_lease_handler(
         }
         Err(err) => return runtime_error_response(err),
     };
-    let session_id = resolve_task_session_id(state.as_ref(), &task).await;
+    let session_id = resolve_session_for_task_record(state.as_ref(), &task).await;
 
     let before = current_event_head(&state).await;
     match state.runtime.tasks.release_lease(session_id.as_ref(), &task_id).await {
@@ -585,7 +561,7 @@ pub(crate) async fn cancel_task_handler(
         Ok(t) => t,
         Err(response) => return response,
     };
-    let session_id = resolve_task_session_id(state.as_ref(), &task).await;
+    let session_id = resolve_session_for_task_record(state.as_ref(), &task).await;
 
     let before = current_event_head(&state).await;
     match state.runtime.tasks.cancel(session_id.as_ref(), &task_id).await {
@@ -623,7 +599,7 @@ pub(crate) async fn complete_task_handler(
             Ok(t) => t,
             Err(response) => return response,
         };
-    let session_id = resolve_task_session_id(state.as_ref(), &current_task).await;
+    let session_id = resolve_session_for_task_record(state.as_ref(), &current_task).await;
 
     if current_task.state == TaskState::Leased {
         if let Err(err) = state.runtime.tasks.start(session_id.as_ref(), &task_id).await {
@@ -646,8 +622,7 @@ pub(crate) async fn complete_task_handler(
                     Ok(false) => {
                         if let Ok(Some(run)) = state.runtime.runs.get(&parent_run_id).await {
                             if run.state == RunState::Running {
-                                let run_session_id = run.session_id.clone();
-                                if let Err(err) = state.runtime.runs.complete(&run_session_id, &parent_run_id).await
+                                if let Err(err) = state.runtime.runs.complete(&run.session_id, &parent_run_id).await
                                 {
                                     return runtime_error_response(err);
                                 }

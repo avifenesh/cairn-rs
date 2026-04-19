@@ -205,10 +205,10 @@ impl RunService for FabricRunServiceAdapter {
         session_id: &SessionId,
         run_id: &RunId,
     ) -> Result<RunRecord, RuntimeError> {
-        // RFC-011 Phase 2: cross-check the caller's session_id against
-        // the projection. Mismatch is an operator error (the run is
-        // keyed to a different session in the projection); we fail loud
-        // rather than silently minting a different ExecutionId.
+        // Cross-check the caller's session_id against the projection.
+        // Mismatch is an operator error (the run is keyed to a
+        // different session in the projection); we fail loud rather
+        // than silently minting a different ExecutionId.
         let project = resolve_run_project_checking_session(&self.store, run_id, session_id).await?;
         self.fabric
             .runs
@@ -524,7 +524,7 @@ async fn resolve_run_scope(
 /// Resolve `project` from the projection AND cross-check that the
 /// caller's `session_id` matches what the projection holds.
 ///
-/// RFC-011 Phase 2: the FF `ExecutionId` is minted from
+/// The FF `ExecutionId` is minted from
 /// `(project, session_id, run_id)`; a mismatched `session_id` mints a
 /// different ID and the FCALL targets a non-existent execution — which
 /// FF reports as a generic not-found and the operator sees as an
@@ -583,8 +583,8 @@ impl TaskService for FabricTaskServiceAdapter {
         parent_task_id: Option<TaskId>,
         priority: u32,
     ) -> Result<TaskRecord, RuntimeError> {
-        // RFC-011 Phase 2: session_id is supplied by the caller (None for
-        // bare tasks). If caller omitted it but the task has a parent run
+        // session_id is supplied by the caller (None for bare tasks).
+        // If caller omitted it but the task has a parent run
         // already in the projection, we could derive it — but at submit
         // time the parent run's session is the authoritative source, so
         // we fall back to the parent_run_id lookup.

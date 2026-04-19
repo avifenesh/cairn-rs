@@ -66,8 +66,8 @@ pub enum BridgeEvent {
     TaskCreated {
         task_id: TaskId,
         project: ProjectKey,
-        /// RFC-011 Phase 2: the session this task is scoped to. Carried
-        /// through the bridge so every downstream consumer (projection,
+        /// The session this task is scoped to. Carried through the
+        /// bridge so every downstream consumer (projection,
         /// FF tag write, audit) sees the same session binding that the
         /// ExecutionId was minted against via
         /// `id_map::session_task_to_execution_id`. `None` for bare

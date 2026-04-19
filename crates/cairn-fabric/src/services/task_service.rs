@@ -30,7 +30,7 @@ impl FabricTaskService {
 
     /// Mint the `ExecutionId` for a task.
     ///
-    /// RFC-011 Phase 2: when `session_id` is `Some`, routes through
+    /// When `session_id` is `Some`, routes through
     /// `id_map::session_task_to_execution_id` so the task co-locates on
     /// the session's FlowId partition with every other run/task in the
     /// same session. When `None` (bare task submission, no parent

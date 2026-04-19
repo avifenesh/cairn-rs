@@ -234,21 +234,7 @@ pub(crate) async fn worker_claim_task_handler(
     }
 
     let task_id = TaskId::new(body.task_id);
-    // RFC-011 Phase 2: fetch session_id from parent run (if any) before claim.
-    let session_id = match state.runtime.tasks.get(&task_id).await {
-        Ok(Some(task)) => match task.parent_run_id.as_ref() {
-            Some(parent_run_id) => state
-                .runtime
-                .runs
-                .get(parent_run_id)
-                .await
-                .ok()
-                .flatten()
-                .map(|r| r.session_id),
-            None => None,
-        },
-        _ => None,
-    };
+    let session_id = crate::helpers::resolve_session_for_task_id(state.as_ref(), &task_id).await;
     match state
         .runtime
         .tasks
@@ -316,20 +302,8 @@ pub(crate) async fn worker_heartbeat_handler(
     }
 
     let hb_task_id = TaskId::new(body.task_id.clone());
-    let hb_session_id = match state.runtime.tasks.get(&hb_task_id).await {
-        Ok(Some(task)) => match task.parent_run_id.as_ref() {
-            Some(parent_run_id) => state
-                .runtime
-                .runs
-                .get(parent_run_id)
-                .await
-                .ok()
-                .flatten()
-                .map(|r| r.session_id),
-            None => None,
-        },
-        _ => None,
-    };
+    let hb_session_id =
+        crate::helpers::resolve_session_for_task_id(state.as_ref(), &hb_task_id).await;
     match state
         .runtime
         .tasks

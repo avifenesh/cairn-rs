@@ -10,7 +10,7 @@ use cairn_api::feed::FeedItem;
 use cairn_domain::workers::{ExternalWorkerProgress, ExternalWorkerRecord, ExternalWorkerReport};
 use cairn_domain::{
     ApprovalId, CheckpointId, EventEnvelope, ProjectKey, RunId, RunState, RuntimeEvent, Scope,
-    TaskId, TaskState, TenantId, ToolInvocationId, WorkerId,
+    SessionId, TaskId, TaskState, TenantId, ToolInvocationId, WorkerId,
 };
 use cairn_runtime::DefaultsService;
 use cairn_store::projections::{RunReadModel, RunRecord, TaskReadModel};
@@ -204,6 +204,34 @@ pub(crate) async fn persist_run_mode_default(
         )
         .await
         .map(|_| ())
+}
+
+/// Resolve a task's session_id by walking `task.parent_run_id → run.session_id`.
+/// Returns `None` for top-level tasks (no parent run) — they were submitted
+/// with `None` and must continue to pass `None`.
+pub(crate) async fn resolve_session_for_task_record(
+    state: &AppState,
+    task: &cairn_store::projections::TaskRecord,
+) -> Option<SessionId> {
+    let parent_run_id = task.parent_run_id.as_ref()?;
+    state
+        .runtime
+        .runs
+        .get(parent_run_id)
+        .await
+        .ok()
+        .flatten()
+        .map(|run| run.session_id)
+}
+
+/// Fetch the task by id, then resolve its session_id via [`resolve_session_for_task_record`].
+/// Returns `None` if the task does not exist or has no parent run.
+pub(crate) async fn resolve_session_for_task_id(
+    state: &AppState,
+    task_id: &TaskId,
+) -> Option<SessionId> {
+    let task = state.runtime.tasks.get(task_id).await.ok().flatten()?;
+    resolve_session_for_task_record(state, &task).await
 }
 
 pub(crate) async fn build_run_record_view(state: &AppState, run: RunRecord) -> RunRecordView {

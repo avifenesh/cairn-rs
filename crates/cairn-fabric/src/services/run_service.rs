@@ -30,9 +30,9 @@ impl FabricRunService {
 
     /// Mint the session-scoped `ExecutionId` for a cairn run.
     ///
-    /// RFC-011 Phase 2: routes through `id_map::session_run_to_execution_id`
-    /// so every run of a session co-locates on the session's FlowId
-    /// partition. The caller MUST supply the session binding that was
+    /// Routes through `id_map::session_run_to_execution_id` so every
+    /// run of a session co-locates on the session's FlowId partition.
+    /// The caller MUST supply the session binding that was
     /// used at run create time; mismatched sessions mint a different
     /// ExecutionId and the lookup misses FF's state entirely.
     fn execution_id(

@@ -307,6 +307,9 @@ pub(crate) async fn start_task_handler(
     }
 }
 
+/// Resolve a task's session_id via `task.parent_run_id → run.session_id`.
+/// Returns `None` for top-level tasks (no parent run) — they were
+/// submitted with `None` and must continue to pass `None`.
 async fn resolve_bin_task_session(
     state: &AppState,
     task_id: &TaskId,

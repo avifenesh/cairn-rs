@@ -33,8 +33,7 @@ pub trait RunService: Send + Sync {
     ///
     /// Read-only projection lookup: no `session_id` parameter because the
     /// projection is keyed by `run_id` and carries `session_id` on the
-    /// record. RFC-011 Phase 2 only changes the mint path, not the
-    /// projection read path.
+    /// record.
     async fn get(&self, run_id: &RunId) -> Result<Option<RunRecord>, RuntimeError>;
 
     /// List runs in a session.
@@ -47,8 +46,8 @@ pub trait RunService: Send + Sync {
 
     /// Complete a run (terminal).
     ///
-    /// RFC-011 Phase 2: `session_id` is required because the FF
-    /// `ExecutionId` is minted from `(project, session_id, run_id)` via
+    /// `session_id` is required because the FF `ExecutionId` is minted
+    /// from `(project, session_id, run_id)` via
     /// [`cairn_fabric::id_map::session_run_to_execution_id`]. Callers on
     /// the HTTP path fetch `session_id` from the cairn-store projection
     /// (`RunRecord::session_id`) before invoking this method; a mismatch

@@ -87,8 +87,8 @@ pub fn session_to_flow_id(project: &ProjectKey, session_id: &SessionId) -> FlowI
 
 /// Mint an `ExecutionId` scoped to a session's `FlowId` for a given run.
 ///
-/// RFC-011 Phase 2: per-session runs route via
-/// `ExecutionId::deterministic_for_flow` so the partition index is derived
+/// Per-session runs route via `ExecutionId::deterministic_for_flow`
+/// so the partition index is derived
 /// from the session's FlowId. This co-locates every run of a session on
 /// the same Valkey partition, which is the whole point of the
 /// `{fp:N}:<uuid>` hash-tag scheme.
@@ -109,9 +109,9 @@ pub fn session_run_to_execution_id(
 
 /// Mint an `ExecutionId` scoped to a session's `FlowId` for a given task.
 ///
-/// RFC-011 Phase 2: per-session tasks share the session's FF FlowId just
-/// like runs, so `execution_partition` lands them on the same partition
-/// as every other run/task of the same session.
+/// Per-session tasks share the session's FF FlowId just like runs, so
+/// `execution_partition` lands them on the same partition as every
+/// other run/task of the same session.
 pub fn session_task_to_execution_id(
     project: &ProjectKey,
     session_id: &SessionId,

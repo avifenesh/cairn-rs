@@ -22,14 +22,11 @@ use crate::error::RuntimeError;
 pub trait TaskService: Send + Sync {
     /// Submit a new task.
     ///
-    /// RFC-011 Phase 2: `session_id` scopes the mint path. `Some(sid)`
-    /// routes through
-    /// [`cairn_fabric::id_map::session_task_to_execution_id`] so the task
-    /// co-locates with its session's runs. `None` mints via
-    /// [`cairn_fabric::id_map::task_to_execution_id`] (solo path, for
-    /// bare tasks without a parent session). The choice at submit time
-    /// MUST match every downstream mutation's `session_id` argument; a
-    /// mismatch targets a non-existent FF execution.
+    /// `session_id` scopes the mint path: `Some(sid)` co-locates the task
+    /// on the session's FlowId partition; `None` mints via the solo path
+    /// for bare tasks (e.g. A2A). The choice at submit time MUST match
+    /// every downstream mutation's `session_id` argument; a mismatch
+    /// targets a non-existent FF execution.
     async fn submit(
         &self,
         project: &ProjectKey,
@@ -62,12 +59,11 @@ pub trait TaskService: Send + Sync {
 
     /// Claim a task lease (queued -> leased).
     ///
-    /// RFC-011 Phase 2: `session_id` must match the value supplied at
-    /// [`Self::submit`] time — the FF `ExecutionId` is cached in no
-    /// projection; it is re-derived on every call from
-    /// `(project, session_id, task_id)`. Handler path fetches it from
-    /// `TaskRecord` (via its `parent_run_id` → `RunRecord.session_id`)
-    /// before invoking.
+    /// `session_id` must match the value supplied at [`Self::submit`]
+    /// time — the FF `ExecutionId` is cached in no projection; it is
+    /// re-derived on every call from `(project, session_id, task_id)`.
+    /// Handler path fetches it from `TaskRecord` (via its
+    /// `parent_run_id` → `RunRecord.session_id`) before invoking.
     async fn claim(
         &self,
         session_id: Option<&SessionId>,
@@ -188,9 +184,9 @@ pub trait TaskService: Send + Sync {
         child_session_id: SessionId,
         _child_run_id: Option<RunId>,
     ) -> Result<TaskRecord, RuntimeError> {
-        // RFC-011 Phase 2: subagent tasks are scoped to the parent's
-        // session so the child execution co-locates on the session's
-        // FlowId partition with the parent run.
+        // Subagent tasks are scoped to the parent's session so the
+        // child execution co-locates on the session's FlowId partition
+        // with the parent run.
         self.submit(
             project,
             Some(&child_session_id),

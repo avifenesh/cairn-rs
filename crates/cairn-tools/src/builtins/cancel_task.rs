@@ -80,10 +80,10 @@ impl ToolHandler for CancelTaskTool {
             .unwrap_or("cancelled by agent")
             .to_owned();
 
-        // RFC-011 Phase 2: pass `None` for session_id; the adapter
-        // resolves the task's session from the projection
-        // (TaskRecord.parent_run_id → RunRecord.session_id). Tools don't
-        // carry session context directly.
+        // Pass `None` for session_id; the adapter resolves the task's
+        // session from the projection (TaskRecord.parent_run_id →
+        // RunRecord.session_id). Tools don't carry session context
+        // directly.
         match self.tasks.cancel(None, &TaskId::new(task_id_str)).await {
             Ok(task) => Ok(ToolResult::ok(serde_json::json!({
                 "task_id": task.task_id.as_str(),

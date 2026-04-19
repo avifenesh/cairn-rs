@@ -1429,7 +1429,6 @@ pub(crate) async fn process_scheduled_run_resumes_handler(
         if record.project.tenant_id != *tenant_scope.tenant_id() {
             continue;
         }
-        // RFC-011 Phase 2: resume needs session_id; fetch from the run projection.
         let session_id = match state.runtime.runs.get(&record.run_id).await {
             Ok(Some(run)) => run.session_id,
             Ok(None) => continue,

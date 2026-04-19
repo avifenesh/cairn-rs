@@ -188,8 +188,8 @@ impl FabricQuotaService {
 
     /// Quota admission check for a session-scoped run.
     ///
-    /// RFC-011 Phase 2: the mint routes through
-    /// `id_map::session_run_to_execution_id` so the quota's concurrency
+    /// The mint routes through `id_map::session_run_to_execution_id`
+    /// so the quota's concurrency
     /// counters hit the same FF flow partition as the run itself. The
     /// caller MUST supply the same `session_id` that the run was started
     /// with — a mismatch mints a different `ExecutionId` and the quota
