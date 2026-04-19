@@ -141,19 +141,20 @@ pub(crate) async fn handle_ws_connection(
             recv_result = receiver.recv() => {
                 match recv_result {
                     Ok(event) => {
-                        // T6c-C2: tenant scope gate. Drop events that
-                        // belong to a different tenant than the
-                        // authenticated subscriber. Admin sees all;
-                        // events without a discoverable project fall
-                        // through.
+                        // T6c-C2 (+ R1): tenant scope gate — fail-closed.
+                        // Drop events whose tenant doesn't match the
+                        // authenticated subscriber. Rules:
+                        //   - admin  → sees every event (match REST).
+                        //   - event tenant-agnostic (System) → visible to all.
+                        //   - event tenant-scoped + subscriber has no tenant
+                        //     → REJECT (Gemini R1: prior `if let (Some, Some)`
+                        //     leaked these to unscoped callers).
+                        //   - both present → must be equal.
                         if !is_admin {
-                            let event_tenant = cairn_app::handlers::sse::ws_event_tenant_id(
-                                &event.envelope.payload,
-                            );
-                            if let (Some(et), Some(st)) =
-                                (event_tenant, subscriber_tenant.as_deref())
-                            {
-                                if et != st {
+                            let event_tenant =
+                                cairn_app::handlers::sse::ws_event_tenant_id(&event.envelope);
+                            if let Some(et) = event_tenant {
+                                if subscriber_tenant.as_deref() != Some(et) {
                                     continue;
                                 }
                             }

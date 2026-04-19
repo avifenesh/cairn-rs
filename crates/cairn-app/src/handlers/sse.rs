@@ -200,45 +200,117 @@ pub(crate) async fn build_runtime_sse_frame(
         }
     }
 
-    // T6c-C1: tag the frame with the originating event's tenant so the
-    // SSE handler can filter fan-out by the subscriber's principal.
-    frame.tenant_id =
-        project_key_from_event(&stored.envelope.payload).map(|pk| pk.tenant_id.as_str().to_owned());
+    // T6c-C1: tag the frame with the originating envelope's tenant so
+    // the SSE handler can filter fan-out by the subscriber's principal.
+    // Use the canonical ownership field rather than re-walking variants
+    // (Gemini R1: `EventEnvelope::ownership` is the definitive source).
+    frame.tenant_id = ws_event_tenant_id(&stored.envelope).map(|s| s.to_owned());
 
     Some(frame)
 }
 
-/// T6c-C2: tenant-id helper for the WebSocket path. Shares the
-/// project-key lookup table with the SSE publisher; returns the
-/// `tenant_id` string so `bin_websocket::handle_ws_connection` can
-/// compare directly against `principal.tenant().tenant_id`.
-pub fn ws_event_tenant_id(payload: &cairn_domain::RuntimeEvent) -> Option<&str> {
-    project_key_from_event(payload).map(|pk| pk.tenant_id.as_str())
+/// T6c-C2 (+ R1): tenant-id helper shared by the SSE publisher and the
+/// WebSocket fan-out. Reads `EventEnvelope::ownership` — the canonical
+/// tenancy field on every event — so it stays correct as new
+/// `RuntimeEvent` variants are added. `System`-owned envelopes return
+/// `None` (tenant-agnostic; visible to everyone, same as `ready`).
+pub fn ws_event_tenant_id(
+    envelope: &cairn_domain::EventEnvelope<cairn_domain::RuntimeEvent>,
+) -> Option<&str> {
+    match &envelope.ownership {
+        cairn_domain::tenancy::OwnershipKey::System => None,
+        cairn_domain::tenancy::OwnershipKey::Tenant(k) => Some(k.tenant_id.as_str()),
+        cairn_domain::tenancy::OwnershipKey::Workspace(k) => Some(k.tenant_id.as_str()),
+        cairn_domain::tenancy::OwnershipKey::Project(k) => Some(k.tenant_id.as_str()),
+    }
 }
 
-/// T6c-C1: extract the ProjectKey from a RuntimeEvent so the SSE
-/// publisher can tag the outgoing frame with its tenant. Returns None
-/// for tenant-agnostic events (if any); those frames broadcast to
-/// every authenticated subscriber.
-fn project_key_from_event(
-    payload: &cairn_domain::RuntimeEvent,
-) -> Option<&cairn_domain::ProjectKey> {
-    use cairn_domain::RuntimeEvent::*;
-    match payload {
-        RunCreated(e) => Some(&e.project),
-        RunStateChanged(e) => Some(&e.project),
-        TaskCreated(e) => Some(&e.project),
-        TaskStateChanged(e) => Some(&e.project),
-        TaskLeaseClaimed(e) => Some(&e.project),
-        ApprovalRequested(e) => Some(&e.project),
-        ApprovalResolved(e) => Some(&e.project),
-        SessionCreated(e) => Some(&e.project),
-        SessionStateChanged(e) => Some(&e.project),
-        MailboxMessageAppended(e) => Some(&e.project),
-        // Extensive — the full match is in `StoredEvent`'s ownership
-        // field. When new variants are added and don't fit the above,
-        // fall through to None (tenant-agnostic) and a CI test catches
-        // the divergence.
-        _ => None,
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use cairn_api::sse::{SseEventName, SseFrame};
+
+    fn frame(tenant_id: Option<&str>) -> SseFrame {
+        SseFrame {
+            event: SseEventName::Ready,
+            data: serde_json::Value::Null,
+            id: None,
+            tenant_id: tenant_id.map(|s| s.to_owned()),
+        }
+    }
+
+    #[test]
+    fn admin_sees_every_frame_regardless_of_tenant() {
+        assert!(frame_visible_to(&frame(Some("acme")), None, true));
+        assert!(frame_visible_to(&frame(Some("globex")), Some("acme"), true));
+        assert!(frame_visible_to(&frame(None), None, true));
+    }
+
+    #[test]
+    fn tenant_agnostic_frames_broadcast_to_all_subscribers() {
+        assert!(frame_visible_to(&frame(None), Some("acme"), false));
+        assert!(frame_visible_to(&frame(None), None, false));
+    }
+
+    #[test]
+    fn tenant_scoped_frame_refused_when_subscriber_has_no_tenant() {
+        // Gemini R1: the prior `if let (Some, Some)` implementation leaked
+        // tenant-scoped frames to unscoped callers. Subscribers without a
+        // tenant should never see tenant-scoped frames.
+        assert!(!frame_visible_to(&frame(Some("acme")), None, false));
+    }
+
+    #[test]
+    fn tenant_scoped_frame_refused_on_mismatch() {
+        assert!(!frame_visible_to(
+            &frame(Some("acme")),
+            Some("globex"),
+            false
+        ));
+    }
+
+    #[test]
+    fn tenant_scoped_frame_delivered_on_match() {
+        assert!(frame_visible_to(&frame(Some("acme")), Some("acme"), false));
+    }
+
+    #[test]
+    fn ws_event_tenant_id_reads_ownership_field() {
+        use cairn_domain::ids::{EventId, SessionId};
+        use cairn_domain::tenancy::{OwnershipKey, ProjectKey, TenantKey, WorkspaceKey};
+
+        // Use SessionCreated as a concrete, minimal RuntimeEvent payload;
+        // the helper cares about `ownership`, not the payload variant.
+        let payload = cairn_domain::RuntimeEvent::SessionCreated(cairn_domain::SessionCreated {
+            project: ProjectKey::new("unused", "unused", "unused"),
+            session_id: SessionId::new("s1"),
+        });
+
+        let envelope = |ownership: OwnershipKey| {
+            cairn_domain::EventEnvelope::new(
+                EventId::new("evt"),
+                cairn_domain::EventSource::System,
+                ownership,
+                payload.clone(),
+            )
+        };
+
+        assert_eq!(ws_event_tenant_id(&envelope(OwnershipKey::System)), None);
+        assert_eq!(
+            ws_event_tenant_id(&envelope(OwnershipKey::Project(ProjectKey::new(
+                "t1", "w1", "p1"
+            )))),
+            Some("t1"),
+        );
+        assert_eq!(
+            ws_event_tenant_id(&envelope(OwnershipKey::Workspace(WorkspaceKey::new(
+                "t2", "w2"
+            )))),
+            Some("t2"),
+        );
+        assert_eq!(
+            ws_event_tenant_id(&envelope(OwnershipKey::Tenant(TenantKey::new("t3")))),
+            Some("t3"),
+        );
     }
 }
