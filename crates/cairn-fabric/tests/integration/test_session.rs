@@ -5,9 +5,10 @@
 //   - ff_cancel_flow   (via sessions.archive)
 //
 // Runs against a testcontainers-provisioned Valkey (see tests/integration.rs).
-// `TestHarness::setup()` issues FLUSHDB between tests so index zsets do not
-// collide across runs — the earlier `unique_session_id()` crutch stays only
-// as defense in depth.
+// Each test gets a uuid-scoped ProjectKey from `TestHarness::setup()` for
+// parallel-safe isolation — there is NO FLUSHDB between tests (would wipe
+// sibling tests' in-flight state on the shared container). `unique_session_id()`
+// provides an additional layer of scoping per test case.
 
 use std::collections::HashMap;
 

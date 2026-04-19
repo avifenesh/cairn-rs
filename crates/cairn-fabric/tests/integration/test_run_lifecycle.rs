@@ -2,7 +2,9 @@
 //
 // These tests create real FF executions in Valkey. Runs against a
 // testcontainers-provisioned Valkey (see tests/integration.rs); every test
-// gets a FLUSHDB between invocations plus unique ids as defense in depth.
+// gets a uuid-scoped ProjectKey from `TestHarness::setup()` for parallel-safe
+// isolation — there is NO FLUSHDB between tests (would wipe sibling tests'
+// in-flight state on the shared container).
 //
 // Terminal operations (complete/fail/cancel) require the execution to be
 // Active (leased). run_service.start() creates executions in Waiting state.

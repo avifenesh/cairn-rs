@@ -6,9 +6,9 @@
 //   - ff_deliver_signal      (via runs.resolve_approval, signals.deliver_*)
 //
 // Runs against a testcontainers-provisioned Valkey (see tests/integration.rs).
-// `TestHarness::setup()` issues FLUSHDB between tests so index zsets do not
-// leak across runs — the earlier uuid-scoped ids stay only as defense in
-// depth.
+// Each test gets a uuid-scoped ProjectKey from `TestHarness::setup()` for
+// parallel-safe isolation — there is NO FLUSHDB between tests (would wipe
+// sibling tests' in-flight state on the shared container).
 
 use std::collections::HashMap;
 use std::time::Duration;
