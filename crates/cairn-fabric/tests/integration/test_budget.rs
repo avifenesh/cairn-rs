@@ -1,7 +1,6 @@
 use cairn_domain::RunId;
 
 use ff_core::contracts::ReportUsageResult;
-use ff_core::partition::PartitionConfig;
 use ff_core::types::{ExecutionId, LaneId};
 
 use crate::TestHarness;
@@ -12,9 +11,13 @@ use crate::TestHarness;
 /// Distinct seeds produce distinct ExecutionIds, so FF's dedup slot does NOT
 /// fire between them — which is the invariant every spend-without-dedup test
 /// below relies on.
-fn test_eid(seed: &str) -> ExecutionId {
+///
+/// Threads the harness's `partition_config()` through so the minted ids route
+/// to the same partition the `FabricServices` instance is writing to, matching
+/// the pattern every other integration test file in this crate already uses.
+fn test_eid(h: &TestHarness, seed: &str) -> ExecutionId {
     let uuid = uuid::Uuid::new_v5(&uuid::Uuid::NAMESPACE_DNS, seed.as_bytes());
-    ExecutionId::deterministic_solo(&LaneId::new("test"), &PartitionConfig::default(), uuid)
+    ExecutionId::deterministic_solo(&LaneId::new("test"), h.partition_config(), uuid)
 }
 
 #[tokio::test]
@@ -31,7 +34,7 @@ async fn test_budget_hard_limit() {
 
     // Distinct ExecutionId per spend: each call is a logically different
     // operation, so dedup must NOT fire between them.
-    let eid_a = test_eid("hard_limit_a");
+    let eid_a = test_eid(&h, "hard_limit_a");
     let spend_ok = h
         .fabric
         .budgets
@@ -41,7 +44,7 @@ async fn test_budget_hard_limit() {
 
     assert_eq!(spend_ok, ReportUsageResult::Ok);
 
-    let eid_b = test_eid("hard_limit_b");
+    let eid_b = test_eid(&h, "hard_limit_b");
     let spend_breach = h
         .fabric
         .budgets
@@ -69,7 +72,7 @@ async fn test_budget_status_reflects_spend() {
         .await
         .expect("create budget failed");
 
-    let eid = test_eid("status_reflects_spend");
+    let eid = test_eid(&h, "status_reflects_spend");
     h.fabric
         .budgets
         .record_spend(&budget_id, &eid, &[("tokens", 42)])
@@ -102,7 +105,7 @@ async fn test_budget_release_resets_usage() {
         .await
         .expect("create budget failed");
 
-    let eid_pre = test_eid("release_pre");
+    let eid_pre = test_eid(&h, "release_pre");
     h.fabric
         .budgets
         .record_spend(&budget_id, &eid_pre, &[("tokens", 90)])
@@ -115,7 +118,7 @@ async fn test_budget_release_resets_usage() {
         .await
         .expect("release failed");
 
-    let eid_post = test_eid("release_post");
+    let eid_post = test_eid(&h, "release_post");
     let after = h
         .fabric
         .budgets
@@ -151,7 +154,7 @@ async fn test_budget_spend_dedup_returns_already_applied() {
         .expect("create budget failed");
 
     // Pin the ExecutionId so both calls produce the same idempotency key.
-    let eid = test_eid("dedup_pinned");
+    let eid = test_eid(&h, "dedup_pinned");
     let deltas: &[(&str, u64)] = &[("tokens", 100)];
 
     let first = h

@@ -177,13 +177,9 @@ pub const DELIVER_SIGNAL_ARGS: usize = 18;
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support::test_eid;
     use ff_core::partition::{execution_partition, PartitionConfig};
     use ff_core::types::LaneId;
-
-    fn test_eid(seed: &str) -> ExecutionId {
-        let uuid = uuid::Uuid::new_v5(&uuid::Uuid::NAMESPACE_DNS, seed.as_bytes());
-        ExecutionId::deterministic_solo(&LaneId::new("test"), &PartitionConfig::default(), uuid)
-    }
 
     fn test_ctx() -> (ExecKeyContext, IndexKeys, ExecutionId) {
         let eid = test_eid("suspension");

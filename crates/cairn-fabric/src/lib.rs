@@ -68,6 +68,8 @@ pub mod signal_bridge;
 pub mod state_map;
 pub mod stream;
 pub mod suspension;
+#[cfg(test)]
+pub(crate) mod test_support;
 pub mod worker_sdk;
 
 pub use aggregate::FabricServices;

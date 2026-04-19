@@ -362,13 +362,7 @@ impl FabricBudgetService {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ff_core::partition::PartitionConfig;
-    use ff_core::types::LaneId;
-
-    fn test_eid(seed: &str) -> ExecutionId {
-        let uuid = uuid::Uuid::new_v5(&uuid::Uuid::NAMESPACE_DNS, seed.as_bytes());
-        ExecutionId::deterministic_solo(&LaneId::new("test"), &PartitionConfig::default(), uuid)
-    }
+    use crate::test_support::test_eid;
 
     #[test]
     fn idempotency_key_stable_for_same_inputs() {

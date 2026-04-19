@@ -63,13 +63,8 @@ pub const CHECK_ADMISSION_ARGS: usize = 6;
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support::test_eid;
     use ff_core::partition::{quota_partition, PartitionConfig};
-    use ff_core::types::LaneId;
-
-    fn test_eid(seed: &str) -> ExecutionId {
-        let uuid = uuid::Uuid::new_v5(&uuid::Uuid::NAMESPACE_DNS, seed.as_bytes());
-        ExecutionId::deterministic_solo(&LaneId::new("test"), &PartitionConfig::default(), uuid)
-    }
 
     #[test]
     fn create_quota_policy_counts() {
