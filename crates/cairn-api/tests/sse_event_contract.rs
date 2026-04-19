@@ -138,6 +138,7 @@ fn sse_frame_serializes_event_name_data_and_id() {
             }
         }),
         id: Some("42".to_owned()),
+        tenant_id: None,
     };
 
     let json = serde_json::to_value(&frame).unwrap();
@@ -164,6 +165,7 @@ fn sse_frame_round_trips_through_serde() {
         event: SseEventName::ApprovalRequired,
         data: serde_json::json!({ "approval": { "id": "appr_1", "status": "pending" } }),
         id: Some("7".to_owned()),
+        tenant_id: None,
     };
 
     let json = serde_json::to_string(&original).unwrap();
@@ -181,6 +183,7 @@ fn sse_frame_id_none_serializes_correctly() {
         event: SseEventName::FeedUpdate,
         data: serde_json::json!({ "item": {} }),
         id: None,
+        tenant_id: None,
     };
 
     let json = serde_json::to_value(&frame).unwrap();
@@ -440,6 +443,7 @@ fn keepalive_frames_do_not_advance_replay_position() {
         event: SseEventName::TaskUpdate,
         data: serde_json::json!({"task": {"id": "t1", "status": "running"}}),
         id: Some("55".to_owned()), // position 55 in the event log
+        tenant_id: None,
     };
     assert!(
         data_frame.id.is_some(),

@@ -212,6 +212,7 @@ impl SseOrchestratorEmitter {
             event: cairn_api::sse::SseEventName::AgentProgress,
             data,
             id: Some(id.to_string()),
+            tenant_id: None,
         };
         if let Ok(mut buf) = self.sse_buffer.write() {
             if buf.len() >= SSE_BUFFER_CAPACITY {

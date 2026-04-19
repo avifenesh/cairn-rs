@@ -624,6 +624,7 @@ pub(crate) fn emit_github_progress(state: &AppState, data: serde_json::Value) {
         event: cairn_api::sse::SseEventName::GitHubProgress,
         data,
         id: None,
+        tenant_id: None,
     };
     let seq = state
         .sse_seq

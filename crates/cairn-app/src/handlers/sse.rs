@@ -25,8 +25,16 @@ pub(crate) const SSE_BUFFER_CAPACITY: usize = 10_000;
 
 pub(crate) async fn runtime_stream_handler(
     State(state): State<Arc<AppState>>,
+    axum::extract::Extension(principal): axum::extract::Extension<cairn_api::auth::AuthPrincipal>,
     headers: HeaderMap,
 ) -> Sse<impl tokio_stream::Stream<Item = Result<SseEvent, Infallible>>> {
+    // T6c-C1: fan out only frames whose tenant matches the subscriber's
+    // authenticated tenant (or unscoped frames, e.g. `ready`). Admin
+    // principals see every tenant — same semantics as the REST API.
+    let subscriber_tenant: Option<String> =
+        principal.tenant().map(|t| t.tenant_id.as_str().to_owned());
+    let is_admin = crate::extractors::is_admin_principal(&principal);
+
     // Subscribe to the live broadcast BEFORE reading the replay window so no
     // frames can be missed in the gap between replay and live subscription.
     let receiver = state.runtime_sse_tx.subscribe();
@@ -38,17 +46,19 @@ pub(crate) async fn runtime_stream_handler(
         .and_then(|v| v.to_str().ok())
         .and_then(|s| s.parse().ok());
 
-    // Collect all buffered frames after last_seq.
+    // Collect all buffered frames after last_seq, filtered by tenant.
     let replay_frames: Vec<SseFrame> = {
         let buf = state
             .sse_event_buffer
             .read()
-            .expect("sse_event_buffer poisoned");
+            .unwrap_or_else(|e| e.into_inner());
         match last_seq {
             None => vec![],
             Some(after) => buf
                 .iter()
-                .filter(|(seq, _)| *seq > after)
+                .filter(|(seq, frame)| {
+                    *seq > after && frame_visible_to(frame, subscriber_tenant.as_deref(), is_admin)
+                })
                 .map(|(_, frame)| frame.clone())
                 .collect(),
         }
@@ -58,9 +68,16 @@ pub(crate) async fn runtime_stream_handler(
     let replay = tokio_stream::iter(replay_frames)
         .map(|frame| Ok::<SseEvent, Infallible>(sse_event_from_frame(frame)));
 
-    // Live stream: new frames arriving via broadcast.
-    let live = BroadcastStream::new(receiver).filter_map(|message| match message {
-        Ok(frame) => Some(Ok(sse_event_from_frame(frame))),
+    // Live stream: new frames arriving via broadcast, tenant-filtered.
+    let subscriber_tenant_live = subscriber_tenant.clone();
+    let live = BroadcastStream::new(receiver).filter_map(move |message| match message {
+        Ok(frame) => {
+            if frame_visible_to(&frame, subscriber_tenant_live.as_deref(), is_admin) {
+                Some(Ok(sse_event_from_frame(frame)))
+            } else {
+                None
+            }
+        }
         Err(_) => None, // lagged receiver — client will reconnect
     });
 
@@ -71,6 +88,20 @@ pub(crate) async fn runtime_stream_handler(
             .interval(std::time::Duration::from_secs(15))
             .text("ping"),
     )
+}
+
+/// T6c-C1: a frame is visible to a subscriber when (a) the caller is
+/// an admin, (b) the frame is tenant-agnostic (None), or (c) the
+/// frame's tenant matches the subscriber's tenant.
+fn frame_visible_to(frame: &SseFrame, subscriber_tenant: Option<&str>, is_admin: bool) -> bool {
+    if is_admin {
+        return true;
+    }
+    match (frame.tenant_id.as_deref(), subscriber_tenant) {
+        (None, _) => true,
+        (Some(_), None) => false,
+        (Some(ft), Some(st)) => ft == st,
+    }
 }
 
 pub(crate) fn sse_event_from_frame(frame: SseFrame) -> SseEvent {
@@ -128,7 +159,7 @@ pub(crate) async fn publish_runtime_frames_since(
                 let mut buf = state
                     .sse_event_buffer
                     .write()
-                    .expect("sse_event_buffer poisoned");
+                    .unwrap_or_else(|e| e.into_inner());
                 if buf.len() >= SSE_BUFFER_CAPACITY {
                     buf.pop_front();
                 }
@@ -169,5 +200,117 @@ pub(crate) async fn build_runtime_sse_frame(
         }
     }
 
+    // T6c-C1: tag the frame with the originating envelope's tenant so
+    // the SSE handler can filter fan-out by the subscriber's principal.
+    // Use the canonical ownership field rather than re-walking variants
+    // (Gemini R1: `EventEnvelope::ownership` is the definitive source).
+    frame.tenant_id = ws_event_tenant_id(&stored.envelope).map(|s| s.to_owned());
+
     Some(frame)
+}
+
+/// T6c-C2 (+ R1): tenant-id helper shared by the SSE publisher and the
+/// WebSocket fan-out. Reads `EventEnvelope::ownership` — the canonical
+/// tenancy field on every event — so it stays correct as new
+/// `RuntimeEvent` variants are added. `System`-owned envelopes return
+/// `None` (tenant-agnostic; visible to everyone, same as `ready`).
+pub fn ws_event_tenant_id(
+    envelope: &cairn_domain::EventEnvelope<cairn_domain::RuntimeEvent>,
+) -> Option<&str> {
+    match &envelope.ownership {
+        cairn_domain::tenancy::OwnershipKey::System => None,
+        cairn_domain::tenancy::OwnershipKey::Tenant(k) => Some(k.tenant_id.as_str()),
+        cairn_domain::tenancy::OwnershipKey::Workspace(k) => Some(k.tenant_id.as_str()),
+        cairn_domain::tenancy::OwnershipKey::Project(k) => Some(k.tenant_id.as_str()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use cairn_api::sse::{SseEventName, SseFrame};
+
+    fn frame(tenant_id: Option<&str>) -> SseFrame {
+        SseFrame {
+            event: SseEventName::Ready,
+            data: serde_json::Value::Null,
+            id: None,
+            tenant_id: tenant_id.map(|s| s.to_owned()),
+        }
+    }
+
+    #[test]
+    fn admin_sees_every_frame_regardless_of_tenant() {
+        assert!(frame_visible_to(&frame(Some("acme")), None, true));
+        assert!(frame_visible_to(&frame(Some("globex")), Some("acme"), true));
+        assert!(frame_visible_to(&frame(None), None, true));
+    }
+
+    #[test]
+    fn tenant_agnostic_frames_broadcast_to_all_subscribers() {
+        assert!(frame_visible_to(&frame(None), Some("acme"), false));
+        assert!(frame_visible_to(&frame(None), None, false));
+    }
+
+    #[test]
+    fn tenant_scoped_frame_refused_when_subscriber_has_no_tenant() {
+        // Gemini R1: the prior `if let (Some, Some)` implementation leaked
+        // tenant-scoped frames to unscoped callers. Subscribers without a
+        // tenant should never see tenant-scoped frames.
+        assert!(!frame_visible_to(&frame(Some("acme")), None, false));
+    }
+
+    #[test]
+    fn tenant_scoped_frame_refused_on_mismatch() {
+        assert!(!frame_visible_to(
+            &frame(Some("acme")),
+            Some("globex"),
+            false
+        ));
+    }
+
+    #[test]
+    fn tenant_scoped_frame_delivered_on_match() {
+        assert!(frame_visible_to(&frame(Some("acme")), Some("acme"), false));
+    }
+
+    #[test]
+    fn ws_event_tenant_id_reads_ownership_field() {
+        use cairn_domain::ids::{EventId, SessionId};
+        use cairn_domain::tenancy::{OwnershipKey, ProjectKey, TenantKey, WorkspaceKey};
+
+        // Use SessionCreated as a concrete, minimal RuntimeEvent payload;
+        // the helper cares about `ownership`, not the payload variant.
+        let payload = cairn_domain::RuntimeEvent::SessionCreated(cairn_domain::SessionCreated {
+            project: ProjectKey::new("unused", "unused", "unused"),
+            session_id: SessionId::new("s1"),
+        });
+
+        let envelope = |ownership: OwnershipKey| {
+            cairn_domain::EventEnvelope::new(
+                EventId::new("evt"),
+                cairn_domain::EventSource::System,
+                ownership,
+                payload.clone(),
+            )
+        };
+
+        assert_eq!(ws_event_tenant_id(&envelope(OwnershipKey::System)), None);
+        assert_eq!(
+            ws_event_tenant_id(&envelope(OwnershipKey::Project(ProjectKey::new(
+                "t1", "w1", "p1"
+            )))),
+            Some("t1"),
+        );
+        assert_eq!(
+            ws_event_tenant_id(&envelope(OwnershipKey::Workspace(WorkspaceKey::new(
+                "t2", "w2"
+            )))),
+            Some("t2"),
+        );
+        assert_eq!(
+            ws_event_tenant_id(&envelope(OwnershipKey::Tenant(TenantKey::new("t3")))),
+            Some("t3"),
+        );
+    }
 }

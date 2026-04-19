@@ -10,9 +10,10 @@ pub struct SseEventEntry {
 }
 
 /// Canonical SSE event names that the Rust API must emit.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SseEventName {
+    #[default]
     Ready,
     FeedUpdate,
     PollCompleted,
@@ -69,11 +70,22 @@ impl SseEventName {
 }
 
 /// Outbound SSE frame carrying a typed event name and JSON payload.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+///
+/// **T6c-C1**: `tenant_id` is set from the originating event's
+/// `ProjectKey.tenant_id` at publish time and MUST be checked against
+/// the subscriber's authenticated tenant before fan-out. Cross-tenant
+/// propagation of frames is a privacy breach. Global / cross-tenant
+/// frames (e.g. `ready` boot events) carry `None` and are broadcast to
+/// every authenticated subscriber.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SseFrame {
     pub event: SseEventName,
     pub data: serde_json::Value,
     pub id: Option<String>,
+    /// T6c-C1: tenant scope for per-subscriber filtering. `None` means
+    /// the frame is tenant-agnostic (e.g. startup `ready` events).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tenant_id: Option<String>,
 }
 
 /// Seam for SSE stream management. Implementors push frames to connected clients.
@@ -140,6 +152,7 @@ mod tests {
             event: SseEventName::Ready,
             data: serde_json::json!({"clientId": "c1"}),
             id: Some("evt_1".to_owned()),
+            tenant_id: None,
         };
         let json = serde_json::to_value(&frame).unwrap();
         assert_eq!(json["event"], "ready");

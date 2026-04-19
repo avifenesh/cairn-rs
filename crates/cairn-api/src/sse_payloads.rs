@@ -157,6 +157,7 @@ pub fn build_memory_proposed_frame(
         event: crate::sse::SseEventName::MemoryProposed,
         data,
         id: event_id,
+        tenant_id: None,
     })
 }
 
@@ -216,6 +217,7 @@ pub fn build_enriched_tool_call_frame(
         event: crate::sse::SseEventName::AssistantToolCall,
         data,
         id: event_id,
+        tenant_id: None,
     })
 }
 
@@ -237,6 +239,7 @@ pub fn build_enriched_task_update_frame(
         event: crate::sse::SseEventName::TaskUpdate,
         data,
         id: event_id,
+        tenant_id: None,
     })
 }
 
@@ -257,6 +260,7 @@ pub fn build_enriched_approval_frame(
         event: crate::sse::SseEventName::ApprovalRequired,
         data,
         id: event_id,
+        tenant_id: None,
     })
 }
 
@@ -282,6 +286,7 @@ pub fn build_enriched_assistant_end_frame(
         event: crate::sse::SseEventName::AssistantEnd,
         data,
         id: event_id,
+        tenant_id: None,
     })
 }
 
@@ -348,6 +353,7 @@ pub fn build_streaming_sse_frame(
         event: event_name,
         data,
         id: event_id,
+        tenant_id: None,
     })
 }
 
@@ -367,6 +373,7 @@ pub fn build_feed_update_frame(
         event: crate::sse::SseEventName::FeedUpdate,
         data,
         id: event_id,
+        tenant_id: None,
     })
 }
 
@@ -390,6 +397,7 @@ pub fn build_poll_completed_frame(
         event: crate::sse::SseEventName::PollCompleted,
         data,
         id: event_id,
+        tenant_id: None,
     })
 }
 

@@ -260,7 +260,7 @@ pub(crate) fn enforce_project_tenant(
         .unwrap_or(false)
 }
 
-pub(crate) fn is_admin_principal(principal: &AuthPrincipal) -> bool {
+pub fn is_admin_principal(principal: &AuthPrincipal) -> bool {
     match principal {
         AuthPrincipal::System => true,
         AuthPrincipal::ServiceAccount { name, .. } => name == "admin",

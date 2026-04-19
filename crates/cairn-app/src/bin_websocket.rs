@@ -43,27 +43,43 @@ pub(crate) async fn ws_handler(
     State(state): State<AppState>,
     Query(params): Query<WsQueryParams>,
 ) -> impl IntoResponse {
-    // Authenticate via query param — same token registry as bearer auth.
+    // Authenticate via query param — same token registry as bearer
+    // auth. (Upstream `auth_middleware` also runs on `/v1/ws`; this is
+    // defence-in-depth.) Carry the resolved principal into the upgraded
+    // task so T6c-C2 tenant filtering can gate each event.
     let token = match params.token {
         Some(t) if !t.is_empty() => t,
         _ => return StatusCode::UNAUTHORIZED.into_response(),
     };
     let authenticator = ServiceTokenAuthenticator::new(state.tokens.clone());
-    if authenticator.authenticate(&token).is_err() {
+    let Ok(principal) = authenticator.authenticate(&token) else {
         return StatusCode::UNAUTHORIZED.into_response();
-    }
+    };
 
-    ws.on_upgrade(move |socket| handle_ws_connection(socket, state))
+    ws.on_upgrade(move |socket| handle_ws_connection(socket, state, principal))
 }
 
 /// Drive a single WebSocket connection to completion.
-pub(crate) async fn handle_ws_connection(mut socket: WebSocket, state: AppState) {
+pub(crate) async fn handle_ws_connection(
+    mut socket: WebSocket,
+    state: AppState,
+    principal: cairn_api::auth::AuthPrincipal,
+) {
     use tokio::sync::broadcast::error::RecvError;
 
     let mut receiver = state.runtime.store.subscribe();
 
     // Active event-type filter set by the client (None = all events).
     let mut filter: Option<Vec<String>> = None;
+
+    // T6c-C2: per-connection tenant gate. Admin principals see every
+    // event; non-admins see only events whose `ProjectKey.tenant_id`
+    // matches their own tenant. Events that carry no project scope
+    // (cross-tenant bootstrap or infra events) fall through to the
+    // subscriber — matches the SSE handler's semantics.
+    let subscriber_tenant: Option<String> =
+        principal.tenant().map(|t| t.tenant_id.as_str().to_owned());
+    let is_admin = cairn_app::extractors::is_admin_principal(&principal);
 
     // Send the "connected" handshake with the current log head position.
     let head_pos = state
@@ -125,6 +141,25 @@ pub(crate) async fn handle_ws_connection(mut socket: WebSocket, state: AppState)
             recv_result = receiver.recv() => {
                 match recv_result {
                     Ok(event) => {
+                        // T6c-C2 (+ R1): tenant scope gate — fail-closed.
+                        // Drop events whose tenant doesn't match the
+                        // authenticated subscriber. Rules:
+                        //   - admin  → sees every event (match REST).
+                        //   - event tenant-agnostic (System) → visible to all.
+                        //   - event tenant-scoped + subscriber has no tenant
+                        //     → REJECT (Gemini R1: prior `if let (Some, Some)`
+                        //     leaked these to unscoped callers).
+                        //   - both present → must be equal.
+                        if !is_admin {
+                            let event_tenant =
+                                cairn_app::handlers::sse::ws_event_tenant_id(&event.envelope);
+                            if let Some(et) = event_tenant {
+                                if subscriber_tenant.as_deref() != Some(et) {
+                                    continue;
+                                }
+                            }
+                        }
+
                         let event_type = event_type_name(&event.envelope.payload);
 
                         // Apply the client's subscription filter when set.

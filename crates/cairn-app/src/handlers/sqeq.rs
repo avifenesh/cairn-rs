@@ -315,6 +315,7 @@ pub(crate) async fn sqeq_submit_handler(
 pub(crate) async fn sqeq_events_handler(
     State(state): State<Arc<AppState>>,
     tenant_scope: TenantScope,
+    axum::extract::Extension(principal): axum::extract::Extension<cairn_api::auth::AuthPrincipal>,
     headers: HeaderMap,
     axum::extract::Query(params): axum::extract::Query<HashMap<String, String>>,
 ) -> impl IntoResponse {
@@ -337,9 +338,13 @@ pub(crate) async fn sqeq_events_handler(
         return tenant_scope_mismatch_error().into_response();
     }
 
-    crate::handlers::sse::runtime_stream_handler(State(state), headers)
-        .await
-        .into_response()
+    crate::handlers::sse::runtime_stream_handler(
+        State(state),
+        axum::extract::Extension(principal),
+        headers,
+    )
+    .await
+    .into_response()
 }
 
 // ── A2A handlers (RFC 021) ──────────────────────────────────────────────────

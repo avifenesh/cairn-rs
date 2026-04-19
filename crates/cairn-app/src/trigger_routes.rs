@@ -128,8 +128,29 @@ fn project_key(project_id: &str) -> Result<ProjectKey, String> {
     ))
 }
 
+#[cfg(all(test, feature = "in-memory-runtime"))]
 fn operator_id() -> OperatorId {
     OperatorId::new("operator")
+}
+
+/// T6c-C3: derive the operator id from the authenticated principal so
+/// trigger writes land with the real actor in the event log.
+fn operator_id_from_principal(principal: &cairn_api::auth::AuthPrincipal) -> OperatorId {
+    OperatorId::new(crate::handlers::admin::audit_actor_id(principal))
+}
+
+/// T6c-C3: cross-tenant guard. Returns a response when the path-scoped
+/// project doesn't belong to the caller's tenant; caller returns it
+/// directly.
+fn check_tenant(
+    principal: &cairn_api::auth::AuthPrincipal,
+    project: &ProjectKey,
+) -> Option<axum::response::Response> {
+    if crate::extractors::enforce_project_tenant(principal, project) {
+        None
+    } else {
+        Some(crate::errors::tenant_scope_mismatch_error().into_response())
+    }
 }
 
 fn now_ms() -> u64 {
@@ -161,13 +182,12 @@ fn not_found_response(entity: &str, id: &str) -> axum::response::Response {
 
 async fn append_operator_runtime_event(
     state: &AppState,
+    operator_id: OperatorId,
     event: RuntimeEvent,
 ) -> Result<(), String> {
     let envelope = EventEnvelope::for_runtime_event(
         EventId::new(format!("evt_trigger_{}", uuid::Uuid::new_v4())),
-        EventSource::Operator {
-            operator_id: operator_id(),
-        },
+        EventSource::Operator { operator_id },
         event,
     );
     state
@@ -184,14 +204,19 @@ async fn append_operator_runtime_event(
 /// GET /v1/projects/:project/triggers
 pub async fn list_triggers_handler(
     State(state): State<Arc<AppState>>,
+    axum::extract::Extension(principal): axum::extract::Extension<cairn_api::auth::AuthPrincipal>,
     Query(query): Query<ListQuery>,
     Path(project_id): Path<String>,
 ) -> impl IntoResponse {
-    let triggers = state.triggers.lock().unwrap();
     let project = match project_key(&project_id) {
         Ok(project) => project,
         Err(message) => return bad_request_response(message),
     };
+    // T6c-C3: refuse cross-tenant reads so list endpoints don't leak.
+    if let Some(resp) = check_tenant(&principal, &project) {
+        return resp;
+    }
+    let triggers = state.triggers.lock().unwrap_or_else(|e| e.into_inner());
     let mut list: Vec<&Trigger> = triggers.list_triggers_for_project(&project);
     list.sort_by_key(|r| r.id.clone());
     let list: Vec<&Trigger> = list
@@ -205,16 +230,22 @@ pub async fn list_triggers_handler(
 /// POST /v1/projects/:project/triggers
 pub async fn create_trigger_handler(
     State(state): State<Arc<AppState>>,
+    axum::extract::Extension(principal): axum::extract::Extension<cairn_api::auth::AuthPrincipal>,
     Path(project_id): Path<String>,
     Json(body): Json<CreateTriggerRequest>,
 ) -> impl IntoResponse {
     let (event, persisted) = {
-        let mut triggers = state.triggers.lock().unwrap();
-        let now = now_ms();
         let project = match project_key(&project_id) {
             Ok(project) => project,
             Err(message) => return bad_request_response(message),
         };
+        // T6c-C3: refuse cross-tenant trigger creation.
+        if let Some(resp) = check_tenant(&principal, &project) {
+            return resp;
+        }
+
+        let mut triggers = state.triggers.lock().unwrap_or_else(|e| e.into_inner());
+        let now = now_ms();
 
         let trigger = Trigger {
             id: TriggerId::new(format!("trigger_{now}")),
@@ -230,7 +261,8 @@ pub async fn create_trigger_handler(
             state: TriggerState::Enabled,
             rate_limit: body.rate_limit.unwrap_or_default(),
             max_chain_depth: body.max_chain_depth,
-            created_by: operator_id(),
+            // T6c-C3: audit the real principal, not a hardcoded literal.
+            created_by: operator_id_from_principal(&principal),
             created_at: now,
             updated_at: now,
         };
@@ -259,7 +291,13 @@ pub async fn create_trigger_handler(
         }
     };
 
-    match append_operator_runtime_event(state.as_ref(), persisted).await {
+    match append_operator_runtime_event(
+        state.as_ref(),
+        operator_id_from_principal(&principal),
+        persisted,
+    )
+    .await
+    {
         Ok(()) => (
             StatusCode::CREATED,
             Json(TriggerEventResponse {
@@ -278,13 +316,18 @@ pub async fn create_trigger_handler(
 /// GET /v1/projects/:project/triggers/:trigger_id
 pub async fn get_trigger_handler(
     State(state): State<Arc<AppState>>,
+    axum::extract::Extension(principal): axum::extract::Extension<cairn_api::auth::AuthPrincipal>,
     Path((project_id, trigger_id)): Path<(String, String)>,
 ) -> impl IntoResponse {
-    let triggers = state.triggers.lock().unwrap();
     let project = match project_key(&project_id) {
         Ok(project) => project,
         Err(message) => return bad_request_response(message),
     };
+    // T6c-C3: refuse cross-tenant reads.
+    if let Some(resp) = check_tenant(&principal, &project) {
+        return resp;
+    }
+    let triggers = state.triggers.lock().unwrap_or_else(|e| e.into_inner());
     match triggers.get_trigger(&TriggerId::new(&trigger_id)) {
         Some(trigger) if trigger.project == project => {
             Json(serde_json::to_value(trigger).expect("trigger serialization")).into_response()
@@ -296,20 +339,28 @@ pub async fn get_trigger_handler(
 /// DELETE /v1/projects/:project/triggers/:trigger_id
 pub async fn delete_trigger_handler(
     State(state): State<Arc<AppState>>,
+    axum::extract::Extension(principal): axum::extract::Extension<cairn_api::auth::AuthPrincipal>,
     Path((project_id, trigger_id)): Path<(String, String)>,
 ) -> impl IntoResponse {
     let (event, persisted) = {
-        let mut triggers = state.triggers.lock().unwrap();
         let project = match project_key(&project_id) {
             Ok(project) => project,
             Err(message) => return bad_request_response(message),
         };
+        // T6c-C3: refuse cross-tenant mutation.
+        if let Some(resp) = check_tenant(&principal, &project) {
+            return resp;
+        }
+        let mut triggers = state.triggers.lock().unwrap_or_else(|e| e.into_inner());
         match triggers.get_trigger(&TriggerId::new(&trigger_id)) {
             Some(trigger) if trigger.project == project => {}
             _ => return not_found_response("trigger", &trigger_id),
         }
 
-        match triggers.delete_trigger(&TriggerId::new(&trigger_id), operator_id()) {
+        match triggers.delete_trigger(
+            &TriggerId::new(&trigger_id),
+            operator_id_from_principal(&principal),
+        ) {
             Ok(event) => {
                 let persisted = crate::runtime_event_for_trigger_service_event(&project, &event)
                     .expect("delete trigger should persist");
@@ -327,7 +378,13 @@ pub async fn delete_trigger_handler(
         }
     };
 
-    match append_operator_runtime_event(state.as_ref(), persisted).await {
+    match append_operator_runtime_event(
+        state.as_ref(),
+        operator_id_from_principal(&principal),
+        persisted,
+    )
+    .await
+    {
         Ok(()) => (
             StatusCode::OK,
             Json(TriggerEventResponse {
@@ -346,20 +403,28 @@ pub async fn delete_trigger_handler(
 /// POST /v1/projects/:project/triggers/:trigger_id/enable
 pub async fn enable_trigger_handler(
     State(state): State<Arc<AppState>>,
+    axum::extract::Extension(principal): axum::extract::Extension<cairn_api::auth::AuthPrincipal>,
     Path((project_id, trigger_id)): Path<(String, String)>,
 ) -> impl IntoResponse {
     let (event, persisted) = {
-        let mut triggers = state.triggers.lock().unwrap();
         let project = match project_key(&project_id) {
             Ok(project) => project,
             Err(message) => return bad_request_response(message),
         };
+        // T6c-C3: refuse cross-tenant mutation.
+        if let Some(resp) = check_tenant(&principal, &project) {
+            return resp;
+        }
+        let mut triggers = state.triggers.lock().unwrap_or_else(|e| e.into_inner());
         match triggers.get_trigger(&TriggerId::new(&trigger_id)) {
             Some(trigger) if trigger.project == project => {}
             _ => return not_found_response("trigger", &trigger_id),
         }
 
-        match triggers.enable_trigger(&TriggerId::new(&trigger_id), operator_id()) {
+        match triggers.enable_trigger(
+            &TriggerId::new(&trigger_id),
+            operator_id_from_principal(&principal),
+        ) {
             Ok(event) => {
                 let persisted = crate::runtime_event_for_trigger_service_event(&project, &event)
                     .expect("enable trigger should persist");
@@ -377,7 +442,13 @@ pub async fn enable_trigger_handler(
         }
     };
 
-    match append_operator_runtime_event(state.as_ref(), persisted).await {
+    match append_operator_runtime_event(
+        state.as_ref(),
+        operator_id_from_principal(&principal),
+        persisted,
+    )
+    .await
+    {
         Ok(()) => (
             StatusCode::OK,
             Json(TriggerEventResponse {
@@ -396,22 +467,31 @@ pub async fn enable_trigger_handler(
 /// POST /v1/projects/:project/triggers/:trigger_id/disable
 pub async fn disable_trigger_handler(
     State(state): State<Arc<AppState>>,
+    axum::extract::Extension(principal): axum::extract::Extension<cairn_api::auth::AuthPrincipal>,
     Path((project_id, trigger_id)): Path<(String, String)>,
     body: Option<Json<DisableRequest>>,
 ) -> impl IntoResponse {
     let reason = body.and_then(|Json(b)| b.reason);
     let (event, persisted) = {
-        let mut triggers = state.triggers.lock().unwrap();
         let project = match project_key(&project_id) {
             Ok(project) => project,
             Err(message) => return bad_request_response(message),
         };
+        // T6c-C3: refuse cross-tenant mutation.
+        if let Some(resp) = check_tenant(&principal, &project) {
+            return resp;
+        }
+        let mut triggers = state.triggers.lock().unwrap_or_else(|e| e.into_inner());
         match triggers.get_trigger(&TriggerId::new(&trigger_id)) {
             Some(trigger) if trigger.project == project => {}
             _ => return not_found_response("trigger", &trigger_id),
         }
 
-        match triggers.disable_trigger(&TriggerId::new(&trigger_id), operator_id(), reason) {
+        match triggers.disable_trigger(
+            &TriggerId::new(&trigger_id),
+            operator_id_from_principal(&principal),
+            reason,
+        ) {
             Ok(event) => {
                 let persisted = crate::runtime_event_for_trigger_service_event(&project, &event)
                     .expect("disable trigger should persist");
@@ -429,7 +509,13 @@ pub async fn disable_trigger_handler(
         }
     };
 
-    match append_operator_runtime_event(state.as_ref(), persisted).await {
+    match append_operator_runtime_event(
+        state.as_ref(),
+        operator_id_from_principal(&principal),
+        persisted,
+    )
+    .await
+    {
         Ok(()) => (
             StatusCode::OK,
             Json(TriggerEventResponse {
@@ -448,14 +534,19 @@ pub async fn disable_trigger_handler(
 /// POST /v1/projects/:project/triggers/:trigger_id/resume
 pub async fn resume_trigger_handler(
     State(state): State<Arc<AppState>>,
+    axum::extract::Extension(principal): axum::extract::Extension<cairn_api::auth::AuthPrincipal>,
     Path((project_id, trigger_id)): Path<(String, String)>,
 ) -> impl IntoResponse {
     let (event, persisted) = {
-        let mut triggers = state.triggers.lock().unwrap();
         let project = match project_key(&project_id) {
             Ok(project) => project,
             Err(message) => return bad_request_response(message),
         };
+        // T6c-C3: refuse cross-tenant mutation.
+        if let Some(resp) = check_tenant(&principal, &project) {
+            return resp;
+        }
+        let mut triggers = state.triggers.lock().unwrap_or_else(|e| e.into_inner());
         match triggers.get_trigger(&TriggerId::new(&trigger_id)) {
             Some(trigger) if trigger.project == project => {}
             _ => return not_found_response("trigger", &trigger_id),
@@ -479,7 +570,13 @@ pub async fn resume_trigger_handler(
         }
     };
 
-    match append_operator_runtime_event(state.as_ref(), persisted).await {
+    match append_operator_runtime_event(
+        state.as_ref(),
+        operator_id_from_principal(&principal),
+        persisted,
+    )
+    .await
+    {
         Ok(()) => (
             StatusCode::OK,
             Json(TriggerEventResponse {
@@ -500,14 +597,19 @@ pub async fn resume_trigger_handler(
 /// GET /v1/projects/:project/run-templates
 pub async fn list_run_templates_handler(
     State(state): State<Arc<AppState>>,
+    axum::extract::Extension(principal): axum::extract::Extension<cairn_api::auth::AuthPrincipal>,
     Query(query): Query<ListQuery>,
     Path(project_id): Path<String>,
 ) -> impl IntoResponse {
-    let triggers = state.triggers.lock().unwrap();
     let project = match project_key(&project_id) {
         Ok(project) => project,
         Err(message) => return bad_request_response(message),
     };
+    // T6c-C3: refuse cross-tenant reads.
+    if let Some(resp) = check_tenant(&principal, &project) {
+        return resp;
+    }
+    let triggers = state.triggers.lock().unwrap_or_else(|e| e.into_inner());
     let mut list: Vec<&RunTemplate> = triggers.list_templates_for_project(&project);
     list.sort_by_key(|r| r.id.clone());
     let list: Vec<&RunTemplate> = list
@@ -521,16 +623,21 @@ pub async fn list_run_templates_handler(
 /// POST /v1/projects/:project/run-templates
 pub async fn create_run_template_handler(
     State(state): State<Arc<AppState>>,
+    axum::extract::Extension(principal): axum::extract::Extension<cairn_api::auth::AuthPrincipal>,
     Path(project_id): Path<String>,
     Json(body): Json<CreateRunTemplateRequest>,
 ) -> impl IntoResponse {
     let (event, persisted) = {
-        let mut triggers = state.triggers.lock().unwrap();
-        let now = now_ms();
         let project = match project_key(&project_id) {
             Ok(project) => project,
             Err(message) => return bad_request_response(message),
         };
+        // T6c-C3: refuse cross-tenant mutation.
+        if let Some(resp) = check_tenant(&principal, &project) {
+            return resp;
+        }
+        let mut triggers = state.triggers.lock().unwrap_or_else(|e| e.into_inner());
+        let now = now_ms();
 
         let template = RunTemplate {
             id: RunTemplateId::new(format!("tmpl_{now}")),
@@ -545,7 +652,8 @@ pub async fn create_run_template_handler(
             budget: body.budget,
             sandbox_hint: body.sandbox_hint,
             required_fields: body.required_fields,
-            created_by: operator_id(),
+            // T6c-C3: audit the real principal.
+            created_by: operator_id_from_principal(&principal),
             created_at: now,
             updated_at: now,
         };
@@ -562,7 +670,13 @@ pub async fn create_run_template_handler(
         (event, persisted)
     };
 
-    match append_operator_runtime_event(state.as_ref(), persisted).await {
+    match append_operator_runtime_event(
+        state.as_ref(),
+        operator_id_from_principal(&principal),
+        persisted,
+    )
+    .await
+    {
         Ok(()) => (
             StatusCode::CREATED,
             Json(TriggerEventResponse {
@@ -581,13 +695,18 @@ pub async fn create_run_template_handler(
 /// GET /v1/projects/:project/run-templates/:template_id
 pub async fn get_run_template_handler(
     State(state): State<Arc<AppState>>,
+    axum::extract::Extension(principal): axum::extract::Extension<cairn_api::auth::AuthPrincipal>,
     Path((project_id, template_id)): Path<(String, String)>,
 ) -> impl IntoResponse {
-    let triggers = state.triggers.lock().unwrap();
     let project = match project_key(&project_id) {
         Ok(project) => project,
         Err(message) => return bad_request_response(message),
     };
+    // T6c-C3: refuse cross-tenant reads.
+    if let Some(resp) = check_tenant(&principal, &project) {
+        return resp;
+    }
+    let triggers = state.triggers.lock().unwrap_or_else(|e| e.into_inner());
     match triggers.get_template(&RunTemplateId::new(&template_id)) {
         Some(template) if template.project == project => {
             Json(serde_json::to_value(template).expect("template serialization")).into_response()
@@ -600,20 +719,28 @@ pub async fn get_run_template_handler(
 /// Returns 409 if any trigger references it.
 pub async fn delete_run_template_handler(
     State(state): State<Arc<AppState>>,
+    axum::extract::Extension(principal): axum::extract::Extension<cairn_api::auth::AuthPrincipal>,
     Path((project_id, template_id)): Path<(String, String)>,
 ) -> impl IntoResponse {
     let (event, persisted) = {
-        let mut triggers = state.triggers.lock().unwrap();
         let project = match project_key(&project_id) {
             Ok(project) => project,
             Err(message) => return bad_request_response(message),
         };
+        // T6c-C3: refuse cross-tenant mutation.
+        if let Some(resp) = check_tenant(&principal, &project) {
+            return resp;
+        }
+        let mut triggers = state.triggers.lock().unwrap_or_else(|e| e.into_inner());
         match triggers.get_template(&RunTemplateId::new(&template_id)) {
             Some(template) if template.project == project => {}
             _ => return not_found_response("run template", &template_id),
         }
 
-        match triggers.delete_template(&RunTemplateId::new(&template_id), operator_id()) {
+        match triggers.delete_template(
+            &RunTemplateId::new(&template_id),
+            operator_id_from_principal(&principal),
+        ) {
             Ok(event) => {
                 let persisted = crate::runtime_event_for_trigger_service_event(&project, &event)
                     .expect("delete template should persist");
@@ -640,7 +767,13 @@ pub async fn delete_run_template_handler(
         }
     };
 
-    match append_operator_runtime_event(state.as_ref(), persisted).await {
+    match append_operator_runtime_event(
+        state.as_ref(),
+        operator_id_from_principal(&principal),
+        persisted,
+    )
+    .await
+    {
         Ok(()) => (
             StatusCode::OK,
             Json(TriggerEventResponse {
@@ -695,11 +828,29 @@ mod tests {
     }
 
     fn test_router(state: Arc<AppState>) -> Router {
+        // T6c-C3: handlers now require `Extension<AuthPrincipal>`.
+        // Inject an admin principal so tests exercise the not-found
+        // path rather than the missing-extension 500.
+        use axum::middleware::from_fn;
+        let admin_principal = cairn_api::auth::AuthPrincipal::ServiceAccount {
+            name: "admin".to_string(),
+            tenant: cairn_domain::tenancy::TenantKey::new("tenant-admin"),
+        };
         Router::new()
             .route(
                 "/v1/projects/:project/triggers/:trigger_id",
                 get(get_trigger_handler).delete(delete_trigger_handler),
             )
+            .layer(from_fn(
+                move |mut req: axum::http::Request<axum::body::Body>,
+                      next: axum::middleware::Next| {
+                    let principal = admin_principal.clone();
+                    async move {
+                        req.extensions_mut().insert(principal);
+                        next.run(req).await
+                    }
+                },
+            ))
             .with_state(state)
     }
 

@@ -82,6 +82,7 @@ pub fn build_sse_frame_with_current_state(
         event: name,
         data,
         id: Some(stored.position.0.to_string()),
+        tenant_id: None,
     })
 }
 
@@ -229,6 +230,7 @@ pub fn build_ready_frame(client_id: &str) -> SseFrame {
         event: SseEventName::Ready,
         data: serde_json::json!({"clientId": client_id}),
         id: None,
+        tenant_id: None,
     }
 }
 
