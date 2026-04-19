@@ -64,6 +64,12 @@ pub const CHECK_ADMISSION_ARGS: usize = 6;
 mod tests {
     use super::*;
     use ff_core::partition::{quota_partition, PartitionConfig};
+    use ff_core::types::LaneId;
+
+    fn test_eid(seed: &str) -> ExecutionId {
+        let uuid = uuid::Uuid::new_v5(&uuid::Uuid::NAMESPACE_DNS, seed.as_bytes());
+        ExecutionId::deterministic_solo(&LaneId::new("test"), &PartitionConfig::default(), uuid)
+    }
 
     #[test]
     fn create_quota_policy_counts() {
@@ -91,7 +97,7 @@ mod tests {
         let pc = PartitionConfig::default();
         let partition = quota_partition(&qid, &pc);
         let ctx = QuotaKeyContext::new(&partition, &qid);
-        let eid = ExecutionId::from_uuid(uuid::Uuid::nil());
+        let eid = test_eid("check_admission");
         let (keys, args) =
             build_check_admission(&ctx, &eid, TimestampMs::now(), 60, 100, 10, "default");
         assert_eq!(keys.len(), CHECK_ADMISSION_KEYS);

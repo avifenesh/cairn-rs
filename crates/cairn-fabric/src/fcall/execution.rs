@@ -176,8 +176,13 @@ mod tests {
     use super::*;
     use ff_core::partition::{execution_partition, PartitionConfig};
 
+    fn test_eid(seed: &str) -> ExecutionId {
+        let uuid = uuid::Uuid::new_v5(&uuid::Uuid::NAMESPACE_DNS, seed.as_bytes());
+        ExecutionId::deterministic_solo(&LaneId::new("test"), &PartitionConfig::default(), uuid)
+    }
+
     fn test_ctx() -> (ExecKeyContext, IndexKeys, ExecutionId) {
-        let eid = ExecutionId::from_uuid(uuid::Uuid::nil());
+        let eid = test_eid("execution");
         let pc = PartitionConfig::default();
         let partition = execution_partition(&eid, &pc);
         let ctx = ExecKeyContext::new(&partition, &eid);
