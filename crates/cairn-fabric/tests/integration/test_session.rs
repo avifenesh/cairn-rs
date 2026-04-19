@@ -44,11 +44,9 @@ async fn read_flow_core(h: &TestHarness, session_id: &SessionId) -> HashMap<Stri
 ///
 /// Exercises `ff_create_flow` (via `sessions.create`) and `ff_cancel_flow`
 /// (via `sessions.archive`). Session is the root of the entity hierarchy
-/// (session → run → task); a regression here is platform-down.
-///
-/// Includes GAP #6 post-archive Valkey assertion: we query
-/// `flow_core.public_flow_state` directly to prove FF wrote `cancelled`,
-/// not just that our Rust service said so.
+/// (session → run → task); a regression here is platform-down. Includes a
+/// direct `flow_core.public_flow_state` read to prove FF wrote
+/// `cancelled`, not just that the Rust service said so.
 #[tokio::test]
 async fn test_session_create_and_cancel_flow() {
     let h = TestHarness::setup().await;
@@ -106,12 +104,10 @@ async fn test_session_create_and_cancel_flow() {
         archived.state,
     );
 
-    // GAP #6: prove FF wrote the cancel, not just cairn's archive flag.
-    // ff_cancel_flow at lua/flow.lua:181-185 sets public_flow_state="cancelled",
-    // cancelled_at=<ts>, cancel_reason=<reason>, last_mutation_at=<ts>.
-    // cairn-fabric ALSO sets `cairn.archived="true"` on the same hash
-    // (session_service.rs:217). Assert BOTH — one catches FF regressions,
-    // the other catches cairn-side regressions.
+    // Prove FF wrote the cancel AND cairn wrote its archive flag. FF's
+    // `ff_cancel_flow` sets public_flow_state/cancelled_at/cancel_reason
+    // on flow_core; cairn-fabric additionally sets `cairn.archived`. Both
+    // assertions catch their respective side regressing.
     let post = read_flow_core(&h, &session_id).await;
     assert_eq!(
         post.get("public_flow_state").map(|s| s.as_str()),

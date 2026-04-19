@@ -166,7 +166,7 @@ async fn task_complete_emits_when_claim_and_complete_use_distinct_services() {
     .expect(
         "TaskStateChanged{Completed} missing from the projection — the emission gate regressed, \
          a task claimed outside this FabricTaskService instance will not land in the cairn-store \
-         projection. See commit d15ed15e for the original fix.",
+         projection.",
     );
 
     h.teardown().await;

@@ -2,6 +2,20 @@ use cairn_domain::ProjectKey;
 
 use crate::error::FabricError;
 
+/// Current wall-clock time in milliseconds since UNIX_EPOCH. On clock skew
+/// (system clock set before 1970), logs a warning and returns 0 so the
+/// caller at least sees an obviously-wrong timestamp rather than silently
+/// continuing with `Duration::default()`.
+pub fn now_ms() -> u64 {
+    match std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH) {
+        Ok(d) => d.as_millis() as u64,
+        Err(e) => {
+            tracing::warn!(error = %e, "system clock is before UNIX_EPOCH — returning 0");
+            0
+        }
+    }
+}
+
 pub fn check_fcall_success(raw: &ferriskey::Value, function_name: &str) -> Result<(), FabricError> {
     let arr = match raw {
         ferriskey::Value::Array(arr) => arr,

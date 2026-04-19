@@ -400,6 +400,7 @@ impl FabricRunService {
                     run_id: run_id.clone(),
                     session_id: session_id.clone(),
                     project: project.clone(),
+                    parent_run_id: parent_run_id.clone(),
                     correlation_id: correlation_id.map(str::to_owned),
                 })
                 .await;
@@ -546,23 +547,18 @@ impl FabricRunService {
                 .unwrap_or("cairn"),
         );
 
-        let reason = format!("{failure_class:?}");
-        let category = match failure_class {
-            FailureClass::TimedOut => "timeout",
-            FailureClass::DependencyFailed => "dependency",
-            FailureClass::ApprovalRejected => "policy",
-            FailureClass::PolicyDenied => "policy",
-            FailureClass::ExecutionError => "execution",
-            FailureClass::LeaseExpired => "lease",
-            FailureClass::CanceledByOperator => "operator",
-        };
+        let category = crate::state_map::failure_class_category(failure_class);
+        let reason = crate::state_map::failure_class_reason(failure_class);
 
+        // Fail loud on Valkey errors: a silent `unwrap_or_default()` here
+        // turns a transient blip into "FF falls back to its own retry
+        // default", which may disable retries entirely for this run.
         let retry_policy_json: String = self
             .runtime
             .client
             .get(&ctx.policy())
             .await
-            .unwrap_or(None)
+            .map_err(|e| FabricError::Valkey(format!("GET retry_policy: {e}")))?
             .unwrap_or_default();
 
         let keys: Vec<String> = vec![
@@ -584,7 +580,7 @@ impl FabricRunService {
             lease_id_str.unwrap_or_default(),
             lease_epoch_str.unwrap_or_else(|| "1".to_owned()),
             attempt_id_str.unwrap_or_default(),
-            reason,
+            reason.to_owned(),
             category.to_owned(),
             retry_policy_json,
         ];
@@ -805,21 +801,38 @@ impl FabricRunService {
 
         check_fcall_success(&raw, crate::fcall::names::FF_SUSPEND_EXECUTION)?;
 
-        // Emit unconditionally — see the rationale on FabricTaskService::pause
-        // for why the prior `!is_already_satisfied(&raw)` guard was retry-
-        // unsafe. Projection is idempotent on EventId; a duplicate emit on
-        // benign back-to-back replay is a harmless re-write, while guarding
-        // would silently lose the event if the process crashed between the
-        // FCALL commit and this emit.
-        let record = self.read_run_record(project, run_id).await?;
+        // Emit unconditionally — the prior `!is_already_satisfied(&raw)` guard
+        // was retry-unsafe. Projection is idempotent on EventId, so a duplicate
+        // emit on replay is a harmless re-write; guarding would silently lose
+        // the event if the process crashed between the FCALL and the emit.
+        //
+        // If `read_run_record` fails after the FCALL committed, still emit
+        // with `RunState::Paused` as a safe fallback — better a slightly
+        // wrong-but-valid state in the projection than a permanent gap.
+        // The operator's next read will correct via the FF-backed
+        // adjust_run_state_for_blocking_reason path.
+        let record_result = self.read_run_record(project, run_id).await;
+        let (to_state, project_for_emit) = match &record_result {
+            Ok(r) => (r.state, r.project.clone()),
+            Err(e) => {
+                tracing::error!(
+                    run_id = %run_id,
+                    error = %e,
+                    "suspend: read_run_record failed after ff_suspend_execution committed — \
+                     emitting with fallback state to avoid projection gap"
+                );
+                (RunState::Paused, project.clone())
+            }
+        };
         self.bridge
             .emit(BridgeEvent::ExecutionSuspended {
                 run_id: run_id.clone(),
-                project: record.project.clone(),
+                project: project_for_emit,
                 prev_state: Some(prev_run_state),
+                to: to_state,
             })
             .await;
-        Ok(record)
+        record_result
     }
 
     pub async fn resume(
@@ -1021,19 +1034,32 @@ impl FabricRunService {
 
         check_fcall_success(&raw, crate::fcall::names::FF_SUSPEND_EXECUTION)?;
 
-        // Emit unconditionally — see rationale on FabricRunService::pause
-        // (and FabricTaskService::pause) for why the prior guard was
-        // retry-unsafe. Idempotent projection on EventId absorbs the benign
-        // double-emit case.
-        let record = self.read_run_record(project, run_id).await?;
+        // Emit unconditionally. See `pause` for retry-safety rationale.
+        // If `read_run_record` fails after the FCALL committed, emit with
+        // `WaitingApproval` (the blocking_reason we just set) as the fallback
+        // so the projection still gets the state change.
+        let record_result = self.read_run_record(project, run_id).await;
+        let (to_state, project_for_emit) = match &record_result {
+            Ok(r) => (r.state, r.project.clone()),
+            Err(e) => {
+                tracing::error!(
+                    run_id = %run_id,
+                    error = %e,
+                    "enter_waiting_approval: read_run_record failed after ff_suspend_execution \
+                     committed — emitting with fallback state to avoid projection gap"
+                );
+                (RunState::WaitingApproval, project.clone())
+            }
+        };
         self.bridge
             .emit(BridgeEvent::ExecutionSuspended {
                 run_id: run_id.clone(),
-                project: record.project.clone(),
+                project: project_for_emit,
                 prev_state: Some(prev_run_state),
+                to: to_state,
             })
             .await;
-        Ok(record)
+        record_result
     }
 
     pub async fn resolve_approval(

@@ -22,9 +22,8 @@ use crate::TestHarness;
 ///   2. Threaded onto `BridgeEvent::ExecutionCreated` → envelope
 ///      `correlation_id` in cairn-store (audit / SSE consumers rely on it).
 ///
-/// Regression guard for the default-trait-impl fallthrough found in the
-/// finalization cross-review: if someone deletes the override, sqeq
-/// telemetry silently drops request correlation on the Fabric path.
+/// Regression guard: if the correlation-propagating override is removed,
+/// sqeq telemetry silently drops request correlation on the Fabric path.
 #[tokio::test]
 async fn test_start_with_correlation_tags_exec_core() {
     let h = TestHarness::setup().await;
@@ -159,9 +158,7 @@ async fn test_duplicate_start_is_idempotent() {
 ///      `execution_not_eligible` — the test goes RED at the
 ///      `msg.contains` assertion. Same alarm, different line.
 /// Either path forces a contract-and-docs revisit alongside the FF
-/// change. This is the bug pattern that caused round-1 cross-review to
-/// reject the original endpoint claim of idempotency — we add the test
-/// so recurrence is structurally impossible.
+/// change, making silent divergence structurally impossible.
 ///
 /// Resume-after-suspend (a legitimate second claim) is covered by
 /// `test_suspension.rs::test_enter_approval_after_prior_approval_creates_fresh_waitpoint`
@@ -308,10 +305,10 @@ async fn test_fail_task_retry_scheduled() {
     h.teardown().await;
 }
 
-/// Fix for cross-review BUG #1 / GAP #7: the prior `test_fail_task_terminal`
-/// name promised terminal transition but only fired fail() once. Walk
-/// through the full retry budget (max_retries=2 → 3 total attempts) and
-/// assert the LAST fail is terminal with failure_class set.
+/// Walk through the full retry budget (max_retries=2 → 3 total attempts)
+/// and assert the LAST fail is terminal with failure_class set. A single
+/// fail() call does not prove terminal transition, so this must exhaust
+/// the budget to be meaningful.
 ///
 /// The bounded polling loop waits for FF's DelayedPromoter (scan interval
 /// 750ms per ff-engine/src/scanner/delayed_promoter.rs) to move the

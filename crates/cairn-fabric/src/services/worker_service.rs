@@ -2,9 +2,9 @@ use std::sync::Arc;
 
 use crate::boot::FabricRuntime;
 use crate::error::FabricError;
-use crate::services::scheduler_service::FabricSchedulerService;
+use crate::helpers::now_ms;
 use ff_core::keys;
-use ff_core::types::{ExecutionId, LaneId, WorkerId, WorkerInstanceId};
+use ff_core::types::{WorkerId, WorkerInstanceId};
 
 pub struct WorkerRegistration {
     pub worker_id: WorkerId,
@@ -13,19 +13,15 @@ pub struct WorkerRegistration {
     pub registered_at_ms: u64,
 }
 
-pub struct ClaimResult {
-    pub execution_id: ExecutionId,
-    pub grant_key: String,
-}
-
 /// Worker-registry service.
 ///
 /// **Lean-bridge silence (intentional).** None of this service's methods emit
 /// `BridgeEvent`s — worker lifecycle is FF-owned operational state with no
 /// corresponding cairn-store projection. `register_worker`, `heartbeat_worker`,
-/// `mark_worker_dead`, and `claim_next` all mutate FF's worker hash / TTL
-/// directly; cairn has no `WorkerReadModel` that needs to stay in sync, so
-/// emission would be a projection write with no reader.
+/// and `mark_worker_dead` all mutate FF's worker hash / TTL directly; cairn
+/// has no `WorkerReadModel` that needs to stay in sync, so emission would be
+/// a projection write with no reader. Production claim flow lives in
+/// `CairnWorker::claim_next` (worker_sdk.rs).
 ///
 /// If a future UI surface renders worker-status (alive / dead / last-heartbeat)
 /// from the cairn projection rather than from FF admin-reads, add BridgeEvent
@@ -35,13 +31,11 @@ pub struct ClaimResult {
 /// See `docs/design/bridge-event-audit.md` §2.5 for the full rationale.
 pub struct FabricWorkerService {
     runtime: Arc<FabricRuntime>,
-    scheduler: FabricSchedulerService,
 }
 
 impl FabricWorkerService {
     pub fn new(runtime: Arc<FabricRuntime>) -> Self {
-        let scheduler = FabricSchedulerService::new(&runtime);
-        Self { runtime, scheduler }
+        Self { runtime }
     }
 
     pub async fn register_worker(
@@ -155,40 +149,6 @@ impl FabricWorkerService {
             .map_err(|e| FabricError::Valkey(format!("HSET is_alive: {e}")))?;
         Ok(())
     }
-
-    pub async fn claim_next(
-        &self,
-        lane_id: &LaneId,
-        worker_id: &WorkerId,
-        instance_id: &WorkerInstanceId,
-    ) -> Result<Option<ClaimResult>, FabricError> {
-        let grant = self
-            .scheduler
-            .claim_for_worker(
-                lane_id,
-                worker_id,
-                instance_id,
-                self.runtime.config.grant_ttl_ms,
-            )
-            .await?;
-
-        let grant = match grant {
-            Some(g) => g,
-            None => return Ok(None),
-        };
-
-        Ok(Some(ClaimResult {
-            execution_id: grant.execution_id,
-            grant_key: grant.grant_key,
-        }))
-    }
-}
-
-fn now_ms() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis() as u64
 }
 
 #[cfg(test)]
@@ -207,17 +167,6 @@ mod tests {
         assert_eq!(reg.instance_id.as_str(), "inst1");
         assert_eq!(reg.capabilities.len(), 2);
         assert_eq!(reg.registered_at_ms, 1000);
-    }
-
-    #[test]
-    fn claim_result_fields() {
-        let eid = ExecutionId::from_uuid(uuid::Uuid::nil());
-        let result = ClaimResult {
-            execution_id: eid.clone(),
-            grant_key: "ff:grant:test".into(),
-        };
-        assert_eq!(result.execution_id, eid);
-        assert_eq!(result.grant_key, "ff:grant:test");
     }
 
     #[test]

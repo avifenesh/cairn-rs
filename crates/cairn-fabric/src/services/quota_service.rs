@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use crate::error::FabricError;
+use crate::helpers::check_fcall_success;
 use ff_core::keys::{quota_policies_index, QuotaKeyContext};
 use ff_core::partition::quota_partition;
 use ff_core::types::{ExecutionId, QuotaPolicyId, TimestampMs};
@@ -72,7 +73,7 @@ impl FabricQuotaService {
         let key_refs: Vec<&str> = keys.iter().map(|s| s.as_str()).collect();
         let arg_refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
 
-        let _: ferriskey::Value = self
+        let raw: ferriskey::Value = self
             .runtime
             .fcall(
                 crate::fcall::names::FF_CREATE_QUOTA_POLICY,
@@ -80,6 +81,7 @@ impl FabricQuotaService {
                 &arg_refs,
             )
             .await?;
+        check_fcall_success(&raw, crate::fcall::names::FF_CREATE_QUOTA_POLICY)?;
 
         let def_key = ctx.definition();
         self.runtime
