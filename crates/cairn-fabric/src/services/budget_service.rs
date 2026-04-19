@@ -21,6 +21,38 @@ const SPEND_NAMESPACE: Uuid = Uuid::from_bytes([
 
 const SPEND_NAMESPACE_VERSION: u8 = 1;
 
+/// Maximum byte length for `scope_type` / `scope_id` fields passed into
+/// `ff_create_budget`. Matches `cairn-app::validate::MAX_ID_LEN` (128) ×2 to
+/// leave headroom for scoped identifiers without hard-coding a cross-crate
+/// constant dependency.
+const SCOPE_FIELD_MAX_LEN: usize = 256;
+
+/// Validate a scope field (scope_type / scope_id) passed to `create_budget`.
+///
+/// SEC-008 guard: cairn-fabric does not import cairn-app's `validate`
+/// module, but it still must reject control-character and oversized inputs
+/// before they reach FF's Valkey key builders (where they become opaque
+/// hash-tag components). Empty / zero-length rejected so a blank scope
+/// never silently collides with a legitimate bootstrap "default".
+pub(crate) fn validate_scope_field(field: &str, name: &str) -> Result<(), FabricError> {
+    if field.is_empty() {
+        return Err(FabricError::Validation {
+            reason: format!("{name} is empty"),
+        });
+    }
+    if field.len() > SCOPE_FIELD_MAX_LEN {
+        return Err(FabricError::Validation {
+            reason: format!("{name} exceeds {SCOPE_FIELD_MAX_LEN} chars"),
+        });
+    }
+    if field.chars().any(|c| c.is_control()) {
+        return Err(FabricError::Validation {
+            reason: format!("{name} contains control characters"),
+        });
+    }
+    Ok(())
+}
+
 /// Derive a stable idempotency key for a spend call.
 ///
 /// Stable across retries for the same (budget, execution, dimension set/amount).
@@ -105,6 +137,10 @@ impl FabricBudgetService {
                 reason: "dimensions, hard_limits, soft_limits must have equal length".to_owned(),
             });
         }
+        // SEC-008: reject control characters / empty / oversized scope
+        // inputs before they flow into FF key builders.
+        validate_scope_field(scope_type, "scope_type")?;
+        validate_scope_field(scope_id, "scope_id")?;
 
         let budget_id = BudgetId::new();
         let partition = budget_partition(&budget_id, &self.runtime.partition_config);
@@ -441,6 +477,96 @@ mod tests {
         };
         assert_eq!(status.scope_type, "run");
         assert!(status.usage.is_empty());
+    }
+
+    // ── SEC-008 validate_scope_field ───────────────────────────────────
+
+    #[test]
+    fn validate_scope_field_rejects_empty() {
+        let err = validate_scope_field("", "scope_id").unwrap_err();
+        match err {
+            FabricError::Validation { reason } => assert!(reason.contains("empty")),
+            other => panic!("expected Validation, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn validate_scope_field_rejects_control_chars() {
+        let err = validate_scope_field("run\x01id", "scope_id").unwrap_err();
+        match err {
+            FabricError::Validation { reason } => assert!(reason.contains("control characters")),
+            other => panic!("expected Validation, got {other:?}"),
+        }
+        // Null byte is the most dangerous control char because FF keys use
+        // it as a delimiter under RFC-011 — must be rejected.
+        let err = validate_scope_field("run\x00id", "scope_id").unwrap_err();
+        assert!(matches!(err, FabricError::Validation { .. }));
+    }
+
+    #[test]
+    fn validate_scope_field_rejects_oversized() {
+        let long = "x".repeat(SCOPE_FIELD_MAX_LEN + 1);
+        let err = validate_scope_field(&long, "scope_id").unwrap_err();
+        match err {
+            FabricError::Validation { reason } => assert!(reason.contains("exceeds")),
+            other => panic!("expected Validation, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn validate_scope_field_accepts_at_max_len() {
+        let exact = "a".repeat(SCOPE_FIELD_MAX_LEN);
+        assert!(validate_scope_field(&exact, "scope_id").is_ok());
+    }
+
+    #[test]
+    fn validate_scope_field_accepts_normal_id() {
+        assert!(validate_scope_field("run_abc_123", "scope_id").is_ok());
+        assert!(validate_scope_field("run", "scope_type").is_ok());
+        // Embedded colons / slashes are fine — they are not control chars
+        // and cairn callers use them inside scope ids (e.g. "tenant:ws").
+        assert!(validate_scope_field("a:b/c", "scope_id").is_ok());
+    }
+
+    // ── TC#5 parse_report_usage_result error propagation ──────────────
+
+    /// Passing a non-`Array` ferriskey Value to
+    /// `ff_sdk::task::parse_report_usage_result` MUST return `Err`, and the
+    /// `record_spend` mapping MUST surface it as `FabricError::Internal`
+    /// (not silently coerce to `ReportUsageResult::Ok`).
+    ///
+    /// We can't unit-test `record_spend` itself without Valkey, but we
+    /// CAN prove the two parts that compose inside it:
+    ///   1. `parse_report_usage_result(malformed)` is Err, and
+    ///   2. `.map_err(|e| FabricError::Internal(e.to_string()))` produces
+    ///      the Internal variant.
+    /// If FF ever changes the parser to silently accept unexpected shapes,
+    /// this test fires.
+    #[test]
+    fn parse_report_usage_result_err_maps_to_fabric_internal() {
+        // SimpleString is the shape FF's parser rejects first (it expects
+        // Array). No FF-side Array variant produces Err deterministically
+        // in a test without Valkey, so we target the outer shape guard.
+        let malformed = ferriskey::Value::SimpleString("not_an_array".into());
+
+        let parse_result = parse_report_usage_result(&malformed);
+        assert!(
+            parse_result.is_err(),
+            "parser must reject non-Array values; got {parse_result:?}"
+        );
+
+        let mapped: Result<ReportUsageResult, FabricError> =
+            parse_result.map_err(|e| FabricError::Internal(e.to_string()));
+        let err = mapped.expect_err("mapping err-ok branch flipped");
+        match err {
+            FabricError::Internal(msg) => assert!(
+                !msg.is_empty(),
+                "Internal variant must carry the parser's detail, got empty"
+            ),
+            other => panic!(
+                "parse_report_usage_result Err must map to FabricError::Internal, got {other:?}"
+            ),
+        }
     }
 
     #[test]

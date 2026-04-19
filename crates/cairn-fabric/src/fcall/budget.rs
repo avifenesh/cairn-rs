@@ -57,10 +57,10 @@ pub fn build_create_budget(
 /// `dedup_key` is REQUIRED. FF reads `ARGV[2 * dim_count + 3]`; if the slot is
 /// empty or missing, server-side dedup is silently disabled and a double-submit
 /// will double-decrement the budget. Callers must pass a caller-prefixed key
-/// (typically `"ff:usagededup:{hash_tag}:{uuid}"`) so FF's SET lands on the
-/// same slot as the budget itself. Pass `""` only when you explicitly want to
-/// disable dedup (integration tests, one-off admin spends) — never for
-/// production run-service spend paths.
+/// via `ff_core::keys::usage_dedup_key(budget_ctx.hash_tag(), &idempotency_uuid)`
+/// so FF's SET lands on the same slot as the budget itself. Pass `""` only
+/// when you explicitly want to disable dedup (integration tests, one-off admin
+/// spends) — never for production run-service spend paths.
 pub fn build_report_usage(
     ctx: &BudgetKeyContext,
     dimension_deltas: &[(&str, u64)],
