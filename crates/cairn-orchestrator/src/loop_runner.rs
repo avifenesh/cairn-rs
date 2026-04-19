@@ -414,9 +414,12 @@ where
                 // T5-M8: mirror the main-path post-execute bookkeeping so
                 // resuming from a checkpointed approval-suspended run sees a
                 // step_summary, a persisted checkpoint, and a step_completed
-                // emission for this iteration.
+                // emission for this iteration. Sync ctx.step_history before
+                // calling the hook so the checkpoint snapshot captures the
+                // freshly-pushed summary (not just the prior iterations).
                 let step_summary = build_step_summary(ctx, &decide_output, &execute_outcome);
                 step_history.push(step_summary);
+                ctx.step_history = step_history.clone();
                 if let Err(e) = self
                     .checkpoint_hook
                     .save(ctx, &gather_output, &decide_output, &execute_outcome)
@@ -590,6 +593,8 @@ where
             // the iteration-level summary and calls the injected checkpoint hook.
             let step_summary = build_step_summary(ctx, &decide_output, &execute_outcome);
             step_history.push(step_summary);
+            // Sync ctx.step_history so the hook sees the just-pushed summary.
+            ctx.step_history = step_history.clone();
 
             if let Err(e) = self
                 .checkpoint_hook

@@ -226,8 +226,22 @@ impl RuntimeExecutePhase {
                         );
                         if let Some(ref args) = proposal.tool_args {
                             let args_str = serde_json::to_string_pretty(args).unwrap_or_default();
-                            if args_str.len() < 2000 {
+                            // Truncate inline rather than hiding entirely —
+                            // the operator needs *some* visibility into
+                            // tools like `write_document` whose payloads
+                            // routinely exceed 2000 chars.
+                            const MAX_ARGS_INLINE: usize = 4000;
+                            if args_str.len() <= MAX_ARGS_INLINE {
                                 desc.push_str(&format!("\n**Args:**\n```json\n{}\n```", args_str));
+                            } else {
+                                let truncated: String =
+                                    args_str.chars().take(MAX_ARGS_INLINE).collect();
+                                desc.push_str(&format!(
+                                    "\n**Args (truncated, {} chars of {}):**\n```json\n{}\n… [truncated]\n```",
+                                    MAX_ARGS_INLINE,
+                                    args_str.len(),
+                                    truncated
+                                ));
                             }
                         }
                         Some(desc)
@@ -561,8 +575,18 @@ impl RuntimeExecutePhase {
                     }
                     if let Some(ref args) = proposal.tool_args {
                         let args_str = serde_json::to_string_pretty(args).unwrap_or_default();
-                        if args_str.len() < 2000 {
+                        const MAX_ARGS_INLINE: usize = 4000;
+                        if args_str.len() <= MAX_ARGS_INLINE {
                             desc.push_str(&format!("\n**Args:**\n```json\n{}\n```", args_str));
+                        } else {
+                            let truncated: String =
+                                args_str.chars().take(MAX_ARGS_INLINE).collect();
+                            desc.push_str(&format!(
+                                "\n**Args (truncated, {} chars of {}):**\n```json\n{}\n… [truncated]\n```",
+                                MAX_ARGS_INLINE,
+                                args_str.len(),
+                                truncated
+                            ));
                         }
                     }
                     Some(desc)
