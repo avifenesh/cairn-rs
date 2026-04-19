@@ -496,6 +496,7 @@ dependencies = [
  "cairn-workspace",
  "chrono",
  "dotenvy",
+ "futures",
  "http-body-util",
  "mime_guess",
  "reqwest",

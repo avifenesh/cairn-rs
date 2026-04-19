@@ -129,6 +129,20 @@ impl CreateTaskRequest {
             self.project_id.as_str(),
         )
     }
+
+    /// SEC-002: reject null bytes, control chars, and oversized ids that
+    /// would otherwise flow into FF key builders where a null byte is a
+    /// delimiter — mirrors `CreateRunRequest::validate`.
+    pub(crate) fn validate(&self) -> Result<(), String> {
+        crate::validate::check_all(&[
+            crate::validate::require_id("tenant_id", &self.tenant_id),
+            crate::validate::require_id("workspace_id", &self.workspace_id),
+            crate::validate::require_id("project_id", &self.project_id),
+            crate::validate::require_id("task_id", &self.task_id),
+            crate::validate::valid_id("parent_run_id", &self.parent_run_id),
+            crate::validate::valid_id("parent_task_id", &self.parent_task_id),
+        ])
+    }
 }
 
 impl HasProjectScope for CreateTaskRequest {
@@ -208,6 +222,10 @@ pub(crate) async fn create_task_handler(
     project_scope: ProjectJson<CreateTaskRequest>,
 ) -> impl IntoResponse {
     let body = project_scope.into_inner();
+    // SEC-002: validate ids before they reach FF key builders.
+    if let Err(msg) = body.validate() {
+        return bad_request_response(msg);
+    }
     let project = CreateTaskRequest::project(&body);
     let mut session_id: Option<cairn_domain::SessionId> = None;
     if let Some(parent_run_id) = body.parent_run_id.as_ref().map(RunId::new) {

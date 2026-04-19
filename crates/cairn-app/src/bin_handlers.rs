@@ -290,40 +290,60 @@ pub(crate) async fn create_run_task_handler(
 /// `POST /v1/tasks/:id/start` — transition a claimed (leased) task to running.
 pub(crate) async fn start_task_handler(
     State(state): State<AppState>,
+    tenant_scope: cairn_app::extractors::TenantScope,
     Path(id): Path<String>,
-) -> impl axum::response::IntoResponse {
+) -> axum::response::Response {
     let task_id = TaskId::new(id.clone());
-    let session_id = resolve_bin_task_session(&state, &task_id).await;
+    let session_id = match load_task_with_session_for_tenant(&state, &tenant_scope, &task_id).await
+    {
+        Ok(s) => s,
+        Err(resp) => return resp,
+    };
     match state.runtime.tasks.start(session_id.as_ref(), &task_id).await {
-        Ok(record) => Ok((StatusCode::OK, Json(record))),
+        Ok(record) => (StatusCode::OK, Json(record)).into_response(),
         Err(e) => {
             let msg = e.to_string();
             if msg.contains("not found") || msg.contains("NotFound") {
-                Err(not_found(format!("task {id} not found")))
+                not_found(format!("task {id} not found")).into_response()
             } else {
-                Err(bad_request(msg))
+                bad_request(msg).into_response()
             }
         }
     }
 }
 
-/// Resolve a task's session_id via `task.parent_run_id → run.session_id`.
-/// Returns `None` for top-level tasks (no parent run) — they were
-/// submitted with `None` and must continue to pass `None`.
-async fn resolve_bin_task_session(
+/// Load a task, enforce tenant-scope visibility, and resolve its
+/// session_id. Returns `NotFound` when the task is missing or belongs
+/// to a different tenant (same shape either way, to avoid leaking
+/// existence across tenants).
+async fn load_task_with_session_for_tenant(
     state: &AppState,
+    tenant_scope: &cairn_app::extractors::TenantScope,
     task_id: &TaskId,
-) -> Option<cairn_domain::SessionId> {
-    let task = state.runtime.tasks.get(task_id).await.ok().flatten()?;
-    let parent_run_id = task.parent_run_id.as_ref()?;
-    state
+) -> Result<Option<cairn_domain::SessionId>, axum::response::Response> {
+    let task = match state.runtime.tasks.get(task_id).await {
+        Ok(Some(task))
+            if tenant_scope.is_admin
+                || task.project.tenant_id == *tenant_scope.tenant_id() =>
+        {
+            task
+        }
+        Ok(_) => {
+            return Err(not_found(format!("task {} not found", task_id.as_str())).into_response())
+        }
+        Err(e) => return Err(internal_error(e.to_string()).into_response()),
+    };
+    let Some(parent_run_id) = task.parent_run_id.as_ref() else {
+        return Ok(None);
+    };
+    Ok(state
         .runtime
         .runs
         .get(parent_run_id)
         .await
         .ok()
         .flatten()
-        .map(|r| r.session_id)
+        .map(|r| r.session_id))
 }
 
 #[derive(Deserialize)]
@@ -333,11 +353,16 @@ pub(crate) struct FailTaskBody {
 
 pub(crate) async fn fail_task_handler(
     State(state): State<AppState>,
+    tenant_scope: cairn_app::extractors::TenantScope,
     Path(id): Path<String>,
     Json(body): Json<FailTaskBody>,
-) -> impl axum::response::IntoResponse {
+) -> axum::response::Response {
     let task_id = TaskId::new(id.clone());
-    let session_id = resolve_bin_task_session(&state, &task_id).await;
+    let session_id = match load_task_with_session_for_tenant(&state, &tenant_scope, &task_id).await
+    {
+        Ok(s) => s,
+        Err(resp) => return resp,
+    };
     match state
         .runtime
         .tasks
@@ -349,14 +374,14 @@ pub(crate) async fn fail_task_handler(
             if let Some(obj) = value.as_object_mut() {
                 obj.insert("error".to_owned(), serde_json::json!(body.error));
             }
-            Ok((StatusCode::OK, Json(value)))
+            (StatusCode::OK, Json(value)).into_response()
         }
         Err(e) => {
             let msg = e.to_string();
             if msg.contains("not found") || msg.contains("NotFound") {
-                Err(not_found(format!("task {id} not found")))
+                not_found(format!("task {id} not found")).into_response()
             } else {
-                Err(bad_request(msg))
+                bad_request(msg).into_response()
             }
         }
     }
@@ -503,6 +528,7 @@ pub(crate) struct BatchCancelTasksBody {
 /// `POST /v1/tasks/batch/cancel` — cancel multiple tasks in one call.
 pub(crate) async fn batch_cancel_tasks_handler(
     State(state): State<AppState>,
+    tenant_scope: cairn_app::extractors::TenantScope,
     Json(body): Json<BatchCancelTasksBody>,
 ) -> impl axum::response::IntoResponse {
     if body.task_ids.is_empty() {
@@ -516,16 +542,42 @@ pub(crate) async fn batch_cancel_tasks_handler(
             .into_response();
     }
 
+    // Resolve tenant scope + session per task concurrently; the per-task
+    // work is independent so we fan out rather than serialize.
+    use futures::stream::{self, StreamExt};
+    const CONCURRENCY: usize = 16;
+    let tenant_scope = &tenant_scope;
+    let state_ref = &state;
+    let results: Vec<(String, Result<(), String>)> = stream::iter(body.task_ids)
+        .map(|raw_id| async move {
+            let task_id = TaskId::new(&raw_id);
+            let session_id =
+                match load_task_with_session_for_tenant(state_ref, tenant_scope, &task_id).await {
+                    Ok(s) => s,
+                    Err(_) => {
+                        return (raw_id, Err("task not found".to_owned()));
+                    }
+                };
+            match state_ref
+                .runtime
+                .tasks
+                .cancel(session_id.as_ref(), &task_id)
+                .await
+            {
+                Ok(_) => (raw_id, Ok(())),
+                Err(e) => (raw_id, Err(e.to_string())),
+            }
+        })
+        .buffer_unordered(CONCURRENCY)
+        .collect()
+        .await;
+
     let mut cancelled: u32 = 0;
     let mut failed: Vec<serde_json::Value> = Vec::new();
-
-    for raw_id in body.task_ids {
-        let task_id = TaskId::new(&raw_id);
-        let session_id = resolve_bin_task_session(&state, &task_id).await;
-        match state.runtime.tasks.cancel(session_id.as_ref(), &task_id).await {
-            Ok(_) => cancelled += 1,
-            Err(e) => {
-                let reason = e.to_string();
+    for (raw_id, result) in results {
+        match result {
+            Ok(()) => cancelled += 1,
+            Err(reason) => {
                 failed.push(serde_json::json!({ "id": raw_id, "reason": reason }));
             }
         }
