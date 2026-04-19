@@ -262,7 +262,7 @@ Runs: rust lib tests (`in-memory-runtime` feature), rust integration tests, **fa
 ## 11. FlowFabric Context (for the new session)
 
 - **Repo:** `github.com/avifenesh/FlowFabric`
-- **Branch we pin against:** `feat/execution-engine` (last pinned commit in cairn-rs session memory: `a098710` — check `crates/cairn-fabric/Cargo.toml` for current git dep rev).
+- **Branch we pin against:** `feat/execution-engine` (last pinned commit in cairn-rs session memory: `1b19dd10` — check `crates/cairn-fabric/Cargo.toml` for current git dep rev).
 - **Relationship:** cairn-rs depends on FF via git dependency. When FF lands a needed fix, bump the rev in Cargo.toml; rebuild; test.
 - **Filing FF issues:** `gh issue create --repo avifenesh/FlowFabric --title "..." --body "..."`.
 - **FF internals to know:**

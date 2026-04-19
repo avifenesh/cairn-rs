@@ -1,6 +1,6 @@
 # Cairn ↔ FlowFabric Finalized Architecture
 
-**Status**: finalization round. Captures the wiring, feature gates, operator workflow, and outstanding asks as of FF @a098710 and cairn branch `feat/cairn-fabric-finalization`.
+**Status**: finalization round. Captures the wiring, feature gates, operator workflow, and outstanding asks as of FF @1b19dd10 and cairn branch `feat/cairn-fabric-finalization`. Updated for RFC-011 phase-1 mechanical sweep (rev bump a098710 → 1b19dd10).
 
 `cairn-fabric` is a **thin bridge**. FlowFabric owns execution truth in Valkey; cairn translates HTTP handler calls into FF FCALLs and projects FF events back into cairn-store for query paths. This doc is the runbook, not a design proposal — behaviour is already shipped.
 
@@ -297,11 +297,11 @@ isolates from the library graph.
 
 ## 5. Outstanding FF asks
 
-Filed with FF maintainers; tracked for re-wiring when they land.
+All three original asks landed upstream in the RFC-011 phase-1 rev bump (a098710 → 1b19dd10). Cairn adopted them in the mechanical sweep on `feat/rfc011-mechanical-sweep`.
 
-1. **`pub fn FlowFabricWorker::claim_from_grant(grant: ClaimGrant) -> Result<ClaimedTask, SdkError>`** — required to route cairn's production worker path through `ff-scheduler` without enabling `insecure-direct-claim`. Today `ClaimedTask::new` is `pub(crate)` on ff-sdk, so cairn can obtain a `ClaimGrant` from the scheduler but cannot turn it into a `ClaimedTask` for the stream / renewal / terminal methods.
-2. **`pub fn parse_report_usage_result(raw: &Value) -> Result<ReportUsageResult, SdkError>`** — ff-sdk's parser is private, so cairn-fabric re-implements it (`services/budget_service.rs::parse_spend_result`) and keeps it in sync by hand. Exposing the upstream parser eliminates a drift hazard.
-3. **Scheduler-mediated `claim_resumed_execution`** — same visibility problem as #1 for the resume-after-suspend path. Needs a `pub` entry point so cairn can consume a scheduler grant for a previously-suspended execution.
+1. ~~**`pub fn FlowFabricWorker::claim_from_grant(grant: ClaimGrant) -> Result<ClaimedTask, SdkError>`**~~ — **CLOSED** (FF #14). Public API landed upstream; cairn-fabric wired in RFC-011 phase-2 (pending).
+2. ~~**`pub fn parse_report_usage_result(raw: &Value) -> Result<ReportUsageResult, SdkError>`**~~ — **CLOSED** (FF #16). `budget_service.rs::parse_spend_result` deleted; cairn now calls `ff_sdk::task::parse_report_usage_result` directly.
+3. ~~**Scheduler-mediated `claim_resumed_execution`**~~ — **CLOSED** (FF #15). `FlowFabricWorker::claim_from_reclaim_grant` is public; cairn-fabric adoption tracked under RFC-011 phase-2.
 
 ---
 
@@ -373,6 +373,6 @@ Both implementations scan up to 10,000 `EventLog` events and truncate silently i
 
 ## 8. Versioning
 
-- Pinned FF rev: `a09871000574388256b1dd7c910239e992c0d3a6` (in every `crates/cairn-fabric/Cargo.toml` `rev = …` entry).
+- Pinned FF rev: `1b19dd108ec0f9af7c344d2e129d053449edcb6f` (in every `crates/cairn-fabric/Cargo.toml` `rev = …` entry). Bumped from `a09871000574388256b1dd7c910239e992c0d3a6` in RFC-011 phase-1 sweep.
 - Cairn-fabric crate version: `0.1.0` (unpublished, `publish = false`).
 - Bumping the FF rev requires the `scripts/run-fabric-integration-tests.sh` `FF_REV` env var to match. The script fails fast on mismatch.

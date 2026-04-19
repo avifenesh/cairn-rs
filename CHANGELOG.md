@@ -20,6 +20,25 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- **RFC-011 phase-1 mechanical sweep** — FF rev bump `a098710` → `1b19dd10`
+  (RFC-011 exec/flow hash-slot co-location, phases 1-3). Consumer-side
+  adoptions in cairn-fabric:
+  - `num_execution_partitions` renamed to `num_flow_partitions`; default
+    raised 64 → 256. **Operator action required** if `FF_EXEC_PARTITIONS`
+    is set: rename env var to `FF_FLOW_PARTITIONS` before deploying, or
+    accept the new default of 256.
+  - `ExecutionId` construction migrated to deterministic mint helpers
+    (`deterministic_solo` / `for_flow`). The `::new()`, `::from_uuid()`,
+    and `Default` constructors are removed upstream.
+  - Parallel `parse_spend_result` deleted from `budget_service.rs`;
+    replaced with `ff_sdk::task::parse_report_usage_result` (FF #16 closed).
+  - Hardcoded `format!("ff:usagededup:…")` sites replaced with
+    `ff_core::keys::usage_dedup_key` helper.
+  - API-boundary validation added: run/session/project IDs now reject
+    control characters at the HTTP handler layer.
+  - `FabricError` detail stripping: 500 responses no longer leak Valkey
+    key names or Lua error internals.
+
 - **`TaskFrameSink` orchestrator integration** (#30) — orchestrator logs
   tool calls, tool results, LLM responses, and checkpoints through a
   non-consuming sink on the active `CairnTask`, removing the need to thread
