@@ -221,7 +221,8 @@ impl FabricBudgetService {
     /// double-decremented). The key's caller-identity component comes from
     /// the ExecutionId, so every distinct logical spend MUST present a
     /// distinct ExecutionId. Tests without a real execution must mint a
-    /// throwaway ([`ExecutionId::new`]); silently falling back to a
+    /// throwaway via [`ExecutionId::deterministic_solo`] with a fresh
+    /// UUID; silently falling back to a
     /// sentinel (`Uuid::nil`) would make two unrelated process-level
     /// retries collide into a single FF dedup slot and suppress a
     /// legitimate spend.

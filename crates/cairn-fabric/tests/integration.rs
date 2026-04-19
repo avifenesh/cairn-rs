@@ -12,7 +12,7 @@
 // test gets a uuid-scoped `ProjectKey` via `TestHarness::setup()`, and
 // every id inside the test is generated with `uuid::Uuid::new_v4()`
 // (`unique_run_id`, `unique_task_id`, `unique_session_id`,
-// `ExecutionId::new()`, `BudgetId::new()`, …). Keyspaces therefore do
+// `ExecutionId::deterministic_solo(...)`, `BudgetId::new()`, …). Keyspaces therefore do
 // not collide across parallel tests — each test operates in its own
 // project partition and FF's `{p:N}` hashtags route their FCALLs to
 // disjoint slots.
