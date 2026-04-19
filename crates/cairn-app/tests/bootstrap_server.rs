@@ -1496,10 +1496,13 @@ async fn tenant_isolation_hides_other_tenant_runs() {
         AppBootstrap::router_with_runtime_and_tokens(BootstrapConfig::default())
             .await
             .unwrap();
+    // T6b-C4: admin-gated tenant/workspace/project creates require the
+    // admin service account. Per-tenant isolation below keeps Operator
+    // principals for the data-plane checks (which is the real test).
     tokens.register(
         "tenant-a-token".to_string(),
-        AuthPrincipal::Operator {
-            operator_id: OperatorId::new("test_op"),
+        AuthPrincipal::ServiceAccount {
+            name: "admin".to_owned(),
             tenant: TenantKey::new("default_tenant"),
         },
     );
@@ -2196,10 +2199,11 @@ async fn audit_log_records_prompt_release_activation() {
         AppBootstrap::router_with_runtime_and_tokens(BootstrapConfig::default())
             .await
             .unwrap();
+    // Uses the admin-gated /v1/admin/audit-log route, so needs admin.
     tokens.register(
         "audit-token".to_string(),
-        AuthPrincipal::Operator {
-            operator_id: OperatorId::new("test_op"),
+        AuthPrincipal::ServiceAccount {
+            name: "admin".to_owned(),
             tenant: TenantKey::new("default_tenant"),
         },
     );
@@ -3477,10 +3481,12 @@ async fn admin_routes_round_trip() {
         AppBootstrap::router_with_runtime_and_tokens(BootstrapConfig::default())
             .await
             .unwrap();
+    // T6b-C4: admin endpoints now require the `admin` service account
+    // or System principal. Non-admin operator tokens correctly get 403.
     tokens.register(
         "test-token".to_string(),
-        AuthPrincipal::Operator {
-            operator_id: OperatorId::new("test_op"),
+        AuthPrincipal::ServiceAccount {
+            name: "admin".to_owned(),
             tenant: TenantKey::new("default_tenant"),
         },
     );
@@ -3860,10 +3866,12 @@ async fn full_workspace_operator_journey_over_http() {
     let (app, _runtime, tokens) = AppBootstrap::router_with_runtime_and_tokens(config)
         .await
         .unwrap();
+    // E2E journey covers admin-gated create-tenant + credential-store
+    // + reviewer-gated release activation steps, so needs admin.
     tokens.register(
         "test-token".to_string(),
-        AuthPrincipal::Operator {
-            operator_id: OperatorId::new("test_op"),
+        AuthPrincipal::ServiceAccount {
+            name: "admin".to_owned(),
             tenant: TenantKey::new("tenant_e2e_http"),
         },
     );

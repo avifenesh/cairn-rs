@@ -9,6 +9,7 @@ use cairn_api::auth::AuthPrincipal;
 use cairn_api::bootstrap::BootstrapConfig;
 use cairn_app::AppBootstrap;
 use cairn_domain::tenancy::TenantKey;
+#[allow(unused_imports)]
 use cairn_domain::OperatorId;
 use tower::ServiceExt;
 
@@ -106,10 +107,12 @@ async fn app_with_token() -> axum::Router {
     let (app, _runtime, tokens) = AppBootstrap::router_with_runtime_and_tokens(config)
         .await
         .unwrap();
+    // T6b-C4: this suite touches admin-gated endpoints (create_tenant,
+    // store_credential, etc.) — admin service account required.
     tokens.register(
         TOKEN.to_string(),
-        AuthPrincipal::Operator {
-            operator_id: OperatorId::new("test_op"),
+        AuthPrincipal::ServiceAccount {
+            name: "admin".to_owned(),
             tenant: TenantKey::new("default_tenant"),
         },
     );

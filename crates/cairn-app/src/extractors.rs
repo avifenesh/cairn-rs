@@ -173,11 +173,11 @@ impl TenantScope {
     }
 }
 
-pub(crate) struct WorkspaceRoleGuard<const MIN_ROLE: u8>;
+pub struct WorkspaceRoleGuard<const MIN_ROLE: u8>;
 #[allow(dead_code)]
 pub(crate) type MemberRoleGuard = WorkspaceRoleGuard<1>;
 pub(crate) type ReviewerRoleGuard = WorkspaceRoleGuard<2>;
-pub(crate) type AdminRoleGuard = WorkspaceRoleGuard<3>;
+pub type AdminRoleGuard = WorkspaceRoleGuard<3>;
 
 #[derive(Clone, Debug)]
 pub(crate) struct ProjectScope<T> {
@@ -243,6 +243,23 @@ pub(crate) fn validate_project_scope<T: HasProjectScope>(
 }
 
 /// `true` for the bootstrap admin service account or the System principal.
+/// T6b-C5 (shared helper): returns true when the path's project belongs
+/// to the caller's tenant OR the caller is an admin. Used by
+/// `marketplace_routes` and `repo_routes` to refuse cross-tenant
+/// mutations; hoisted here to avoid divergent copies.
+pub(crate) fn enforce_project_tenant(
+    principal: &AuthPrincipal,
+    project: &cairn_domain::tenancy::ProjectKey,
+) -> bool {
+    if is_admin_principal(principal) {
+        return true;
+    }
+    principal
+        .tenant()
+        .map(|t| t.tenant_id == project.tenant_id)
+        .unwrap_or(false)
+}
+
 pub(crate) fn is_admin_principal(principal: &AuthPrincipal) -> bool {
     match principal {
         AuthPrincipal::System => true,
@@ -344,9 +361,21 @@ where
     type Rejection = AppApiError;
 
     async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Self, Self::Rejection> {
+        // T6b-C4 fail-closed: the prior "no workspace role attached →
+        // treat as unrestricted" branch was a blanket bypass. Admin
+        // endpoints must refuse requests from principals that haven't
+        // had a role attached, UNLESS the principal is System / the
+        // admin service account (these carry `is_admin_principal ==
+        // true` and don't need a workspace-role binding to pass).
+        if let Some(principal) = parts.extensions.get::<AuthPrincipal>() {
+            if is_admin_principal(principal) {
+                return Ok(Self);
+            }
+        }
         let Some(role) = parts.extensions.get::<WorkspaceRole>().copied() else {
-            // No workspace role attached — membership not found; treat as unrestricted.
-            return Ok(Self);
+            return Err(forbidden_api_error(
+                "workspace role not attached; refusing privileged request",
+            ));
         };
         if (role as u8) < MIN_ROLE {
             return Err(forbidden_api_error("insufficient workspace role"));

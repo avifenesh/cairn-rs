@@ -11,7 +11,7 @@ pub const OPENAPI_JSON: &str = r##"{
   "openapi": "3.0.3",
   "info": {
     "title": "Cairn API",
-    "description": "Self-hostable control plane for production AI agent deployments.\n\nAll `/v1/` endpoints require `Authorization: Bearer <token>`. `/health`, `/v1/stream`, and `/v1/docs` are public.\n\n**Database:** Set `DATABASE_URL=postgres://user:pass@host/db` for persistent storage, or `--db memory` for ephemeral in-memory mode.\n\n**Rate limiting:** All responses include `X-RateLimit-Limit`, `X-RateLimit-Remaining`, and `X-RateLimit-Reset` headers. Token-authenticated requests: 1000 req/min. IP-only: 100 req/min. Exceeded requests return `429` with `Retry-After`.",
+    "description": "Self-hostable control plane for production AI agent deployments.\n\nAll `/v1/` endpoints require `Authorization: Bearer <token>`. `/health` and `/v1/docs` are public. `/v1/stream` requires bearer auth via the `?token=` query parameter (browsers cannot set custom headers on SSE connections).\n\n**Database:** Set `DATABASE_URL=postgres://user:pass@host/db` for persistent storage, or `--db memory` for ephemeral in-memory mode.\n\n**Rate limiting:** All responses include `X-RateLimit-Limit`, `X-RateLimit-Remaining`, and `X-RateLimit-Reset` headers. Token-authenticated requests: 1000 req/min. IP-only: 100 req/min. Exceeded requests return `429` with `Retry-After`.",
     "version": "0.1.0",
     "contact": {
       "name": "cairn-rs",

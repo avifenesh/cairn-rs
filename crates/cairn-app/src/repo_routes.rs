@@ -8,10 +8,11 @@
 
 use std::sync::Arc;
 
-use axum::extract::{Path, Query, State};
+use axum::extract::{Extension, Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::Json;
+use cairn_api::auth::AuthPrincipal;
 use cairn_domain::{ActorRef, OperatorId, ProjectKey, RepoAccessContext};
 use cairn_workspace::{RepoId, RepoStoreError};
 use serde::{Deserialize, Serialize};
@@ -81,10 +82,13 @@ impl ListQuery {
     }
 }
 
-fn operator_id_from_state(_state: &AppState) -> OperatorId {
-    // TODO: extract from auth context once wired.
-    OperatorId::new("operator")
+fn operator_id_from_principal(principal: &cairn_api::auth::AuthPrincipal) -> OperatorId {
+    // T6b-C5: derive from the authenticated principal so repo mutations
+    // land with the real actor in the event log.
+    OperatorId::new(crate::handlers::admin::audit_actor_id(principal))
 }
+
+use crate::extractors::enforce_project_tenant;
 
 fn validate_project_segment(value: &str, field: &'static str) -> Result<(), String> {
     let is_valid = !value.is_empty()
@@ -177,6 +181,7 @@ async fn repo_entry_response(
 
 pub async fn list_project_repos_handler(
     State(state): State<Arc<AppState>>,
+    Extension(principal): Extension<AuthPrincipal>,
     Query(query): Query<ListQuery>,
     Path(project): Path<String>,
 ) -> impl IntoResponse {
@@ -184,6 +189,10 @@ pub async fn list_project_repos_handler(
         Ok(ctx) => ctx,
         Err(message) => return bad_request_response(message),
     };
+    // T6b-C5: refuse cross-tenant enumeration.
+    if !enforce_project_tenant(&principal, &ctx.project) {
+        return crate::errors::tenant_scope_mismatch_error().into_response();
+    }
     let repo_ids = state.project_repo_access.list_for_project(&ctx).await;
     let paged_repo_ids: Vec<_> = repo_ids
         .into_iter()
@@ -205,6 +214,7 @@ pub async fn list_project_repos_handler(
 
 pub async fn add_project_repo_handler(
     State(state): State<Arc<AppState>>,
+    Extension(principal): Extension<AuthPrincipal>,
     Path(project): Path<String>,
     Json(body): Json<AddRepoRequest>,
 ) -> impl IntoResponse {
@@ -212,6 +222,10 @@ pub async fn add_project_repo_handler(
         Ok(ctx) => ctx,
         Err(message) => return bad_request_response(message),
     };
+    // T6b-C5: refuse cross-tenant repo registration.
+    if !enforce_project_tenant(&principal, &ctx.project) {
+        return crate::errors::tenant_scope_mismatch_error().into_response();
+    }
     let repo_id = match RepoId::parse(body.repo_id) {
         Ok(repo_id) => repo_id,
         Err(error) => return bad_request_response(error.to_string()),
@@ -222,7 +236,7 @@ pub async fn add_project_repo_handler(
         .await;
 
     let actor = ActorRef::Operator {
-        operator_id: operator_id_from_state(&state),
+        operator_id: operator_id_from_principal(&principal),
     };
 
     if let Err(error) = state.project_repo_access.allow(&ctx, &repo_id, actor).await {
@@ -254,12 +268,17 @@ pub async fn add_project_repo_handler(
 
 pub async fn get_project_repo_handler(
     State(state): State<Arc<AppState>>,
+    Extension(principal): Extension<AuthPrincipal>,
     Path((project, owner, repo)): Path<(String, String, String)>,
 ) -> impl IntoResponse {
     let ctx = match repo_access_context(&project) {
         Ok(ctx) => ctx,
         Err(message) => return bad_request_response(message),
     };
+    // T6b-C5: refuse cross-tenant read.
+    if !enforce_project_tenant(&principal, &ctx.project) {
+        return crate::errors::tenant_scope_mismatch_error().into_response();
+    }
     let repo_id = match RepoId::parse(format!("{owner}/{repo}")) {
         Ok(repo_id) => repo_id,
         Err(error) => return bad_request_response(error.to_string()),
@@ -286,18 +305,23 @@ pub async fn get_project_repo_handler(
 
 pub async fn delete_project_repo_handler(
     State(state): State<Arc<AppState>>,
+    Extension(principal): Extension<AuthPrincipal>,
     Path((project, owner, repo)): Path<(String, String, String)>,
 ) -> impl IntoResponse {
     let ctx = match repo_access_context(&project) {
         Ok(ctx) => ctx,
         Err(message) => return bad_request_response(message),
     };
+    // T6b-C5: refuse cross-tenant repo revocation.
+    if !enforce_project_tenant(&principal, &ctx.project) {
+        return crate::errors::tenant_scope_mismatch_error().into_response();
+    }
     let repo_id = match RepoId::parse(format!("{owner}/{repo}")) {
         Ok(repo_id) => repo_id,
         Err(error) => return bad_request_response(error.to_string()),
     };
     let actor = ActorRef::Operator {
-        operator_id: operator_id_from_state(&state),
+        operator_id: operator_id_from_principal(&principal),
     };
 
     if let Err(error) = state
@@ -351,6 +375,17 @@ mod tests {
     }
 
     fn test_router(state: Arc<AppState>) -> Router {
+        use cairn_api::auth::AuthPrincipal;
+        use cairn_domain::TenantId;
+        // T6b-C5: inject an admin principal extension so the new
+        // tenant-scope guard allows the test through. The real
+        // auth_middleware does this in production.
+        let principal = AuthPrincipal::ServiceAccount {
+            name: "admin".to_owned(),
+            tenant: cairn_domain::tenancy::TenantKey {
+                tenant_id: TenantId::new("default_tenant"),
+            },
+        };
         Router::new()
             .route(
                 "/v1/projects/:project/repos",
@@ -360,6 +395,7 @@ mod tests {
                 "/v1/projects/:project/repos/:owner/:repo",
                 get(get_project_repo_handler).delete(delete_project_repo_handler),
             )
+            .layer(axum::Extension(principal))
             .with_state(state)
     }
 

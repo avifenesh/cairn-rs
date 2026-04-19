@@ -11,12 +11,13 @@
 
 use std::sync::Arc;
 
-use axum::extract::{Path, Query, State};
+use axum::extract::{Extension, Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::Json;
 use serde::{Deserialize, Serialize};
 
+use cairn_api::auth::AuthPrincipal;
 use cairn_domain::contexts::SignalCaptureOverride;
 use cairn_runtime::{
     CredentialScopeKey, MarketplaceCommand, MarketplaceEvent, MarketplaceRecord, MarketplaceState,
@@ -123,10 +124,16 @@ fn record_to_response(record: &MarketplaceRecord) -> CatalogEntryResponse {
     }
 }
 
-fn operator_id_from_state(_state: &AppState) -> cairn_domain::ids::OperatorId {
-    // TODO: extract from auth context once wired
-    cairn_domain::ids::OperatorId::new("operator")
+fn operator_id_from_principal(
+    principal: &cairn_api::auth::AuthPrincipal,
+) -> cairn_domain::ids::OperatorId {
+    // T6b-C5: derive the operator id from the authenticated principal
+    // so plugin install / credential writes land with the real actor
+    // in the event log.
+    cairn_domain::ids::OperatorId::new(crate::handlers::admin::audit_actor_id(principal))
 }
+
+use crate::extractors::enforce_project_tenant;
 
 fn validate_project_segment(value: &str, field: &'static str) -> Result<(), String> {
     let is_valid = !value.is_empty()
@@ -182,7 +189,7 @@ pub async fn list_catalog_handler(
     State(state): State<Arc<AppState>>,
     Query(query): Query<ListQuery>,
 ) -> impl IntoResponse {
-    let marketplace = state.marketplace.lock().unwrap();
+    let marketplace = state.marketplace.lock().unwrap_or_else(|e| e.into_inner());
     let mut records = marketplace.list_all_records();
     records.sort_by_key(|r| r.descriptor.id.clone());
     let plugins = records
@@ -199,10 +206,13 @@ pub async fn list_catalog_handler(
 /// Installs a listed plugin, transitioning it from Listed to Installed.
 pub async fn install_plugin_handler(
     State(state): State<Arc<AppState>>,
+    _role: crate::extractors::AdminRoleGuard,
+    Extension(principal): Extension<AuthPrincipal>,
     Path(plugin_id): Path<String>,
 ) -> impl IntoResponse {
-    let operator = operator_id_from_state(&state);
-    let mut marketplace = state.marketplace.lock().unwrap();
+    // T6b-C5: plugin install is tenant-wide and admin-only.
+    let operator = operator_id_from_principal(&principal);
+    let mut marketplace = state.marketplace.lock().unwrap_or_else(|e| e.into_inner());
 
     match marketplace.handle_command(MarketplaceCommand::InstallPlugin {
         plugin_id,
@@ -224,11 +234,15 @@ pub async fn install_plugin_handler(
 /// Provides credentials for an installed plugin via the credential wizard.
 pub async fn provide_credentials_handler(
     State(state): State<Arc<AppState>>,
+    _role: crate::extractors::AdminRoleGuard,
+    Extension(principal): Extension<AuthPrincipal>,
     Path(plugin_id): Path<String>,
     Json(body): Json<ProvideCredentialsRequest>,
 ) -> impl IntoResponse {
-    let operator = operator_id_from_state(&state);
-    let mut marketplace = state.marketplace.lock().unwrap();
+    // T6b-C5: plugin credential writes touch the shared credential
+    // store — admin-gated.
+    let operator = operator_id_from_principal(&principal);
+    let mut marketplace = state.marketplace.lock().unwrap_or_else(|e| e.into_inner());
 
     let credentials: Vec<(String, String)> = body
         .credentials
@@ -259,11 +273,12 @@ pub async fn provide_credentials_handler(
 /// Does NOT commit any persistent lifecycle state.
 pub async fn verify_credentials_handler(
     State(state): State<Arc<AppState>>,
+    Extension(principal): Extension<AuthPrincipal>,
     Path(plugin_id): Path<String>,
     body: Option<Json<VerifyCredentialsRequest>>,
 ) -> impl IntoResponse {
-    let operator = operator_id_from_state(&state);
-    let mut marketplace = state.marketplace.lock().unwrap();
+    let operator = operator_id_from_principal(&principal);
+    let mut marketplace = state.marketplace.lock().unwrap_or_else(|e| e.into_inner());
 
     let scope_key = body.and_then(|Json(b)| b.credential_scope_key.map(CredentialScopeKey));
 
@@ -289,16 +304,24 @@ pub async fn verify_credentials_handler(
 /// and signal capture override.
 pub async fn enable_plugin_handler(
     State(state): State<Arc<AppState>>,
+    Extension(principal): Extension<AuthPrincipal>,
     Path((project_id, plugin_id)): Path<(String, String)>,
     body: Option<Json<EnablePluginRequest>>,
 ) -> impl IntoResponse {
-    let operator = operator_id_from_state(&state);
-    let mut marketplace = state.marketplace.lock().unwrap();
+    let operator = operator_id_from_principal(&principal);
 
     let project = match project_key_from_path(&project_id) {
         Ok(project) => project,
         Err(message) => return bad_request_response(message),
     };
+
+    // T6b-C5: refuse cross-tenant enable. Only the authenticated
+    // tenant's projects may have plugins enabled. Admin bypass allowed.
+    if !enforce_project_tenant(&principal, &project) {
+        return crate::errors::tenant_scope_mismatch_error().into_response();
+    }
+
+    let mut marketplace = state.marketplace.lock().unwrap_or_else(|e| e.into_inner());
 
     let (tool_allowlist, signal_allowlist, signal_capture_override) = match body {
         Some(Json(b)) => (
@@ -364,15 +387,22 @@ pub async fn enable_plugin_handler(
 /// Disables a plugin for a project.
 pub async fn disable_plugin_handler(
     State(state): State<Arc<AppState>>,
+    Extension(principal): Extension<AuthPrincipal>,
     Path((project_id, plugin_id)): Path<(String, String)>,
 ) -> impl IntoResponse {
-    let operator = operator_id_from_state(&state);
-    let mut marketplace = state.marketplace.lock().unwrap();
+    let operator = operator_id_from_principal(&principal);
 
     let project = match project_key_from_path(&project_id) {
         Ok(project) => project,
         Err(message) => return bad_request_response(message),
     };
+
+    // T6b-C5: refuse cross-tenant disable.
+    if !enforce_project_tenant(&principal, &project) {
+        return crate::errors::tenant_scope_mismatch_error().into_response();
+    }
+
+    let mut marketplace = state.marketplace.lock().unwrap_or_else(|e| e.into_inner());
 
     match marketplace.handle_command(MarketplaceCommand::DisablePluginForProject {
         plugin_id,
@@ -396,10 +426,13 @@ pub async fn disable_plugin_handler(
 /// project enablements.
 pub async fn uninstall_plugin_handler(
     State(state): State<Arc<AppState>>,
+    _role: crate::extractors::AdminRoleGuard,
+    Extension(principal): Extension<AuthPrincipal>,
     Path(plugin_id): Path<String>,
 ) -> impl IntoResponse {
-    let operator = operator_id_from_state(&state);
-    let mut marketplace = state.marketplace.lock().unwrap();
+    // T6b-C5: uninstall is tenant-wide and admin-only.
+    let operator = operator_id_from_principal(&principal);
+    let mut marketplace = state.marketplace.lock().unwrap_or_else(|e| e.into_inner());
 
     match marketplace.handle_command(MarketplaceCommand::UninstallPlugin {
         plugin_id,

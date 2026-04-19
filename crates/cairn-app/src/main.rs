@@ -411,7 +411,12 @@ async fn main() {
     match &config.storage {
         StorageBackend::Postgres { connection_url } => {
             let url = connection_url.clone();
-            eprintln!("store: connecting to Postgres at {url}");
+            // T6b-C3: log only the redacted URL so credentials don't end
+            // up in journald / CloudWatch.
+            eprintln!(
+                "store: connecting to Postgres at {}",
+                cairn_app::redact_dsn(&url)
+            );
             match PgPoolOptions::new()
                 .max_connections(10)
                 .acquire_timeout(Duration::from_secs(10))
@@ -462,7 +467,10 @@ async fn main() {
                 .strip_prefix("sqlite:")
                 .unwrap_or(path.as_str())
                 .to_owned();
-            eprintln!("store: connecting to SQLite at {url}");
+            eprintln!(
+                "store: connecting to SQLite at {}",
+                cairn_app::redact_dsn(&url)
+            );
             match SqlitePoolOptions::new()
                 .max_connections(1) // SQLite is not safe with multiple writers
                 .connect(&url)
@@ -813,8 +821,22 @@ async fn main() {
                     .as_ref()
                     .map(|p| p.clone() as Arc<dyn GenerationProvider>)
             });
-        let lib_mut = Arc::get_mut(&mut lib_state)
-            .expect("lib_state must not be cloned before brain_provider is wired");
+        let lib_mut = match Arc::get_mut(&mut lib_state) {
+            Some(m) => m,
+            None => {
+                // T6b-C4: fail loud with a useful error rather than
+                // a bare `.expect()` panic. The Arc must not have
+                // been cloned before this point — any clone here is
+                // a programming error introduced by a refactor, and
+                // a stack trace from panic is less helpful than a
+                // named diagnostic.
+                eprintln!(
+                    "fatal: lib_state was cloned before brain_provider was wired — \
+                     check AppState::new for stray clones"
+                );
+                std::process::exit(1);
+            }
+        };
         if let Some(b) = brain {
             lib_mut.brain_provider = Some(b);
             eprintln!("brain provider: wired to lib_state");
@@ -871,11 +893,26 @@ async fn main() {
                                 webhook_secret,
                                 3,
                             );
-                            let lib_mut = Arc::get_mut(&mut lib_state)
-                                .expect("lib_state must not be cloned before github is wired");
+                            // T6b-C4: same fail-loud pattern as above.
+                            let lib_mut = match Arc::get_mut(&mut lib_state) {
+                                Some(m) => m,
+                                None => {
+                                    eprintln!(
+                                        "fatal: lib_state was cloned before github was wired"
+                                    );
+                                    std::process::exit(1);
+                                }
+                            };
                             lib_mut.github = Some(Arc::new(github));
-                            let registry = Arc::get_mut(&mut lib_mut.integrations)
-                                .expect("integrations registry must not be cloned yet");
+                            let registry = match Arc::get_mut(&mut lib_mut.integrations) {
+                                Some(r) => r,
+                                None => {
+                                    eprintln!(
+                                        "fatal: integrations registry was cloned before github was registered"
+                                    );
+                                    std::process::exit(1);
+                                }
+                            };
                             registry.register_sync(Arc::new(github_plugin));
                             eprintln!("GitHub App: wired (app_id={app_id})");
                         }
@@ -913,8 +950,14 @@ async fn main() {
             lib_state.project_repo_access.clone(),
             lib_state.repo_clone_cache.clone(),
         );
-        let lib_mut = Arc::get_mut(&mut lib_state)
-            .expect("lib_state must not be cloned before tool_registry is wired");
+        // T6b-C4: fail loud.
+        let lib_mut = match Arc::get_mut(&mut lib_state) {
+            Some(m) => m,
+            None => {
+                eprintln!("fatal: lib_state was cloned before tool_registry was wired");
+                std::process::exit(1);
+            }
+        };
         lib_mut.tool_registry = Some(Arc::new(registry));
         eprintln!("tool registry: memory tools + cairn.registerRepo wired");
     }
@@ -1256,10 +1299,11 @@ mod tests {
 
     fn make_state() -> AppState {
         let tokens = Arc::new(ServiceTokenRegistry::new());
+        // Name = "admin" so AdminRoleGuard-gated endpoints pass.
         tokens.register(
             TEST_TOKEN.to_owned(),
             AuthPrincipal::ServiceAccount {
-                name: "test-admin".to_owned(),
+                name: "admin".to_owned(),
                 tenant: cairn_domain::tenancy::TenantKey::new(cairn_domain::TenantId::new(
                     "test-tenant",
                 )),
