@@ -540,8 +540,8 @@ mod tests {
     ///   1. `parse_report_usage_result(malformed)` is Err, and
     ///   2. `.map_err(|e| FabricError::Internal(e.to_string()))` produces
     ///      the Internal variant.
-    /// If FF ever changes the parser to silently accept unexpected shapes,
-    /// this test fires.
+    ///      If FF ever changes the parser to silently accept unexpected shapes,
+    ///      this test fires.
     #[test]
     fn parse_report_usage_result_err_maps_to_fabric_internal() {
         // SimpleString is the shape FF's parser rejects first (it expects

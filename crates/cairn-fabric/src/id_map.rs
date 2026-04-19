@@ -94,7 +94,8 @@ pub fn session_to_flow_id(project: &ProjectKey, session_id: &SessionId) -> FlowI
 /// onto the same partition). The signature is landed here so callers
 /// can migrate incrementally; wiring into service callers is phase 2
 /// scope.
-pub fn session_run_to_execution_id(
+#[allow(dead_code)]
+pub(crate) fn session_run_to_execution_id(
     project: &ProjectKey,
     session_id: &SessionId,
     run_id: &RunId,
@@ -370,8 +371,7 @@ mod tests {
         let cfg = PartitionConfig::default();
         let rid = RunId::new("run_shared_between_paths");
         let solo = run_to_execution_id(&p, &rid, &cfg);
-        let via_session =
-            session_run_to_execution_id(&p, &SessionId::new("sess_x"), &rid, &cfg);
+        let via_session = session_run_to_execution_id(&p, &SessionId::new("sess_x"), &rid, &cfg);
         assert_ne!(solo, via_session);
     }
 
@@ -500,8 +500,8 @@ mod tests {
         assert_eq!(
             CAIRN_NAMESPACE.as_bytes(),
             &[
-                0xa3, 0x4e, 0x7c, 0x01, 0xf8, 0x2d, 0x4b, 0x9a, 0x91, 0x5c, 0xd7, 0x6e, 0x3a,
-                0x1b, 0x58, 0xf0,
+                0xa3, 0x4e, 0x7c, 0x01, 0xf8, 0x2d, 0x4b, 0x9a, 0x91, 0x5c, 0xd7, 0x6e, 0x3a, 0x1b,
+                0x58, 0xf0,
             ]
         );
         assert_eq!(NAMESPACE_VERSION, 1);
