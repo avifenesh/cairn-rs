@@ -109,6 +109,13 @@ pub fn session_run_to_execution_id(
     ExecutionId::deterministic_for_flow(&flow, config, uuid)
 }
 
+/// Map a cairn `TenantId` to an FF `Namespace`.
+///
+/// Empty/whitespace tenants map to the shared `"default"` namespace.
+/// Callers MUST validate `tenant_id` is non-empty at the API boundary
+/// (see `cairn-app::validate::require_id`) to avoid tenant-scope
+/// collapse. This fallback exists only for bootstrap tooling that
+/// legitimately uses `"default"` as its tenant.
 pub fn tenant_to_namespace(tenant_id: &TenantId) -> Namespace {
     let s = tenant_id.as_str().trim();
     if s.is_empty() {
@@ -118,9 +125,16 @@ pub fn tenant_to_namespace(tenant_id: &TenantId) -> Namespace {
     }
 }
 
+/// Mint a `LaneId` from a `ProjectKey`.
+///
+/// Uses null-byte delimiters so projects whose ids contain slashes
+/// (e.g. `tenant="a/b"` + `workspace="c"` vs `tenant="a"` +
+/// `workspace="b/c"`) produce distinct `LaneId`s. Cross-project key
+/// collisions on the FF side would otherwise merge unrelated tenants'
+/// routing state.
 pub fn project_to_lane(project: &ProjectKey) -> LaneId {
     LaneId::new(format!(
-        "{}/{}/{}",
+        "v{NAMESPACE_VERSION}:project:\0{}\0{}\0{}",
         project.tenant_id, project.workspace_id, project.project_id
     ))
 }
@@ -295,6 +309,221 @@ mod tests {
     fn project_to_lane_format() {
         let project = ProjectKey::new("t1", "w1", "p1");
         let lane = project_to_lane(&project);
-        assert_eq!(lane.as_str(), "t1/w1/p1");
+        assert_eq!(lane.as_str(), "v1:project:\0t1\0w1\0p1");
+    }
+
+    /// F02 regression guard: with slash-delimited LaneIds, ProjectKey("a/b","c","d")
+    /// and ProjectKey("a","b/c","d") would BOTH produce `"a/b/c/d"` and alias onto
+    /// the same FF routing lane. Null-byte delimiters prevent that collision —
+    /// same pattern as the UUID-v5 inputs upstream.
+    #[test]
+    fn project_to_lane_no_cross_project_collision() {
+        let lane_1 = project_to_lane(&ProjectKey::new("a/b", "c", "d"));
+        let lane_2 = project_to_lane(&ProjectKey::new("a", "b/c", "d"));
+        assert_ne!(lane_1, lane_2);
+    }
+
+    // ── session_run_to_execution_id coverage ───────────────────────────
+
+    #[test]
+    fn session_run_to_execution_id_deterministic() {
+        let p = test_project();
+        let cfg = PartitionConfig::default();
+        let sid = SessionId::new("sess_stable");
+        let rid = RunId::new("run_stable");
+        let e1 = session_run_to_execution_id(&p, &sid, &rid, &cfg);
+        let e2 = session_run_to_execution_id(&p, &sid, &rid, &cfg);
+        let e3 = session_run_to_execution_id(&p, &sid, &rid, &cfg);
+        assert_eq!(e1, e2);
+        assert_eq!(e2, e3);
+    }
+
+    #[test]
+    fn session_run_to_execution_id_different_runs_differ() {
+        let p = test_project();
+        let cfg = PartitionConfig::default();
+        let sid = SessionId::new("sess_1");
+        let e1 = session_run_to_execution_id(&p, &sid, &RunId::new("run_a"), &cfg);
+        let e2 = session_run_to_execution_id(&p, &sid, &RunId::new("run_b"), &cfg);
+        assert_ne!(e1, e2);
+    }
+
+    #[test]
+    fn session_run_to_execution_id_different_sessions_differ() {
+        let p = test_project();
+        let cfg = PartitionConfig::default();
+        let rid = RunId::new("run_shared");
+        let e1 = session_run_to_execution_id(&p, &SessionId::new("sess_a"), &rid, &cfg);
+        let e2 = session_run_to_execution_id(&p, &SessionId::new("sess_b"), &rid, &cfg);
+        assert_ne!(e1, e2);
+    }
+
+    /// session_run_to_execution_id routes via `deterministic_for_flow` which
+    /// derives its partition from the session's FlowId. run_to_execution_id
+    /// routes via `deterministic_solo` keyed on the project's LaneId. Even
+    /// with identical `(project, run_id)`, the two paths MUST produce
+    /// distinct ExecutionIds — otherwise a session-attached run would
+    /// alias onto the solo run's FF state.
+    #[test]
+    fn session_run_to_execution_id_different_from_run() {
+        let p = test_project();
+        let cfg = PartitionConfig::default();
+        let rid = RunId::new("run_shared_between_paths");
+        let solo = run_to_execution_id(&p, &rid, &cfg);
+        let via_session =
+            session_run_to_execution_id(&p, &SessionId::new("sess_x"), &rid, &cfg);
+        assert_ne!(solo, via_session);
+    }
+
+    /// SEC-001: delimiter-collision guard for the 5-field session_run input.
+    /// Every naive single-char delimiter scheme has an input pair that
+    /// collides; the null-byte scheme doesn't. Pin several concrete pairs.
+    #[test]
+    fn session_run_delimiter_collision_impossible() {
+        let cfg = PartitionConfig::default();
+
+        // tenant boundary
+        let e1 = session_run_to_execution_id(
+            &ProjectKey::new("a:b", "c", "d"),
+            &SessionId::new("s"),
+            &RunId::new("r1"),
+            &cfg,
+        );
+        let e2 = session_run_to_execution_id(
+            &ProjectKey::new("a", "b:c", "d"),
+            &SessionId::new("s"),
+            &RunId::new("r1"),
+            &cfg,
+        );
+        assert_ne!(e1, e2);
+
+        // workspace/project boundary
+        let e3 = session_run_to_execution_id(
+            &ProjectKey::new("t", "w:p", "q"),
+            &SessionId::new("s"),
+            &RunId::new("r1"),
+            &cfg,
+        );
+        let e4 = session_run_to_execution_id(
+            &ProjectKey::new("t", "w", "p:q"),
+            &SessionId::new("s"),
+            &RunId::new("r1"),
+            &cfg,
+        );
+        assert_ne!(e3, e4);
+
+        // session/run boundary
+        let e5 = session_run_to_execution_id(
+            &test_project(),
+            &SessionId::new("s:r"),
+            &RunId::new("1"),
+            &cfg,
+        );
+        let e6 = session_run_to_execution_id(
+            &test_project(),
+            &SessionId::new("s"),
+            &RunId::new("r:1"),
+            &cfg,
+        );
+        assert_ne!(e5, e6);
+    }
+
+    /// TC#1/#3: The partition index chosen at mint time MUST be baked into
+    /// the resulting ExecutionId. If `num_flow_partitions` is ever changed
+    /// after IDs are minted, lookups will target a different partition from
+    /// where the state was written. Proves the invariant by minting with
+    /// two distinct configs and asserting the IDs differ.
+    #[test]
+    fn deterministic_solo_respects_partition_config() {
+        let p = test_project();
+        let rid = RunId::new("run_partition_sensitive");
+        let cfg_64 = PartitionConfig {
+            num_flow_partitions: 64,
+            num_budget_partitions: 32,
+            num_quota_partitions: 32,
+        };
+        let cfg_256 = PartitionConfig {
+            num_flow_partitions: 256,
+            num_budget_partitions: 32,
+            num_quota_partitions: 32,
+        };
+        let e_64 = run_to_execution_id(&p, &rid, &cfg_64);
+        let e_256 = run_to_execution_id(&p, &rid, &cfg_256);
+        // At least one of the 64/256 partition indices must differ for some
+        // input; this fixture is chosen to demonstrate the general invariant.
+        // The assertion is that partition count DOES affect the output — if
+        // the two IDs are byte-equal, `deterministic_solo` is ignoring the
+        // config, which is the exact regression we're guarding against.
+        assert_ne!(
+            e_64, e_256,
+            "deterministic_solo must incorporate partition_config into the \
+             resulting ExecutionId; got identical ids across 64-vs-256 configs"
+        );
+    }
+
+    /// TC#3: broad sanity — five distinct (project, run) pairs must produce
+    /// five pairwise-distinct ExecutionIds, and each must be self-stable.
+    #[test]
+    fn deterministic_solo_multiple_fixtures() {
+        let cfg = PartitionConfig::default();
+        let fixtures: [(ProjectKey, RunId); 5] = [
+            (ProjectKey::new("t1", "w1", "p1"), RunId::new("r_alpha")),
+            (ProjectKey::new("t2", "w1", "p1"), RunId::new("r_alpha")),
+            (ProjectKey::new("t1", "w2", "p1"), RunId::new("r_alpha")),
+            (ProjectKey::new("t1", "w1", "p2"), RunId::new("r_alpha")),
+            (ProjectKey::new("t1", "w1", "p1"), RunId::new("r_beta")),
+        ];
+        let ids: Vec<ExecutionId> = fixtures
+            .iter()
+            .map(|(p, r)| run_to_execution_id(p, r, &cfg))
+            .collect();
+
+        // Self-stable.
+        for (i, (p, r)) in fixtures.iter().enumerate() {
+            assert_eq!(ids[i], run_to_execution_id(p, r, &cfg));
+        }
+
+        // Pairwise distinct.
+        for i in 0..ids.len() {
+            for j in (i + 1)..ids.len() {
+                assert_ne!(ids[i], ids[j], "fixtures {i} and {j} collided");
+            }
+        }
+    }
+
+    /// TC#4: pin the CAIRN_NAMESPACE UUID bytes against accidental rewrite.
+    /// Any change here silently orphans every ExecutionId / FlowId in
+    /// every Valkey cluster cairn ever wrote to — must be a deliberate
+    /// migration event tied to NAMESPACE_VERSION, never a casual edit.
+    #[test]
+    fn cairn_namespace_uuid_stable() {
+        assert_eq!(
+            CAIRN_NAMESPACE.as_bytes(),
+            &[
+                0xa3, 0x4e, 0x7c, 0x01, 0xf8, 0x2d, 0x4b, 0x9a, 0x91, 0x5c, 0xd7, 0x6e, 0x3a,
+                0x1b, 0x58, 0xf0,
+            ]
+        );
+        assert_eq!(NAMESPACE_VERSION, 1);
+    }
+
+    // ── tenant_to_namespace edge cases (SEC-003) ───────────────────────
+
+    #[test]
+    fn tenant_to_namespace_empty_maps_to_default() {
+        let ns = tenant_to_namespace(&TenantId::new(""));
+        assert_eq!(ns.as_str(), "default");
+    }
+
+    #[test]
+    fn tenant_to_namespace_whitespace_maps_to_default() {
+        let ns = tenant_to_namespace(&TenantId::new("   "));
+        assert_eq!(ns.as_str(), "default");
+    }
+
+    #[test]
+    fn tenant_to_namespace_trims_surrounding() {
+        let ns = tenant_to_namespace(&TenantId::new(" acme "));
+        assert_eq!(ns.as_str(), "acme");
     }
 }
