@@ -18,11 +18,11 @@ async fn task_dependency_resolves_when_prerequisite_completes() {
     let project = project();
 
     tasks
-        .submit(&project, TaskId::new("task_a"), None, None, 0)
+        .submit(&project, None, TaskId::new("task_a"), None, None, 0)
         .await
         .unwrap();
     tasks
-        .submit(&project, TaskId::new("task_b"), None, None, 0)
+        .submit(&project, None, TaskId::new("task_b"), None, None, 0)
         .await
         .unwrap();
 
@@ -36,11 +36,11 @@ async fn task_dependency_resolves_when_prerequisite_completes() {
     assert_eq!(task_b.state, TaskState::WaitingDependency);
 
     tasks
-        .claim(&TaskId::new("task_a"), "worker-a".to_owned(), 60_000)
+        .claim(None, &TaskId::new("task_a"), "worker-a".to_owned(), 60_000)
         .await
         .unwrap();
-    tasks.start(&TaskId::new("task_a")).await.unwrap();
-    tasks.complete(&TaskId::new("task_a")).await.unwrap();
+    tasks.start(None, &TaskId::new("task_a")).await.unwrap();
+    tasks.complete(None, &TaskId::new("task_a")).await.unwrap();
 
     let deps = TaskDependencyReadModel::list_blocking(store.as_ref(), &TaskId::new("task_b"))
         .await

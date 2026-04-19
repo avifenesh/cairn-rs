@@ -87,15 +87,12 @@ pub fn session_to_flow_id(project: &ProjectKey, session_id: &SessionId) -> FlowI
 
 /// Mint an `ExecutionId` scoped to a session's `FlowId` for a given run.
 ///
-/// This is the phase-2 helper for session-attached executions: once the
-/// orchestrator grant-flow migration lands, per-session runs will route
-/// via `ExecutionId::deterministic_for_flow` so the partition index is
-/// derived from the session's FlowId (grouping all runs of one session
-/// onto the same partition). The signature is landed here so callers
-/// can migrate incrementally; wiring into service callers is phase 2
-/// scope.
-#[allow(dead_code)]
-pub(crate) fn session_run_to_execution_id(
+/// Per-session runs route via `ExecutionId::deterministic_for_flow`
+/// so the partition index is derived
+/// from the session's FlowId. This co-locates every run of a session on
+/// the same Valkey partition, which is the whole point of the
+/// `{fp:N}:<uuid>` hash-tag scheme.
+pub fn session_run_to_execution_id(
     project: &ProjectKey,
     session_id: &SessionId,
     run_id: &RunId,
@@ -104,6 +101,26 @@ pub(crate) fn session_run_to_execution_id(
     let input = format!(
         "v{NAMESPACE_VERSION}:session_run:\0{}\0{}\0{}\0{}\0{}",
         project.tenant_id, project.workspace_id, project.project_id, session_id, run_id
+    );
+    let uuid = Uuid::new_v5(&CAIRN_NAMESPACE, input.as_bytes());
+    let flow = session_to_flow_id(project, session_id);
+    ExecutionId::deterministic_for_flow(&flow, config, uuid)
+}
+
+/// Mint an `ExecutionId` scoped to a session's `FlowId` for a given task.
+///
+/// Per-session tasks share the session's FF FlowId just like runs, so
+/// `execution_partition` lands them on the same partition as every
+/// other run/task of the same session.
+pub fn session_task_to_execution_id(
+    project: &ProjectKey,
+    session_id: &SessionId,
+    task_id: &TaskId,
+    config: &PartitionConfig,
+) -> ExecutionId {
+    let input = format!(
+        "v{NAMESPACE_VERSION}:session_task:\0{}\0{}\0{}\0{}\0{}",
+        project.tenant_id, project.workspace_id, project.project_id, session_id, task_id
     );
     let uuid = Uuid::new_v5(&CAIRN_NAMESPACE, input.as_bytes());
     let flow = session_to_flow_id(project, session_id);
@@ -525,5 +542,121 @@ mod tests {
     fn tenant_to_namespace_trims_surrounding() {
         let ns = tenant_to_namespace(&TenantId::new(" acme "));
         assert_eq!(ns.as_str(), "acme");
+    }
+
+    // ── session_task_to_execution_id coverage ──────────────────────────
+
+    #[test]
+    fn session_task_to_execution_id_deterministic() {
+        let p = test_project();
+        let cfg = PartitionConfig::default();
+        let sid = SessionId::new("sess_task_stable");
+        let tid = TaskId::new("task_stable");
+        let e1 = session_task_to_execution_id(&p, &sid, &tid, &cfg);
+        let e2 = session_task_to_execution_id(&p, &sid, &tid, &cfg);
+        let e3 = session_task_to_execution_id(&p, &sid, &tid, &cfg);
+        assert_eq!(e1, e2);
+        assert_eq!(e2, e3);
+    }
+
+    #[test]
+    fn same_task_different_sessions_no_collision() {
+        let p = test_project();
+        let cfg = PartitionConfig::default();
+        let tid = TaskId::new("task_shared_across_sessions");
+        let e1 = session_task_to_execution_id(&p, &SessionId::new("sess_a"), &tid, &cfg);
+        let e2 = session_task_to_execution_id(&p, &SessionId::new("sess_b"), &tid, &cfg);
+        assert_ne!(e1, e2);
+    }
+
+    #[test]
+    fn session_task_to_execution_id_different_from_task() {
+        // session_task_to_execution_id routes via `deterministic_for_flow`
+        // while task_to_execution_id routes via `deterministic_solo`.
+        // Identical (project, task_id) pairs must still produce distinct
+        // ExecutionIds across the two paths — see
+        // session_run_to_execution_id_different_from_run for the run-side
+        // mirror.
+        let p = test_project();
+        let cfg = PartitionConfig::default();
+        let tid = TaskId::new("task_shared_between_paths");
+        let solo = task_to_execution_id(&p, &tid, &cfg);
+        let via_session = session_task_to_execution_id(&p, &SessionId::new("sess_x"), &tid, &cfg);
+        assert_ne!(solo, via_session);
+    }
+
+    #[test]
+    fn session_task_and_session_run_no_collision() {
+        // Same session, same id-string — the entity-kind prefix in the
+        // UUID-v5 input must keep task and run separate.
+        let p = test_project();
+        let cfg = PartitionConfig::default();
+        let sid = SessionId::new("sess_collide");
+        let e_run = session_run_to_execution_id(&p, &sid, &RunId::new("abc"), &cfg);
+        let e_task = session_task_to_execution_id(&p, &sid, &TaskId::new("abc"), &cfg);
+        assert_ne!(e_run, e_task);
+    }
+
+    #[test]
+    fn session_task_delimiter_collision_impossible() {
+        let cfg = PartitionConfig::default();
+        let e1 = session_task_to_execution_id(
+            &ProjectKey::new("a:b", "c", "d"),
+            &SessionId::new("s"),
+            &TaskId::new("t1"),
+            &cfg,
+        );
+        let e2 = session_task_to_execution_id(
+            &ProjectKey::new("a", "b:c", "d"),
+            &SessionId::new("s"),
+            &TaskId::new("t1"),
+            &cfg,
+        );
+        assert_ne!(e1, e2);
+
+        let e3 = session_task_to_execution_id(
+            &test_project(),
+            &SessionId::new("s:t"),
+            &TaskId::new("1"),
+            &cfg,
+        );
+        let e4 = session_task_to_execution_id(
+            &test_project(),
+            &SessionId::new("s"),
+            &TaskId::new("t:1"),
+            &cfg,
+        );
+        assert_ne!(e3, e4);
+    }
+
+    /// RFC-011 co-location invariant: runs and tasks scoped to the same
+    /// session must land on the same `execution_partition(&eid, &cfg)`
+    /// result. This is the point of the session-scoped ExecutionId path —
+    /// the partition index is derived from the session's FlowId, so every
+    /// execution that uses `deterministic_for_flow(&flow, ...)` shares a
+    /// partition with every other execution of the same flow.
+    #[test]
+    fn same_session_runs_and_tasks_same_partition() {
+        use ff_core::partition::execution_partition;
+        let p = test_project();
+        let cfg = PartitionConfig::default();
+        let sid = SessionId::new("sess_colocate");
+
+        let run_a = session_run_to_execution_id(&p, &sid, &RunId::new("run_1"), &cfg);
+        let run_b = session_run_to_execution_id(&p, &sid, &RunId::new("run_2"), &cfg);
+        let task_a = session_task_to_execution_id(&p, &sid, &TaskId::new("task_1"), &cfg);
+        let task_b = session_task_to_execution_id(&p, &sid, &TaskId::new("task_2"), &cfg);
+
+        let p_run_a = execution_partition(&run_a, &cfg);
+        let p_run_b = execution_partition(&run_b, &cfg);
+        let p_task_a = execution_partition(&task_a, &cfg);
+        let p_task_b = execution_partition(&task_b, &cfg);
+
+        assert_eq!(p_run_a, p_run_b, "runs in same session must co-locate");
+        assert_eq!(
+            p_run_a, p_task_a,
+            "task must co-locate with runs in same session"
+        );
+        assert_eq!(p_task_a, p_task_b, "tasks in same session must co-locate");
     }
 }

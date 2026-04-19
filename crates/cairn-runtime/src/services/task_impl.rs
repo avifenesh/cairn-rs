@@ -78,6 +78,7 @@ where
     async fn submit(
         &self,
         project: &ProjectKey,
+        _session_id: Option<&SessionId>,
         task_id: TaskId,
         parent_run_id: Option<RunId>,
         parent_task_id: Option<TaskId>,
@@ -101,6 +102,7 @@ where
 
     async fn claim(
         &self,
+        _session_id: Option<&SessionId>,
         task_id: &TaskId,
         lease_owner: String,
         lease_duration_ms: u64,
@@ -147,6 +149,7 @@ where
 
     async fn heartbeat(
         &self,
+        _session_id: Option<&SessionId>,
         task_id: &TaskId,
         lease_extension_ms: u64,
     ) -> Result<TaskRecord, RuntimeError> {
@@ -176,12 +179,20 @@ where
         self.get_task(task_id).await
     }
 
-    async fn start(&self, task_id: &TaskId) -> Result<TaskRecord, RuntimeError> {
+    async fn start(
+        &self,
+        _session_id: Option<&SessionId>,
+        task_id: &TaskId,
+    ) -> Result<TaskRecord, RuntimeError> {
         self.transition_task(task_id, TaskState::Running, None)
             .await
     }
 
-    async fn complete(&self, task_id: &TaskId) -> Result<TaskRecord, RuntimeError> {
+    async fn complete(
+        &self,
+        _session_id: Option<&SessionId>,
+        task_id: &TaskId,
+    ) -> Result<TaskRecord, RuntimeError> {
         let result = self
             .transition_task(task_id, TaskState::Completed, None)
             .await?;
@@ -310,6 +321,7 @@ where
 
     async fn fail(
         &self,
+        _session_id: Option<&SessionId>,
         task_id: &TaskId,
         failure_class: FailureClass,
     ) -> Result<TaskRecord, RuntimeError> {
@@ -324,12 +336,20 @@ where
             .await
     }
 
-    async fn cancel(&self, task_id: &TaskId) -> Result<TaskRecord, RuntimeError> {
+    async fn cancel(
+        &self,
+        _session_id: Option<&SessionId>,
+        task_id: &TaskId,
+    ) -> Result<TaskRecord, RuntimeError> {
         self.transition_task(task_id, TaskState::Canceled, None)
             .await
     }
 
-    async fn dead_letter(&self, task_id: &TaskId) -> Result<TaskRecord, RuntimeError> {
+    async fn dead_letter(
+        &self,
+        _session_id: Option<&SessionId>,
+        task_id: &TaskId,
+    ) -> Result<TaskRecord, RuntimeError> {
         self.transition_task(task_id, TaskState::DeadLettered, None)
             .await
     }
@@ -352,6 +372,7 @@ where
 
     async fn pause(
         &self,
+        _session_id: Option<&SessionId>,
         task_id: &TaskId,
         reason: PauseReason,
     ) -> Result<TaskRecord, RuntimeError> {
@@ -383,6 +404,7 @@ where
 
     async fn resume(
         &self,
+        _session_id: Option<&SessionId>,
         task_id: &TaskId,
         trigger: ResumeTrigger,
         target: TaskResumeTarget,
@@ -434,7 +456,11 @@ where
         Ok(self.store.list_expired_leases(now, limit).await?)
     }
 
-    async fn release_lease(&self, task_id: &TaskId) -> Result<TaskRecord, RuntimeError> {
+    async fn release_lease(
+        &self,
+        _session_id: Option<&SessionId>,
+        task_id: &TaskId,
+    ) -> Result<TaskRecord, RuntimeError> {
         self.transition_task(task_id, TaskState::Queued, None).await
     }
 
@@ -495,24 +521,25 @@ mod tests {
         let svc = TaskServiceImpl::new(store.clone());
 
         let task_id = TaskId::new("task_pause");
-        svc.submit(&project(), task_id.clone(), None, None, 0)
+        svc.submit(&project(), None, task_id.clone(), None, None, 0)
             .await
             .unwrap();
 
         // Claim a lease
         let claimed = svc
-            .claim(&task_id, "worker-1".into(), 60_000)
+            .claim(None, &task_id, "worker-1".into(), 60_000)
             .await
             .unwrap();
         assert!(claimed.lease_owner.is_some());
         assert!(claimed.lease_expires_at.is_some());
 
         // Start running
-        svc.start(&task_id).await.unwrap();
+        svc.start(None, &task_id).await.unwrap();
 
         // Pause — should clear lease fields
         let paused = svc
             .pause(
+                None,
                 &task_id,
                 PauseReason {
                     kind: PauseReasonKind::OperatorPause,
@@ -538,13 +565,14 @@ mod tests {
         let svc = TaskServiceImpl::new(store.clone());
 
         let task_id = TaskId::new("task_resume");
-        svc.submit(&project(), task_id.clone(), None, None, 0)
+        svc.submit(&project(), None, task_id.clone(), None, None, 0)
             .await
             .unwrap();
 
-        svc.claim(&task_id, "w".into(), 60_000).await.unwrap();
-        svc.start(&task_id).await.unwrap();
+        svc.claim(None, &task_id, "w".into(), 60_000).await.unwrap();
+        svc.start(None, &task_id).await.unwrap();
         svc.pause(
+            None,
             &task_id,
             PauseReason {
                 kind: PauseReasonKind::OperatorPause,
@@ -558,6 +586,7 @@ mod tests {
 
         let resumed = svc
             .resume(
+                None,
                 &task_id,
                 ResumeTrigger::OperatorResume,
                 TaskResumeTarget::Queued,
@@ -575,7 +604,7 @@ mod tests {
         let svc = TaskServiceImpl::new(store.clone());
 
         let parent_task_id = TaskId::new("parent_task");
-        svc.submit(&project(), parent_task_id.clone(), None, None, 0)
+        svc.submit(&project(), None, parent_task_id.clone(), None, None, 0)
             .await
             .unwrap();
 

@@ -60,6 +60,7 @@ async fn event_log_compaction_retains_state() {
     task_svc
         .submit(
             &project,
+            None,
             final_task_id.clone(),
             Some(final_run_id.clone()),
             None,
@@ -68,7 +69,7 @@ async fn event_log_compaction_retains_state() {
         .await
         .unwrap();
     task_svc
-        .claim(&final_task_id, "worker_compact".to_owned(), 60_000)
+        .claim(None, &final_task_id, "worker_compact".to_owned(), 60_000)
         .await
         .unwrap();
 

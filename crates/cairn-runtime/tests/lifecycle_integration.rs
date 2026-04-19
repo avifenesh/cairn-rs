@@ -86,6 +86,7 @@ async fn run_lifecycle_pending_to_running_to_completed() {
     // Move into active execution, then complete
     let run = run_svc
         .resume(
+            &SessionId::new("sess_1"),
             &RunId::new("run_1"),
             ResumeTrigger::RuntimeSignal,
             RunResumeTarget::Running,
@@ -94,7 +95,10 @@ async fn run_lifecycle_pending_to_running_to_completed() {
         .unwrap();
     assert_eq!(run.state, RunState::Running);
 
-    let run = run_svc.complete(&RunId::new("run_1")).await.unwrap();
+    let run = run_svc
+        .complete(&SessionId::new("sess_1"), &RunId::new("run_1"))
+        .await
+        .unwrap();
     assert_eq!(run.state, RunState::Completed);
     assert!(run.state.is_terminal());
 }
@@ -122,7 +126,11 @@ async fn run_fail_with_failure_class() {
         .unwrap();
 
     let run = run_svc
-        .fail(&RunId::new("run_1"), FailureClass::TimedOut)
+        .fail(
+            &SessionId::new("sess_1"),
+            &RunId::new("run_1"),
+            FailureClass::TimedOut,
+        )
         .await
         .unwrap();
 
@@ -152,15 +160,21 @@ async fn terminal_run_cannot_transition() {
         .unwrap();
     run_svc
         .resume(
+            &SessionId::new("sess_1"),
             &RunId::new("run_1"),
             ResumeTrigger::RuntimeSignal,
             RunResumeTarget::Running,
         )
         .await
         .unwrap();
-    run_svc.complete(&RunId::new("run_1")).await.unwrap();
+    run_svc
+        .complete(&SessionId::new("sess_1"), &RunId::new("run_1"))
+        .await
+        .unwrap();
 
-    let result = run_svc.cancel(&RunId::new("run_1")).await;
+    let result = run_svc
+        .cancel(&SessionId::new("sess_1"), &RunId::new("run_1"))
+        .await;
     assert!(result.is_err());
 }
 
@@ -172,14 +186,14 @@ async fn task_submit_claim_start_complete_lifecycle() {
 
     // Submit
     let task = task_svc
-        .submit(&project, TaskId::new("task_1"), None, None, 0)
+        .submit(&project, None, TaskId::new("task_1"), None, None, 0)
         .await
         .unwrap();
     assert_eq!(task.state, TaskState::Queued);
 
     // Claim
     let task = task_svc
-        .claim(&TaskId::new("task_1"), "worker-a".to_owned(), 60_000)
+        .claim(None, &TaskId::new("task_1"), "worker-a".to_owned(), 60_000)
         .await
         .unwrap();
     assert_eq!(task.state, TaskState::Leased);
@@ -187,11 +201,14 @@ async fn task_submit_claim_start_complete_lifecycle() {
     assert!(task.lease_expires_at.is_some());
 
     // Start
-    let task = task_svc.start(&TaskId::new("task_1")).await.unwrap();
+    let task = task_svc.start(None, &TaskId::new("task_1")).await.unwrap();
     assert_eq!(task.state, TaskState::Running);
 
     // Complete
-    let task = task_svc.complete(&TaskId::new("task_1")).await.unwrap();
+    let task = task_svc
+        .complete(None, &TaskId::new("task_1"))
+        .await
+        .unwrap();
     assert_eq!(task.state, TaskState::Completed);
     assert!(task.state.is_terminal());
 }
@@ -203,17 +220,17 @@ async fn task_claim_requires_queued_state() {
     let project = test_project();
 
     task_svc
-        .submit(&project, TaskId::new("task_1"), None, None, 0)
+        .submit(&project, None, TaskId::new("task_1"), None, None, 0)
         .await
         .unwrap();
     task_svc
-        .claim(&TaskId::new("task_1"), "worker-a".to_owned(), 60_000)
+        .claim(None, &TaskId::new("task_1"), "worker-a".to_owned(), 60_000)
         .await
         .unwrap();
 
     // Can't claim again (already leased)
     let result = task_svc
-        .claim(&TaskId::new("task_1"), "worker-b".to_owned(), 60_000)
+        .claim(None, &TaskId::new("task_1"), "worker-b".to_owned(), 60_000)
         .await;
     assert!(result.is_err());
 }
@@ -225,17 +242,17 @@ async fn task_lease_expired_failure_is_retryable() {
     let project = test_project();
 
     task_svc
-        .submit(&project, TaskId::new("task_1"), None, None, 0)
+        .submit(&project, None, TaskId::new("task_1"), None, None, 0)
         .await
         .unwrap();
     task_svc
-        .claim(&TaskId::new("task_1"), "worker-a".to_owned(), 60_000)
+        .claim(None, &TaskId::new("task_1"), "worker-a".to_owned(), 60_000)
         .await
         .unwrap();
-    task_svc.start(&TaskId::new("task_1")).await.unwrap();
+    task_svc.start(None, &TaskId::new("task_1")).await.unwrap();
 
     let task = task_svc
-        .fail(&TaskId::new("task_1"), FailureClass::LeaseExpired)
+        .fail(None, &TaskId::new("task_1"), FailureClass::LeaseExpired)
         .await
         .unwrap();
 
@@ -272,6 +289,7 @@ async fn full_session_run_task_lifecycle() {
     assert_eq!(run.state, RunState::Pending);
     let run = run_svc
         .resume(
+            &SessionId::new("sess_1"),
             &RunId::new("run_1"),
             ResumeTrigger::RuntimeSignal,
             RunResumeTarget::Running,
@@ -284,6 +302,7 @@ async fn full_session_run_task_lifecycle() {
     let task = task_svc
         .submit(
             &project,
+            None,
             TaskId::new("task_1"),
             Some(RunId::new("run_1")),
             None,
@@ -295,14 +314,20 @@ async fn full_session_run_task_lifecycle() {
 
     // Work the task through its lifecycle
     task_svc
-        .claim(&TaskId::new("task_1"), "worker-a".to_owned(), 60_000)
+        .claim(None, &TaskId::new("task_1"), "worker-a".to_owned(), 60_000)
         .await
         .unwrap();
-    task_svc.start(&TaskId::new("task_1")).await.unwrap();
-    task_svc.complete(&TaskId::new("task_1")).await.unwrap();
+    task_svc.start(None, &TaskId::new("task_1")).await.unwrap();
+    task_svc
+        .complete(None, &TaskId::new("task_1"))
+        .await
+        .unwrap();
 
     // Complete run
-    run_svc.complete(&RunId::new("run_1")).await.unwrap();
+    run_svc
+        .complete(&SessionId::new("sess_1"), &RunId::new("run_1"))
+        .await
+        .unwrap();
 
     // Verify final states
     let session = session_svc

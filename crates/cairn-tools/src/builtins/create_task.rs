@@ -141,9 +141,14 @@ impl ToolHandler for CreateTaskTool {
         let parent_run_id = RunId::new(run_id_str);
 
         // ── Submit via TaskService ────────────────────────────────────────────
+        // Pass `None` for session_id. The adapter
+        // (FabricTaskServiceAdapter::submit) derives the session from the
+        // parent_run_id's projection record, so the task co-locates with
+        // its parent run's FF partition. The tool does not carry session
+        // context directly.
         let record = self
             .task_service
-            .submit(project, task_id.clone(), Some(parent_run_id), None, 0)
+            .submit(project, None, task_id.clone(), Some(parent_run_id), None, 0)
             .await
             .map_err(|e| ToolError::Transient(e.to_string()))?;
 

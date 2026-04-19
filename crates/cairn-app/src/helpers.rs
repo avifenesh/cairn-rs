@@ -5,12 +5,13 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use axum::http::StatusCode;
+use axum::response::IntoResponse;
 
 use cairn_api::feed::FeedItem;
 use cairn_domain::workers::{ExternalWorkerProgress, ExternalWorkerRecord, ExternalWorkerReport};
 use cairn_domain::{
     ApprovalId, CheckpointId, EventEnvelope, ProjectKey, RunId, RunState, RuntimeEvent, Scope,
-    TaskId, TaskState, TenantId, ToolInvocationId, WorkerId,
+    SessionId, TaskId, TaskState, TenantId, ToolInvocationId, WorkerId,
 };
 use cairn_runtime::DefaultsService;
 use cairn_store::projections::{RunReadModel, RunRecord, TaskReadModel};
@@ -204,6 +205,61 @@ pub(crate) async fn persist_run_mode_default(
         )
         .await
         .map(|_| ())
+}
+
+/// Resolve a task's session_id by walking `task.parent_run_id → run.session_id`.
+/// Returns `Ok(None)` for top-level tasks (no parent run) — they were submitted
+/// with `None` and must continue to pass `None`.
+///
+/// Errors (returned as axum `Response`):
+/// - Store fetch of the parent run fails → 500 (propagates the transient error
+///   rather than silently degrading to solo-mint).
+/// - Task has `parent_run_id` but the run is not found in the projection → 404
+///   (the task was created with a session, so minting as solo would hit the
+///   wrong Valkey partition under RFC-011 and produce an unexplained NotFound
+///   from the Fabric layer).
+pub(crate) async fn resolve_session_for_task_record(
+    state: &AppState,
+    task: &cairn_store::projections::TaskRecord,
+) -> Result<Option<SessionId>, axum::response::Response> {
+    let Some(parent_run_id) = task.parent_run_id.as_ref() else {
+        return Ok(None);
+    };
+    let run = state
+        .runtime
+        .runs
+        .get(parent_run_id)
+        .await
+        .map_err(runtime_error_response)?
+        .ok_or_else(|| {
+            AppApiError::new(
+                StatusCode::NOT_FOUND,
+                "not_found",
+                format!("parent run {} not found", parent_run_id.as_str()),
+            )
+            .into_response()
+        })?;
+    Ok(Some(run.session_id))
+}
+
+/// Fetch the task by id, then resolve its session_id via
+/// [`resolve_session_for_task_record`]. Returns `Ok(None)` if the task does not
+/// exist (the caller will typically surface that as a 404 on its own path) or
+/// has no parent run. Errors propagate store and missing-parent-run failures.
+pub(crate) async fn resolve_session_for_task_id(
+    state: &AppState,
+    task_id: &TaskId,
+) -> Result<Option<SessionId>, axum::response::Response> {
+    let Some(task) = state
+        .runtime
+        .tasks
+        .get(task_id)
+        .await
+        .map_err(runtime_error_response)?
+    else {
+        return Ok(None);
+    };
+    resolve_session_for_task_record(state, &task).await
 }
 
 pub(crate) async fn build_run_record_view(state: &AppState, run: RunRecord) -> RunRecordView {

@@ -114,6 +114,7 @@ async fn e2e_full_session_lifecycle() {
         .tasks
         .submit(
             &project,
+            None,
             TaskId::new("task_e2e_1"),
             Some(RunId::new("run_e2e_1")),
             None,
@@ -127,6 +128,7 @@ async fn e2e_full_session_lifecycle() {
         .tasks
         .submit(
             &project,
+            None,
             TaskId::new("task_e2e_2"),
             Some(RunId::new("run_e2e_1")),
             None,
@@ -139,33 +141,53 @@ async fn e2e_full_session_lifecycle() {
     // ── 4. Claim tasks ───────────────────────────────────────────────────
     let claimed = svc
         .tasks
-        .claim(&TaskId::new("task_e2e_1"), "worker_1".to_owned(), 30_000)
+        .claim(
+            None,
+            &TaskId::new("task_e2e_1"),
+            "worker_1".to_owned(),
+            30_000,
+        )
         .await
         .unwrap();
     assert_eq!(claimed.state, TaskState::Leased);
 
     // ── 5. Start and complete tasks ──────────────────────────────────────
-    svc.tasks.start(&TaskId::new("task_e2e_1")).await.unwrap();
+    svc.tasks
+        .start(None, &TaskId::new("task_e2e_1"))
+        .await
+        .unwrap();
     let completed = svc
         .tasks
-        .complete(&TaskId::new("task_e2e_1"))
+        .complete(None, &TaskId::new("task_e2e_1"))
         .await
         .unwrap();
     assert!(completed.state.is_terminal());
 
     // Claim + start + complete task 2.
     svc.tasks
-        .claim(&TaskId::new("task_e2e_2"), "worker_1".to_owned(), 30_000)
+        .claim(
+            None,
+            &TaskId::new("task_e2e_2"),
+            "worker_1".to_owned(),
+            30_000,
+        )
         .await
         .unwrap();
-    svc.tasks.start(&TaskId::new("task_e2e_2")).await.unwrap();
     svc.tasks
-        .complete(&TaskId::new("task_e2e_2"))
+        .start(None, &TaskId::new("task_e2e_2"))
+        .await
+        .unwrap();
+    svc.tasks
+        .complete(None, &TaskId::new("task_e2e_2"))
         .await
         .unwrap();
 
     // ── 6. Complete run ──────────────────────────────────────────────────
-    let run_done = svc.runs.complete(&RunId::new("run_e2e_1")).await.unwrap();
+    let run_done = svc
+        .runs
+        .complete(&SessionId::new("sess_e2e_1"), &RunId::new("run_e2e_1"))
+        .await
+        .unwrap();
     assert_eq!(run_done.state, RunState::Completed);
 
     // ── 7. Verify events emitted ─────────────────────────────────────────
@@ -451,7 +473,10 @@ async fn e2e_entitlement_enforcement() {
     );
 
     // ── Complete one run and verify quota is available again ──────────────
-    svc.runs.complete(&RunId::new("run_ent_1")).await.unwrap();
+    svc.runs
+        .complete(&SessionId::new("sess_ent_1"), &RunId::new("run_ent_1"))
+        .await
+        .unwrap();
     mgr.record_run_completed("e2e_ws");
 
     let quota_after = mgr.check_run_quota(&WorkspaceId::new("e2e_ws"));

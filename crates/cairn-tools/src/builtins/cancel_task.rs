@@ -80,7 +80,11 @@ impl ToolHandler for CancelTaskTool {
             .unwrap_or("cancelled by agent")
             .to_owned();
 
-        match self.tasks.cancel(&TaskId::new(task_id_str)).await {
+        // Pass `None` for session_id; the adapter resolves the task's
+        // session from the projection (TaskRecord.parent_run_id →
+        // RunRecord.session_id). Tools don't carry session context
+        // directly.
+        match self.tasks.cancel(None, &TaskId::new(task_id_str)).await {
             Ok(task) => Ok(ToolResult::ok(serde_json::json!({
                 "task_id": task.task_id.as_str(),
                 "state":   format!("{:?}", task.state).to_lowercase(),
@@ -123,7 +127,7 @@ mod tests {
     async fn cancels_queued_task() {
         let svc = svc().await;
         svc.tasks
-            .submit(&project(), TaskId::new("task_ct"), None, None, 0)
+            .submit(&project(), None, TaskId::new("task_ct"), None, None, 0)
             .await
             .unwrap();
 

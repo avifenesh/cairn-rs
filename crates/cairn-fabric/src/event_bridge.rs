@@ -66,6 +66,13 @@ pub enum BridgeEvent {
     TaskCreated {
         task_id: TaskId,
         project: ProjectKey,
+        /// The session this task is scoped to. Carried through the
+        /// bridge so every downstream consumer (projection,
+        /// FF tag write, audit) sees the same session binding that the
+        /// ExecutionId was minted against via
+        /// `id_map::session_task_to_execution_id`. `None` for bare
+        /// (session-less) submissions.
+        session_id: Option<SessionId>,
         parent_run_id: Option<RunId>,
         parent_task_id: Option<TaskId>,
     },
@@ -368,6 +375,7 @@ fn bridge_event_to_runtime_event(event: &BridgeEvent) -> RuntimeEvent {
         BridgeEvent::TaskCreated {
             task_id,
             project,
+            session_id: _,
             parent_run_id,
             parent_task_id,
         } => RuntimeEvent::TaskCreated(TaskCreated {
@@ -655,6 +663,7 @@ mod tests {
         let event = BridgeEvent::TaskCreated {
             task_id: TaskId::new("task_1"),
             project: ProjectKey::new("t", "w", "p"),
+            session_id: Some(SessionId::new("sess_1")),
             parent_run_id: Some(RunId::new("run_1")),
             parent_task_id: None,
         };
@@ -676,6 +685,7 @@ mod tests {
         let event = BridgeEvent::TaskCreated {
             task_id: TaskId::new("task_child"),
             project: ProjectKey::new("t", "w", "p"),
+            session_id: None,
             parent_run_id: Some(RunId::new("run_1")),
             parent_task_id: Some(TaskId::new("task_parent")),
         };

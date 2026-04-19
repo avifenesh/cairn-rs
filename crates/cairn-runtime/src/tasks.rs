@@ -21,9 +21,16 @@ use crate::error::RuntimeError;
 #[async_trait]
 pub trait TaskService: Send + Sync {
     /// Submit a new task.
+    ///
+    /// `session_id` scopes the mint path: `Some(sid)` co-locates the task
+    /// on the session's FlowId partition; `None` mints via the solo path
+    /// for bare tasks (e.g. A2A). The choice at submit time MUST match
+    /// every downstream mutation's `session_id` argument; a mismatch
+    /// targets a non-existent FF execution.
     async fn submit(
         &self,
         project: &ProjectKey,
+        session_id: Option<&SessionId>,
         task_id: TaskId,
         parent_run_id: Option<RunId>,
         parent_task_id: Option<TaskId>,
@@ -51,8 +58,15 @@ pub trait TaskService: Send + Sync {
     async fn get(&self, task_id: &TaskId) -> Result<Option<TaskRecord>, RuntimeError>;
 
     /// Claim a task lease (queued -> leased).
+    ///
+    /// `session_id` must match the value supplied at [`Self::submit`]
+    /// time — the FF `ExecutionId` is cached in no projection; it is
+    /// re-derived on every call from `(project, session_id, task_id)`.
+    /// Handler path fetches it from `TaskRecord` (via its
+    /// `parent_run_id` → `RunRecord.session_id`) before invoking.
     async fn claim(
         &self,
+        session_id: Option<&SessionId>,
         task_id: &TaskId,
         lease_owner: String,
         lease_duration_ms: u64,
@@ -61,28 +75,46 @@ pub trait TaskService: Send + Sync {
     /// Heartbeat to extend a lease.
     async fn heartbeat(
         &self,
+        session_id: Option<&SessionId>,
         task_id: &TaskId,
         lease_extension_ms: u64,
     ) -> Result<TaskRecord, RuntimeError>;
 
     /// Transition to running (leased -> running).
-    async fn start(&self, task_id: &TaskId) -> Result<TaskRecord, RuntimeError>;
+    async fn start(
+        &self,
+        session_id: Option<&SessionId>,
+        task_id: &TaskId,
+    ) -> Result<TaskRecord, RuntimeError>;
 
     /// Complete a task (terminal).
-    async fn complete(&self, task_id: &TaskId) -> Result<TaskRecord, RuntimeError>;
+    async fn complete(
+        &self,
+        session_id: Option<&SessionId>,
+        task_id: &TaskId,
+    ) -> Result<TaskRecord, RuntimeError>;
 
     /// Fail a task (terminal or retryable).
     async fn fail(
         &self,
+        session_id: Option<&SessionId>,
         task_id: &TaskId,
         failure_class: FailureClass,
     ) -> Result<TaskRecord, RuntimeError>;
 
     /// Cancel a task (terminal).
-    async fn cancel(&self, task_id: &TaskId) -> Result<TaskRecord, RuntimeError>;
+    async fn cancel(
+        &self,
+        session_id: Option<&SessionId>,
+        task_id: &TaskId,
+    ) -> Result<TaskRecord, RuntimeError>;
 
     /// Dead-letter a task (terminal, after exhausting retries).
-    async fn dead_letter(&self, task_id: &TaskId) -> Result<TaskRecord, RuntimeError>;
+    async fn dead_letter(
+        &self,
+        session_id: Option<&SessionId>,
+        task_id: &TaskId,
+    ) -> Result<TaskRecord, RuntimeError>;
 
     /// RFC 005: query the dead-letter queue — tasks that exhausted all retry attempts.
     async fn list_dead_lettered(
@@ -95,6 +127,7 @@ pub trait TaskService: Send + Sync {
     /// Pause a task.
     async fn pause(
         &self,
+        session_id: Option<&SessionId>,
         task_id: &TaskId,
         reason: PauseReason,
     ) -> Result<TaskRecord, RuntimeError>;
@@ -102,6 +135,7 @@ pub trait TaskService: Send + Sync {
     /// Resume a paused task.
     async fn resume(
         &self,
+        session_id: Option<&SessionId>,
         task_id: &TaskId,
         trigger: ResumeTrigger,
         target: TaskResumeTarget,
@@ -123,7 +157,11 @@ pub trait TaskService: Send + Sync {
     ) -> Result<Vec<TaskRecord>, RuntimeError>;
 
     /// Release a task lease (leased -> queued), clearing lease_owner.
-    async fn release_lease(&self, task_id: &TaskId) -> Result<TaskRecord, RuntimeError>;
+    async fn release_lease(
+        &self,
+        session_id: Option<&SessionId>,
+        task_id: &TaskId,
+    ) -> Result<TaskRecord, RuntimeError>;
 
     /// Spawn a subagent task linked to a parent run.
     ///
@@ -143,11 +181,21 @@ pub trait TaskService: Send + Sync {
         parent_run_id: RunId,
         _parent_task_id: Option<TaskId>,
         child_task_id: TaskId,
-        _child_session_id: SessionId,
+        child_session_id: SessionId,
         _child_run_id: Option<RunId>,
     ) -> Result<TaskRecord, RuntimeError> {
-        self.submit(project, child_task_id, Some(parent_run_id), None, 0)
-            .await
+        // Subagent tasks are scoped to the parent's session so the
+        // child execution co-locates on the session's FlowId partition
+        // with the parent run.
+        self.submit(
+            project,
+            Some(&child_session_id),
+            child_task_id,
+            Some(parent_run_id),
+            None,
+            0,
+        )
+        .await
     }
 }
 

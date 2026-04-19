@@ -538,7 +538,11 @@ impl RuntimeExecutePhase {
             }
 
             // ── CompleteRun ────────────────────────────────────────────────
-            ActionType::CompleteRun => match self.run_service.complete(&ctx.run_id).await {
+            ActionType::CompleteRun => match self
+                .run_service
+                .complete(&ctx.session_id, &ctx.run_id)
+                .await
+            {
                 Ok(_) => Ok(ActionResult {
                     proposal: proposal.clone(),
                     status: ActionStatus::Succeeded,

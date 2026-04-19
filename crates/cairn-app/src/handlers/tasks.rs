@@ -28,6 +28,7 @@ use crate::errors::{
     AppApiError,
 };
 use crate::extractors::{HasProjectScope, ProjectJson, ProjectScope, TenantScope};
+use crate::helpers::resolve_session_for_task_record;
 use crate::state::AppState;
 #[allow(unused_imports)]
 use crate::TaskRecordDoc;
@@ -128,6 +129,20 @@ impl CreateTaskRequest {
             self.project_id.as_str(),
         )
     }
+
+    /// SEC-002: reject null bytes, control chars, and oversized ids that
+    /// would otherwise flow into FF key builders where a null byte is a
+    /// delimiter — mirrors `CreateRunRequest::validate`.
+    pub(crate) fn validate(&self) -> Result<(), String> {
+        crate::validate::check_all(&[
+            crate::validate::require_id("tenant_id", &self.tenant_id),
+            crate::validate::require_id("workspace_id", &self.workspace_id),
+            crate::validate::require_id("project_id", &self.project_id),
+            crate::validate::require_id("task_id", &self.task_id),
+            crate::validate::valid_id("parent_run_id", &self.parent_run_id),
+            crate::validate::valid_id("parent_task_id", &self.parent_task_id),
+        ])
+    }
 }
 
 impl HasProjectScope for CreateTaskRequest {
@@ -207,10 +222,17 @@ pub(crate) async fn create_task_handler(
     project_scope: ProjectJson<CreateTaskRequest>,
 ) -> impl IntoResponse {
     let body = project_scope.into_inner();
+    // SEC-002: validate ids before they reach FF key builders.
+    if let Err(msg) = body.validate() {
+        return bad_request_response(msg);
+    }
     let project = CreateTaskRequest::project(&body);
+    let mut session_id: Option<cairn_domain::SessionId> = None;
     if let Some(parent_run_id) = body.parent_run_id.as_ref().map(RunId::new) {
         match state.runtime.runs.get(&parent_run_id).await {
-            Ok(Some(parent_run)) if parent_run.project == project => {}
+            Ok(Some(parent_run)) if parent_run.project == project => {
+                session_id = Some(parent_run.session_id.clone());
+            }
             Ok(Some(_)) | Ok(None) => {
                 return AppApiError::new(
                     StatusCode::NOT_FOUND,
@@ -224,7 +246,15 @@ pub(crate) async fn create_task_handler(
     }
     if let Some(parent_task_id) = body.parent_task_id.as_ref().map(TaskId::new) {
         match state.runtime.tasks.get(&parent_task_id).await {
-            Ok(Some(parent_task)) if parent_task.project == project => {}
+            Ok(Some(parent_task)) if parent_task.project == project => {
+                if session_id.is_none() {
+                    session_id =
+                        match resolve_session_for_task_record(state.as_ref(), &parent_task).await {
+                            Ok(sid) => sid,
+                            Err(response) => return response,
+                        };
+                }
+            }
             Ok(Some(_)) | Ok(None) => {
                 return AppApiError::new(
                     StatusCode::NOT_FOUND,
@@ -242,6 +272,7 @@ pub(crate) async fn create_task_handler(
         .tasks
         .submit(
             &project,
+            session_id.as_ref(),
             TaskId::new(body.task_id.clone()),
             body.parent_run_id.clone().map(RunId::new),
             body.parent_task_id.clone().map(TaskId::new),
@@ -454,15 +485,21 @@ pub(crate) async fn claim_task_handler(
     Json(body): Json<ClaimTaskRequest>,
 ) -> impl IntoResponse {
     let task_id = TaskId::new(id);
-    if let Err(resp) = load_task_visible_to_tenant(state.as_ref(), &tenant_scope, &task_id).await {
-        return resp;
-    }
+    let task = match load_task_visible_to_tenant(state.as_ref(), &tenant_scope, &task_id).await {
+        Ok(t) => t,
+        Err(resp) => return resp,
+    };
+    let session_id = match resolve_session_for_task_record(state.as_ref(), &task).await {
+        Ok(sid) => sid,
+        Err(response) => return response,
+    };
 
     let before = current_event_head(&state).await;
     match state
         .runtime
         .tasks
         .claim(
+            session_id.as_ref(),
             &task_id,
             body.worker_id,
             body.lease_duration_ms.unwrap_or(60_000),
@@ -484,15 +521,24 @@ pub(crate) async fn heartbeat_task_handler(
     Json(body): Json<HeartbeatTaskRequest>,
 ) -> impl IntoResponse {
     let task_id = TaskId::new(id);
-    if let Err(resp) = load_task_visible_to_tenant(state.as_ref(), &tenant_scope, &task_id).await {
-        return resp;
-    }
+    let task = match load_task_visible_to_tenant(state.as_ref(), &tenant_scope, &task_id).await {
+        Ok(t) => t,
+        Err(resp) => return resp,
+    };
+    let session_id = match resolve_session_for_task_record(state.as_ref(), &task).await {
+        Ok(sid) => sid,
+        Err(response) => return response,
+    };
 
     let before = current_event_head(&state).await;
     match state
         .runtime
         .tasks
-        .heartbeat(&task_id, body.lease_extension_ms.unwrap_or(60_000))
+        .heartbeat(
+            session_id.as_ref(),
+            &task_id,
+            body.lease_extension_ms.unwrap_or(60_000),
+        )
         .await
     {
         Ok(task) => {
@@ -509,17 +555,26 @@ pub(crate) async fn release_task_lease_handler(
     Path(id): Path<String>,
 ) -> impl IntoResponse {
     let task_id = TaskId::new(id);
-    match state.runtime.tasks.get(&task_id).await {
-        Ok(Some(task)) if task.project.tenant_id == *tenant_scope.tenant_id() => {}
+    let task = match state.runtime.tasks.get(&task_id).await {
+        Ok(Some(task)) if task.project.tenant_id == *tenant_scope.tenant_id() => task,
         Ok(Some(_)) | Ok(None) => {
             return AppApiError::new(StatusCode::NOT_FOUND, "not_found", "task not found")
                 .into_response();
         }
         Err(err) => return runtime_error_response(err),
-    }
+    };
+    let session_id = match resolve_session_for_task_record(state.as_ref(), &task).await {
+        Ok(sid) => sid,
+        Err(response) => return response,
+    };
 
     let before = current_event_head(&state).await;
-    match state.runtime.tasks.release_lease(&task_id).await {
+    match state
+        .runtime
+        .tasks
+        .release_lease(session_id.as_ref(), &task_id)
+        .await
+    {
         Ok(task) => {
             publish_runtime_frames_since(&state, before).await;
             (StatusCode::OK, Json(task)).into_response()
@@ -541,9 +596,18 @@ pub(crate) async fn cancel_task_handler(
         Ok(t) => t,
         Err(response) => return response,
     };
+    let session_id = match resolve_session_for_task_record(state.as_ref(), &task).await {
+        Ok(sid) => sid,
+        Err(response) => return response,
+    };
 
     let before = current_event_head(&state).await;
-    match state.runtime.tasks.cancel(&task_id).await {
+    match state
+        .runtime
+        .tasks
+        .cancel(session_id.as_ref(), &task_id)
+        .await
+    {
         Ok(record) => {
             let _ = state
                 .runtime
@@ -578,14 +642,46 @@ pub(crate) async fn complete_task_handler(
             Ok(t) => t,
             Err(response) => return response,
         };
+    // Fetch the parent run once: we need its session_id to drive task
+    // completion and, if the run becomes eligible, to complete it below.
+    // Propagate store errors and surface a 404 when the task references a
+    // parent run that is not in the projection — silently minting a solo
+    // ExecutionId in that case would violate RFC-011 co-location and produce
+    // an unexplained NotFound from the Fabric layer.
+    let parent_run = match current_task.parent_run_id.as_ref() {
+        Some(rid) => match state.runtime.runs.get(rid).await {
+            Ok(Some(run)) => Some(run),
+            Ok(None) => {
+                return AppApiError::new(
+                    StatusCode::NOT_FOUND,
+                    "not_found",
+                    format!("parent run {} not found", rid.as_str()),
+                )
+                .into_response();
+            }
+            Err(err) => return runtime_error_response(err),
+        },
+        None => None,
+    };
+    let session_id = parent_run.as_ref().map(|r| r.session_id.clone());
 
     if current_task.state == TaskState::Leased {
-        if let Err(err) = state.runtime.tasks.start(&task_id).await {
+        if let Err(err) = state
+            .runtime
+            .tasks
+            .start(session_id.as_ref(), &task_id)
+            .await
+        {
             return runtime_error_response(err);
         }
     }
 
-    match state.runtime.tasks.complete(&task_id).await {
+    match state
+        .runtime
+        .tasks
+        .complete(session_id.as_ref(), &task_id)
+        .await
+    {
         Ok(task) => {
             // Auto-checkpoint on task_complete is handled inside
             // TaskServiceImpl::complete() to avoid double-checkpoint races.
@@ -598,9 +694,13 @@ pub(crate) async fn complete_task_handler(
                 .await
                 {
                     Ok(false) => {
-                        if let Ok(Some(run)) = state.runtime.runs.get(&parent_run_id).await {
+                        if let Some(run) = parent_run.as_ref() {
                             if run.state == RunState::Running {
-                                if let Err(err) = state.runtime.runs.complete(&parent_run_id).await
+                                if let Err(err) = state
+                                    .runtime
+                                    .runs
+                                    .complete(&run.session_id, &parent_run_id)
+                                    .await
                                 {
                                     return runtime_error_response(err);
                                 }

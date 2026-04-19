@@ -155,15 +155,21 @@ mod tests {
     async fn returns_immediately_when_already_terminal() {
         let svc = svc().await;
         svc.tasks
-            .submit(&project(), TaskId::new("task_wt"), None, None, 0)
+            .submit(&project(), None, TaskId::new("task_wt"), None, None, 0)
             .await
             .unwrap();
         svc.tasks
-            .claim(&TaskId::new("task_wt"), "worker".into(), 30_000)
+            .claim(None, &TaskId::new("task_wt"), "worker".into(), 30_000)
             .await
             .unwrap();
-        svc.tasks.start(&TaskId::new("task_wt")).await.unwrap();
-        svc.tasks.complete(&TaskId::new("task_wt")).await.unwrap();
+        svc.tasks
+            .start(None, &TaskId::new("task_wt"))
+            .await
+            .unwrap();
+        svc.tasks
+            .complete(None, &TaskId::new("task_wt"))
+            .await
+            .unwrap();
 
         let tool = WaitForTaskTool::new(svc.store.clone());
         let res = tool
@@ -184,7 +190,7 @@ mod tests {
     async fn times_out_when_task_not_terminal() {
         let svc = svc().await;
         svc.tasks
-            .submit(&project(), TaskId::new("task_wt2"), None, None, 0)
+            .submit(&project(), None, TaskId::new("task_wt2"), None, None, 0)
             .await
             .unwrap();
         // Task stays in queued — will never be terminal before timeout.

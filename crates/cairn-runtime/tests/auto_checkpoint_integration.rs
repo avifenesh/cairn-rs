@@ -34,6 +34,7 @@ async fn auto_checkpoint_saves_checkpoint_when_triggered_on_task_complete() {
     tasks
         .submit(
             &project,
+            Some(&session_id),
             TaskId::new("task_auto_cp"),
             Some(run_id.clone()),
             None,
@@ -43,14 +44,21 @@ async fn auto_checkpoint_saves_checkpoint_when_triggered_on_task_complete() {
         .unwrap();
     tasks
         .claim(
+            Some(&session_id),
             &TaskId::new("task_auto_cp"),
             "worker_auto_cp".to_owned(),
             60_000,
         )
         .await
         .unwrap();
-    tasks.start(&TaskId::new("task_auto_cp")).await.unwrap();
-    tasks.complete(&TaskId::new("task_auto_cp")).await.unwrap();
+    tasks
+        .start(Some(&session_id), &TaskId::new("task_auto_cp"))
+        .await
+        .unwrap();
+    tasks
+        .complete(Some(&session_id), &TaskId::new("task_auto_cp"))
+        .await
+        .unwrap();
 
     let checkpoints = CheckpointReadModel::list_by_run(store.as_ref(), &run_id, 10)
         .await

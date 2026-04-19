@@ -42,6 +42,7 @@ async fn replay_preserves_current_state_reads() {
         .unwrap();
     run_svc
         .resume(
+            &SessionId::new("s1"),
             &RunId::new("r1"),
             ResumeTrigger::RuntimeSignal,
             RunResumeTarget::Running,
@@ -51,14 +52,29 @@ async fn replay_preserves_current_state_reads() {
 
     // Task with tool invocation
     task_svc
-        .submit(&p, TaskId::new("t1"), Some(RunId::new("r1")), None, 0)
+        .submit(
+            &p,
+            Some(&SessionId::new("s1")),
+            TaskId::new("t1"),
+            Some(RunId::new("r1")),
+            None,
+            0,
+        )
         .await
         .unwrap();
     task_svc
-        .claim(&TaskId::new("t1"), "w1".to_owned(), 60_000)
+        .claim(
+            Some(&SessionId::new("s1")),
+            &TaskId::new("t1"),
+            "w1".to_owned(),
+            60_000,
+        )
         .await
         .unwrap();
-    task_svc.start(&TaskId::new("t1")).await.unwrap();
+    task_svc
+        .start(Some(&SessionId::new("s1")), &TaskId::new("t1"))
+        .await
+        .unwrap();
 
     tool_svc
         .record_start(
@@ -84,18 +100,36 @@ async fn replay_preserves_current_state_reads() {
         .await
         .unwrap();
 
-    task_svc.complete(&TaskId::new("t1")).await.unwrap();
+    task_svc
+        .complete(Some(&SessionId::new("s1")), &TaskId::new("t1"))
+        .await
+        .unwrap();
 
     // Task with external worker
     task_svc
-        .submit(&p, TaskId::new("t2"), Some(RunId::new("r1")), None, 0)
+        .submit(
+            &p,
+            Some(&SessionId::new("s1")),
+            TaskId::new("t2"),
+            Some(RunId::new("r1")),
+            None,
+            0,
+        )
         .await
         .unwrap();
     task_svc
-        .claim(&TaskId::new("t2"), "ext".to_owned(), 60_000)
+        .claim(
+            Some(&SessionId::new("s1")),
+            &TaskId::new("t2"),
+            "ext".to_owned(),
+            60_000,
+        )
         .await
         .unwrap();
-    task_svc.start(&TaskId::new("t2")).await.unwrap();
+    task_svc
+        .start(Some(&SessionId::new("s1")), &TaskId::new("t2"))
+        .await
+        .unwrap();
 
     worker_svc
         .report(ExternalWorkerReport {
@@ -111,7 +145,10 @@ async fn replay_preserves_current_state_reads() {
         .await
         .unwrap();
 
-    run_svc.complete(&RunId::new("r1")).await.unwrap();
+    run_svc
+        .complete(&SessionId::new("s1"), &RunId::new("r1"))
+        .await
+        .unwrap();
 
     // -- Capture current-state reads from original store --
 

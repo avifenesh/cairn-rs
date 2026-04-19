@@ -160,15 +160,15 @@ impl HasProjectScope for PreservedMemorySearchParams {
 // ── Scope types ────────────────────────────────────────────────────────────
 
 #[derive(Clone, Debug)]
-pub(crate) struct TenantScope {
-    pub(crate) tenant_id: TenantId,
+pub struct TenantScope {
+    pub tenant_id: TenantId,
     /// `true` when the request was authenticated with the admin service account.
     /// Admin tokens bypass per-tenant scope checks so they can access any tenant.
-    pub(crate) is_admin: bool,
+    pub is_admin: bool,
 }
 
 impl TenantScope {
-    pub(crate) fn tenant_id(&self) -> &TenantId {
+    pub fn tenant_id(&self) -> &TenantId {
         &self.tenant_id
     }
 }

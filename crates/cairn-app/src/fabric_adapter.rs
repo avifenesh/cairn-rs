@@ -176,13 +176,13 @@ impl RunService for FabricRunServiceAdapter {
     }
 
     async fn get(&self, run_id: &RunId) -> Result<Option<RunRecord>, RuntimeError> {
-        let project = match resolve_project_from_run_id(&self.store, run_id).await? {
-            Some(p) => p,
+        let record = match resolve_run_scope(&self.store, run_id).await? {
+            Some(r) => r,
             None => return Ok(None),
         };
         self.fabric
             .runs
-            .get(&project, run_id)
+            .get(&record.project, &record.session_id, run_id)
             .await
             .map_err(fabric_err_to_runtime)
     }
@@ -200,93 +200,121 @@ impl RunService for FabricRunServiceAdapter {
         list_runs_by_session_from_projection(&self.store, session_id, limit, offset).await
     }
 
-    async fn complete(&self, run_id: &RunId) -> Result<RunRecord, RuntimeError> {
-        let project = resolve_run_project(&self.store, run_id).await?;
+    async fn complete(
+        &self,
+        session_id: &SessionId,
+        run_id: &RunId,
+    ) -> Result<RunRecord, RuntimeError> {
+        // Cross-check the caller's session_id against the projection.
+        // Mismatch is an operator error (the run is keyed to a
+        // different session in the projection); we fail loud rather
+        // than silently minting a different ExecutionId.
+        let project = resolve_run_project_checking_session(&self.store, run_id, session_id).await?;
         self.fabric
             .runs
-            .complete(&project, run_id)
+            .complete(&project, session_id, run_id)
             .await
             .map_err(fabric_err_to_runtime)
     }
 
     async fn fail(
         &self,
+        session_id: &SessionId,
         run_id: &RunId,
         failure_class: FailureClass,
     ) -> Result<RunRecord, RuntimeError> {
-        let project = resolve_run_project(&self.store, run_id).await?;
+        let project = resolve_run_project_checking_session(&self.store, run_id, session_id).await?;
         self.fabric
             .runs
-            .fail(&project, run_id, failure_class)
+            .fail(&project, session_id, run_id, failure_class)
             .await
             .map_err(fabric_err_to_runtime)
     }
 
-    async fn cancel(&self, run_id: &RunId) -> Result<RunRecord, RuntimeError> {
-        let project = resolve_run_project(&self.store, run_id).await?;
+    async fn cancel(
+        &self,
+        session_id: &SessionId,
+        run_id: &RunId,
+    ) -> Result<RunRecord, RuntimeError> {
+        let project = resolve_run_project_checking_session(&self.store, run_id, session_id).await?;
         self.fabric
             .runs
-            .cancel(&project, run_id)
+            .cancel(&project, session_id, run_id)
             .await
             .map_err(fabric_err_to_runtime)
     }
 
-    async fn pause(&self, run_id: &RunId, reason: PauseReason) -> Result<RunRecord, RuntimeError> {
-        let project = resolve_run_project(&self.store, run_id).await?;
+    async fn pause(
+        &self,
+        session_id: &SessionId,
+        run_id: &RunId,
+        reason: PauseReason,
+    ) -> Result<RunRecord, RuntimeError> {
+        let project = resolve_run_project_checking_session(&self.store, run_id, session_id).await?;
         self.fabric
             .runs
-            .pause(&project, run_id, reason)
+            .pause(&project, session_id, run_id, reason)
             .await
             .map_err(fabric_err_to_runtime)
     }
 
     async fn resume(
         &self,
+        session_id: &SessionId,
         run_id: &RunId,
         trigger: ResumeTrigger,
         target: RunResumeTarget,
     ) -> Result<RunRecord, RuntimeError> {
-        let project = resolve_run_project(&self.store, run_id).await?;
+        let project = resolve_run_project_checking_session(&self.store, run_id, session_id).await?;
         self.fabric
             .runs
-            .resume(&project, run_id, trigger, target)
+            .resume(&project, session_id, run_id, trigger, target)
             .await
             .map_err(fabric_err_to_runtime)
     }
 
-    async fn claim(&self, run_id: &RunId) -> Result<RunRecord, RuntimeError> {
+    async fn claim(
+        &self,
+        session_id: &SessionId,
+        run_id: &RunId,
+    ) -> Result<RunRecord, RuntimeError> {
         // Active-lease activation for the run's FF execution so the
         // approval-gate / signal-delivery FCALLs accept it downstream.
         // `FabricRunService::claim` handles the
         // ff_issue_claim_grant + ff_claim_execution sequence (and the
         // `use_claim_resumed_execution` dispatch for resumed
         // executions) via `claim_common::issue_grant_and_claim`.
-        let project = resolve_run_project(&self.store, run_id).await?;
+        let project = resolve_run_project_checking_session(&self.store, run_id, session_id).await?;
         self.fabric
             .runs
-            .claim(&project, run_id)
+            .claim(&project, session_id, run_id)
             .await
             .map_err(fabric_err_to_runtime)
     }
 
-    async fn enter_waiting_approval(&self, run_id: &RunId) -> Result<RunRecord, RuntimeError> {
-        let project = resolve_run_project(&self.store, run_id).await?;
+    async fn enter_waiting_approval(
+        &self,
+        session_id: &SessionId,
+        run_id: &RunId,
+    ) -> Result<RunRecord, RuntimeError> {
+        let project = resolve_run_project_checking_session(&self.store, run_id, session_id).await?;
         self.fabric
             .runs
-            .enter_waiting_approval(&project, run_id)
+            .enter_waiting_approval(&project, session_id, run_id)
             .await
             .map_err(fabric_err_to_runtime)
     }
 
     async fn resolve_approval(
         &self,
+        session_id: &SessionId,
         run_id: &RunId,
         decision: ApprovalDecision,
     ) -> Result<RunRecord, RuntimeError> {
-        let project = resolve_run_project(&self.store, run_id).await?;
+        let project = resolve_run_project_checking_session(&self.store, run_id, session_id).await?;
         self.fabric
             .runs
-            .resolve_approval(&project, run_id, decision)
+            .resolve_approval(&project, session_id, run_id, decision)
             .await
             .map_err(fabric_err_to_runtime)
     }
@@ -342,6 +370,7 @@ impl FabricTaskServiceAdapter {
 
 // Error type for the bare-ID path: either the projection failed to find the
 // record (returns NotFound) or the resolver hit a real store error.
+#[allow(dead_code)]
 async fn resolve_task_project(
     store: &Arc<InMemoryStore>,
     task_id: &TaskId,
@@ -366,6 +395,116 @@ async fn resolve_session_project(
         })
 }
 
+/// Fetch a task's projection record.
+///
+/// Returns `Ok(None)` for unknown task ids (projection-lag race or never
+/// created). Callers on the task-mutation path treat `None` as
+/// NotFound; the `get` path returns `Ok(None)` to the HTTP layer.
+async fn resolve_task_scope(
+    store: &Arc<InMemoryStore>,
+    task_id: &TaskId,
+) -> Result<Option<TaskRecord>, RuntimeError> {
+    TaskReadModel::get(store.as_ref(), task_id)
+        .await
+        .map_err(RuntimeError::from)
+}
+
+/// Resolve the task's `(project, session_id_option)` from the
+/// projection. `session_id` is derived by following
+/// `TaskRecord.parent_run_id → RunRecord.session_id` — cairn does not
+/// store session scope directly on the task projection.
+///
+/// Returns `Err(NotFound)` when the task itself is missing from the
+/// projection. When the task has no parent run (bare submission),
+/// returns `Ok((project, None))` matching the `task_to_execution_id`
+/// (solo) mint path used at submit time.
+///
+/// When `caller_session_id` is supplied (the adapter threads it through
+/// from the trait method), we cross-check that it matches the
+/// projection-derived value. Mismatch ⇒ typed Validation error, same
+/// contract as `resolve_run_project_checking_session` — no silent
+/// fallbacks.
+/// Read-only variant: returns `None` when the task is unknown (so the
+/// `get` handler can return 404) instead of erroring. Derives
+/// `session_id` from the parent run; does not cross-check.
+async fn resolve_task_project_and_session_opt(
+    store: &Arc<InMemoryStore>,
+    task_id: &TaskId,
+) -> Result<Option<(ProjectKey, Option<SessionId>)>, RuntimeError> {
+    let task = match resolve_task_scope(store, task_id).await? {
+        Some(t) => t,
+        None => return Ok(None),
+    };
+    let session = match &task.parent_run_id {
+        Some(prid) => RunReadModel::get(store.as_ref(), prid)
+            .await?
+            .map(|r| r.session_id),
+        None => None,
+    };
+    Ok(Some((task.project, session)))
+}
+
+async fn resolve_task_project_and_session(
+    store: &Arc<InMemoryStore>,
+    task_id: &TaskId,
+    caller_session_id: Option<&SessionId>,
+) -> Result<(ProjectKey, Option<SessionId>), RuntimeError> {
+    let task = resolve_task_scope(store, task_id)
+        .await?
+        .ok_or_else(|| RuntimeError::NotFound {
+            entity: "task",
+            id: task_id.to_string(),
+        })?;
+
+    // Derive session_id from the parent run when present. Bare tasks
+    // (no parent_run_id) carry no session binding and must be minted
+    // via the solo `task_to_execution_id` path.
+    let derived_session_id = match &task.parent_run_id {
+        Some(parent_run_id) => {
+            // Parent run is mandatory for session-scoped ExecutionId minting
+            // under RFC-011. A silent None fallback would route to the solo
+            // mint path and land on the wrong Valkey partition.
+            let run = RunReadModel::get(store.as_ref(), parent_run_id)
+                .await?
+                .ok_or_else(|| RuntimeError::NotFound {
+                    entity: "run",
+                    id: parent_run_id.to_string(),
+                })?;
+            Some(run.session_id)
+        }
+        None => None,
+    };
+
+    if let Some(caller) = caller_session_id {
+        match &derived_session_id {
+            Some(derived) if derived.as_str() == caller.as_str() => {}
+            Some(derived) => {
+                return Err(RuntimeError::Validation {
+                    reason: format!(
+                        "task {} belongs to session {}, but the request specified {}",
+                        task_id.as_str(),
+                        derived.as_str(),
+                        caller.as_str()
+                    ),
+                });
+            }
+            None => {
+                return Err(RuntimeError::Validation {
+                    reason: format!(
+                        "task {} was submitted without a session binding, \
+                         but the request specified session {}",
+                        task_id.as_str(),
+                        caller.as_str()
+                    ),
+                });
+            }
+        }
+    }
+
+    Ok((task.project, derived_session_id))
+}
+
+#[allow(dead_code)]
 async fn resolve_run_project(
     store: &Arc<InMemoryStore>,
     run_id: &RunId,
@@ -376,6 +515,58 @@ async fn resolve_run_project(
             entity: "run",
             id: run_id.to_string(),
         })
+}
+
+/// Fetch the run's full projection record (project + session_id).
+///
+/// Returns `Ok(None)` when the projection has not yet observed this run
+/// (create/mutate race) or the run was never created. Surfacing this as
+/// `None` lets the read-only `get` path return `Ok(None)` to the caller
+/// rather than silently falling back.
+async fn resolve_run_scope(
+    store: &Arc<InMemoryStore>,
+    run_id: &RunId,
+) -> Result<Option<RunRecord>, RuntimeError> {
+    RunReadModel::get(store.as_ref(), run_id)
+        .await
+        .map_err(RuntimeError::from)
+}
+
+/// Resolve `project` from the projection AND cross-check that the
+/// caller's `session_id` matches what the projection holds.
+///
+/// The FF `ExecutionId` is minted from
+/// `(project, session_id, run_id)`; a mismatched `session_id` mints a
+/// different ID and the FCALL targets a non-existent execution — which
+/// FF reports as a generic not-found and the operator sees as an
+/// unexplained 404. Per the "no silent fallbacks" rule, we fail loud
+/// here with a typed Validation error instead.
+///
+/// Returns `NotFound` when the projection hasn't observed the run yet
+/// (projection-lag race on a very recently started run) — the operator
+/// should retry after the projection catches up.
+async fn resolve_run_project_checking_session(
+    store: &Arc<InMemoryStore>,
+    run_id: &RunId,
+    session_id: &SessionId,
+) -> Result<ProjectKey, RuntimeError> {
+    let record = RunReadModel::get(store.as_ref(), run_id)
+        .await?
+        .ok_or_else(|| RuntimeError::NotFound {
+            entity: "run",
+            id: run_id.to_string(),
+        })?;
+    if record.session_id.as_str() != session_id.as_str() {
+        return Err(RuntimeError::Validation {
+            reason: format!(
+                "run {} is bound to session {}, but the request specified {}",
+                run_id.as_str(),
+                record.session_id.as_str(),
+                session_id.as_str()
+            ),
+        });
+    }
+    Ok(record.project)
 }
 
 /// Projection-backed runs-by-session lookup, extracted so unit tests can
@@ -397,15 +588,35 @@ impl TaskService for FabricTaskServiceAdapter {
     async fn submit(
         &self,
         project: &ProjectKey,
+        session_id: Option<&SessionId>,
         task_id: TaskId,
         parent_run_id: Option<RunId>,
         parent_task_id: Option<TaskId>,
         priority: u32,
     ) -> Result<TaskRecord, RuntimeError> {
-        // FabricTaskService::submit has a trailing Option<&SessionId> arg
-        // that the RuntimeService trait does not; None is the correct value
-        // for bare-ID callers — submissions that need a session scope go
-        // through the Run path, which tags the task hash on the run's behalf.
+        // session_id is supplied by the caller (None for bare tasks).
+        // If caller omitted it but the task has a parent run
+        // already in the projection, we could derive it — but at submit
+        // time the parent run's session is the authoritative source, so
+        // we fall back to the parent_run_id lookup.
+        let resolved_session = match session_id {
+            Some(sid) => Some(sid.clone()),
+            None => match &parent_run_id {
+                Some(prid) => {
+                    // Parent run is mandatory for RFC-011 co-location —
+                    // silently falling back to solo mint would drop the
+                    // task on the wrong Valkey partition.
+                    let run = RunReadModel::get(self.store.as_ref(), prid)
+                        .await?
+                        .ok_or_else(|| RuntimeError::NotFound {
+                            entity: "run",
+                            id: prid.to_string(),
+                        })?;
+                    Some(run.session_id)
+                }
+                None => None,
+            },
+        };
         self.fabric
             .tasks
             .submit(
@@ -414,7 +625,7 @@ impl TaskService for FabricTaskServiceAdapter {
                 parent_run_id,
                 parent_task_id,
                 priority,
-                None,
+                resolved_session.as_ref(),
             )
             .await
             .map_err(fabric_err_to_runtime)
@@ -459,89 +670,124 @@ impl TaskService for FabricTaskServiceAdapter {
     }
 
     async fn get(&self, task_id: &TaskId) -> Result<Option<TaskRecord>, RuntimeError> {
-        let project = match resolve_project_from_task_id(&self.store, task_id).await? {
-            Some(p) => p,
-            None => return Ok(None),
-        };
+        // Read-only: derive (project, session_id) from projection; None
+        // caller_session means no cross-check.
+        let (project, session) =
+            match resolve_task_project_and_session_opt(&self.store, task_id).await? {
+                Some(v) => v,
+                None => return Ok(None),
+            };
         self.fabric
             .tasks
-            .get(&project, task_id)
+            .get(&project, session.as_ref(), task_id)
             .await
             .map_err(fabric_err_to_runtime)
     }
 
     async fn claim(
         &self,
+        session_id: Option<&SessionId>,
         task_id: &TaskId,
         lease_owner: String,
         lease_duration_ms: u64,
     ) -> Result<TaskRecord, RuntimeError> {
-        let project = resolve_task_project(&self.store, task_id).await?;
+        let (project, session) =
+            resolve_task_project_and_session(&self.store, task_id, session_id).await?;
         self.fabric
             .tasks
-            .claim(&project, task_id, lease_owner, lease_duration_ms)
+            .claim(
+                &project,
+                session.as_ref(),
+                task_id,
+                lease_owner,
+                lease_duration_ms,
+            )
             .await
             .map_err(fabric_err_to_runtime)
     }
 
     async fn heartbeat(
         &self,
+        session_id: Option<&SessionId>,
         task_id: &TaskId,
         lease_extension_ms: u64,
     ) -> Result<TaskRecord, RuntimeError> {
-        let project = resolve_task_project(&self.store, task_id).await?;
+        let (project, session) =
+            resolve_task_project_and_session(&self.store, task_id, session_id).await?;
         self.fabric
             .tasks
-            .heartbeat(&project, task_id, lease_extension_ms)
+            .heartbeat(&project, session.as_ref(), task_id, lease_extension_ms)
             .await
             .map_err(fabric_err_to_runtime)
     }
 
-    async fn start(&self, task_id: &TaskId) -> Result<TaskRecord, RuntimeError> {
-        let project = resolve_task_project(&self.store, task_id).await?;
+    async fn start(
+        &self,
+        session_id: Option<&SessionId>,
+        task_id: &TaskId,
+    ) -> Result<TaskRecord, RuntimeError> {
+        let (project, session) =
+            resolve_task_project_and_session(&self.store, task_id, session_id).await?;
         self.fabric
             .tasks
-            .start(&project, task_id)
+            .start(&project, session.as_ref(), task_id)
             .await
             .map_err(fabric_err_to_runtime)
     }
 
-    async fn complete(&self, task_id: &TaskId) -> Result<TaskRecord, RuntimeError> {
-        let project = resolve_task_project(&self.store, task_id).await?;
+    async fn complete(
+        &self,
+        session_id: Option<&SessionId>,
+        task_id: &TaskId,
+    ) -> Result<TaskRecord, RuntimeError> {
+        let (project, session) =
+            resolve_task_project_and_session(&self.store, task_id, session_id).await?;
         self.fabric
             .tasks
-            .complete(&project, task_id)
+            .complete(&project, session.as_ref(), task_id)
             .await
             .map_err(fabric_err_to_runtime)
     }
 
     async fn fail(
         &self,
+        session_id: Option<&SessionId>,
         task_id: &TaskId,
         failure_class: FailureClass,
     ) -> Result<TaskRecord, RuntimeError> {
-        let project = resolve_task_project(&self.store, task_id).await?;
+        let (project, session) =
+            resolve_task_project_and_session(&self.store, task_id, session_id).await?;
         self.fabric
             .tasks
-            .fail(&project, task_id, failure_class)
+            .fail(&project, session.as_ref(), task_id, failure_class)
             .await
             .map_err(fabric_err_to_runtime)
     }
 
-    async fn cancel(&self, task_id: &TaskId) -> Result<TaskRecord, RuntimeError> {
-        let project = resolve_task_project(&self.store, task_id).await?;
+    async fn cancel(
+        &self,
+        session_id: Option<&SessionId>,
+        task_id: &TaskId,
+    ) -> Result<TaskRecord, RuntimeError> {
+        let (project, session) =
+            resolve_task_project_and_session(&self.store, task_id, session_id).await?;
         self.fabric
             .tasks
-            .cancel(&project, task_id)
+            .cancel(&project, session.as_ref(), task_id)
             .await
             .map_err(fabric_err_to_runtime)
     }
 
-    async fn dead_letter(&self, task_id: &TaskId) -> Result<TaskRecord, RuntimeError> {
-        let project = resolve_task_project(&self.store, task_id).await?;
+    async fn dead_letter(
+        &self,
+        session_id: Option<&SessionId>,
+        task_id: &TaskId,
+    ) -> Result<TaskRecord, RuntimeError> {
+        let (project, session) =
+            resolve_task_project_and_session(&self.store, task_id, session_id).await?;
         self.fabric
             .tasks
-            .dead_letter(&project, task_id)
+            .dead_letter(&project, session.as_ref(), task_id)
             .await
             .map_err(fabric_err_to_runtime)
     }
@@ -569,27 +815,31 @@ impl TaskService for FabricTaskServiceAdapter {
 
     async fn pause(
         &self,
+        session_id: Option<&SessionId>,
         task_id: &TaskId,
         reason: PauseReason,
     ) -> Result<TaskRecord, RuntimeError> {
-        let project = resolve_task_project(&self.store, task_id).await?;
+        let (project, session) =
+            resolve_task_project_and_session(&self.store, task_id, session_id).await?;
         self.fabric
             .tasks
-            .pause(&project, task_id, reason)
+            .pause(&project, session.as_ref(), task_id, reason)
             .await
             .map_err(fabric_err_to_runtime)
     }
 
     async fn resume(
         &self,
+        session_id: Option<&SessionId>,
         task_id: &TaskId,
         trigger: ResumeTrigger,
         target: TaskResumeTarget,
     ) -> Result<TaskRecord, RuntimeError> {
-        let project = resolve_task_project(&self.store, task_id).await?;
+        let (project, session) =
+            resolve_task_project_and_session(&self.store, task_id, session_id).await?;
         self.fabric
             .tasks
-            .resume(&project, task_id, trigger, target)
+            .resume(&project, session.as_ref(), task_id, trigger, target)
             .await
             .map_err(fabric_err_to_runtime)
     }
@@ -619,11 +869,16 @@ impl TaskService for FabricTaskServiceAdapter {
             .map_err(RuntimeError::from)
     }
 
-    async fn release_lease(&self, task_id: &TaskId) -> Result<TaskRecord, RuntimeError> {
-        let project = resolve_task_project(&self.store, task_id).await?;
+    async fn release_lease(
+        &self,
+        session_id: Option<&SessionId>,
+        task_id: &TaskId,
+    ) -> Result<TaskRecord, RuntimeError> {
+        let (project, session) =
+            resolve_task_project_and_session(&self.store, task_id, session_id).await?;
         self.fabric
             .tasks
-            .release_lease(&project, task_id)
+            .release_lease(&project, session.as_ref(), task_id)
             .await
             .map_err(fabric_err_to_runtime)
     }

@@ -126,7 +126,7 @@ async fn checkpoint_save_fail_recover_lifecycle() {
 
     // ── Phase 4: transition run to Failed ───────────────────────────────────
     let failed_run = run_svc
-        .fail(&run_id, FailureClass::ExecutionError)
+        .fail(&session_id, &run_id, FailureClass::ExecutionError)
         .await
         .unwrap();
 

@@ -71,6 +71,7 @@ async fn approval_blocks_resume_then_allows_after_decision() {
     let resume_err = run_svc
         .run
         .resume(
+            &session_id,
             &run_id,
             ResumeTrigger::OperatorResume,
             RunResumeTarget::Running,
@@ -171,6 +172,7 @@ async fn rejection_also_unblocks_run_but_leaves_approval_rejected() {
     let resume_result = run_svc
         .run
         .resume(
+            &session_id,
             &run_id,
             ResumeTrigger::OperatorResume,
             RunResumeTarget::Running,

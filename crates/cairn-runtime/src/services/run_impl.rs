@@ -186,7 +186,11 @@ where
             .await?)
     }
 
-    async fn complete(&self, run_id: &RunId) -> Result<RunRecord, RuntimeError> {
+    async fn complete(
+        &self,
+        _session_id: &SessionId,
+        run_id: &RunId,
+    ) -> Result<RunRecord, RuntimeError> {
         let run = self
             .transition_run(run_id, RunState::Completed, None)
             .await?;
@@ -196,6 +200,7 @@ where
 
     async fn fail(
         &self,
+        _session_id: &SessionId,
         run_id: &RunId,
         failure_class: FailureClass,
     ) -> Result<RunRecord, RuntimeError> {
@@ -206,7 +211,11 @@ where
         Ok(run)
     }
 
-    async fn cancel(&self, run_id: &RunId) -> Result<RunRecord, RuntimeError> {
+    async fn cancel(
+        &self,
+        _session_id: &SessionId,
+        run_id: &RunId,
+    ) -> Result<RunRecord, RuntimeError> {
         let run = self
             .transition_run(run_id, RunState::Canceled, None)
             .await?;
@@ -214,7 +223,12 @@ where
         Ok(run)
     }
 
-    async fn pause(&self, run_id: &RunId, reason: PauseReason) -> Result<RunRecord, RuntimeError> {
+    async fn pause(
+        &self,
+        _session_id: &SessionId,
+        run_id: &RunId,
+        reason: PauseReason,
+    ) -> Result<RunRecord, RuntimeError> {
         let run = self.get_run(run_id).await?;
 
         if !can_transition_run_state(run.state, RunState::Paused) {
@@ -243,6 +257,7 @@ where
 
     async fn resume(
         &self,
+        _session_id: &SessionId,
         run_id: &RunId,
         trigger: ResumeTrigger,
         target: RunResumeTarget,
@@ -288,17 +303,26 @@ where
     /// The Fabric adapter is the production implementation where claim
     /// is load-bearing; this path exists only for dev/CI state-machine
     /// exercise.
-    async fn claim(&self, run_id: &RunId) -> Result<RunRecord, RuntimeError> {
+    async fn claim(
+        &self,
+        _session_id: &SessionId,
+        run_id: &RunId,
+    ) -> Result<RunRecord, RuntimeError> {
         self.get_run(run_id).await
     }
 
-    async fn enter_waiting_approval(&self, run_id: &RunId) -> Result<RunRecord, RuntimeError> {
+    async fn enter_waiting_approval(
+        &self,
+        _session_id: &SessionId,
+        run_id: &RunId,
+    ) -> Result<RunRecord, RuntimeError> {
         self.transition_run(run_id, RunState::WaitingApproval, None)
             .await
     }
 
     async fn resolve_approval(
         &self,
+        _session_id: &SessionId,
         run_id: &RunId,
         decision: ApprovalDecision,
     ) -> Result<RunRecord, RuntimeError> {
@@ -505,7 +529,10 @@ mod tests {
             .transition_run(&RunId::new("run_1"), RunState::Running, None)
             .await
             .unwrap();
-        run_svc.complete(&RunId::new("run_1")).await.unwrap();
+        run_svc
+            .complete(&SessionId::new("sess_1"), &RunId::new("run_1"))
+            .await
+            .unwrap();
 
         let session = SessionReadModel::get(store.as_ref(), &SessionId::new("sess_1"))
             .await
@@ -536,7 +563,11 @@ mod tests {
             .unwrap();
 
         run_svc
-            .fail(&RunId::new("run_2"), FailureClass::ExecutionError)
+            .fail(
+                &SessionId::new("sess_2"),
+                &RunId::new("run_2"),
+                FailureClass::ExecutionError,
+            )
             .await
             .unwrap();
 
@@ -581,7 +612,10 @@ mod tests {
             .transition_run(&RunId::new("run_a"), RunState::Running, None)
             .await
             .unwrap();
-        run_svc.complete(&RunId::new("run_a")).await.unwrap();
+        run_svc
+            .complete(&SessionId::new("sess_3"), &RunId::new("run_a"))
+            .await
+            .unwrap();
 
         let session = SessionReadModel::get(store.as_ref(), &SessionId::new("sess_3"))
             .await

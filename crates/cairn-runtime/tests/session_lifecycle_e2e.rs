@@ -27,8 +27,9 @@ fn project() -> ProjectKey {
 }
 
 /// Advance a run from Pending → Running via resume.
-async fn activate_run(runs: &impl RunService, run_id: &RunId) {
+async fn activate_run(runs: &impl RunService, session_id: &SessionId, run_id: &RunId) {
     runs.resume(
+        session_id,
         run_id,
         ResumeTrigger::RuntimeSignal,
         RunResumeTarget::Running,
@@ -102,9 +103,9 @@ async fn step3_complete_run() {
     runs.start(&project(), &sess_id, run_id.clone(), None)
         .await
         .unwrap();
-    activate_run(&runs, &run_id).await;
+    activate_run(&runs, &sess_id, &run_id).await;
 
-    let completed = runs.complete(&run_id).await.unwrap();
+    let completed = runs.complete(&sess_id, &run_id).await.unwrap();
 
     assert_eq!(
         completed.state,
@@ -129,8 +130,8 @@ async fn step4_archive_session_transitions_to_archived() {
     runs.start(&project(), &sess_id, run_id.clone(), None)
         .await
         .unwrap();
-    activate_run(&runs, &run_id).await;
-    runs.complete(&run_id).await.unwrap();
+    activate_run(&runs, &sess_id, &run_id).await;
+    runs.complete(&sess_id, &run_id).await.unwrap();
 
     let archived = sessions.archive(&sess_id).await.unwrap();
 
@@ -262,8 +263,8 @@ async fn step6_session_with_all_completed_runs_is_closeable() {
         "session must stay Open while run is Pending/Running"
     );
 
-    activate_run(&runs, &run_id).await;
-    runs.complete(&run_id).await.unwrap();
+    activate_run(&runs, &sess_id, &run_id).await;
+    runs.complete(&sess_id, &run_id).await.unwrap();
 
     // After run completes — derived state should be Completed, enabling archive.
     let session_post = sessions.get(&sess_id).await.unwrap().unwrap();
