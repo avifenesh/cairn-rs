@@ -1,8 +1,7 @@
 //! HTTP middleware: authentication, rate limiting, observability.
 
 use std::{
-    collections::HashMap,
-    sync::{Arc, Mutex},
+    sync::{atomic::Ordering, Arc},
     time::Instant,
 };
 
@@ -72,10 +71,11 @@ pub(crate) const RL_IP_LIMIT: u32 = 100;
 pub(crate) const RL_WINDOW_MS: u64 = 60_000;
 
 pub(crate) async fn rate_limit_middleware(
-    State(rate_limits): State<Arc<Mutex<HashMap<String, RateLimitBucket>>>>,
+    State(state): State<Arc<AppState>>,
     request: Request,
     next: Next,
 ) -> Response {
+    let rate_limits = state.rate_limits.clone();
     // Skip health/readiness probes — these must never be rate-limited.
     if matches!(
         request.uri().path(),
@@ -104,15 +104,17 @@ pub(crate) async fn rate_limit_middleware(
             Err(poisoned) => poisoned.into_inner(),
         };
 
-        // T6b-C6: evict buckets whose window ended over 2x ago. Without
-        // this the map grows unbounded when an attacker rotates bearer
-        // strings to bypass per-token limits — trivial memory DoS.
-        // Amortized O(1): we only do the full sweep when the map grows
-        // past a soft-cap threshold.
-        const MAX_BUCKETS: usize = 10_000;
-        if buckets.len() > MAX_BUCKETS {
+        // T6b-C6: amortized time-based eviction. We cache the last sweep
+        // timestamp on the state and only sweep once per window, so an
+        // attacker keeping the map at the threshold can't trigger a
+        // full O(N) scan on every request. A HashSet of "rotate bearer
+        // strings" still grows up to 10k entries in the worst case
+        // before the minute-boundary sweep — bounded and recoverable.
+        let last_sweep = state.rate_limit_last_sweep_ms.load(Ordering::Relaxed);
+        if now.saturating_sub(last_sweep) >= RL_WINDOW_MS {
             let evict_before = now.saturating_sub(RL_WINDOW_MS * 2);
             buckets.retain(|_, b| b.window_started_ms >= evict_before);
+            state.rate_limit_last_sweep_ms.store(now, Ordering::Relaxed);
         }
 
         let bucket = buckets.entry(key).or_insert(RateLimitBucket {
@@ -299,19 +301,29 @@ pub(crate) fn auth_exempt_path_method(path: &str, method: &axum::http::Method) -
 
 /// T6b-C2: redact credential-looking query params before the query
 /// string is stored in telemetry. Keys matched case-insensitively
-/// against a denylist; the value is replaced with `REDACTED`.
+/// against a denylist after percent-decoding (so `?%74oken=secret`
+/// — a URL-encoded `token=` — is also caught).
 pub(crate) fn scrub_credentials_in_query(query: &str) -> String {
     const REDACTED_KEYS: &[&str] = &["token", "api_key", "apikey", "password", "secret", "bearer"];
-    query
-        .split('&')
-        .map(|pair| match pair.split_once('=') {
-            Some((k, _)) if REDACTED_KEYS.iter().any(|r| r.eq_ignore_ascii_case(k)) => {
-                format!("{k}=REDACTED")
-            }
-            _ => pair.to_owned(),
+
+    // Parse each pair ONCE through the urlencoded decoder, compare the
+    // decoded key against the denylist, and rebuild the scrubbed query
+    // (urlencoded-decoded — the point is ops visibility, not byte-exact
+    // round-trip).
+    let pairs: Vec<(String, String)> = url::form_urlencoded::parse(query.as_bytes())
+        .map(|(k, v)| {
+            let k = k.into_owned();
+            let v_scrubbed = if REDACTED_KEYS.iter().any(|r| r.eq_ignore_ascii_case(&k)) {
+                "REDACTED".to_owned()
+            } else {
+                v.into_owned()
+            };
+            (k, v_scrubbed)
         })
-        .collect::<Vec<_>>()
-        .join("&")
+        .collect();
+    url::form_urlencoded::Serializer::new(String::new())
+        .extend_pairs(&pairs)
+        .finish()
 }
 
 pub(crate) fn request_rate_limit_key(request: &Request) -> Option<String> {

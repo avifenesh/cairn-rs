@@ -88,20 +88,7 @@ fn operator_id_from_principal(principal: &cairn_api::auth::AuthPrincipal) -> Ope
     OperatorId::new(crate::handlers::admin::audit_actor_id(principal))
 }
 
-/// T6b-C5: cross-tenant repo mutation guard. Mirror of the helper in
-/// `marketplace_routes.rs`.
-fn enforce_project_tenant(
-    principal: &cairn_api::auth::AuthPrincipal,
-    project: &ProjectKey,
-) -> bool {
-    if crate::extractors::is_admin_principal(principal) {
-        return true;
-    }
-    principal
-        .tenant()
-        .map(|t| t.tenant_id == project.tenant_id)
-        .unwrap_or(false)
-}
+use crate::extractors::enforce_project_tenant;
 
 fn validate_project_segment(value: &str, field: &'static str) -> Result<(), String> {
     let is_valid = !value.is_empty()
@@ -204,7 +191,7 @@ pub async fn list_project_repos_handler(
     };
     // T6b-C5: refuse cross-tenant enumeration.
     if !enforce_project_tenant(&principal, &ctx.project) {
-        return bad_request_response("project does not belong to authenticated tenant");
+        return crate::errors::tenant_scope_mismatch_error().into_response();
     }
     let repo_ids = state.project_repo_access.list_for_project(&ctx).await;
     let paged_repo_ids: Vec<_> = repo_ids
@@ -237,7 +224,7 @@ pub async fn add_project_repo_handler(
     };
     // T6b-C5: refuse cross-tenant repo registration.
     if !enforce_project_tenant(&principal, &ctx.project) {
-        return bad_request_response("project does not belong to authenticated tenant");
+        return crate::errors::tenant_scope_mismatch_error().into_response();
     }
     let repo_id = match RepoId::parse(body.repo_id) {
         Ok(repo_id) => repo_id,
@@ -290,7 +277,7 @@ pub async fn get_project_repo_handler(
     };
     // T6b-C5: refuse cross-tenant read.
     if !enforce_project_tenant(&principal, &ctx.project) {
-        return bad_request_response("project does not belong to authenticated tenant");
+        return crate::errors::tenant_scope_mismatch_error().into_response();
     }
     let repo_id = match RepoId::parse(format!("{owner}/{repo}")) {
         Ok(repo_id) => repo_id,
@@ -327,7 +314,7 @@ pub async fn delete_project_repo_handler(
     };
     // T6b-C5: refuse cross-tenant repo revocation.
     if !enforce_project_tenant(&principal, &ctx.project) {
-        return bad_request_response("project does not belong to authenticated tenant");
+        return crate::errors::tenant_scope_mismatch_error().into_response();
     }
     let repo_id = match RepoId::parse(format!("{owner}/{repo}")) {
         Ok(repo_id) => repo_id,

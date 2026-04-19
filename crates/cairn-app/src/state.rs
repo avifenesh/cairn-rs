@@ -251,6 +251,11 @@ pub struct AppState {
     pub(crate) sqeq_sessions: Arc<Mutex<HashMap<String, SqEqSessionBinding>>>,
     pub(crate) a2a_tasks: Arc<Mutex<HashMap<String, A2aTaskBinding>>>,
     pub rate_limits: Arc<Mutex<HashMap<String, RateLimitBucket>>>,
+    /// T6b-C6: timestamp of the most recent eviction sweep over
+    /// `rate_limits`. Used to amortize the O(N) retain pass so an
+    /// attacker keeping the bucket map at the threshold can't force
+    /// a sweep on every request.
+    pub rate_limit_last_sweep_ms: Arc<std::sync::atomic::AtomicU64>,
     pub metrics: Arc<AppMetrics>,
     pub memory_api: Arc<MemoryApiImpl<InMemoryRetrieval>>,
     #[allow(dead_code)]
@@ -800,6 +805,7 @@ impl AppState {
             Arc::new(Mutex::new(svc))
         };
         let rate_limits = Arc::new(Mutex::new(HashMap::new()));
+        let rate_limit_last_sweep_ms = Arc::new(std::sync::atomic::AtomicU64::new(0));
         let metrics = Arc::new(AppMetrics::default());
         let (runtime_sse_tx, _) = broadcast::channel(256);
         let sse_event_buffer = Arc::new(std::sync::RwLock::new(
@@ -885,6 +891,7 @@ impl AppState {
             sqeq_sessions,
             a2a_tasks,
             rate_limits,
+            rate_limit_last_sweep_ms,
             metrics,
             memory_api,
             memory_proposal_hook,

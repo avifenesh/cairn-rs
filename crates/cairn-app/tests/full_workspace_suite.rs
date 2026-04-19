@@ -106,10 +106,12 @@ async fn app_with_token() -> axum::Router {
     let (app, _runtime, tokens) = AppBootstrap::router_with_runtime_and_tokens(config)
         .await
         .unwrap();
+    // T6b-C4: this suite touches admin-gated endpoints (create_tenant,
+    // store_credential, etc.) — admin service account required.
     tokens.register(
         TOKEN.to_string(),
-        AuthPrincipal::Operator {
-            operator_id: OperatorId::new("test_op"),
+        AuthPrincipal::ServiceAccount {
+            name: "admin".to_owned(),
             tenant: TenantKey::new("default_tenant"),
         },
     );

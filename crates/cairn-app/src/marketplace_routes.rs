@@ -133,20 +133,7 @@ fn operator_id_from_principal(
     cairn_domain::ids::OperatorId::new(crate::handlers::admin::audit_actor_id(principal))
 }
 
-/// T6b-C5: returns true when the path's project belongs to the caller's
-/// tenant OR the caller is an admin (System / `admin` service account).
-fn enforce_project_tenant(
-    principal: &AuthPrincipal,
-    project: &cairn_domain::tenancy::ProjectKey,
-) -> bool {
-    if crate::extractors::is_admin_principal(principal) {
-        return true;
-    }
-    principal
-        .tenant()
-        .map(|t| t.tenant_id == project.tenant_id)
-        .unwrap_or(false)
-}
+use crate::extractors::enforce_project_tenant;
 
 fn validate_project_segment(value: &str, field: &'static str) -> Result<(), String> {
     let is_valid = !value.is_empty()
@@ -202,7 +189,7 @@ pub async fn list_catalog_handler(
     State(state): State<Arc<AppState>>,
     Query(query): Query<ListQuery>,
 ) -> impl IntoResponse {
-    let marketplace = state.marketplace.lock().unwrap();
+    let marketplace = state.marketplace.lock().unwrap_or_else(|e| e.into_inner());
     let mut records = marketplace.list_all_records();
     records.sort_by_key(|r| r.descriptor.id.clone());
     let plugins = records
@@ -225,7 +212,7 @@ pub async fn install_plugin_handler(
 ) -> impl IntoResponse {
     // T6b-C5: plugin install is tenant-wide and admin-only.
     let operator = operator_id_from_principal(&principal);
-    let mut marketplace = state.marketplace.lock().unwrap();
+    let mut marketplace = state.marketplace.lock().unwrap_or_else(|e| e.into_inner());
 
     match marketplace.handle_command(MarketplaceCommand::InstallPlugin {
         plugin_id,
@@ -255,7 +242,7 @@ pub async fn provide_credentials_handler(
     // T6b-C5: plugin credential writes touch the shared credential
     // store — admin-gated.
     let operator = operator_id_from_principal(&principal);
-    let mut marketplace = state.marketplace.lock().unwrap();
+    let mut marketplace = state.marketplace.lock().unwrap_or_else(|e| e.into_inner());
 
     let credentials: Vec<(String, String)> = body
         .credentials
@@ -291,7 +278,7 @@ pub async fn verify_credentials_handler(
     body: Option<Json<VerifyCredentialsRequest>>,
 ) -> impl IntoResponse {
     let operator = operator_id_from_principal(&principal);
-    let mut marketplace = state.marketplace.lock().unwrap();
+    let mut marketplace = state.marketplace.lock().unwrap_or_else(|e| e.into_inner());
 
     let scope_key = body.and_then(|Json(b)| b.credential_scope_key.map(CredentialScopeKey));
 
@@ -331,10 +318,10 @@ pub async fn enable_plugin_handler(
     // T6b-C5: refuse cross-tenant enable. Only the authenticated
     // tenant's projects may have plugins enabled. Admin bypass allowed.
     if !enforce_project_tenant(&principal, &project) {
-        return bad_request_response("project does not belong to authenticated tenant");
+        return crate::errors::tenant_scope_mismatch_error().into_response();
     }
 
-    let mut marketplace = state.marketplace.lock().unwrap();
+    let mut marketplace = state.marketplace.lock().unwrap_or_else(|e| e.into_inner());
 
     let (tool_allowlist, signal_allowlist, signal_capture_override) = match body {
         Some(Json(b)) => (
@@ -412,10 +399,10 @@ pub async fn disable_plugin_handler(
 
     // T6b-C5: refuse cross-tenant disable.
     if !enforce_project_tenant(&principal, &project) {
-        return bad_request_response("project does not belong to authenticated tenant");
+        return crate::errors::tenant_scope_mismatch_error().into_response();
     }
 
-    let mut marketplace = state.marketplace.lock().unwrap();
+    let mut marketplace = state.marketplace.lock().unwrap_or_else(|e| e.into_inner());
 
     match marketplace.handle_command(MarketplaceCommand::DisablePluginForProject {
         plugin_id,
@@ -445,7 +432,7 @@ pub async fn uninstall_plugin_handler(
 ) -> impl IntoResponse {
     // T6b-C5: uninstall is tenant-wide and admin-only.
     let operator = operator_id_from_principal(&principal);
-    let mut marketplace = state.marketplace.lock().unwrap();
+    let mut marketplace = state.marketplace.lock().unwrap_or_else(|e| e.into_inner());
 
     match marketplace.handle_command(MarketplaceCommand::UninstallPlugin {
         plugin_id,

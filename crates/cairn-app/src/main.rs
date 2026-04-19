@@ -1299,10 +1299,11 @@ mod tests {
 
     fn make_state() -> AppState {
         let tokens = Arc::new(ServiceTokenRegistry::new());
+        // Name = "admin" so AdminRoleGuard-gated endpoints pass.
         tokens.register(
             TEST_TOKEN.to_owned(),
             AuthPrincipal::ServiceAccount {
-                name: "test-admin".to_owned(),
+                name: "admin".to_owned(),
                 tenant: cairn_domain::tenancy::TenantKey::new(cairn_domain::TenantId::new(
                     "test-tenant",
                 )),

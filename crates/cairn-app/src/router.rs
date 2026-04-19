@@ -1630,10 +1630,7 @@ impl AppBootstrap {
             .layer(cors)
             .layer(from_fn(request_id_middleware))
             .layer(DefaultBodyLimit::max(10 * 1024 * 1024))
-            .layer(from_fn_with_state(
-                state.rate_limits.clone(),
-                rate_limit_middleware,
-            ))
+            .layer(from_fn_with_state(state.clone(), rate_limit_middleware))
             .layer(from_fn_with_state(state, observability_middleware))
     }
 

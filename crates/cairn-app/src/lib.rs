@@ -1162,8 +1162,9 @@ mod tests {
 
         state.service_tokens.register(
             "tle-token".to_owned(),
+            // `expire-leases` is now `AdminRoleGuard`-gated (T6b-C3 tier 6a).
             AuthPrincipal::ServiceAccount {
-                name: "service_token".to_owned(),
+                name: "admin".to_owned(),
                 tenant: cairn_domain::tenancy::TenantKey::new(tenant_id.clone()),
             },
         );
@@ -1526,11 +1527,14 @@ mod tests {
     // ── New endpoint tests ────────────────────────────────────────────────────
 
     /// Helper: register a service-account token for DEFAULT_TENANT_ID.
+    /// Registered as `admin` so `AdminRoleGuard` passes — the admin
+    /// test shortcut. For tests that need a non-admin principal, build
+    /// the principal directly.
     fn register_token(state: &Arc<AppState>, token: &str) {
         state.service_tokens.register(
             token.to_owned(),
             AuthPrincipal::ServiceAccount {
-                name: "test".to_owned(),
+                name: "admin".to_owned(),
                 tenant: cairn_domain::tenancy::TenantKey::new(TenantId::new(DEFAULT_TENANT_ID)),
             },
         );
@@ -1832,7 +1836,15 @@ mod tests {
     #[tokio::test]
     async fn preserved_memory_routes_reject_cross_tenant_scope_override() {
         let state = Arc::new(AppState::new(BootstrapConfig::default()).await.unwrap());
-        register_token(&state, "memory-tenant-scope-token");
+        // Use a non-admin token so the cross-tenant guard actually
+        // fires (admin tokens bypass by design).
+        state.service_tokens.register(
+            "memory-tenant-scope-token".to_owned(),
+            AuthPrincipal::ServiceAccount {
+                name: "tenant_operator".to_owned(),
+                tenant: cairn_domain::tenancy::TenantKey::new(TenantId::new(DEFAULT_TENANT_ID)),
+            },
+        );
 
         let response = post_json(
             AppBootstrap::build_router(state),
