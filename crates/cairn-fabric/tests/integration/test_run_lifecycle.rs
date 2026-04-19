@@ -41,7 +41,12 @@ async fn test_start_with_correlation_tags_exec_core() {
 
     // Read back the exec tags hash and verify `cairn.correlation_id` landed.
     // Key layout matches FabricRunService::create_execution.
-    let eid = cairn_fabric::id_map::session_run_to_execution_id(&h.project, &session_id, &run_id, h.partition_config());
+    let eid = cairn_fabric::id_map::session_run_to_execution_id(
+        &h.project,
+        &session_id,
+        &run_id,
+        h.partition_config(),
+    );
     let partition = ff_core::partition::execution_partition(&eid, h.partition_config());
     let ctx = ff_core::keys::ExecKeyContext::new(&partition, &eid);
     let tags: HashMap<String, String> = h
@@ -224,7 +229,13 @@ async fn test_complete_task() {
 
     h.fabric
         .tasks
-        .claim(&h.project, Some(&session_id), &task_id, "test-worker".into(), 30_000)
+        .claim(
+            &h.project,
+            Some(&session_id),
+            &task_id,
+            "test-worker".into(),
+            30_000,
+        )
         .await
         .expect("claim failed");
 
@@ -277,14 +288,25 @@ async fn test_fail_task_retry_scheduled() {
 
     h.fabric
         .tasks
-        .claim(&h.project, Some(&session_id), &task_id, "test-worker".into(), 30_000)
+        .claim(
+            &h.project,
+            Some(&session_id),
+            &task_id,
+            "test-worker".into(),
+            30_000,
+        )
         .await
         .expect("claim failed");
 
     let failed = h
         .fabric
         .tasks
-        .fail(&h.project, Some(&session_id), &task_id, FailureClass::ExecutionError)
+        .fail(
+            &h.project,
+            Some(&session_id),
+            &task_id,
+            FailureClass::ExecutionError,
+        )
         .await
         .expect("fail failed");
 
@@ -345,24 +367,38 @@ async fn test_fail_reaches_terminal_after_retry_exhaustion() {
     let mut last_state = None;
 
     for attempt in 1..=max_attempts {
-        wait_until_eligible(&h, &session_id, &task_id, std::time::Duration::from_secs(10))
-            .await
-            .unwrap_or_else(|diag| {
-                panic!(
-                    "attempt {attempt}: task did not become claim-eligible within timeout — {diag}"
-                );
-            });
+        wait_until_eligible(
+            &h,
+            &session_id,
+            &task_id,
+            std::time::Duration::from_secs(10),
+        )
+        .await
+        .unwrap_or_else(|diag| {
+            panic!("attempt {attempt}: task did not become claim-eligible within timeout — {diag}");
+        });
 
         h.fabric
             .tasks
-            .claim(&h.project, Some(&session_id), &task_id, "test-worker".into(), 30_000)
+            .claim(
+                &h.project,
+                Some(&session_id),
+                &task_id,
+                "test-worker".into(),
+                30_000,
+            )
             .await
             .unwrap_or_else(|e| panic!("attempt {attempt}: claim failed: {e}"));
 
         let failed = h
             .fabric
             .tasks
-            .fail(&h.project, Some(&session_id), &task_id, FailureClass::ExecutionError)
+            .fail(
+                &h.project,
+                Some(&session_id),
+                &task_id,
+                FailureClass::ExecutionError,
+            )
             .await
             .unwrap_or_else(|e| panic!("attempt {attempt}: fail failed: {e}"));
 
@@ -433,7 +469,12 @@ async fn wait_until_eligible(
     let mut last_state: Option<TaskState> = None;
     let mut last_fetch_err: Option<String> = None;
     loop {
-        match h.fabric.tasks.get(&h.project, Some(session_id), task_id).await {
+        match h
+            .fabric
+            .tasks
+            .get(&h.project, Some(session_id), task_id)
+            .await
+        {
             Ok(Some(record)) => {
                 last_state = Some(record.state);
                 // Leave last_fetch_err untouched — only overwrite when a
@@ -496,7 +537,13 @@ async fn test_cancel_task() {
 
     h.fabric
         .tasks
-        .claim(&h.project, Some(&session_id), &task_id, "test-worker".into(), 30_000)
+        .claim(
+            &h.project,
+            Some(&session_id),
+            &task_id,
+            "test-worker".into(),
+            30_000,
+        )
         .await
         .expect("claim failed");
 

@@ -112,7 +112,10 @@ async fn e2e_full_session_lifecycle() {
     // ── 3. Submit tasks ──────────────────────────────────────────────────
     let task1 = svc
         .tasks
-        .submit(&project, None, TaskId::new("task_e2e_1"),
+        .submit(
+            &project,
+            None,
+            TaskId::new("task_e2e_1"),
             Some(RunId::new("run_e2e_1")),
             None,
             1,
@@ -123,7 +126,10 @@ async fn e2e_full_session_lifecycle() {
 
     let task2 = svc
         .tasks
-        .submit(&project, None, TaskId::new("task_e2e_2"),
+        .submit(
+            &project,
+            None,
+            TaskId::new("task_e2e_2"),
             Some(RunId::new("run_e2e_1")),
             None,
             2,
@@ -135,13 +141,21 @@ async fn e2e_full_session_lifecycle() {
     // ── 4. Claim tasks ───────────────────────────────────────────────────
     let claimed = svc
         .tasks
-        .claim(None, &TaskId::new("task_e2e_1"), "worker_1".to_owned(), 30_000)
+        .claim(
+            None,
+            &TaskId::new("task_e2e_1"),
+            "worker_1".to_owned(),
+            30_000,
+        )
         .await
         .unwrap();
     assert_eq!(claimed.state, TaskState::Leased);
 
     // ── 5. Start and complete tasks ──────────────────────────────────────
-    svc.tasks.start(None, &TaskId::new("task_e2e_1")).await.unwrap();
+    svc.tasks
+        .start(None, &TaskId::new("task_e2e_1"))
+        .await
+        .unwrap();
     let completed = svc
         .tasks
         .complete(None, &TaskId::new("task_e2e_1"))
@@ -151,10 +165,18 @@ async fn e2e_full_session_lifecycle() {
 
     // Claim + start + complete task 2.
     svc.tasks
-        .claim(None, &TaskId::new("task_e2e_2"), "worker_1".to_owned(), 30_000)
+        .claim(
+            None,
+            &TaskId::new("task_e2e_2"),
+            "worker_1".to_owned(),
+            30_000,
+        )
         .await
         .unwrap();
-    svc.tasks.start(None, &TaskId::new("task_e2e_2")).await.unwrap();
+    svc.tasks
+        .start(None, &TaskId::new("task_e2e_2"))
+        .await
+        .unwrap();
     svc.tasks
         .complete(None, &TaskId::new("task_e2e_2"))
         .await

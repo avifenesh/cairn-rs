@@ -53,11 +53,7 @@ async fn seed_run(store: &Arc<InMemoryStore>, run_id: &str, session_id: &str) {
     store.append(&[env]).await.unwrap();
 }
 
-async fn seed_task(
-    store: &Arc<InMemoryStore>,
-    task_id: &str,
-    parent_run_id: Option<&str>,
-) {
+async fn seed_task(store: &Arc<InMemoryStore>, task_id: &str, parent_run_id: Option<&str>) {
     let env = EventEnvelope::for_runtime_event(
         EventId::new(format!("task_{task_id}")),
         EventSource::Runtime,
@@ -74,7 +70,12 @@ async fn seed_task(
 
 /// Emulates `resolve_session_for_task_id`: fetches task, walks parent_run_id → run.session_id.
 async fn resolve(services: &InMemoryServices, task_id: &str) -> Option<SessionId> {
-    let task = services.tasks.get(&TaskId::new(task_id)).await.ok().flatten()?;
+    let task = services
+        .tasks
+        .get(&TaskId::new(task_id))
+        .await
+        .ok()
+        .flatten()?;
     let parent_run_id = task.parent_run_id.as_ref()?;
     services
         .runs

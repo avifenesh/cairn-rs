@@ -88,7 +88,13 @@ async fn task_complete_emits_state_changed_after_claim() {
         .expect("submit failed");
     h.fabric
         .tasks
-        .claim(&h.project, Some(&session_id), &task_id, "test-worker".into(), 30_000)
+        .claim(
+            &h.project,
+            Some(&session_id),
+            &task_id,
+            "test-worker".into(),
+            30_000,
+        )
         .await
         .expect("claim failed");
     let record = h
@@ -139,7 +145,13 @@ async fn task_complete_emits_when_claim_and_complete_use_distinct_services() {
         .expect("submit failed");
     h.fabric
         .tasks
-        .claim(&h.project, Some(&session_id), &task_id, "test-worker".into(), 30_000)
+        .claim(
+            &h.project,
+            Some(&session_id),
+            &task_id,
+            "test-worker".into(),
+            30_000,
+        )
         .await
         .expect("claim failed");
 
@@ -195,7 +207,13 @@ async fn task_cancel_emits_when_called_from_registry_less_service() {
         .expect("submit failed");
     h.fabric
         .tasks
-        .claim(&h.project, Some(&session_id), &task_id, "test-worker".into(), 30_000)
+        .claim(
+            &h.project,
+            Some(&session_id),
+            &task_id,
+            "test-worker".into(),
+            30_000,
+        )
         .await
         .expect("claim failed");
 
@@ -257,13 +275,24 @@ async fn task_terminal_fail_emits_when_called_from_registry_less_service() {
 
         let fresh_tasks = FabricTaskService::new(h.fabric.runtime.clone(), h.fabric.bridge.clone());
         fresh_tasks
-            .claim(&h.project, Some(&session_id), &task_id, "test-worker".into(), 30_000)
+            .claim(
+                &h.project,
+                Some(&session_id),
+                &task_id,
+                "test-worker".into(),
+                30_000,
+            )
             .await
             .unwrap_or_else(|e| panic!("attempt {attempt}: claim via fresh service: {e}"));
 
         let fresh_fail = FabricTaskService::new(h.fabric.runtime.clone(), h.fabric.bridge.clone());
         let record = fresh_fail
-            .fail(&h.project, Some(&session_id), &task_id, FailureClass::ExecutionError)
+            .fail(
+                &h.project,
+                Some(&session_id),
+                &task_id,
+                FailureClass::ExecutionError,
+            )
             .await
             .unwrap_or_else(|e| panic!("attempt {attempt}: fail via fresh service: {e}"));
 
@@ -303,7 +332,12 @@ async fn wait_until_claim_eligible(
 ) -> Result<(), Duration> {
     let start = std::time::Instant::now();
     loop {
-        let record = match h.fabric.tasks.get(&h.project, Some(session_id), task_id).await {
+        let record = match h
+            .fabric
+            .tasks
+            .get(&h.project, Some(session_id), task_id)
+            .await
+        {
             Ok(Some(r)) => r,
             _ => {
                 if start.elapsed() >= deadline {

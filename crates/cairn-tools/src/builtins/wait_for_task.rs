@@ -162,8 +162,14 @@ mod tests {
             .claim(None, &TaskId::new("task_wt"), "worker".into(), 30_000)
             .await
             .unwrap();
-        svc.tasks.start(None, &TaskId::new("task_wt")).await.unwrap();
-        svc.tasks.complete(None, &TaskId::new("task_wt")).await.unwrap();
+        svc.tasks
+            .start(None, &TaskId::new("task_wt"))
+            .await
+            .unwrap();
+        svc.tasks
+            .complete(None, &TaskId::new("task_wt"))
+            .await
+            .unwrap();
 
         let tool = WaitForTaskTool::new(svc.store.clone());
         let res = tool

@@ -844,32 +844,34 @@ pub(crate) async fn intervene_run_handler(
 
     let before = current_event_head(&state).await;
     match body.action {
-        RunInterventionAction::ForceComplete => match state.runtime.runs.complete(&run.session_id, &run_id).await {
-            Ok(updated_run) => {
-                if let Err(err) = append_run_intervention_event(
-                    &state,
-                    &run_id,
-                    tenant_scope.tenant_id(),
-                    "force_complete",
-                    &body.reason,
-                )
-                .await
-                {
-                    return store_error_response(err);
+        RunInterventionAction::ForceComplete => {
+            match state.runtime.runs.complete(&run.session_id, &run_id).await {
+                Ok(updated_run) => {
+                    if let Err(err) = append_run_intervention_event(
+                        &state,
+                        &run_id,
+                        tenant_scope.tenant_id(),
+                        "force_complete",
+                        &body.reason,
+                    )
+                    .await
+                    {
+                        return store_error_response(err);
+                    }
+                    publish_runtime_frames_since(&state, before).await;
+                    (
+                        StatusCode::OK,
+                        Json(RunInterventionResponse {
+                            ok: true,
+                            run: Some(updated_run),
+                            message_id: None,
+                        }),
+                    )
+                        .into_response()
                 }
-                publish_runtime_frames_since(&state, before).await;
-                (
-                    StatusCode::OK,
-                    Json(RunInterventionResponse {
-                        ok: true,
-                        run: Some(updated_run),
-                        message_id: None,
-                    }),
-                )
-                    .into_response()
+                Err(err) => runtime_error_response(err),
             }
-            Err(err) => runtime_error_response(err),
-        },
+        }
         RunInterventionAction::ForceFail => {
             let events = vec![
                 operator_event_envelope(RuntimeEvent::RunStateChanged(RunStateChanged {
@@ -1159,7 +1161,12 @@ pub(crate) async fn pause_run_handler(
         actor: body.actor,
     };
 
-    match state.runtime.runs.pause(&run.session_id, &run_id, reason).await {
+    match state
+        .runtime
+        .runs
+        .pause(&run.session_id, &run_id, reason)
+        .await
+    {
         Ok(run) => {
             publish_runtime_frames_since(&state, before).await;
             (StatusCode::OK, Json(run)).into_response()

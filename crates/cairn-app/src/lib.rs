@@ -1398,13 +1398,23 @@ mod tests {
         state
             .runtime
             .tasks
-            .claim(Some(&session_id), &task_id_1, "worker_rac".to_owned(), 60_000)
+            .claim(
+                Some(&session_id),
+                &task_id_1,
+                "worker_rac".to_owned(),
+                60_000,
+            )
             .await
             .unwrap();
         state
             .runtime
             .tasks
-            .claim(Some(&session_id), &task_id_2, "worker_rac".to_owned(), 60_000)
+            .claim(
+                Some(&session_id),
+                &task_id_2,
+                "worker_rac".to_owned(),
+                60_000,
+            )
             .await
             .unwrap();
 

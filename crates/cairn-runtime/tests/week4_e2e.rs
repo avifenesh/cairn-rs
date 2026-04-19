@@ -66,7 +66,10 @@ async fn end_to_end_runtime_slice_with_replay() {
 
     // 4. Submit and work a task
     task_svc
-        .submit(&project, None, TaskId::new("task_e2e"),
+        .submit(
+            &project,
+            None,
+            TaskId::new("task_e2e"),
             Some(RunId::new("run_e2e")),
             None,
             0,
@@ -74,10 +77,18 @@ async fn end_to_end_runtime_slice_with_replay() {
         .await
         .unwrap();
     task_svc
-        .claim(None, &TaskId::new("task_e2e"), "worker-a".to_owned(), 60_000)
+        .claim(
+            None,
+            &TaskId::new("task_e2e"),
+            "worker-a".to_owned(),
+            60_000,
+        )
         .await
         .unwrap();
-    task_svc.start(None, &TaskId::new("task_e2e")).await.unwrap();
+    task_svc
+        .start(None, &TaskId::new("task_e2e"))
+        .await
+        .unwrap();
 
     // 5. Request and resolve approval
     approval_svc
@@ -120,7 +131,10 @@ async fn end_to_end_runtime_slice_with_replay() {
         .unwrap();
 
     // 8. Complete task and run
-    task_svc.complete(None, &TaskId::new("task_e2e")).await.unwrap();
+    task_svc
+        .complete(None, &TaskId::new("task_e2e"))
+        .await
+        .unwrap();
     run_svc
         .complete(&SessionId::new("sess_e2e"), &RunId::new("run_e2e"))
         .await
@@ -239,7 +253,10 @@ async fn subagent_spawn_creates_linked_entities() {
 
     // Subagent spawn: create child task linked to parent run
     let child_task = task_svc
-        .submit(&project, None, TaskId::new("child_task"),
+        .submit(
+            &project,
+            None,
+            TaskId::new("child_task"),
             Some(RunId::new("parent_run")),
             None,
             0,
@@ -268,11 +285,22 @@ async fn subagent_spawn_creates_linked_entities() {
 
     // Work and complete child
     task_svc
-        .claim(None, &TaskId::new("child_task"), "worker-b".to_owned(), 60_000)
+        .claim(
+            None,
+            &TaskId::new("child_task"),
+            "worker-b".to_owned(),
+            60_000,
+        )
         .await
         .unwrap();
-    task_svc.start(None, &TaskId::new("child_task")).await.unwrap();
-    task_svc.complete(None, &TaskId::new("child_task")).await.unwrap();
+    task_svc
+        .start(None, &TaskId::new("child_task"))
+        .await
+        .unwrap();
+    task_svc
+        .complete(None, &TaskId::new("child_task"))
+        .await
+        .unwrap();
 
     run_svc
         .resume(

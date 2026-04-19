@@ -126,7 +126,11 @@ async fn run_fail_with_failure_class() {
         .unwrap();
 
     let run = run_svc
-        .fail(&SessionId::new("sess_1"), &RunId::new("run_1"), FailureClass::TimedOut)
+        .fail(
+            &SessionId::new("sess_1"),
+            &RunId::new("run_1"),
+            FailureClass::TimedOut,
+        )
         .await
         .unwrap();
 
@@ -201,7 +205,10 @@ async fn task_submit_claim_start_complete_lifecycle() {
     assert_eq!(task.state, TaskState::Running);
 
     // Complete
-    let task = task_svc.complete(None, &TaskId::new("task_1")).await.unwrap();
+    let task = task_svc
+        .complete(None, &TaskId::new("task_1"))
+        .await
+        .unwrap();
     assert_eq!(task.state, TaskState::Completed);
     assert!(task.state.is_terminal());
 }
@@ -293,7 +300,10 @@ async fn full_session_run_task_lifecycle() {
 
     // Submit task linked to run
     let task = task_svc
-        .submit(&project, None, TaskId::new("task_1"),
+        .submit(
+            &project,
+            None,
+            TaskId::new("task_1"),
             Some(RunId::new("run_1")),
             None,
             0,
@@ -308,7 +318,10 @@ async fn full_session_run_task_lifecycle() {
         .await
         .unwrap();
     task_svc.start(None, &TaskId::new("task_1")).await.unwrap();
-    task_svc.complete(None, &TaskId::new("task_1")).await.unwrap();
+    task_svc
+        .complete(None, &TaskId::new("task_1"))
+        .await
+        .unwrap();
 
     // Complete run
     run_svc

@@ -70,7 +70,12 @@ async fn read_exec_core_for_run(
     session_id: &cairn_domain::SessionId,
     run_id: &cairn_domain::RunId,
 ) -> HashMap<String, String> {
-    let eid = cairn_fabric::id_map::session_run_to_execution_id(&h.project, session_id, run_id, h.partition_config());
+    let eid = cairn_fabric::id_map::session_run_to_execution_id(
+        &h.project,
+        session_id,
+        run_id,
+        h.partition_config(),
+    );
     let partition = execution_partition(&eid, h.partition_config());
     let ctx = ExecKeyContext::new(&partition, &eid);
     let fields: HashMap<String, String> = h
@@ -108,7 +113,13 @@ async fn test_suspend_and_resume_roundtrip() {
 
     h.fabric
         .tasks
-        .claim(&h.project, Some(&session_id), &task_id, "test-worker".into(), 30_000)
+        .claim(
+            &h.project,
+            Some(&session_id),
+            &task_id,
+            "test-worker".into(),
+            30_000,
+        )
         .await
         .expect("claim failed");
 
@@ -318,7 +329,12 @@ async fn test_signal_delivery_is_idempotent() {
         .filter(|s| !s.is_empty())
         .expect("current_waitpoint_id must be set after enter_waiting_approval");
     let wp_id = ff_core::types::WaitpointId::parse(&wp_id_str).expect("waitpoint_id must parse");
-    let eid = cairn_fabric::id_map::session_run_to_execution_id(&h.project, &session_id, &run_id, h.partition_config());
+    let eid = cairn_fabric::id_map::session_run_to_execution_id(
+        &h.project,
+        &session_id,
+        &run_id,
+        h.partition_config(),
+    );
 
     let invocation_id = format!("inv_{}", uuid::Uuid::new_v4());
 
@@ -503,7 +519,13 @@ async fn task_pause_and_resume_emit_state_changed() {
 
     h.fabric
         .tasks
-        .claim(&h.project, Some(&session_id), &task_id, "test-worker".into(), 30_000)
+        .claim(
+            &h.project,
+            Some(&session_id),
+            &task_id,
+            "test-worker".into(),
+            30_000,
+        )
         .await
         .expect("claim failed");
 

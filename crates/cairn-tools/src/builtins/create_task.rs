@@ -148,14 +148,7 @@ impl ToolHandler for CreateTaskTool {
         // context directly.
         let record = self
             .task_service
-            .submit(
-                project,
-                None,
-                task_id.clone(),
-                Some(parent_run_id),
-                None,
-                0,
-            )
+            .submit(project, None, task_id.clone(), Some(parent_run_id), None, 0)
             .await
             .map_err(|e| ToolError::Transient(e.to_string()))?;
 

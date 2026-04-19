@@ -248,7 +248,14 @@ async fn full_task_lifecycle() {
     // (2) Submit → Queued.
     let task_id = TaskId::new("task_full_1");
     let queued = tasks
-        .submit(&project(), None, task_id.clone(), Some(run_id.clone()), None, 0)
+        .submit(
+            &project(),
+            None,
+            task_id.clone(),
+            Some(run_id.clone()),
+            None,
+            0,
+        )
         .await
         .unwrap();
     assert_eq!(queued.state, TaskState::Queued);
@@ -329,7 +336,10 @@ async fn fail_task_uses_correct_failure_class() {
         .claim(None, &t1, "worker_01".to_owned(), 60_000)
         .await
         .unwrap();
-    let retryable = tasks.fail(None, &t1, FailureClass::LeaseExpired).await.unwrap();
+    let retryable = tasks
+        .fail(None, &t1, FailureClass::LeaseExpired)
+        .await
+        .unwrap();
     assert_eq!(retryable.state, TaskState::RetryableFailed);
     assert!(!retryable.state.is_terminal());
 
@@ -343,7 +353,10 @@ async fn fail_task_uses_correct_failure_class() {
         .claim(None, &t2, "worker_01".to_owned(), 60_000)
         .await
         .unwrap();
-    let failed = tasks.fail(None, &t2, FailureClass::ExecutionError).await.unwrap();
+    let failed = tasks
+        .fail(None, &t2, FailureClass::ExecutionError)
+        .await
+        .unwrap();
     assert_eq!(failed.state, TaskState::Failed);
     assert!(failed.state.is_terminal());
 }

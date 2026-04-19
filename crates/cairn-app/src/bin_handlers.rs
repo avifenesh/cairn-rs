@@ -265,7 +265,14 @@ pub(crate) async fn create_run_task_handler(
     match state
         .runtime
         .tasks
-        .submit(&run.project, Some(&run.session_id), task_id, Some(run_id), None, 0)
+        .submit(
+            &run.project,
+            Some(&run.session_id),
+            task_id,
+            Some(run_id),
+            None,
+            0,
+        )
         .await
     {
         Ok(record) => {
@@ -299,7 +306,12 @@ pub(crate) async fn start_task_handler(
         Ok(s) => s,
         Err(resp) => return resp,
     };
-    match state.runtime.tasks.start(session_id.as_ref(), &task_id).await {
+    match state
+        .runtime
+        .tasks
+        .start(session_id.as_ref(), &task_id)
+        .await
+    {
         Ok(record) => (StatusCode::OK, Json(record)).into_response(),
         Err(e) => {
             let msg = e.to_string();
@@ -323,8 +335,7 @@ async fn load_task_with_session_for_tenant(
 ) -> Result<Option<cairn_domain::SessionId>, axum::response::Response> {
     let task = match state.runtime.tasks.get(task_id).await {
         Ok(Some(task))
-            if tenant_scope.is_admin
-                || task.project.tenant_id == *tenant_scope.tenant_id() =>
+            if tenant_scope.is_admin || task.project.tenant_id == *tenant_scope.tenant_id() =>
         {
             task
         }
@@ -366,7 +377,11 @@ pub(crate) async fn fail_task_handler(
     match state
         .runtime
         .tasks
-        .fail(session_id.as_ref(), &task_id, cairn_domain::FailureClass::ExecutionError)
+        .fail(
+            session_id.as_ref(),
+            &task_id,
+            cairn_domain::FailureClass::ExecutionError,
+        )
         .await
     {
         Ok(record) => {

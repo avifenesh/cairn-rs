@@ -28,10 +28,10 @@ use crate::errors::{
     AppApiError,
 };
 use crate::extractors::{HasProjectScope, ProjectJson, ProjectScope, TenantScope};
+use crate::helpers::resolve_session_for_task_record;
 use crate::state::AppState;
 #[allow(unused_imports)]
 use crate::TaskRecordDoc;
-use crate::helpers::resolve_session_for_task_record;
 use crate::{
     append_runtime_event, audit_actor_id, current_event_head, publish_runtime_frames_since,
 };
@@ -525,7 +525,11 @@ pub(crate) async fn heartbeat_task_handler(
     match state
         .runtime
         .tasks
-        .heartbeat(session_id.as_ref(), &task_id, body.lease_extension_ms.unwrap_or(60_000))
+        .heartbeat(
+            session_id.as_ref(),
+            &task_id,
+            body.lease_extension_ms.unwrap_or(60_000),
+        )
         .await
     {
         Ok(task) => {
@@ -553,7 +557,12 @@ pub(crate) async fn release_task_lease_handler(
     let session_id = resolve_session_for_task_record(state.as_ref(), &task).await;
 
     let before = current_event_head(&state).await;
-    match state.runtime.tasks.release_lease(session_id.as_ref(), &task_id).await {
+    match state
+        .runtime
+        .tasks
+        .release_lease(session_id.as_ref(), &task_id)
+        .await
+    {
         Ok(task) => {
             publish_runtime_frames_since(&state, before).await;
             (StatusCode::OK, Json(task)).into_response()
@@ -578,7 +587,12 @@ pub(crate) async fn cancel_task_handler(
     let session_id = resolve_session_for_task_record(state.as_ref(), &task).await;
 
     let before = current_event_head(&state).await;
-    match state.runtime.tasks.cancel(session_id.as_ref(), &task_id).await {
+    match state
+        .runtime
+        .tasks
+        .cancel(session_id.as_ref(), &task_id)
+        .await
+    {
         Ok(record) => {
             let _ = state
                 .runtime
@@ -622,12 +636,22 @@ pub(crate) async fn complete_task_handler(
     let session_id = parent_run.as_ref().map(|r| r.session_id.clone());
 
     if current_task.state == TaskState::Leased {
-        if let Err(err) = state.runtime.tasks.start(session_id.as_ref(), &task_id).await {
+        if let Err(err) = state
+            .runtime
+            .tasks
+            .start(session_id.as_ref(), &task_id)
+            .await
+        {
             return runtime_error_response(err);
         }
     }
 
-    match state.runtime.tasks.complete(session_id.as_ref(), &task_id).await {
+    match state
+        .runtime
+        .tasks
+        .complete(session_id.as_ref(), &task_id)
+        .await
+    {
         Ok(task) => {
             // Auto-checkpoint on task_complete is handled inside
             // TaskServiceImpl::complete() to avoid double-checkpoint races.
@@ -642,7 +666,11 @@ pub(crate) async fn complete_task_handler(
                     Ok(false) => {
                         if let Some(run) = parent_run.as_ref() {
                             if run.state == RunState::Running {
-                                if let Err(err) = state.runtime.runs.complete(&run.session_id, &parent_run_id).await
+                                if let Err(err) = state
+                                    .runtime
+                                    .runs
+                                    .complete(&run.session_id, &parent_run_id)
+                                    .await
                                 {
                                     return runtime_error_response(err);
                                 }

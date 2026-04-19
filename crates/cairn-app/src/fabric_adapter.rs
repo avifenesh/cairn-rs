@@ -449,12 +449,12 @@ async fn resolve_task_project_and_session(
     task_id: &TaskId,
     caller_session_id: Option<&SessionId>,
 ) -> Result<(ProjectKey, Option<SessionId>), RuntimeError> {
-    let task = resolve_task_scope(store, task_id).await?.ok_or_else(|| {
-        RuntimeError::NotFound {
+    let task = resolve_task_scope(store, task_id)
+        .await?
+        .ok_or_else(|| RuntimeError::NotFound {
             entity: "task",
             id: task_id.to_string(),
-        }
-    })?;
+        })?;
 
     // Derive session_id from the parent run when present. Bare tasks
     // (no parent_run_id) carry no session binding and must be minted
@@ -654,15 +654,11 @@ impl TaskService for FabricTaskServiceAdapter {
     async fn get(&self, task_id: &TaskId) -> Result<Option<TaskRecord>, RuntimeError> {
         // Read-only: derive (project, session_id) from projection; None
         // caller_session means no cross-check.
-        let (project, session) = match resolve_task_project_and_session_opt(
-            &self.store,
-            task_id,
-        )
-        .await?
-        {
-            Some(v) => v,
-            None => return Ok(None),
-        };
+        let (project, session) =
+            match resolve_task_project_and_session_opt(&self.store, task_id).await? {
+                Some(v) => v,
+                None => return Ok(None),
+            };
         self.fabric
             .tasks
             .get(&project, session.as_ref(), task_id)

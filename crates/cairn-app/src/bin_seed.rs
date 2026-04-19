@@ -61,12 +61,24 @@ pub(crate) async fn seed_demo_data(state: &AppState) {
     let sess_alpha = SessionId::new("sess_alpha");
     let sess_beta = SessionId::new("sess_beta");
     let sess_gamma = SessionId::new("sess_gamma");
-    let _ = state.runtime.runs.complete(&sess_alpha, &RunId::new("run_a")).await;
-    let _ = state.runtime.runs.complete(&sess_alpha, &RunId::new("run_b")).await;
     let _ = state
         .runtime
         .runs
-        .fail(&sess_beta, &RunId::new("run_d"), FailureClass::ExecutionError)
+        .complete(&sess_alpha, &RunId::new("run_a"))
+        .await;
+    let _ = state
+        .runtime
+        .runs
+        .complete(&sess_alpha, &RunId::new("run_b"))
+        .await;
+    let _ = state
+        .runtime
+        .runs
+        .fail(
+            &sess_beta,
+            &RunId::new("run_d"),
+            FailureClass::ExecutionError,
+        )
         .await;
     let _ = state
         .runtime
@@ -137,10 +149,23 @@ pub(crate) async fn seed_demo_data(state: &AppState) {
         let _ = state
             .runtime
             .tasks
-            .claim(Some(&sess), &TaskId::new(*tid), "demo-worker".to_owned(), 300_000)
+            .claim(
+                Some(&sess),
+                &TaskId::new(*tid),
+                "demo-worker".to_owned(),
+                300_000,
+            )
             .await;
-        let _ = state.runtime.tasks.start(Some(&sess), &TaskId::new(*tid)).await;
-        let _ = state.runtime.tasks.complete(Some(&sess), &TaskId::new(*tid)).await;
+        let _ = state
+            .runtime
+            .tasks
+            .start(Some(&sess), &TaskId::new(*tid))
+            .await;
+        let _ = state
+            .runtime
+            .tasks
+            .complete(Some(&sess), &TaskId::new(*tid))
+            .await;
     }
     // Running: task_05, task_06
     for tid in &["task_05", "task_06"] {
@@ -148,9 +173,18 @@ pub(crate) async fn seed_demo_data(state: &AppState) {
         let _ = state
             .runtime
             .tasks
-            .claim(Some(&sess), &TaskId::new(*tid), "demo-worker".to_owned(), 300_000)
+            .claim(
+                Some(&sess),
+                &TaskId::new(*tid),
+                "demo-worker".to_owned(),
+                300_000,
+            )
             .await;
-        let _ = state.runtime.tasks.start(Some(&sess), &TaskId::new(*tid)).await;
+        let _ = state
+            .runtime
+            .tasks
+            .start(Some(&sess), &TaskId::new(*tid))
+            .await;
     }
     // Claimed: task_07, task_08
     for tid in &["task_07", "task_08"] {
@@ -158,7 +192,12 @@ pub(crate) async fn seed_demo_data(state: &AppState) {
         let _ = state
             .runtime
             .tasks
-            .claim(Some(&sess), &TaskId::new(*tid), "demo-worker".to_owned(), 300_000)
+            .claim(
+                Some(&sess),
+                &TaskId::new(*tid),
+                "demo-worker".to_owned(),
+                300_000,
+            )
             .await;
     }
     // task_09, task_12 remain queued
@@ -167,16 +206,33 @@ pub(crate) async fn seed_demo_data(state: &AppState) {
     let _ = state
         .runtime
         .tasks
-        .claim(Some(&sess_10), &TaskId::new("task_10"), "demo-worker".to_owned(), 300_000)
+        .claim(
+            Some(&sess_10),
+            &TaskId::new("task_10"),
+            "demo-worker".to_owned(),
+            300_000,
+        )
         .await;
-    let _ = state.runtime.tasks.start(Some(&sess_10), &TaskId::new("task_10")).await;
     let _ = state
         .runtime
         .tasks
-        .fail(Some(&sess_10), &TaskId::new("task_10"), FailureClass::ExecutionError)
+        .start(Some(&sess_10), &TaskId::new("task_10"))
+        .await;
+    let _ = state
+        .runtime
+        .tasks
+        .fail(
+            Some(&sess_10),
+            &TaskId::new("task_10"),
+            FailureClass::ExecutionError,
+        )
         .await;
     let sess_11 = task_session("task_11");
-    let _ = state.runtime.tasks.cancel(Some(&sess_11), &TaskId::new("task_11")).await;
+    let _ = state
+        .runtime
+        .tasks
+        .cancel(Some(&sess_11), &TaskId::new("task_11"))
+        .await;
 
     // ── 3 Approvals ───────────────────────────────────────────────────────────
     // appr_01: pending (run_c)

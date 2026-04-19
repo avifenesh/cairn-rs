@@ -139,7 +139,12 @@ async fn external_worker_progress_report_emits_event() {
         .await
         .unwrap();
     task_svc
-        .claim(None, &TaskId::new("task_1"), "worker-ext".to_owned(), 60_000)
+        .claim(
+            None,
+            &TaskId::new("task_1"),
+            "worker-ext".to_owned(),
+            60_000,
+        )
         .await
         .unwrap();
     task_svc.start(None, &TaskId::new("task_1")).await.unwrap();
@@ -180,7 +185,12 @@ async fn external_worker_completed_transitions_task() {
         .await
         .unwrap();
     task_svc
-        .claim(None, &TaskId::new("task_1"), "worker-ext".to_owned(), 60_000)
+        .claim(
+            None,
+            &TaskId::new("task_1"),
+            "worker-ext".to_owned(),
+            60_000,
+        )
         .await
         .unwrap();
     task_svc.start(None, &TaskId::new("task_1")).await.unwrap();
@@ -214,11 +224,19 @@ async fn external_worker_report_on_terminal_task_fails() {
         .await
         .unwrap();
     task_svc
-        .claim(None, &TaskId::new("task_1"), "worker-ext".to_owned(), 60_000)
+        .claim(
+            None,
+            &TaskId::new("task_1"),
+            "worker-ext".to_owned(),
+            60_000,
+        )
         .await
         .unwrap();
     task_svc.start(None, &TaskId::new("task_1")).await.unwrap();
-    task_svc.complete(None, &TaskId::new("task_1")).await.unwrap();
+    task_svc
+        .complete(None, &TaskId::new("task_1"))
+        .await
+        .unwrap();
 
     // Report on already-completed task
     let report = ExternalWorkerReport {

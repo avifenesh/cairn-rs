@@ -581,8 +581,7 @@ mod tests {
         let cfg = PartitionConfig::default();
         let tid = TaskId::new("task_shared_between_paths");
         let solo = task_to_execution_id(&p, &tid, &cfg);
-        let via_session =
-            session_task_to_execution_id(&p, &SessionId::new("sess_x"), &tid, &cfg);
+        let via_session = session_task_to_execution_id(&p, &SessionId::new("sess_x"), &tid, &cfg);
         assert_ne!(solo, via_session);
     }
 
@@ -654,7 +653,10 @@ mod tests {
         let p_task_b = execution_partition(&task_b, &cfg);
 
         assert_eq!(p_run_a, p_run_b, "runs in same session must co-locate");
-        assert_eq!(p_run_a, p_task_a, "task must co-locate with runs in same session");
+        assert_eq!(
+            p_run_a, p_task_a,
+            "task must co-locate with runs in same session"
+        );
         assert_eq!(p_task_a, p_task_b, "tasks in same session must co-locate");
     }
 }
