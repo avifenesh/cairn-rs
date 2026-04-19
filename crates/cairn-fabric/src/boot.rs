@@ -182,7 +182,7 @@ async fn seed_waitpoint_hmac_secret_if_configured(
         }
     };
 
-    let num_partitions = partition_config.num_execution_partitions;
+    let num_partitions = partition_config.num_flow_partitions;
     let secret_field = format!("secret:{kid}");
 
     for index in 0..num_partitions {
