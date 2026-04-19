@@ -828,11 +828,29 @@ mod tests {
     }
 
     fn test_router(state: Arc<AppState>) -> Router {
+        // T6c-C3: handlers now require `Extension<AuthPrincipal>`.
+        // Inject an admin principal so tests exercise the not-found
+        // path rather than the missing-extension 500.
+        use axum::middleware::from_fn;
+        let admin_principal = cairn_api::auth::AuthPrincipal::ServiceAccount {
+            name: "admin".to_string(),
+            tenant: cairn_domain::tenancy::TenantKey::new("tenant-admin"),
+        };
         Router::new()
             .route(
                 "/v1/projects/:project/triggers/:trigger_id",
                 get(get_trigger_handler).delete(delete_trigger_handler),
             )
+            .layer(from_fn(
+                move |mut req: axum::http::Request<axum::body::Body>,
+                      next: axum::middleware::Next| {
+                    let principal = admin_principal.clone();
+                    async move {
+                        req.extensions_mut().insert(principal);
+                        next.run(req).await
+                    }
+                },
+            ))
             .with_state(state)
     }
 
