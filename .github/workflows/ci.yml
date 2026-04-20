@@ -92,11 +92,15 @@ jobs:
         timeout-minutes: 8
         env:
           CARGO_BUILD_JOBS: "2"
-      - name: integration tests (cairn-app handler fixture)
+      - name: integration tests (runtime + orchestrator + app)
         # Handler tests run against the read-only FakeFabric fixture
-        # under `crates/cairn-app/tests/support/`. No Valkey required.
-        run: cargo test --tests -p cairn-app
-        timeout-minutes: 10
+        # under `crates/cairn-app/tests/support/` (no Valkey required).
+        # cairn-runtime and cairn-orchestrator contribute 41 + 1
+        # non-gated integration test binaries that exercise service,
+        # projection, and orchestrator surfaces — they must run here
+        # because `--workspace --lib` only covers `src/` unit tests.
+        run: cargo test --tests -p cairn-runtime -p cairn-orchestrator -p cairn-app
+        timeout-minutes: 15
         env:
           CARGO_BUILD_JOBS: "2"
           RUSTFLAGS: "-C debuginfo=0"

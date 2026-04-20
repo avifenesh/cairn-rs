@@ -325,15 +325,22 @@ impl TaskService for FakeFabricTasks {
         &self,
         project: &ProjectKey,
         limit: usize,
-        _offset: usize,
+        offset: usize,
     ) -> Result<Vec<TaskRecord>, RuntimeError> {
+        // `TaskReadModel::list_by_state` has no offset parameter, so emulate
+        // pagination by over-fetching `limit + offset` and skipping the first
+        // `offset` records. `saturating_add` guards against the unlikely
+        // `limit + offset` overflow case in tests that thrash the API.
         Ok(TaskReadModel::list_by_state(
             self.store.as_ref(),
             project,
             TaskState::DeadLettered,
-            limit,
+            limit.saturating_add(offset),
         )
-        .await?)
+        .await?
+        .into_iter()
+        .skip(offset)
+        .collect())
     }
 
     async fn pause(
