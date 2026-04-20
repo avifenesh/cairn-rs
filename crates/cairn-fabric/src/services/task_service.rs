@@ -727,17 +727,18 @@ impl FabricTaskService {
         }
 
         // Read the child's in-adjacency set — SMEMBERS over all
-        // edge_ids applied to this execution (includes resolved +
-        // impossible + unresolved). For each, HGET `edge_state` on
-        // the flow-partition edge hash; keep only `pending` edges.
+        // edge_ids applied to this execution. For each, HGET `state`
+        // on the per-execution dep record (written by
+        // ff_apply_dependency_to_child and mutated by
+        // ff_resolve_dependency). Values: `unsatisfied` (blocker),
+        // `satisfied` (prerequisite completed), `impossible`
+        // (prerequisite failed/cancelled → child will be skipped).
+        // Only `unsatisfied` counts as a current blocker.
+        //
         // Then resolve the upstream execution_id → cairn task_id via
         // the `cairn.task_id` tag on the upstream exec_core (set at
         // submit time, see crates/cairn-fabric/src/services/
         // task_service.rs:296).
-        let fid = id_map::session_to_flow_id(project, session_id);
-        let flow_partition =
-            ff_core::partition::flow_partition(&fid, &self.runtime.partition_config);
-        let fctx = ff_core::keys::FlowKeyContext::new(&flow_partition, &fid);
 
         // SMEMBERS on the child's deps_all_edges set (raw cmd —
         // ferriskey doesn't expose a typed smembers() helper).
@@ -755,21 +756,21 @@ impl FabricTaskService {
         for edge_id_str in &edge_ids {
             let edge_id = ff_core::types::EdgeId::parse(edge_id_str)
                 .map_err(|e| FabricError::Internal(format!("parse edge_id {edge_id_str}: {e}")))?;
-            let edge_key = fctx.edge(&edge_id);
-            let edge_state: Option<String> = self
+            let dep_key = exec_ctx.dep_edge(&edge_id);
+            let dep_state: Option<String> = self
                 .runtime
                 .client
-                .hget(&edge_key, "edge_state")
+                .hget(&dep_key, "state")
                 .await
-                .map_err(|e| FabricError::Internal(format!("hget edge_state: {e}")))?;
+                .map_err(|e| FabricError::Internal(format!("hget dep state: {e}")))?;
             let upstream_eid_str: Option<String> = self
                 .runtime
                 .client
-                .hget(&edge_key, "upstream_eid")
+                .hget(&dep_key, "upstream_execution_id")
                 .await
-                .map_err(|e| FabricError::Internal(format!("hget upstream_eid: {e}")))?;
-            let state = edge_state.unwrap_or_default();
-            if state != "pending" {
+                .map_err(|e| FabricError::Internal(format!("hget upstream_execution_id: {e}")))?;
+            let state = dep_state.unwrap_or_default();
+            if state != "unsatisfied" {
                 continue;
             }
             let upstream_eid_str = match upstream_eid_str {

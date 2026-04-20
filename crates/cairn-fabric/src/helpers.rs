@@ -154,41 +154,45 @@ pub fn value_to_string(v: &ferriskey::Value) -> Option<String> {
     }
 }
 
-/// Flatten a SMEMBERS-style `Value::Array(Vec<Result<Value, _>>)` into
-/// a `Vec<String>`. Errored entries and non-string values are skipped
-/// silently — missing/garbled set members shouldn't crash the read.
+/// Flatten a collection of string-like `Value`s into a `Vec<String>`.
+/// Handles both `Value::Array(Vec<Result<Value, _>>)` (LRANGE, HKEYS…)
+/// and `Value::Set(Vec<Value>)` (SMEMBERS, SINTER…). Errored or
+/// non-string entries are skipped silently — missing/garbled members
+/// shouldn't crash the read.
 pub fn parse_string_array(raw: &ferriskey::Value) -> Vec<String> {
-    let ferriskey::Value::Array(items) = raw else {
-        return Vec::new();
-    };
-    items
-        .iter()
-        .filter_map(|r| r.as_ref().ok())
-        .filter_map(value_to_string)
-        .collect()
+    match raw {
+        ferriskey::Value::Array(items) => items
+            .iter()
+            .filter_map(|r| r.as_ref().ok())
+            .filter_map(value_to_string)
+            .collect(),
+        ferriskey::Value::Set(items) => items.iter().filter_map(value_to_string).collect(),
+        _ => Vec::new(),
+    }
 }
 
-/// Extract the `new_graph_revision` (second element) from the
-/// `ff_stage_dependency_edge` OK envelope `[1, "<edge_id>",
-/// "<new_graph_revision>"]`. Returns `None` on malformed shape.
+/// Extract the `new_graph_revision` from the
+/// `ff_stage_dependency_edge` OK envelope
+/// `[1, "OK", "<edge_id>", "<new_graph_revision>"]`. FF's `ok(...)`
+/// helper (flowfabric.lua) wraps `(status=1, "OK", ...caller_args)`,
+/// so index 3 carries the second caller-supplied value. Returns
+/// `None` on malformed shape.
 pub fn parse_stage_result_revision(raw: &ferriskey::Value) -> Option<u64> {
     let ferriskey::Value::Array(arr) = raw else {
         return None;
     };
-    // Layout: [status, edge_id, new_graph_revision]. Indices 1 and 2
-    // are both Result<Value, _>; we want index 2.
-    let rev_value = arr.get(2)?.as_ref().ok()?;
+    let rev_value = arr.get(3)?.as_ref().ok()?;
     value_to_string(rev_value).and_then(|s| s.parse().ok())
 }
 
-/// Extract the eligibility state string (second element) from the
-/// `ff_evaluate_flow_eligibility` OK envelope `[1, "<state>"]`.
+/// Extract the eligibility state string from the
+/// `ff_evaluate_flow_eligibility` OK envelope `[1, "OK", "<state>"]`.
 /// Returns `None` on malformed shape.
 pub fn parse_eligibility_result(raw: &ferriskey::Value) -> Option<String> {
     let ferriskey::Value::Array(arr) = raw else {
         return None;
     };
-    let state_value = arr.get(1)?.as_ref().ok()?;
+    let state_value = arr.get(2)?.as_ref().ok()?;
     value_to_string(state_value)
 }
 
