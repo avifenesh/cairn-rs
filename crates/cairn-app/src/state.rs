@@ -307,7 +307,7 @@ pub struct AppState {
     /// Background task that derives lifecycle metrics from the event
     /// log broadcast. Kept on `AppState` so its lifetime tracks the
     /// process; drop/cancel is managed by shutdown paths.
-    #[cfg(feature = "metrics-core")]
+    #[cfg(any(feature = "metrics-core", feature = "metrics-providers"))]
     pub metrics_tap: Option<crate::metrics_tap::MetricsTap>,
 }
 
@@ -922,12 +922,12 @@ impl AppState {
             model_registry: ModelRegistry::with_bundled()
                 .unwrap_or_else(|_| ModelRegistry::empty()),
             fabric,
-            #[cfg(feature = "metrics-core")]
+            #[cfg(any(feature = "metrics-core", feature = "metrics-providers"))]
             metrics_tap: None,
         };
         state.runtime.store.reset_usage_counters();
 
-        #[cfg(feature = "metrics-core")]
+        #[cfg(any(feature = "metrics-core", feature = "metrics-providers"))]
         {
             let tap = crate::metrics_tap::MetricsTap::spawn(
                 state.runtime.store.clone(),

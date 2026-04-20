@@ -20,10 +20,11 @@
 //! counter bumps are worse than crashing, and the lag count is
 //! itself a useful operational signal.
 
-#![cfg(feature = "metrics-core")]
+#![cfg(any(feature = "metrics-core", feature = "metrics-providers"))]
 
 use std::sync::Arc;
 
+#[cfg(feature = "metrics-core")]
 use cairn_domain::lifecycle::{RunState, TaskState};
 use cairn_domain::RuntimeEvent;
 use cairn_store::InMemoryStore;
@@ -100,12 +101,14 @@ impl MetricsTap {
 
 fn process_event(metrics: &AppMetrics, event: &RuntimeEvent) {
     match event {
+        #[cfg(feature = "metrics-core")]
         RuntimeEvent::RunCreated(e) => {
             metrics.record_run_created(
                 e.project.tenant_id.as_str(),
                 e.project.workspace_id.as_str(),
             );
         }
+        #[cfg(feature = "metrics-core")]
         RuntimeEvent::RunStateChanged(e) => {
             let (outcome, failure_class) = match e.transition.to {
                 RunState::Completed => (Some("completed"), None),
@@ -134,12 +137,14 @@ fn process_event(metrics: &AppMetrics, event: &RuntimeEvent) {
                 metrics.record_lease_expiry("run");
             }
         }
+        #[cfg(feature = "metrics-core")]
         RuntimeEvent::TaskCreated(e) => {
             metrics.record_task_created(
                 e.project.tenant_id.as_str(),
                 e.project.workspace_id.as_str(),
             );
         }
+        #[cfg(feature = "metrics-core")]
         RuntimeEvent::TaskStateChanged(e) => {
             let (outcome, failure_class) = match e.transition.to {
                 TaskState::Completed => (Some("completed"), None),
@@ -172,6 +177,7 @@ fn process_event(metrics: &AppMetrics, event: &RuntimeEvent) {
                 metrics.record_lease_expiry("task");
             }
         }
+        #[cfg(feature = "metrics-core")]
         RuntimeEvent::ToolInvocationCompleted(e) => {
             use cairn_domain::tool_invocation::ToolInvocationOutcomeKind as K;
             let outcome = match e.outcome {
@@ -184,10 +190,34 @@ fn process_event(metrics: &AppMetrics, event: &RuntimeEvent) {
             };
             metrics.record_tool_invocation(&e.tool_name, outcome);
         }
+        #[cfg(feature = "metrics-providers")]
+        RuntimeEvent::ProviderCallCompleted(e) => {
+            use cairn_domain::providers::{OperationKind, ProviderCallStatus};
+            let operation = match e.operation_kind {
+                OperationKind::Generate => "generate",
+                OperationKind::Embed => "embed",
+                OperationKind::Rerank => "rerank",
+            };
+            let status = match e.status {
+                ProviderCallStatus::Succeeded => "succeeded",
+                ProviderCallStatus::Failed => "failed",
+                ProviderCallStatus::Cancelled => "cancelled",
+            };
+            metrics.record_provider_call(
+                e.provider_connection_id.as_str(),
+                e.provider_model_id.as_str(),
+                operation,
+                status,
+                e.latency_ms,
+                e.input_tokens,
+                e.output_tokens,
+            );
+        }
         _ => {}
     }
 }
 
+#[cfg(feature = "metrics-core")]
 fn failure_label(fc: cairn_domain::lifecycle::FailureClass) -> &'static str {
     use cairn_domain::lifecycle::FailureClass;
     match fc {
