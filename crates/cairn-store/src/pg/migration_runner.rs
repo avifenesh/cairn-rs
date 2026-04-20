@@ -120,6 +120,11 @@ const MIGRATIONS: &[(u32, &str, &str)] = &[
         "add_task_session_id",
         include_str!("migrations/V021__add_task_session_id.sql"),
     ),
+    (
+        22,
+        "create_ff_lease_history_cursors",
+        include_str!("migrations/V022__create_ff_lease_history_cursors.sql"),
+    ),
 ];
 
 /// Return the compile-time migration registry as (version, name, sql) triples.
