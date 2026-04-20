@@ -45,8 +45,8 @@ Out of scope:
 - `CAIRN_ADMIN_TOKEN` is the admin authentication for the HTTP surface. Dev
   defaults (`dev-admin-token`, `cairn-demo-token`) must not be used in
   production. Boot logs warn when defaults are active.
-- The `direct-valkey-claim` cargo feature exposes FCALL paths that skip
-  scheduler admission and budget checks. It is OFF by default and must
-  stay OFF in production builds.
 - FlowFabric HMAC secret (`CAIRN_FABRIC_WAITPOINT_HMAC_SECRET`) is required
   when the Fabric backend is enabled; boot fails loud if unset.
+- All worker claim paths route through `FabricSchedulerService::claim_for_worker`
+  which runs budget / quota / capability admission. There is no direct-Valkey
+  bypass.

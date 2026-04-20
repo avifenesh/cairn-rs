@@ -1,23 +1,18 @@
 //! Regression guards for the registry-less terminal emission contract.
 //!
-//! The bug these tests pin:
-//! `FabricTaskService::complete` / `fail` / `cancel` used to gate
-//! `BridgeEvent::TaskStateChanged` emission on `ActiveTaskRegistry`
-//! membership. Tasks claimed via any path that did not populate the
-//! registry (external API callers, `CairnWorker::claim_next` under
-//! `direct-valkey-claim`, or a cairn process restart between claim
-//! and completion) silently skipped emission — and the cairn-store
-//! `TaskReadModel` projection drifted from FF's exec_core truth.
+//! Invariant pinned here: `FabricTaskService::complete` / `fail` /
+//! `cancel` must emit `BridgeEvent::TaskStateChanged` regardless of
+//! how the task was claimed. FF's exec_core owns every lease field
+//! (`lease_id`, `lease_epoch`, `attempt_index`) and is re-read on
+//! demand — no cairn-side registry caches those. Tasks claimed by any
+//! path (external API callers, scheduler-routed workers, or a cairn
+//! process restart between claim and completion) must still drive a
+//! terminal emission so the `TaskReadModel` projection tracks FF
+//! truth.
 //!
-//! The fix:
-//! 1. Removed the `was_registered` gate in all three terminal methods.
-//! 2. Deleted `ActiveTaskRegistry` entirely — FF owns every field it
-//!    cached (`lease_id`, `lease_epoch`, `attempt_index`), and the
-//!    `Option<ClaimedTask>` slot was already carried inside `CairnTask`.
-//!
-//! Each test exercises a DIFFERENT claim path, completes or fails or
+//! Each test exercises a different claim path, completes or fails or
 //! cancels, and asserts the projection sees the terminal transition.
-//! If the gate ever comes back (or the emission is otherwise dropped),
+//! If emission is ever dropped,
 //! exactly one of these tests fails with a specific, actionable message.
 
 use std::time::Duration;

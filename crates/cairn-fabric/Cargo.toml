@@ -27,18 +27,6 @@ tracing = "0.1"
 serde_json = "1"
 thiserror = "2"
 
-[features]
-# Direct (scheduler-bypassing) claim path. Forwards to ff-sdk's
-# `direct-valkey-claim` feature so CairnWorker::claim_next is available.
-# DO NOT enable in production: the direct path skips the budget and quota
-# admission checks that only ff-scheduler enforces. Intended for
-# integration tests and local dev only — production must go through
-# FabricSchedulerService::claim_for_worker. See worker_sdk.rs for the
-# architectural dispute note (cairn cannot wrap a scheduler-mediated
-# CairnTask today because ff_sdk::task::ClaimedTask::new is pub(crate)
-# at FF @a09871000574388256b1dd7c910239e992c0d3a6).
-direct-valkey-claim = ["ff-sdk/direct-valkey-claim"]
-
 [dev-dependencies]
 url = "2"
 # Spin up a fresh Valkey container per cargo-test invocation (OnceCell
