@@ -7,8 +7,9 @@ use cairn_store::projections::TaskRecord;
 use crate::error::FabricError;
 use crate::event_bridge::{BridgeEvent, EventBridge};
 use crate::helpers::{
-    check_fcall_success, is_duplicate_result, parse_fail_outcome, parse_public_state,
-    try_parse_project_key, FailOutcome,
+    check_fcall_success, is_duplicate_result, parse_eligibility_result, parse_fail_outcome,
+    parse_public_state, parse_stage_result_revision, parse_string_array, try_parse_project_key,
+    FailOutcome,
 };
 use ff_core::keys::{ExecKeyContext, IndexKeys};
 use ff_core::partition::execution_partition;
@@ -375,27 +376,442 @@ impl FabricTaskService {
                 .await;
         }
 
+        // Session-bound tasks join their session's flow so future
+        // `declare_dependency` calls can reference them as edge
+        // endpoints. `ff_add_execution_to_flow` is idempotent
+        // (returns `ok_already_satisfied` on a duplicate add) so
+        // retry-safe. Session-less (bare) tasks never get a flow;
+        // declare_dependency rejects them with Validation.
+        if let Some(sid) = session_id {
+            self.add_execution_to_session_flow(project, sid, &eid)
+                .await?;
+        }
+
         self.read_task_record(project, session_id, &task_id).await
     }
 
-    pub async fn declare_dependency(
+    /// Add the execution to its session's flow, creating the flow
+    /// first if it doesn't exist. `ff_create_flow` is idempotent
+    /// (`ok_already_satisfied` on duplicate), so calling it
+    /// defensively costs one extra round-trip on the first task of a
+    /// session and zero on subsequent ones (the idempotency guard
+    /// short-circuits). The ergonomic benefit: callers don't have to
+    /// remember to call `sessions.create` before submitting tasks.
+    async fn add_execution_to_session_flow(
         &self,
-        _dependent_task_id: &TaskId,
-        _prerequisite_task_id: &TaskId,
-    ) -> Result<TaskDependencyRecord, FabricError> {
-        // FF handles dependencies via flow edges (ff_stage_dependency_edge +
-        // ff_apply_dependency_to_child). For v1 cairn-fabric bridge, task
-        // dependencies use FF's native flow coordination.
-        Err(FabricError::Internal(
-            "task dependencies use FF flow edges — use flow coordination API".to_owned(),
-        ))
+        project: &ProjectKey,
+        session_id: &SessionId,
+        eid: &ExecutionId,
+    ) -> Result<(), FabricError> {
+        let fid = id_map::session_to_flow_id(project, session_id);
+        let flow_partition =
+            ff_core::partition::flow_partition(&fid, &self.runtime.partition_config);
+        let fctx = ff_core::keys::FlowKeyContext::new(&flow_partition, &fid);
+        let flow_idx = ff_core::keys::FlowIndexKeys::new(&flow_partition);
+        let exec_partition =
+            ff_core::partition::execution_partition(eid, &self.runtime.partition_config);
+        let exec_ctx = ff_core::keys::ExecKeyContext::new(&exec_partition, eid);
+
+        let now_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as u64;
+
+        // Ensure the flow exists. Idempotent on the FF side.
+        let namespace = id_map::tenant_to_namespace(&project.tenant_id);
+        let (create_keys, create_args) = crate::fcall::session::build_create_flow(
+            &fctx,
+            &flow_partition,
+            &fid,
+            "cairn_session",
+            &namespace,
+            ff_core::types::TimestampMs::from_millis(now_ms as i64),
+        );
+        let create_key_refs: Vec<&str> = create_keys.iter().map(|s| s.as_str()).collect();
+        let create_arg_refs: Vec<&str> = create_args.iter().map(|s| s.as_str()).collect();
+        let create_raw = self
+            .runtime
+            .fcall(
+                crate::fcall::names::FF_CREATE_FLOW,
+                &create_key_refs,
+                &create_arg_refs,
+            )
+            .await
+            .map_err(|e| FabricError::Internal(format!("ff_create_flow: {e}")))?;
+        crate::helpers::check_fcall_success(&create_raw, crate::fcall::names::FF_CREATE_FLOW)?;
+
+        // Add the execution to the flow's members set.
+        let (keys, args) = crate::fcall::flow_edges::build_add_execution_to_flow(
+            &fctx, &flow_idx, &exec_ctx, &fid, eid, now_ms,
+        );
+        let key_refs: Vec<&str> = keys.iter().map(|s| s.as_str()).collect();
+        let arg_refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
+
+        let raw = self
+            .runtime
+            .fcall(
+                crate::fcall::names::FF_ADD_EXECUTION_TO_FLOW,
+                &key_refs,
+                &arg_refs,
+            )
+            .await
+            .map_err(|e| FabricError::Internal(format!("ff_add_execution_to_flow: {e}")))?;
+        crate::helpers::check_fcall_success(&raw, crate::fcall::names::FF_ADD_EXECUTION_TO_FLOW)?;
+        Ok(())
     }
 
+    /// Declare that `dependent_task_id` must not start until
+    /// `prerequisite_task_id` completes. Both tasks must live in the
+    /// same session — FF flow edges cannot cross flows. Caller
+    /// supplies the shared `(project, session_id)`; the adapter layer
+    /// validates that the two tasks agree before this method is
+    /// invoked, so reaching here with mismatched sessions is a bug.
+    pub async fn declare_dependency(
+        &self,
+        project: &ProjectKey,
+        session_id: &SessionId,
+        dependent_task_id: &TaskId,
+        prerequisite_task_id: &TaskId,
+    ) -> Result<TaskDependencyRecord, FabricError> {
+        // Self-dependency: reject client-side. FF's Lua also rejects
+        // with `self_referencing_edge`, but a clearer message here
+        // saves a round-trip and matches the contract cairn exposes.
+        if dependent_task_id == prerequisite_task_id {
+            return Err(FabricError::Validation {
+                reason: "task cannot depend on itself".to_owned(),
+            });
+        }
+
+        let fid = id_map::session_to_flow_id(project, session_id);
+        let flow_partition =
+            ff_core::partition::flow_partition(&fid, &self.runtime.partition_config);
+        let fctx = ff_core::keys::FlowKeyContext::new(&flow_partition, &fid);
+
+        // Mint both execution ids — deterministic_for_flow guarantees
+        // they co-locate with the session's flow partition.
+        let dep_eid = self.task_to_execution_id(project, Some(session_id), dependent_task_id);
+        let pre_eid = self.task_to_execution_id(project, Some(session_id), prerequisite_task_id);
+
+        // Child's execution partition — aliased to the same {fp:N}
+        // tag as the flow, so apply_dependency_to_child is CROSSSLOT-
+        // safe.
+        let child_exec_partition =
+            ff_core::partition::execution_partition(&dep_eid, &self.runtime.partition_config);
+        let child_exec_ctx = ff_core::keys::ExecKeyContext::new(&child_exec_partition, &dep_eid);
+        let child_idx = ff_core::keys::IndexKeys::new(&child_exec_partition);
+        let lane_id = id_map::project_to_lane(project);
+
+        let now_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as u64;
+
+        let edge_id = ff_core::types::EdgeId::new();
+
+        // Retry budget for stale_graph_revision. Concurrent declarers
+        // on the same session's flow all compete for the HINCRBY;
+        // exponential backoff converges quickly. Five attempts at
+        // 10/20/40/80/160ms is plenty for typical concurrency;
+        // beyond that something is pathologically wrong and we
+        // surface as Validation so the caller can retry externally.
+        const RETRY_DELAYS_MS: &[u64] = &[10, 20, 40, 80, 160];
+        let new_graph_revision: u64;
+        let mut attempts = 0usize;
+        loop {
+            attempts += 1;
+            // Read the current graph_revision. New flows have 0.
+            let current_rev_str: Option<String> = self
+                .runtime
+                .client
+                .hget(&fctx.core(), "graph_revision")
+                .await
+                .map_err(|e| FabricError::Internal(format!("hget graph_revision: {e}")))?;
+            let current_rev: u64 = current_rev_str.and_then(|s| s.parse().ok()).unwrap_or(0);
+
+            let (keys, args) = crate::fcall::flow_edges::build_stage_dependency_edge(
+                &fctx,
+                &fid,
+                &edge_id,
+                &pre_eid,
+                &dep_eid,
+                "success_only",
+                "",
+                current_rev,
+                now_ms,
+            );
+            let key_refs: Vec<&str> = keys.iter().map(|s| s.as_str()).collect();
+            let arg_refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
+
+            let raw = self
+                .runtime
+                .fcall(
+                    crate::fcall::names::FF_STAGE_DEPENDENCY_EDGE,
+                    &key_refs,
+                    &arg_refs,
+                )
+                .await
+                .map_err(|e| FabricError::Internal(format!("ff_stage_dependency_edge: {e}")))?;
+
+            if let Some(code) = crate::helpers::fcall_error_code(&raw) {
+                if code == "stale_graph_revision" {
+                    if attempts <= RETRY_DELAYS_MS.len() {
+                        tokio::time::sleep(std::time::Duration::from_millis(
+                            RETRY_DELAYS_MS[attempts - 1],
+                        ))
+                        .await;
+                        continue;
+                    }
+                    return Err(FabricError::Validation {
+                        reason: format!(
+                            "stage_dependency_edge: graph_revision kept racing \
+                             after {attempts} attempts — concurrent declarers \
+                             overwhelming the flow"
+                        ),
+                    });
+                }
+                match code.as_str() {
+                    "cycle_detected" => {
+                        return Err(FabricError::Validation {
+                            reason: "dependency introduces cycle".to_owned(),
+                        });
+                    }
+                    "self_referencing_edge" => {
+                        // Already guarded client-side; this would be
+                        // a logic bug.
+                        return Err(FabricError::Validation {
+                            reason: "task cannot depend on itself".to_owned(),
+                        });
+                    }
+                    "dependency_already_exists" => {
+                        // Treat as success — idempotent declare. The
+                        // caller's intent is "B depends on A"; if
+                        // that edge already exists, the intent is
+                        // satisfied. Return a synthesized record;
+                        // the existing edge_id (which we don't have)
+                        // isn't surfaced anywhere.
+                        return Ok(TaskDependencyRecord {
+                            dependency: TaskDependency {
+                                dependent_task_id: dependent_task_id.clone(),
+                                depends_on_task_id: prerequisite_task_id.clone(),
+                                project: project.clone(),
+                                created_at_ms: now_ms,
+                            },
+                            resolved_at_ms: None,
+                        });
+                    }
+                    "flow_not_found" => {
+                        return Err(FabricError::NotFound {
+                            entity: "flow",
+                            id: fid.to_string(),
+                        });
+                    }
+                    "flow_already_terminal" => {
+                        return Err(FabricError::Validation {
+                            reason: format!(
+                                "session's flow {fid} is already terminal; \
+                                 cannot add new dependency edges"
+                            ),
+                        });
+                    }
+                    "execution_not_in_flow" => {
+                        return Err(FabricError::NotFound {
+                            entity: "task",
+                            id: "(one of the endpoints is not a flow member)".to_owned(),
+                        });
+                    }
+                    _ => {
+                        return Err(FabricError::Internal(format!(
+                            "ff_stage_dependency_edge rejected: {code}"
+                        )));
+                    }
+                }
+            }
+
+            // Success — parse `new_graph_revision` out of the OK envelope.
+            new_graph_revision = parse_stage_result_revision(&raw).ok_or_else(|| {
+                FabricError::Internal("ff_stage_dependency_edge: malformed OK envelope".into())
+            })?;
+            break;
+        }
+
+        // 2. Apply the edge on the child's execution partition.
+        let (apply_keys, apply_args) = crate::fcall::flow_edges::build_apply_dependency_to_child(
+            &child_exec_ctx,
+            &child_idx.lane_eligible(&lane_id),
+            &child_idx.lane_blocked_dependencies(&lane_id),
+            &edge_id,
+            &fid,
+            &pre_eid,
+            new_graph_revision,
+            "success_only",
+            "",
+            now_ms,
+        );
+        let apply_key_refs: Vec<&str> = apply_keys.iter().map(|s| s.as_str()).collect();
+        let apply_arg_refs: Vec<&str> = apply_args.iter().map(|s| s.as_str()).collect();
+        let apply_raw = self
+            .runtime
+            .fcall(
+                crate::fcall::names::FF_APPLY_DEPENDENCY_TO_CHILD,
+                &apply_key_refs,
+                &apply_arg_refs,
+            )
+            .await
+            .map_err(|e| FabricError::Internal(format!("ff_apply_dependency_to_child: {e}")))?;
+        crate::helpers::check_fcall_success(
+            &apply_raw,
+            crate::fcall::names::FF_APPLY_DEPENDENCY_TO_CHILD,
+        )?;
+
+        // 3. Append audit record. No projection reads it; callers
+        // reconstruct "which deps were resolved when" by joining this
+        // against the prerequisite's TaskStateChanged(Completed).
+        self.bridge
+            .emit(BridgeEvent::TaskDependencyAdded {
+                dependent_task_id: dependent_task_id.clone(),
+                prerequisite_task_id: prerequisite_task_id.clone(),
+                project: project.clone(),
+                edge_id: edge_id.to_string(),
+                flow_id: fid.to_string(),
+                created_at_ms: now_ms,
+            })
+            .await;
+
+        Ok(TaskDependencyRecord {
+            dependency: TaskDependency {
+                dependent_task_id: dependent_task_id.clone(),
+                depends_on_task_id: prerequisite_task_id.clone(),
+                project: project.clone(),
+                created_at_ms: now_ms,
+            },
+            resolved_at_ms: None,
+        })
+    }
+
+    /// Return the list of currently-blocking upstream task_ids for
+    /// `task_id`. Empty means either (a) the task is eligible /
+    /// running / terminal, or (b) its prereqs are all satisfied. If
+    /// FF reports `impossible`, an empty list is also returned —
+    /// the push listener has either already skipped the child or
+    /// will soon; cairn does not need to take action.
     pub async fn check_dependencies(
         &self,
-        _task_id: &TaskId,
+        project: &ProjectKey,
+        session_id: &SessionId,
+        task_id: &TaskId,
     ) -> Result<Vec<TaskDependencyRecord>, FabricError> {
-        Ok(Vec::new())
+        let eid = self.task_to_execution_id(project, Some(session_id), task_id);
+        let exec_partition =
+            ff_core::partition::execution_partition(&eid, &self.runtime.partition_config);
+        let exec_ctx = ff_core::keys::ExecKeyContext::new(&exec_partition, &eid);
+
+        let (keys, args) = crate::fcall::flow_edges::build_evaluate_flow_eligibility(&exec_ctx);
+        let key_refs: Vec<&str> = keys.iter().map(|s| s.as_str()).collect();
+        let arg_refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
+        let raw = self
+            .runtime
+            .fcall(
+                crate::fcall::names::FF_EVALUATE_FLOW_ELIGIBILITY,
+                &key_refs,
+                &arg_refs,
+            )
+            .await
+            .map_err(|e| FabricError::Internal(format!("ff_evaluate_flow_eligibility: {e}")))?;
+
+        let state = parse_eligibility_result(&raw).ok_or_else(|| {
+            FabricError::Internal("ff_evaluate_flow_eligibility: malformed OK envelope".into())
+        })?;
+
+        if state != "blocked_by_dependencies" {
+            return Ok(Vec::new());
+        }
+
+        // Read the child's in-adjacency set — SMEMBERS over all
+        // edge_ids applied to this execution (includes resolved +
+        // impossible + unresolved). For each, HGET `edge_state` on
+        // the flow-partition edge hash; keep only `pending` edges.
+        // Then resolve the upstream execution_id → cairn task_id via
+        // the `cairn.task_id` tag on the upstream exec_core (set at
+        // submit time, see crates/cairn-fabric/src/services/
+        // task_service.rs:296).
+        let fid = id_map::session_to_flow_id(project, session_id);
+        let flow_partition =
+            ff_core::partition::flow_partition(&fid, &self.runtime.partition_config);
+        let fctx = ff_core::keys::FlowKeyContext::new(&flow_partition, &fid);
+
+        // SMEMBERS on the child's deps_all_edges set (raw cmd —
+        // ferriskey doesn't expose a typed smembers() helper).
+        let smembers_raw: ferriskey::Value = self
+            .runtime
+            .client
+            .cmd("SMEMBERS")
+            .arg(exec_ctx.deps_all_edges())
+            .execute()
+            .await
+            .map_err(|e| FabricError::Internal(format!("smembers deps_all_edges: {e}")))?;
+        let edge_ids: Vec<String> = parse_string_array(&smembers_raw);
+
+        let mut blockers = Vec::new();
+        for edge_id_str in &edge_ids {
+            let edge_id = ff_core::types::EdgeId::parse(edge_id_str)
+                .map_err(|e| FabricError::Internal(format!("parse edge_id {edge_id_str}: {e}")))?;
+            let edge_key = fctx.edge(&edge_id);
+            let edge_state: Option<String> = self
+                .runtime
+                .client
+                .hget(&edge_key, "edge_state")
+                .await
+                .map_err(|e| FabricError::Internal(format!("hget edge_state: {e}")))?;
+            let upstream_eid_str: Option<String> = self
+                .runtime
+                .client
+                .hget(&edge_key, "upstream_eid")
+                .await
+                .map_err(|e| FabricError::Internal(format!("hget upstream_eid: {e}")))?;
+            let state = edge_state.unwrap_or_default();
+            if state != "pending" {
+                continue;
+            }
+            let upstream_eid_str = match upstream_eid_str {
+                Some(s) if !s.is_empty() => s,
+                _ => continue,
+            };
+            // Resolve upstream execution_id → cairn task_id via the tag.
+            let upstream_eid = ff_core::types::ExecutionId::parse(&upstream_eid_str)
+                .map_err(|e| FabricError::Internal(format!("parse upstream_eid: {e}")))?;
+            let upstream_partition = ff_core::partition::execution_partition(
+                &upstream_eid,
+                &self.runtime.partition_config,
+            );
+            let upstream_ctx =
+                ff_core::keys::ExecKeyContext::new(&upstream_partition, &upstream_eid);
+            let upstream_task: Option<String> = self
+                .runtime
+                .client
+                .hget(&upstream_ctx.tags(), "cairn.task_id")
+                .await
+                .map_err(|e| FabricError::Internal(format!("hget cairn.task_id tag: {e}")))?;
+            let upstream_task_id = match upstream_task {
+                Some(s) if !s.is_empty() => TaskId::new(s),
+                _ => continue,
+            };
+            blockers.push(TaskDependencyRecord {
+                dependency: TaskDependency {
+                    dependent_task_id: task_id.clone(),
+                    depends_on_task_id: upstream_task_id,
+                    project: project.clone(),
+                    // created_at_ms isn't carried on the edge record
+                    // in a form we can recover cheaply; the audit
+                    // event has it, but we'd need to scan the
+                    // EventLog. Callers that need it should read the
+                    // log directly.
+                    created_at_ms: 0,
+                },
+                resolved_at_ms: None,
+            });
+        }
+
+        Ok(blockers)
     }
 
     pub async fn get(

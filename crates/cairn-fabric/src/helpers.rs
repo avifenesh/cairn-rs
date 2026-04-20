@@ -143,6 +143,55 @@ pub fn sanitize_signal_component(s: &str) -> String {
     s.replace(':', "_")
 }
 
+/// Extract a `String` out of a ferriskey `Value` in bulk or simple
+/// string form. Returns `None` for other shapes.
+pub fn value_to_string(v: &ferriskey::Value) -> Option<String> {
+    match v {
+        ferriskey::Value::BulkString(b) => Some(String::from_utf8_lossy(b).into_owned()),
+        ferriskey::Value::SimpleString(s) => Some(s.clone()),
+        ferriskey::Value::VerbatimString { text, .. } => Some(text.clone()),
+        _ => None,
+    }
+}
+
+/// Flatten a SMEMBERS-style `Value::Array(Vec<Result<Value, _>>)` into
+/// a `Vec<String>`. Errored entries and non-string values are skipped
+/// silently — missing/garbled set members shouldn't crash the read.
+pub fn parse_string_array(raw: &ferriskey::Value) -> Vec<String> {
+    let ferriskey::Value::Array(items) = raw else {
+        return Vec::new();
+    };
+    items
+        .iter()
+        .filter_map(|r| r.as_ref().ok())
+        .filter_map(value_to_string)
+        .collect()
+}
+
+/// Extract the `new_graph_revision` (second element) from the
+/// `ff_stage_dependency_edge` OK envelope `[1, "<edge_id>",
+/// "<new_graph_revision>"]`. Returns `None` on malformed shape.
+pub fn parse_stage_result_revision(raw: &ferriskey::Value) -> Option<u64> {
+    let ferriskey::Value::Array(arr) = raw else {
+        return None;
+    };
+    // Layout: [status, edge_id, new_graph_revision]. Indices 1 and 2
+    // are both Result<Value, _>; we want index 2.
+    let rev_value = arr.get(2)?.as_ref().ok()?;
+    value_to_string(rev_value).and_then(|s| s.parse().ok())
+}
+
+/// Extract the eligibility state string (second element) from the
+/// `ff_evaluate_flow_eligibility` OK envelope `[1, "<state>"]`.
+/// Returns `None` on malformed shape.
+pub fn parse_eligibility_result(raw: &ferriskey::Value) -> Option<String> {
+    let ferriskey::Value::Array(arr) = raw else {
+        return None;
+    };
+    let state_value = arr.get(1)?.as_ref().ok()?;
+    value_to_string(state_value)
+}
+
 pub fn is_duplicate_result(raw: &ferriskey::Value) -> bool {
     if let ferriskey::Value::Array(arr) = raw {
         if let Some(Ok(ferriskey::Value::BulkString(b))) = arr.get(1) {

@@ -106,6 +106,20 @@ pub enum BridgeEvent {
         session_id: SessionId,
         project: ProjectKey,
     },
+    /// Emitted after a successful `declare_dependency` FCALL sequence
+    /// on the Fabric layer. Written to the EventLog as
+    /// `RuntimeEvent::TaskDependencyAdded` for audit. No projection
+    /// reads it — dependency authority lives in FF, and
+    /// `check_dependencies` reads edge state live via
+    /// `ff_evaluate_flow_eligibility`.
+    TaskDependencyAdded {
+        dependent_task_id: TaskId,
+        prerequisite_task_id: TaskId,
+        project: ProjectKey,
+        edge_id: String,
+        flow_id: String,
+        created_at_ms: u64,
+    },
 }
 
 pub struct EventBridge {
@@ -260,6 +274,7 @@ fn bridge_event_type_name(event: &BridgeEvent) -> &'static str {
         BridgeEvent::ExecutionRetryScheduled { .. } => "ExecutionRetryScheduled",
         BridgeEvent::SessionCreated { .. } => "SessionCreated",
         BridgeEvent::SessionArchived { .. } => "SessionArchived",
+        BridgeEvent::TaskDependencyAdded { .. } => "TaskDependencyAdded",
     }
 }
 
@@ -445,6 +460,18 @@ fn bridge_event_to_runtime_event(event: &BridgeEvent) -> RuntimeEvent {
                 from: Some(SessionState::Open),
                 to: SessionState::Archived,
             },
+        }),
+        BridgeEvent::TaskDependencyAdded {
+            dependent_task_id,
+            prerequisite_task_id,
+            created_at_ms,
+            ..
+        } => RuntimeEvent::TaskDependencyAdded(cairn_domain::events::TaskDependencyAdded {
+            task_id: dependent_task_id.clone(),
+            depends_on: prerequisite_task_id.clone(),
+            added_at_ms: *created_at_ms,
+            dependent_task_id: dependent_task_id.clone(),
+            depends_on_task_id: prerequisite_task_id.clone(),
         }),
     }
 }
