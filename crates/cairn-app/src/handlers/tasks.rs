@@ -17,9 +17,7 @@ use cairn_domain::{
     StateTransition, TaskId, TaskState, TaskStateChanged,
 };
 use cairn_runtime::AuditService;
-use cairn_store::projections::{
-    TaskDependencyReadModel, TaskLeaseExpiredReadModel, TaskReadModel, TaskRecord,
-};
+use cairn_store::projections::{TaskLeaseExpiredReadModel, TaskReadModel, TaskRecord};
 use cairn_store::EventLog;
 use utoipa::ToSchema;
 
@@ -373,13 +371,15 @@ pub(crate) async fn list_task_dependencies_handler(
     Path(id): Path<String>,
 ) -> impl IntoResponse {
     let task_id = TaskId::new(id);
+    // Go through TaskService::check_dependencies so the HTTP surface
+    // stays backend-agnostic. Under Fabric the result comes from FF
+    // edge state; under the dev-only in-memory runtime the result is
+    // always empty (see RunServiceImpl::check_dependencies).
     match state.runtime.tasks.get(&task_id).await {
         Ok(Some(task)) if task.project.tenant_id == *tenant_scope.tenant_id() => {
-            match TaskDependencyReadModel::list_blocking(state.runtime.store.as_ref(), &task_id)
-                .await
-            {
+            match state.runtime.tasks.check_dependencies(&task_id).await {
                 Ok(records) => (StatusCode::OK, Json(records)).into_response(),
-                Err(err) => store_error_response(err),
+                Err(err) => runtime_error_response(err),
             }
         }
         Ok(Some(_)) | Ok(None) => {

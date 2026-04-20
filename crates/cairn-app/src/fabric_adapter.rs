@@ -29,6 +29,7 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use cairn_domain::TaskDependencyRecord;
 use cairn_domain::{
     ApprovalDecision, FailureClass, PauseReason, ProjectKey, ResumeTrigger, RunId, RunResumeTarget,
     SessionId, TaskId, TaskResumeTarget, TaskState,
@@ -39,8 +40,7 @@ use cairn_runtime::runs::RunService;
 use cairn_runtime::sessions::SessionService;
 use cairn_runtime::tasks::TaskService;
 use cairn_store::projections::{
-    RunReadModel, RunRecord, SessionReadModel, SessionRecord, TaskDependencyRecord, TaskReadModel,
-    TaskRecord,
+    RunReadModel, RunRecord, SessionReadModel, SessionRecord, TaskReadModel, TaskRecord,
 };
 use cairn_store::InMemoryStore;
 
@@ -627,21 +627,12 @@ impl TaskService for FabricTaskServiceAdapter {
 
     async fn check_dependencies(
         &self,
-        task_id: &TaskId,
+        _task_id: &TaskId,
     ) -> Result<Vec<TaskDependencyRecord>, RuntimeError> {
-        // Delegates to the store projection: dependency records are written
-        // by declare_dependency via the event log, so reads come from there.
-        // FF's flow-edge state is not indexed by cairn TaskId, so we can't
-        // read authoritatively from FF without declare_dependency first
-        // writing a projection. Using the projection avoids that coupling.
-        use cairn_store::projections::TaskDependencyReadModel;
-        // Projection's `list_blocking(task_id)` returns the unresolved
-        // prerequisites for THIS task — exactly what check_dependencies
-        // needs to return. `list_unresolved(project)` is a different view
-        // (all unresolved deps in a project), not what the trait asks for.
-        TaskDependencyReadModel::list_blocking(self.store.as_ref(), task_id)
-            .await
-            .map_err(RuntimeError::from)
+        // Stubbed in commit A (trait deletion). Commit C wires the
+        // FF-authoritative path: ff_evaluate_flow_eligibility + read
+        // the child's in-adjacency set to list blocking upstreams.
+        Ok(Vec::new())
     }
 
     async fn get(&self, task_id: &TaskId) -> Result<Option<TaskRecord>, RuntimeError> {

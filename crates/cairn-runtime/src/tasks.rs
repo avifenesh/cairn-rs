@@ -39,20 +39,25 @@ pub trait TaskService: Send + Sync {
 
     /// Declare that `dependent_task_id` cannot start until `prerequisite_task_id` completes.
     ///
-    /// Transitions `dependent_task_id` to `WaitingDependency`.
+    /// Under the Fabric backend this issues `ff_stage_dependency_edge` +
+    /// `ff_apply_dependency_to_child` against FF. Both tasks must belong
+    /// to the same session (FF flows are session-scoped).
     async fn declare_dependency(
         &self,
         dependent_task_id: &TaskId,
         prerequisite_task_id: &TaskId,
-    ) -> Result<cairn_store::projections::TaskDependencyRecord, RuntimeError>;
+    ) -> Result<cairn_domain::TaskDependencyRecord, RuntimeError>;
 
     /// Return unresolved (blocking) dependencies for `task_id`.
     ///
-    /// If all dependencies are resolved, transitions the task to `Queued`.
+    /// Under the Fabric backend this queries `ff_evaluate_flow_eligibility`
+    /// and, when the task is blocked, reads the in-adjacency set to
+    /// enumerate upstream task_ids. An empty return means no active
+    /// blockers (eligible or already moved past the waiting state).
     async fn check_dependencies(
         &self,
         task_id: &TaskId,
-    ) -> Result<Vec<cairn_store::projections::TaskDependencyRecord>, RuntimeError>;
+    ) -> Result<Vec<cairn_domain::TaskDependencyRecord>, RuntimeError>;
 
     /// Get a task by ID.
     async fn get(&self, task_id: &TaskId) -> Result<Option<TaskRecord>, RuntimeError>;

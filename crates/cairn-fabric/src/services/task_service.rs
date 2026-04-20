@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use cairn_domain::*;
-use cairn_store::projections::{TaskDependencyRecord, TaskRecord};
+use cairn_store::projections::TaskRecord;
 
 use crate::error::FabricError;
 use crate::event_bridge::{BridgeEvent, EventBridge};

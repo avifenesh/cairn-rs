@@ -6,10 +6,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use cairn_domain::*;
-use cairn_store::projections::{
-    CheckpointStrategyReadModel, TaskDependencyReadModel, TaskDependencyRecord, TaskReadModel,
-    TaskRecord,
-};
+use cairn_store::projections::{CheckpointStrategyReadModel, TaskReadModel, TaskRecord};
 use cairn_store::EventLog;
 
 use super::event_helpers::make_envelope;
@@ -27,7 +24,7 @@ impl<S> TaskServiceImpl<S> {
     }
 }
 
-impl<S: EventLog + TaskReadModel + TaskDependencyReadModel + 'static> TaskServiceImpl<S> {
+impl<S: EventLog + TaskReadModel + 'static> TaskServiceImpl<S> {
     async fn get_task(&self, task_id: &TaskId) -> Result<TaskRecord, RuntimeError> {
         TaskReadModel::get(self.store.as_ref(), task_id)
             .await?
@@ -73,7 +70,7 @@ impl<S: EventLog + TaskReadModel + TaskDependencyReadModel + 'static> TaskServic
 #[async_trait]
 impl<S> TaskService for TaskServiceImpl<S>
 where
-    S: EventLog + TaskReadModel + TaskDependencyReadModel + CheckpointStrategyReadModel + 'static,
+    S: EventLog + TaskReadModel + CheckpointStrategyReadModel + 'static,
 {
     async fn submit(
         &self,
@@ -197,15 +194,13 @@ where
         let result = self
             .transition_task(task_id, TaskState::Completed, None)
             .await?;
-        // Mark all dependencies with this task as prerequisite as resolved.
+        // Task dependencies are FF-authoritative; there is nothing for
+        // the in-memory runtime to resolve on completion.
+
         let now_ms = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
             .as_millis() as u64;
-        // Resolve any task dependencies this completion unblocks. Propagate
-        // the error — pre-T3-H1 the store failure was silently dropped and
-        // downstream tasks stayed stuck in WaitingDependency forever.
-        TaskDependencyReadModel::resolve_dependency(self.store.as_ref(), task_id, now_ms).await?;
 
         // Auto-checkpoint: if the parent run has a strategy with
         // trigger_on_task_complete, emit a CheckpointRecorded event.
@@ -241,83 +236,35 @@ where
 
     async fn declare_dependency(
         &self,
-        dependent_task_id: &TaskId,
-        prerequisite_task_id: &TaskId,
+        _dependent_task_id: &TaskId,
+        _prerequisite_task_id: &TaskId,
     ) -> Result<TaskDependencyRecord, RuntimeError> {
-        // Look up the dependent task to get its project.
-        let task = self.get_task(dependent_task_id).await?;
-
-        // Transition dependent task to WaitingDependency.
-        if can_transition_task_state(task.state, TaskState::WaitingDependency) {
-            let event = make_envelope(RuntimeEvent::TaskStateChanged(TaskStateChanged {
-                project: task.project.clone(),
-                task_id: dependent_task_id.clone(),
-                transition: StateTransition {
-                    from: Some(task.state),
-                    to: TaskState::WaitingDependency,
-                },
-                failure_class: None,
-                pause_reason: None,
-                resume_trigger: None,
-            }));
-            self.store.append(&[event]).await?;
-        }
-
-        // Store the dependency record.
-        let now_ms = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_millis() as u64;
-        let dep = cairn_domain::TaskDependency {
-            dependent_task_id: dependent_task_id.clone(),
-            depends_on_task_id: prerequisite_task_id.clone(),
-            project: task.project.clone(),
-            created_at_ms: now_ms,
-        };
-        let record = TaskDependencyRecord {
-            dependency: dep,
-            resolved_at_ms: None,
-        };
-        TaskDependencyReadModel::insert_dependency(self.store.as_ref(), record.clone())
-            .await
-            .map_err(RuntimeError::Store)?;
-        Ok(record)
+        // `in-memory-runtime` is a dev/CI-only path (CLAUDE.md). Task
+        // dependencies are FF-authoritative under the default Fabric
+        // backend: `ff_stage_dependency_edge` on the flow partition
+        // plus `ff_apply_dependency_to_child` on the child's execution
+        // partition. Reconstructing that edge state in-memory would
+        // duplicate FF's invariants with guaranteed drift, so this
+        // path is intentionally absent.
+        Err(RuntimeError::Validation {
+            reason: "task dependencies require the Fabric backend; \
+                     in-memory-runtime is dev-only and does not model \
+                     FF flow edges"
+                .to_owned(),
+        })
     }
 
     async fn check_dependencies(
         &self,
-        task_id: &TaskId,
+        _task_id: &TaskId,
     ) -> Result<Vec<TaskDependencyRecord>, RuntimeError> {
-        let deps = TaskDependencyReadModel::list_blocking(self.store.as_ref(), task_id)
-            .await
-            .map_err(RuntimeError::Store)?;
-        let unresolved: Vec<TaskDependencyRecord> = deps
-            .into_iter()
-            .filter(|d| d.resolved_at_ms.is_none())
-            .collect();
-        // If all resolved, transition to Queued.
-        if unresolved.is_empty() {
-            if let Ok(task) = self.get_task(task_id).await {
-                if can_transition_task_state(task.state, TaskState::Queued) {
-                    let event = make_envelope(RuntimeEvent::TaskStateChanged(TaskStateChanged {
-                        project: task.project.clone(),
-                        task_id: task_id.clone(),
-                        transition: StateTransition {
-                            from: Some(task.state),
-                            to: TaskState::Queued,
-                        },
-                        failure_class: None,
-                        pause_reason: None,
-                        resume_trigger: None,
-                    }));
-                    // Propagate: pre-T3-H1 the append error was
-                    // `let _`-discarded, leaving the task stuck in
-                    // WaitingDependency while the caller saw success.
-                    self.store.append(&[event]).await?;
-                }
-            }
-        }
-        Ok(unresolved)
+        // See declare_dependency — the in-memory runtime is
+        // intentionally dep-less. Returning an empty list (rather
+        // than an error) lets callers that only want "is anything
+        // blocking me?" short-circuit without noise, since the answer
+        // under this backend is trivially "no, nothing can be
+        // declared".
+        Ok(Vec::new())
     }
 
     async fn fail(
