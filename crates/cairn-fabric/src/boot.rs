@@ -56,6 +56,12 @@ impl FabricRuntime {
         }
         let client = client.ok_or(FabricError::Valkey(last_err))?;
 
+        // Verify the connected Valkey has the Functions API (>= 7.0),
+        // with a boot-time WARN when the detected major is below 8.0.
+        // 60s retry budget tolerates rolling upgrades. See
+        // `version_check` module docs for the full rationale.
+        crate::version_check::verify_valkey_version(&client).await?;
+
         let mut lib_loaded = false;
         for attempt in 0..CONNECT_MAX_ATTEMPTS {
             match ff_script::loader::ensure_library(&client).await {
