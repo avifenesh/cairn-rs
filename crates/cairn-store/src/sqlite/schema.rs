@@ -184,4 +184,14 @@ CREATE TABLE IF NOT EXISTS graph_edges (
     created_at      INTEGER NOT NULL,
     UNIQUE(source_node_id, target_node_id, kind)
 );
+
+CREATE TABLE IF NOT EXISTS ff_lease_history_cursors (
+    partition_id    TEXT NOT NULL,
+    execution_id    TEXT NOT NULL,
+    last_stream_id  TEXT NOT NULL,
+    updated_at_ms   INTEGER NOT NULL,
+    PRIMARY KEY (partition_id, execution_id)
+);
+CREATE INDEX IF NOT EXISTS idx_ff_lease_history_cursors_partition
+    ON ff_lease_history_cursors(partition_id);
 "#;

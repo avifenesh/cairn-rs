@@ -96,6 +96,9 @@ struct State {
     retention_policies: HashMap<String, cairn_domain::RetentionPolicy>,
     route_policies: HashMap<String, cairn_domain::providers::RoutePolicy>,
     resource_shares: HashMap<String, cairn_domain::resource_sharing::SharedResource>,
+    /// FF lease_history subscriber cursors, keyed by `(partition_id,
+    /// execution_id)`.
+    ff_lease_history_cursors: HashMap<(String, String), crate::projections::FfLeaseHistoryCursor>,
 }
 
 pub struct InMemoryStore {
@@ -192,6 +195,7 @@ impl InMemoryStore {
                 retention_policies: HashMap::new(),
                 route_policies: HashMap::new(),
                 resource_shares: HashMap::new(),
+                ff_lease_history_cursors: HashMap::new(),
                 tenants: HashMap::new(),
                 workspaces: HashMap::new(),
                 projects: HashMap::new(),
@@ -4398,6 +4402,54 @@ impl crate::projections::ResourceSharingReadModel for InMemoryStore {
                     && s.resource_id == resource_id
             })
             .cloned())
+    }
+}
+
+#[async_trait]
+impl crate::projections::FfLeaseHistoryCursorStore for InMemoryStore {
+    async fn get(
+        &self,
+        partition_id: &str,
+        execution_id: &str,
+    ) -> Result<Option<crate::projections::FfLeaseHistoryCursor>, StoreError> {
+        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        Ok(state
+            .ff_lease_history_cursors
+            .get(&(partition_id.to_owned(), execution_id.to_owned()))
+            .cloned())
+    }
+
+    async fn list_by_partition(
+        &self,
+        partition_id: &str,
+    ) -> Result<Vec<crate::projections::FfLeaseHistoryCursor>, StoreError> {
+        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        Ok(state
+            .ff_lease_history_cursors
+            .values()
+            .filter(|c| c.partition_id == partition_id)
+            .cloned()
+            .collect())
+    }
+
+    async fn upsert(
+        &self,
+        cursor: &crate::projections::FfLeaseHistoryCursor,
+    ) -> Result<(), StoreError> {
+        let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        state.ff_lease_history_cursors.insert(
+            (cursor.partition_id.clone(), cursor.execution_id.clone()),
+            cursor.clone(),
+        );
+        Ok(())
+    }
+
+    async fn delete(&self, partition_id: &str, execution_id: &str) -> Result<(), StoreError> {
+        let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        state
+            .ff_lease_history_cursors
+            .remove(&(partition_id.to_owned(), execution_id.to_owned()));
+        Ok(())
     }
 }
 

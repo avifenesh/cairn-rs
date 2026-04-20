@@ -70,6 +70,7 @@ pub mod event_bridge;
 pub mod fcall;
 pub mod helpers;
 pub mod id_map;
+pub mod lease_history_subscriber;
 pub mod services;
 pub mod signal_bridge;
 pub mod state_map;

@@ -64,7 +64,7 @@ impl std::fmt::Display for MigrationCheckError {
 /// `crates/cairn-store/src/pg/migrations/`. The `all_migrations_are_valid`
 /// test below embeds both directories explicitly. Consolidating to a
 /// single directory is tracked in the audit queue (T2-M1).
-pub const EXPECTED_MIGRATION_COUNT: usize = 21;
+pub const EXPECTED_MIGRATION_COUNT: usize = 22;
 
 #[cfg(test)]
 mod tests {
@@ -159,6 +159,10 @@ mod tests {
             (
                 "add_task_session_id",
                 include_str!("pg/migrations/V021__add_task_session_id.sql"),
+            ),
+            (
+                "create_ff_lease_history_cursors",
+                include_str!("pg/migrations/V022__create_ff_lease_history_cursors.sql"),
             ),
         ];
 

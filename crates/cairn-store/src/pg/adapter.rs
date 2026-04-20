@@ -618,6 +618,93 @@ impl ToolInvocationReadModel for PgAdapter {
     }
 }
 
+#[async_trait]
+impl crate::projections::FfLeaseHistoryCursorStore for PgAdapter {
+    async fn get(
+        &self,
+        partition_id: &str,
+        execution_id: &str,
+    ) -> Result<Option<crate::projections::FfLeaseHistoryCursor>, StoreError> {
+        let row: Option<(String, String, String, i64)> = sqlx::query_as(
+            "SELECT partition_id, execution_id, last_stream_id, updated_at_ms
+             FROM ff_lease_history_cursors
+             WHERE partition_id = $1 AND execution_id = $2",
+        )
+        .bind(partition_id)
+        .bind(execution_id)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|e| StoreError::Internal(e.to_string()))?;
+        Ok(
+            row.map(|(p, e, s, ts)| crate::projections::FfLeaseHistoryCursor {
+                partition_id: p,
+                execution_id: e,
+                last_stream_id: s,
+                updated_at_ms: ts as u64,
+            }),
+        )
+    }
+
+    async fn list_by_partition(
+        &self,
+        partition_id: &str,
+    ) -> Result<Vec<crate::projections::FfLeaseHistoryCursor>, StoreError> {
+        let rows: Vec<(String, String, String, i64)> = sqlx::query_as(
+            "SELECT partition_id, execution_id, last_stream_id, updated_at_ms
+             FROM ff_lease_history_cursors
+             WHERE partition_id = $1",
+        )
+        .bind(partition_id)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| StoreError::Internal(e.to_string()))?;
+        Ok(rows
+            .into_iter()
+            .map(|(p, e, s, ts)| crate::projections::FfLeaseHistoryCursor {
+                partition_id: p,
+                execution_id: e,
+                last_stream_id: s,
+                updated_at_ms: ts as u64,
+            })
+            .collect())
+    }
+
+    async fn upsert(
+        &self,
+        cursor: &crate::projections::FfLeaseHistoryCursor,
+    ) -> Result<(), StoreError> {
+        sqlx::query(
+            "INSERT INTO ff_lease_history_cursors
+                (partition_id, execution_id, last_stream_id, updated_at_ms)
+             VALUES ($1, $2, $3, $4)
+             ON CONFLICT (partition_id, execution_id) DO UPDATE
+                SET last_stream_id = EXCLUDED.last_stream_id,
+                    updated_at_ms = EXCLUDED.updated_at_ms",
+        )
+        .bind(&cursor.partition_id)
+        .bind(&cursor.execution_id)
+        .bind(&cursor.last_stream_id)
+        .bind(cursor.updated_at_ms as i64)
+        .execute(&self.pool)
+        .await
+        .map_err(|e| StoreError::Internal(e.to_string()))?;
+        Ok(())
+    }
+
+    async fn delete(&self, partition_id: &str, execution_id: &str) -> Result<(), StoreError> {
+        sqlx::query(
+            "DELETE FROM ff_lease_history_cursors
+             WHERE partition_id = $1 AND execution_id = $2",
+        )
+        .bind(partition_id)
+        .bind(execution_id)
+        .execute(&self.pool)
+        .await
+        .map_err(|e| StoreError::Internal(e.to_string()))?;
+        Ok(())
+    }
+}
+
 #[derive(sqlx::FromRow)]
 struct ToolInvocationRow {
     invocation_id: String,

@@ -1,12 +1,14 @@
 use std::sync::Arc;
 
 use cairn_store::event_log::EventLog;
+use cairn_store::projections::FfLeaseHistoryCursorStore;
 use tokio::task::JoinHandle;
 
 use crate::boot::FabricRuntime;
 use crate::config::FabricConfig;
 use crate::error::FabricError;
 use crate::event_bridge::EventBridge;
+use crate::lease_history_subscriber::LeaseHistorySubscriber;
 use crate::services::{
     FabricBudgetService, FabricQuotaService, FabricRunService, FabricSchedulerService,
     FabricSessionService, FabricTaskService, FabricWorkerService,
@@ -25,6 +27,7 @@ pub struct FabricServices {
     pub quotas: FabricQuotaService,
     pub signals: SignalBridge,
     bridge_handle: JoinHandle<()>,
+    lease_history: Option<LeaseHistorySubscriber>,
 }
 
 impl FabricServices {
@@ -32,11 +35,45 @@ impl FabricServices {
         config: FabricConfig,
         event_log: Arc<dyn EventLog + Send + Sync>,
     ) -> Result<Self, FabricError> {
+        Self::start_inner(config, event_log, None).await
+    }
+
+    /// Variant that wires the lease-history subscriber against a
+    /// cursor-store implementation. When `None`, the subscriber is
+    /// skipped — useful for tests that don't want the background
+    /// tail running against a scratch Valkey.
+    pub async fn start_with_lease_history(
+        config: FabricConfig,
+        event_log: Arc<dyn EventLog + Send + Sync>,
+        cursor_store: Arc<dyn FfLeaseHistoryCursorStore>,
+    ) -> Result<Self, FabricError> {
+        Self::start_inner(config, event_log, Some(cursor_store)).await
+    }
+
+    async fn start_inner(
+        config: FabricConfig,
+        event_log: Arc<dyn EventLog + Send + Sync>,
+        cursor_store: Option<Arc<dyn FfLeaseHistoryCursorStore>>,
+    ) -> Result<Self, FabricError> {
         let runtime = Arc::new(FabricRuntime::start(config).await?);
         let (bridge, bridge_handle) = EventBridge::start(event_log);
         let bridge = Arc::new(bridge);
 
-        let result = Self::build_services(runtime.clone(), bridge.clone(), bridge_handle);
+        let lease_history = cursor_store.map(|store| {
+            LeaseHistorySubscriber::start(
+                runtime.client.clone(),
+                runtime.partition_config.num_flow_partitions,
+                bridge.clone(),
+                store,
+            )
+        });
+
+        let result = Self::build_services(
+            runtime.clone(),
+            bridge.clone(),
+            bridge_handle,
+            lease_history,
+        );
 
         match result {
             Ok(services) => {
@@ -56,6 +93,7 @@ impl FabricServices {
         runtime: Arc<FabricRuntime>,
         bridge: Arc<EventBridge>,
         bridge_handle: JoinHandle<()>,
+        lease_history: Option<LeaseHistorySubscriber>,
     ) -> Result<Self, (FabricError, JoinHandle<()>)> {
         let runs = FabricRunService::new(runtime.clone(), bridge.clone());
         let tasks = FabricTaskService::new(runtime.clone(), bridge.clone());
@@ -78,6 +116,7 @@ impl FabricServices {
             quotas,
             signals,
             bridge_handle,
+            lease_history,
         })
     }
 
@@ -94,7 +133,12 @@ impl FabricServices {
             quotas: _,
             signals: _,
             bridge_handle,
+            lease_history,
         } = self;
+
+        if let Some(lh) = lease_history {
+            lh.shutdown().await;
+        }
 
         bridge.stop();
         drop(bridge);
