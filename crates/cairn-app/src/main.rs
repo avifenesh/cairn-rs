@@ -2909,6 +2909,7 @@ mod tests {
                         parent_run_id: Some(run_id.clone()),
                         parent_task_id: None,
                         prompt_release_id: None,
+                        session_id: None,
                     }),
                 ),
                 EventEnvelope::for_runtime_event(
@@ -2920,6 +2921,7 @@ mod tests {
                         parent_run_id: Some(run_id.clone()),
                         parent_task_id: None,
                         prompt_release_id: None,
+                        session_id: None,
                     }),
                 ),
             ])

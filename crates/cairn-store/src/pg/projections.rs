@@ -87,9 +87,16 @@ impl PgSyncProjection {
             }
 
             RuntimeEvent::TaskCreated(e) => {
+                // RFC-011 Phase 3: persist the session binding on the task
+                // row. Prefer the session_id carried on the event; fall back
+                // to the parent run's session_id for legacy events that
+                // predate Phase 3.
+                let session_id_on_event = e.session_id.as_ref().map(|s| s.as_str());
                 sqlx::query(
-                    "INSERT INTO tasks (task_id, tenant_id, workspace_id, project_id, parent_run_id, parent_task_id, state, title, description, version, created_at, updated_at)
-                     VALUES ($1, $2, $3, $4, $5, $6, 'queued', NULL, NULL, 1, $7, $7)",
+                    "INSERT INTO tasks (task_id, tenant_id, workspace_id, project_id, parent_run_id, parent_task_id, session_id, state, title, description, version, created_at, updated_at)
+                     VALUES ($1, $2, $3, $4, $5, $6,
+                        COALESCE($7, (SELECT session_id FROM runs WHERE run_id = $5)),
+                        'queued', NULL, NULL, 1, $8, $8)",
                 )
                 .bind(e.task_id.as_str())
                 .bind(e.project.tenant_id.as_str())
@@ -97,6 +104,7 @@ impl PgSyncProjection {
                 .bind(e.project.project_id.as_str())
                 .bind(e.parent_run_id.as_ref().map(|id| id.as_str()))
                 .bind(e.parent_task_id.as_ref().map(|id| id.as_str()))
+                .bind(session_id_on_event)
                 .bind(now)
                 .execute(&mut **tx)
                 .await

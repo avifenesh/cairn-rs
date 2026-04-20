@@ -395,6 +395,7 @@ fn task_created_primary_entity_ref_is_task() {
             parent_run_id: None,
             parent_task_id: None,
             prompt_release_id: None,
+            session_id: None,
         }),
     );
 

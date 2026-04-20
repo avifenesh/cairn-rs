@@ -66,6 +66,7 @@ fn task_event(n: u32) -> EventEnvelope<RuntimeEvent> {
             parent_run_id: Some(RunId::new(format!("run_{n}"))),
             parent_task_id: None,
             prompt_release_id: None,
+            session_id: None,
         }),
     )
 }

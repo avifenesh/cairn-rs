@@ -86,6 +86,7 @@ async fn seed_tasks(store: &Arc<InMemoryStore>) {
                     parent_run_id: Some(run_id()),
                     parent_task_id: None,
                     prompt_release_id: None,
+                    session_id: None,
                 }),
             ),
             ev(
@@ -96,6 +97,7 @@ async fn seed_tasks(store: &Arc<InMemoryStore>) {
                     parent_run_id: Some(run_id()),
                     parent_task_id: None,
                     prompt_release_id: None,
+                    session_id: None,
                 }),
             ),
             ev(
@@ -106,6 +108,7 @@ async fn seed_tasks(store: &Arc<InMemoryStore>) {
                     parent_run_id: Some(run_id()),
                     parent_task_id: None,
                     prompt_release_id: None,
+                    session_id: None,
                 }),
             ),
         ])

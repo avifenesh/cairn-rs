@@ -78,7 +78,7 @@ where
     async fn submit(
         &self,
         project: &ProjectKey,
-        _session_id: Option<&SessionId>,
+        session_id: Option<&SessionId>,
         task_id: TaskId,
         parent_run_id: Option<RunId>,
         parent_task_id: Option<TaskId>,
@@ -90,6 +90,7 @@ where
             parent_run_id,
             parent_task_id,
             prompt_release_id: None,
+            session_id: session_id.cloned(),
         }));
 
         self.store.append(&[event]).await?;
@@ -484,6 +485,10 @@ where
                 parent_run_id: Some(parent_run_id.clone()),
                 parent_task_id: parent_task_id.clone(),
                 prompt_release_id: None,
+                // Subagent spawn: the child task belongs to the child
+                // session, not the parent's — persist that binding up front
+                // so Phase 3 resolvers skip the parent_run → run lookup.
+                session_id: Some(child_session_id.clone()),
             })),
             make_envelope(RuntimeEvent::SubagentSpawned(SubagentSpawned {
                 project: project.clone(),

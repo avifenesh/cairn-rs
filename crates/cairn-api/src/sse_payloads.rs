@@ -630,6 +630,7 @@ mod tests {
             parent_run_id: None,
             parent_task_id: None,
             prompt_release_id: None,
+            session_id: None,
         });
         let payload = shape_event_payload(&event).unwrap();
         assert!(payload.get("task").is_some());
@@ -686,12 +687,14 @@ mod tests {
             parent_run_id: None,
             parent_task_id: None,
             prompt_release_id: None,
+            session_id: None,
         });
         let record = TaskRecord {
             task_id: TaskId::new("task_1"),
             project: ProjectKey::new("t", "w", "p"),
             parent_run_id: None,
             parent_task_id: None,
+            session_id: None,
             state: TaskState::Running,
             prompt_release_id: None,
             failure_class: None,
@@ -945,6 +948,7 @@ mod tests {
             project: ProjectKey::new("t", "w", "p"),
             parent_run_id: None,
             parent_task_id: None,
+            session_id: None,
             state: cairn_domain::lifecycle::TaskState::Running,
             prompt_release_id: None,
             failure_class: None,

@@ -312,6 +312,7 @@ fn primary_entity_ref_is_some_for_operational_events() {
                 parent_run_id: None,
                 parent_task_id: None,
                 prompt_release_id: None,
+                session_id: None,
             }),
             "TaskCreated",
         ),
@@ -407,6 +408,7 @@ fn primary_entity_ref_task_carries_correct_id() {
         parent_run_id: None,
         parent_task_id: None,
         prompt_release_id: None,
+        session_id: None,
     });
 
     match event.primary_entity_ref() {
@@ -451,6 +453,7 @@ fn project_extraction_matches_for_all_event_families() {
                 parent_run_id: None,
                 parent_task_id: None,
                 prompt_release_id: None,
+                session_id: None,
             }),
             "TaskCreated",
         ),
@@ -521,6 +524,7 @@ fn full_history_event_projects_are_accessible() {
         parent_run_id: Some(RunId::new("r_dur")),
         parent_task_id: None,
         prompt_release_id: None,
+        session_id: None,
     });
 
     for event in &[session_ev, run_ev, task_ev] {

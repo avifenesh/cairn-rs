@@ -1,6 +1,7 @@
 use async_trait::async_trait;
 use cairn_domain::{
-    FailureClass, PauseReason, ProjectKey, PromptReleaseId, ResumeTrigger, RunId, TaskId, TaskState,
+    FailureClass, PauseReason, ProjectKey, PromptReleaseId, ResumeTrigger, RunId, SessionId,
+    TaskId, TaskState,
 };
 use serde::{Deserialize, Serialize};
 
@@ -13,6 +14,13 @@ pub struct TaskRecord {
     pub project: ProjectKey,
     pub parent_run_id: Option<RunId>,
     pub parent_task_id: Option<TaskId>,
+    /// Session the task is scoped to. Populated from `TaskCreated.session_id`
+    /// on new submissions (RFC-011 Phase 3). `None` for solo (session-less)
+    /// tasks, and also for legacy tasks created before Phase 3 whose event
+    /// carried no session_id — resolvers must still fall back to walking
+    /// `parent_run_id → RunRecord.session_id` in that case.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_id: Option<SessionId>,
     pub state: TaskState,
     pub prompt_release_id: Option<PromptReleaseId>,
     pub failure_class: Option<FailureClass>,

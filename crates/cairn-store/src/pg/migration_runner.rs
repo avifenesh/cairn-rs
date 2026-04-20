@@ -115,6 +115,11 @@ const MIGRATIONS: &[(u32, &str, &str)] = &[
         "add_checkpoint_data_json",
         include_str!("migrations/V020__add_checkpoint_data_json.sql"),
     ),
+    (
+        21,
+        "add_task_session_id",
+        include_str!("migrations/V021__add_task_session_id.sql"),
+    ),
 ];
 
 /// Return the compile-time migration registry as (version, name, sql) triples.

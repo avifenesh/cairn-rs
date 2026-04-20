@@ -118,9 +118,17 @@ impl SqliteSyncProjection {
             }
 
             RuntimeEvent::TaskCreated(e) => {
+                // RFC-011 Phase 3: persist the session binding on the task
+                // row. Prefer the session_id carried on the event; fall back
+                // to the parent run's session_id for legacy events that
+                // predate Phase 3. `COALESCE((?), (SELECT … FROM runs …))`
+                // lets SQLite do the resolve in a single statement.
+                let session_id_on_event = e.session_id.as_ref().map(|s| s.as_str());
                 sqlx::query(
-                    "INSERT INTO tasks (task_id, tenant_id, workspace_id, project_id, parent_run_id, parent_task_id, state, version, created_at, updated_at)
-                     VALUES (?, ?, ?, ?, ?, ?, 'queued', 1, ?, ?)",
+                    "INSERT INTO tasks (task_id, tenant_id, workspace_id, project_id, parent_run_id, parent_task_id, session_id, state, version, created_at, updated_at)
+                     VALUES (?, ?, ?, ?, ?, ?,
+                        COALESCE(?, (SELECT session_id FROM runs WHERE run_id = ?)),
+                        'queued', 1, ?, ?)",
                 )
                 .bind(e.task_id.as_str())
                 .bind(e.project.tenant_id.as_str())
@@ -128,6 +136,8 @@ impl SqliteSyncProjection {
                 .bind(e.project.project_id.as_str())
                 .bind(e.parent_run_id.as_ref().map(|id| id.as_str()))
                 .bind(e.parent_task_id.as_ref().map(|id| id.as_str()))
+                .bind(session_id_on_event)
+                .bind(e.parent_run_id.as_ref().map(|id| id.as_str()))
                 .bind(now)
                 .bind(now)
                 .execute(&mut **tx)

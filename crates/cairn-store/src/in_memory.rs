@@ -331,6 +331,16 @@ impl InMemoryStore {
                 }
             }
             RuntimeEvent::TaskCreated(e) => {
+                // RFC-011 Phase 3: prefer the session_id carried on the
+                // event itself; fall back to walking `parent_run_id →
+                // RunRecord.session_id` for legacy (pre-V018) events that
+                // predate this field.
+                let session_id = e.session_id.clone().or_else(|| {
+                    e.parent_run_id
+                        .as_ref()
+                        .and_then(|rid| state.runs.get(rid.as_str()))
+                        .map(|r| r.session_id.clone())
+                });
                 state.tasks.insert(
                     e.task_id.as_str().to_owned(),
                     TaskRecord {
@@ -338,6 +348,7 @@ impl InMemoryStore {
                         project: e.project.clone(),
                         parent_run_id: e.parent_run_id.clone(),
                         parent_task_id: e.parent_task_id.clone(),
+                        session_id,
                         state: TaskState::Queued,
                         prompt_release_id: e.prompt_release_id.clone(),
                         failure_class: None,
@@ -5241,6 +5252,7 @@ mod tests {
                 parent_run_id: None,
                 parent_task_id: None,
                 prompt_release_id: None,
+                session_id: None,
             }))])
             .await
             .unwrap();
@@ -5538,6 +5550,7 @@ mod tests {
                 parent_run_id: Some(run_id.clone()),
                 parent_task_id: None,
                 prompt_release_id: None,
+                session_id: None,
             }))])
             .await
             .unwrap();
@@ -5775,6 +5788,7 @@ mod tests {
                     parent_run_id: None,
                     parent_task_id: None,
                     prompt_release_id: None,
+                    session_id: None,
                 }))])
                 .await
                 .unwrap();
