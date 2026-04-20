@@ -735,6 +735,23 @@ impl AppState {
         // surfaces here before cairn-app starts serving traffic — no silent
         // fall-back.
         let (runtime, fabric) = build_runtime_with_optional_fabric().await?;
+        Self::new_with_runtime(config, runtime, fabric).await
+    }
+
+    /// Build an `AppState` around a caller-provided runtime.
+    ///
+    /// Used by integration tests that need to inject a test fixture
+    /// (e.g. `FakeFabric` under `tests/support/`) in place of live Fabric —
+    /// the ancillary state (graph, eval services, metrics, tokens) wires up
+    /// identically either way.
+    ///
+    /// Production callers use [`Self::new`], which builds the runtime via
+    /// `build_runtime_with_optional_fabric` and then delegates here.
+    pub async fn new_with_runtime(
+        config: BootstrapConfig,
+        runtime: Arc<InMemoryServices>,
+        fabric: Option<Arc<cairn_fabric::FabricServices>>,
+    ) -> Result<Self, String> {
         let graph = Arc::new(InMemoryGraphStore::new());
         let plugin_registry = Arc::new(InMemoryPluginRegistry::new());
         let document_store = Arc::new(InMemoryDocumentStore::new());
