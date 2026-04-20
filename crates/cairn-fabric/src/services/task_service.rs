@@ -718,6 +718,15 @@ impl FabricTaskService {
             .await
             .map_err(|e| FabricError::Internal(format!("ff_evaluate_flow_eligibility: {e}")))?;
 
+        // Check for an FCALL error envelope before parsing. Without
+        // this, an error like `execution_not_found` returns `[0,
+        // "execution_not_found", ...]`; `parse_eligibility_result`
+        // would extract the error code at index 2 as if it were the
+        // eligibility state, which doesn't equal
+        // "blocked_by_dependencies", and the function would silently
+        // return "no blockers" — hiding the real failure.
+        check_fcall_success(&raw, crate::fcall::names::FF_EVALUATE_FLOW_ELIGIBILITY)?;
+
         let state = parse_eligibility_result(&raw).ok_or_else(|| {
             FabricError::Internal("ff_evaluate_flow_eligibility: malformed OK envelope".into())
         })?;
