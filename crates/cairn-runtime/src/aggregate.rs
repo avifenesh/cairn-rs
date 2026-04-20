@@ -41,16 +41,10 @@ pub struct InMemoryServices {
 
     // ── Core runtime ───────────────────────────────────────────────────────
     //
-    // Trait-object fields so the Fabric adapter can be installed at boot.
-    // Cairn-app's `AppState::new` picks the concrete impl via the
-    // `in-memory-runtime` cargo feature (default OFF → Fabric adapters;
-    // feature ON → in-memory event-log courtesy impls). Handlers call
-    // trait methods through these fields unchanged either way.
-    //
-    // `InMemoryServices::new()` / `with_store()` default to the in-memory
-    // impl; `with_store_and_core(store, runs, tasks, sessions)` lets callers
-    // inject the Fabric adapter (or any other `RunService` / `TaskService` /
-    // `SessionService` impl).
+    // Trait-object fields so the Fabric adapter is installed at boot.
+    // Handlers call trait methods through these fields; the single factory
+    // `with_store_and_core(store, runs, tasks, sessions)` is how cairn-app
+    // wires them in.
     pub runs: Arc<dyn RunService>,
     pub tasks: Arc<dyn TaskService>,
     pub sessions: Arc<dyn SessionService>,
@@ -216,4 +210,3 @@ impl InMemoryServices {
         self.fabric.as_ref().and_then(|f| f.downcast_ref::<T>())
     }
 }
-

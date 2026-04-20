@@ -24,9 +24,7 @@ use crate::support::fake_fabric::build_fake_fabric;
 /// not need live Valkey or real runtime mutation — a read-only fixture
 /// is enough. Tests that do need mutation belong in
 /// `crates/cairn-fabric/tests/integration/`.
-pub async fn build_test_router_fake_fabric(
-    config: BootstrapConfig,
-) -> (Router, Arc<AppState>) {
+pub async fn build_test_router_fake_fabric(config: BootstrapConfig) -> (Router, Arc<AppState>) {
     let store = Arc::new(InMemoryStore::new());
     let (runs, tasks, sessions) = build_fake_fabric(store.clone());
     let runtime = Arc::new(InMemoryServices::with_store_and_core(

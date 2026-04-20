@@ -12,36 +12,30 @@
   cairn-app handlers
      │  trait: RunService / TaskService / SessionService
      ▼
-  ┌──────────────────┐   ┌──────────────────────┐
-  │ in-memory impl   │   │ FabricAdapter        │
-  │ (dev default,    │   │ (CAIRN_FABRIC_       │
-  │  CAIRN_FABRIC_   │   │  ENABLED=1)          │
-  │  ENABLED unset)  │   │ resolves project via │
-  │                  │   │ store, delegates     │
-  │  → InMemoryStore │   │ mutation to Fabric   │
-  └───────┬──────────┘   └──────────┬───────────┘
-          │                         ▼
-          │              ┌────────────────────────┐
-          │              │ cairn-fabric services  │
-          │              │ {Run,Task,Session,     │
-          │              │  Budget,Quota,         │
-          │              │  Scheduler} +          │
-          │              │ SignalBridge           │
-          │              └──────────┬─────────────┘
-          │                         │ FCALL ff_*
-          │                         ▼
-          │              ┌────────────────────────┐
-          │  EventBridge │ Valkey + FF library    │
-          │  queue       │ exec_core / leases /   │
-          │  (FF→store)  │ waitpoints / signals / │
-          ▼              │ budgets / flows +      │
-  ┌──────────────┐       │ 14 ff-engine scanners  │
-  │ cairn-store  │◄──────┤ (see § scanners)       │
-  │ EventLog +   │       └────────────────────────┘
-  │ projections  │
-  │ serve GET /  │
-  │ list queries │
-  └──────────────┘
+  ┌──────────────────────┐
+  │ FabricAdapter        │
+  │ resolves project via │
+  │ store, delegates     │
+  │ mutation to Fabric   │
+  └──────────┬───────────┘
+             ▼
+  ┌────────────────────────┐
+  │ cairn-fabric services  │
+  │ {Run,Task,Session,     │
+  │  Budget,Quota,         │
+  │  Scheduler} +          │
+  │ SignalBridge           │
+  └──────────┬─────────────┘
+             │ FCALL ff_*
+             ▼
+  ┌────────────────────────┐         ┌──────────────┐
+  │ Valkey + FF library    │ Event-  │ cairn-store  │
+  │ exec_core / leases /   │ Bridge  │ EventLog +   │
+  │ waitpoints / signals / ├────────►│ projections  │
+  │ budgets / flows +      │  queue  │ serve GET /  │
+  │ 14 ff-engine scanners  │         │ list queries │
+  │ (see § scanners)       │         └──────────────┘
+  └────────────────────────┘
 ```
 
 **Write path**: handler → trait → Fabric adapter → `FabricServices::{runs,tasks,sessions}` → FCALL → Valkey. FF state transitions emit bridge events → `EventBridge` queue → cairn-store append → projections update.
@@ -61,8 +55,7 @@ unsupported (FF is the only correctness-guaranteed path).
 
 | Flag / env var | Default | Scope | Effect |
 |---|---|---|---|
-| `in-memory-runtime` | OFF | cargo feature on `cairn-app` (forwards to `cairn-runtime`, `cairn-orchestrator`, `cairn-tools`) | When OFF (default / production), `AppState::new` constructs `FabricServices` and installs `Fabric{Run,Task,Session}ServiceAdapter` on `state.runtime.{runs,tasks,sessions}`. When ON, the event-log-only `RunServiceImpl` / `TaskServiceImpl` / `SessionServiceImpl` are compiled in and wired instead — no Valkey, no scanners, no correctness guarantees. Local tinkering and unit-test harnesses only. |
-| `CAIRN_FABRIC_WAITPOINT_HMAC_SECRET` | unset (boot fails) | env var | 64-char hex (32-byte) HMAC secret. **Required** in the default (Fabric) build — boot aborts with `FabricError::Config` if unset (no silent degrade). Dev paths that don't want HMAC must build with `--features in-memory-runtime` so Fabric boot is skipped. |
+| `CAIRN_FABRIC_WAITPOINT_HMAC_SECRET` | unset (boot fails) | env var | 64-char hex (32-byte) HMAC secret. **Required** — boot aborts with `FabricError::Config` if unset (no silent degrade). |
 | `CAIRN_FABRIC_WAITPOINT_HMAC_KID` | `k1` when secret set | env var | Kid for the HMAC secret. Must be non-empty and free of `:` (FF field-name delimiter). |
 | `CAIRN_FABRIC_WORKER_CAPABILITIES` | empty set | env var | Comma-separated capability tokens. Passed to `ff_scheduler::Scheduler::claim_for_worker`. Empty = matches only executions with no capability requirements. |
 | `CAIRN_FABRIC_HOST` / `_PORT` / `_TLS` / `_CLUSTER` | `localhost` / `6379` / off / off | env var | Valkey connection. `_CLUSTER=1` uses cluster mode; all FCALL KEYS on a single `{p:N}` hash tag so this is cluster-safe without extra wiring. |
@@ -87,7 +80,7 @@ that requires Valkey at boot. To get a Fabric-backed deployment up:
    export CAIRN_FABRIC_WAITPOINT_HMAC_SECRET=<64-hex>
    export CAIRN_FABRIC_WAITPOINT_HMAC_KID=prod-2026-04
    ```
-   Omitting `CAIRN_FABRIC_WAITPOINT_HMAC_SECRET` (or supplying an invalid length / non-hex value) aborts `FabricServices::start` with a typed `FabricError::Config` — we do not ship a runtime that would reject every `ff_suspend_execution` with `hmac_secret_not_initialized` at runtime. Dev / CI paths that don't want HMAC must build with `--features in-memory-runtime` so Fabric boot is skipped entirely.
+   Omitting `CAIRN_FABRIC_WAITPOINT_HMAC_SECRET` (or supplying an invalid length / non-hex value) aborts `FabricServices::start` with a typed `FabricError::Config` — we do not ship a runtime that would reject every `ff_suspend_execution` with `hmac_secret_not_initialized` at runtime.
 5. Boot cairn-app. You should see:
    ```
    INFO connecting to valkey url=redis://valkey.internal:6379
@@ -109,38 +102,41 @@ FF builds a deterministic sorted CSV from the cairn-side `BTreeSet`. An executio
 
 Not automated in this round. FF ships `rotate_waitpoint_hmac_secret` in `ff-test` fixtures; cairn will wrap it in a dedicated admin endpoint in a follow-up round. Until then: redeploy with a new `CAIRN_FABRIC_WAITPOINT_HMAC_SECRET`, accept that in-flight suspensions signed by the old key fail `invalid_token` until their waitpoints close. No silent data loss — operator sees the typed error.
 
-### 3.4 Disabling Fabric for debugging
+### 3.4 Local development without Valkey
 
-Rebuild with `cargo build -p cairn-app --features in-memory-runtime`.
-`AppState::new` then skips `FabricServices::start` entirely and wires
-the event-log-only `RunServiceImpl` / `TaskServiceImpl` /
-`SessionServiceImpl` onto `state.runtime.{runs,tasks,sessions}`. No
-data is shared between the two builds — in-memory runs are not visible
-from the Fabric build and vice versa.
+Production requires Valkey. For handler-surface iteration without one,
+cairn-app integration tests under `crates/cairn-app/tests/` boot
+`AppState` via a read-only `FakeFabric` fixture
+(`crates/cairn-app/tests/support/fake_fabric.rs`) — it forwards every
+read method (`get` / `list_by_session` / …) to the projection store and
+returns `RuntimeError::Internal` on every mutation. The fixture wires
+into `AppBootstrap::router_with_injected_runtime`, which accepts a
+caller-provided `InMemoryServices`.
 
-This is a **local / test harness escape hatch**, not a supported
-production mode. The in-memory impls do not participate in FF's
-scanner lifecycle, so any state that requires recovery (leases, budgets,
-delayed promotion) will not work.
+Running the production binary (`cargo run -p cairn-app`) without a
+reachable Valkey will fail at boot with `FabricError::Config` — this is
+intentional (no silent degrade).
 
-### 3.5 Dev vs production paths
+### 3.5 Single backing stack
 
-Two backing stacks live in the codebase, gated by the
-`in-memory-runtime` cargo feature — `AppState::new` wires the
-corresponding impl at compile time.
+Post kill-in-memory-runtime, there is exactly one backing for
+Run/Task/Session services: `Fabric{Run,Task,Session}ServiceAdapter`
+against Valkey + FF. `AppState::new` wires it unconditionally;
+`InMemoryServices::with_store_and_core(store, runs, tasks, sessions)` is
+the only factory.
 
-| Path | Trigger | Run/Task/Session backing | Execution state lives in | Recovery | Recommended for |
-|---|---|---|---|---|---|
-| **Production** | default build (`in-memory-runtime` OFF) | `Fabric{Run,Task,Session}ServiceAdapter` | Valkey + FF Lua library | FF's 14 background scanners (`LeaseExpiryScanner`, `AttemptTimeoutScanner`, etc.) | real teams, production traffic |
-| **Dev / CI** | `--features in-memory-runtime` | `RunServiceImpl` / `TaskServiceImpl` / `SessionServiceImpl` | cairn-store event log (in-memory) | none — no scanners, no Valkey | `cargo test`, local `cargo run -p cairn-app --features in-memory-runtime`, short-lived CI without a Valkey dependency |
+The courtesy in-memory `RunServiceImpl` / `TaskServiceImpl` /
+`SessionServiceImpl` backings, together with their
+`InMemoryServices::{new, with_store, with_fabric}` constructors, existed
+during the Fabric migration as a compile-time escape hatch. Post
+migration they carried no correctness guarantees (state transitions
+drifted from Fabric's, no scanner lifecycle participation) and were
+removed — see CHANGELOG for the full scope.
 
-The in-memory impls are **courtesy backings for tinkerers**, not peers
-of FF. They exist so that unit tests and local exploration can run
-without standing up Valkey; they do not attempt to replicate FF's
-correctness semantics (strict state transitions, lease recovery,
-budget scanners).
-
-The deleted pieces in finalization were: `FabricRecoveryStub` (cairn-fabric side) and `RecoveryServiceImpl` (cairn-runtime side). Both were passive duplicates of FF's scanners — FF owns recovery on both paths, so the cairn-side sweeps were redundant under the Fabric build and useless under the in-memory build (no background worker to drive them).
+The deleted pieces in Fabric finalization were: `FabricRecoveryStub`
+(cairn-fabric side) and `RecoveryServiceImpl` (cairn-runtime side).
+Both were passive duplicates of FF's scanners — FF owns recovery
+unconditionally.
 
 ### 3.6 Common failures
 

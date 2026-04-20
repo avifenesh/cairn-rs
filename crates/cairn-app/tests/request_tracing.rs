@@ -9,10 +9,7 @@
 
 mod support;
 
-use axum::{
-    body::Body,
-    http::Request,
-};
+use axum::{body::Body, http::Request};
 use cairn_api::auth::AuthPrincipal;
 use cairn_api::bootstrap::BootstrapConfig;
 use cairn_domain::tenancy::TenantKey;

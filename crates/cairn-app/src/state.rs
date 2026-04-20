@@ -293,9 +293,10 @@ pub struct AppState {
     /// Model catalog — per-model metadata including cost rates and capabilities.
     /// Operators can override entries at runtime via the admin API.
     pub model_registry: ModelRegistry,
-    /// FlowFabric services aggregate — `Some` in default production
-    /// builds (when `build_runtime_with_optional_fabric` successfully
-    /// boots `FabricServices`). `None` under `--features in-memory-runtime`.
+    /// FlowFabric services aggregate — `Some` in production (when
+    /// `build_runtime_with_optional_fabric` successfully boots
+    /// `FabricServices`). `None` only when a test fixture has injected a
+    /// read-only runtime (see `crates/cairn-app/tests/support/fake_fabric.rs`).
     /// When `Some`, `runtime.runs / tasks / sessions` are the Fabric
     /// adapters (see `crate::fabric_adapter`); handlers call through the
     /// trait unchanged.
@@ -726,14 +727,10 @@ impl AppState {
     }
 
     pub async fn new(config: BootstrapConfig) -> Result<Self, String> {
-        // Default build: construct FabricServices + install the
-        // FabricAdapter trio for runs/tasks/sessions. Under
-        // `--features in-memory-runtime`, fall back to the event-log-only
-        // courtesy impls (no Valkey, no scanners, no correctness guarantees
-        // — for local tinkering and test harnesses only). Any boot failure
-        // on the Fabric path (unreachable Valkey, HMAC validation, …)
-        // surfaces here before cairn-app starts serving traffic — no silent
-        // fall-back.
+        // Construct FabricServices + install the FabricAdapter trio for
+        // runs/tasks/sessions. Any boot failure on the Fabric path
+        // (unreachable Valkey, HMAC validation, …) surfaces here before
+        // cairn-app starts serving traffic — no silent fall-back.
         let (runtime, fabric) = build_runtime_with_optional_fabric().await?;
         Self::new_with_runtime(config, runtime, fabric).await
     }

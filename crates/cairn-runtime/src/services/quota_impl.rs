@@ -121,4 +121,3 @@ where
         enforce_session_quota(self.store.as_ref(), tenant_id).await
     }
 }
-

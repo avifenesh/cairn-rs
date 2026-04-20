@@ -177,6 +177,3 @@ pub async fn get_usage_telemetry_handler(State(state): State<Arc<AppState>>) -> 
         projects: project_rows(state.runtime.store.usage_snapshot()),
     })
 }
-
-// Boots `AppState` via `BootstrapConfig`; same HMAC-fail-loud reason as
-// `repo_routes::tests` — gate on `in-memory-runtime`.

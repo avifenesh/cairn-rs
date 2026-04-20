@@ -334,7 +334,3 @@ pub async fn delete_project_repo_handler(
 
     StatusCode::NO_CONTENT.into_response()
 }
-
-// Boots `AppBootstrap` via `BootstrapConfig`; the default Fabric build
-// refuses to boot without HMAC env (fail-loud). Gated on
-// `in-memory-runtime` so `cargo test -p cairn-app` stays green by default.

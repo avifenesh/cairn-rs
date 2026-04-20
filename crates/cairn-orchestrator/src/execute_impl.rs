@@ -773,9 +773,3 @@ fn truncate_text_for_context(text: &str, token_limit: usize) -> String {
 
     format!("{prefix}... [truncated: {omitted} chars omitted] ...{suffix}")
 }
-
-// ── Tests ─────────────────────────────────────────────────────────────────────
-
-// Tests use the in-memory Run/Task/Session impls directly via
-// RuntimeExecutePhase::builder(). Gated on `in-memory-runtime` because
-// the impls aren't available under default features.

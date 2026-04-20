@@ -327,10 +327,13 @@ impl TaskService for FakeFabricTasks {
         limit: usize,
         _offset: usize,
     ) -> Result<Vec<TaskRecord>, RuntimeError> {
-        Ok(
-            TaskReadModel::list_by_state(self.store.as_ref(), project, TaskState::DeadLettered, limit)
-                .await?,
+        Ok(TaskReadModel::list_by_state(
+            self.store.as_ref(),
+            project,
+            TaskState::DeadLettered,
+            limit,
         )
+        .await?)
     }
 
     async fn pause(
