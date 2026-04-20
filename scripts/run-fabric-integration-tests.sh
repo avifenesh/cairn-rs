@@ -58,8 +58,10 @@ FF_REPO="${FF_REPO:-https://github.com/avifenesh/FlowFabric.git}"
 # Rust crates in crates/cairn-fabric/Cargo.toml are now pinned to
 # crates.io (`ff-core = "0.1"` etc.), so this ref only controls
 # which Lua version lives in the test instance. Track the published
-# v0.1.1 tag so the Lua matches the Rust.
-FF_REV="${FF_REV:-00608ef62c0bdd1c4f6fed6b41be93f4d64af41a}"  # v0.1.1
+# v0.1.1 tag so the Lua matches the Rust. FF_REV accepts any ref
+# git can resolve (tag, branch, SHA) — tags are preferred for
+# readability; override with a SHA when reproducing a specific build.
+FF_REV="${FF_REV:-v0.1.1}"
 TEST_URL="${CAIRN_TEST_VALKEY_URL:-redis://localhost:${VALKEY_PORT}}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -108,10 +110,12 @@ if [ ! -d "$FF_PATH/.git" ]; then
   git clone --branch "$FF_BRANCH" "$FF_REPO" "$FF_PATH"
   ok "cloned FlowFabric"
 fi
-say "checking out pinned rev ${FF_REV:0:10}"
-git -C "$FF_PATH" fetch --quiet origin "$FF_BRANCH"
+say "checking out pinned rev ${FF_REV}"
+# --tags so FF_REV can be a tag like v0.1.1; branches and SHAs still
+# resolve the same way.
+git -C "$FF_PATH" fetch --quiet --tags origin "$FF_BRANCH"
 git -C "$FF_PATH" checkout --quiet --detach "$FF_REV" || die "could not check out FF_REV=${FF_REV} in ${FF_PATH} (try: rm -rf ${FF_PATH})"
-ok "FF at ${FF_REV:0:10}"
+ok "FF at ${FF_REV}"
 
 # ── Valkey container (idempotent) ────────────────────────────────────────────
 say "starting valkey (${VALKEY_IMAGE})"
