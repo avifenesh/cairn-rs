@@ -150,7 +150,16 @@ enum VersionCheckError {
     Parse(String),
 }
 
-/// Run `INFO server` and extract the major component of the Valkey version.
+/// Run `INFO server` across every node the client is connected to and
+/// return the **minimum** major version observed.
+///
+/// Taking the min (not the first) matters during rolling upgrades: if
+/// any node still reports a pre-upgrade major, this returns that lower
+/// value so the outer retry loop keeps waiting until the whole cluster
+/// is past the floor. Picking the first entry (as FF's `ff-server`
+/// does) opens a race where a map iteration order that happens to put
+/// an upgraded node first lets us pass boot while FCALLs sent to
+/// stragglers still fail.
 async fn query_valkey_version(client: &Client) -> Result<u32, VersionCheckError> {
     let raw: Value = client
         .cmd("INFO")
@@ -161,27 +170,107 @@ async fn query_valkey_version(client: &Client) -> Result<u32, VersionCheckError>
             retryable: ff_script::retry::is_retryable_kind(e.kind()),
             error: format!("INFO server: {e}"),
         })?;
-    let info_body = extract_info_body(&raw).map_err(VersionCheckError::Parse)?;
-    parse_valkey_major_version(&info_body).map_err(VersionCheckError::Parse)
+    let bodies = collect_info_bodies(&raw).map_err(VersionCheckError::Parse)?;
+    if bodies.is_empty() {
+        return Err(VersionCheckError::Parse(
+            "INFO returned no bodies to parse".to_owned(),
+        ));
+    }
+    bodies
+        .iter()
+        .map(|b| parse_valkey_major_version(b))
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(VersionCheckError::Parse)?
+        .into_iter()
+        .min()
+        .ok_or_else(|| VersionCheckError::Parse("no major versions parsed".to_owned()))
 }
 
-/// Normalize an `INFO server` response to a single string body.
+/// Flatten an `INFO server` response into one body string per node.
 ///
-/// Standalone returns the body as a bulk / simple / verbatim string.
-/// Cluster returns a map keyed by node address whose values are bodies;
-/// pick the first entry since every healthy node reports the same
-/// version. Divergent versions during a rolling upgrade are reconciled
-/// by the outer retry loop.
-fn extract_info_body(raw: &Value) -> Result<String, String> {
+/// Shapes handled:
+/// - **Standalone** — single bulk / simple / verbatim string.
+/// - **Cluster over RESP3** — `Map { addr → body }`; every body is
+///   included.
+/// - **Cluster over RESP2** — `Array` in one of two shapes ferriskey
+///   emits depending on version: either flat `[addr, body, addr, body,
+///   ...]` pairs, or a nested `[[addr, body], [addr, body], ...]`. The
+///   collector recurses so both shapes yield the per-node bodies.
+///
+/// Every multi-shape parser in the crate (`parse_multi_stream_xread`,
+/// `parse_field_pairs`, `parse_string_map`) handles both RESP2 `Array`
+/// and RESP3 `Map` because ferriskey selects the protocol at connection
+/// time and RESP2 is the default. This parser follows that contract.
+fn collect_info_bodies(raw: &Value) -> Result<Vec<String>, String> {
+    let mut bodies = Vec::new();
+    collect_info_bodies_into(raw, &mut bodies)?;
+    Ok(bodies)
+}
+
+fn collect_info_bodies_into(raw: &Value, out: &mut Vec<String>) -> Result<(), String> {
     match raw {
-        Value::BulkString(bytes) => Ok(String::from_utf8_lossy(bytes).into_owned()),
-        Value::VerbatimString { text, .. } => Ok(text.clone()),
-        Value::SimpleString(s) => Ok(s.clone()),
+        Value::BulkString(bytes) => {
+            out.push(String::from_utf8_lossy(bytes).into_owned());
+            Ok(())
+        }
+        Value::VerbatimString { text, .. } => {
+            out.push(text.clone());
+            Ok(())
+        }
+        Value::SimpleString(s) => {
+            out.push(s.clone());
+            Ok(())
+        }
         Value::Map(entries) => {
-            let (_, body) = entries
-                .first()
-                .ok_or_else(|| "cluster INFO returned empty map".to_owned())?;
-            extract_info_body(body)
+            if entries.is_empty() {
+                return Err("cluster INFO returned empty map".to_owned());
+            }
+            for (_, body) in entries {
+                collect_info_bodies_into(body, out)?;
+            }
+            Ok(())
+        }
+        Value::Array(items) => {
+            if items.is_empty() {
+                return Err("cluster INFO returned empty array".to_owned());
+            }
+            // Array entries are `Result<Value, Error>` — each element
+            // can independently carry an error if a particular node
+            // failed. Surface the first such failure as a parse error.
+            let unwrapped: Vec<&Value> = items
+                .iter()
+                .map(|r| r.as_ref().map_err(|e| format!("array entry failed: {e}")))
+                .collect::<Result<Vec<_>, _>>()?;
+
+            // RESP2 cluster INFO is either flat `[addr, body, ...]`
+            // pairs or nested `[[addr, body], ...]`. Probe for the
+            // nested shape first; otherwise walk flat pairs.
+            let all_nested_pairs = unwrapped.iter().all(|v| match v {
+                Value::Array(inner) => inner.len() == 2,
+                _ => false,
+            });
+            if all_nested_pairs {
+                for item in &unwrapped {
+                    if let Value::Array(pair) = item {
+                        // Second element of each pair is the body.
+                        match pair[1].as_ref() {
+                            Ok(body) => collect_info_bodies_into(body, out)?,
+                            Err(e) => return Err(format!("nested pair body failed: {e}")),
+                        }
+                    }
+                }
+            } else if unwrapped.len().is_multiple_of(2) {
+                // Flat pairs: odd indices are bodies.
+                for body in unwrapped.iter().skip(1).step_by(2) {
+                    collect_info_bodies_into(body, out)?;
+                }
+            } else {
+                return Err(format!(
+                    "cluster INFO array has {} entries — expected pairs or nested 2-arrays",
+                    unwrapped.len()
+                ));
+            }
+            Ok(())
         }
         other => Err(format!("unexpected INFO shape: {other:?}")),
     }
@@ -268,38 +357,115 @@ mod tests {
         assert!(parse_valkey_major_version(info).is_err());
     }
 
-    #[test]
-    fn extract_info_body_bulk_string() {
-        let raw = Value::BulkString(b"valkey_version:8.0.0\n".as_slice().into());
-        assert_eq!(extract_info_body(&raw).unwrap(), "valkey_version:8.0.0\n");
+    // Helper: bulk-string body with a given version line.
+    fn body(v: &str) -> Value {
+        Value::BulkString(format!("valkey_version:{v}\n").as_bytes().to_vec().into())
+    }
+
+    // `Value::Array` holds `Vec<Result<Value, Error>>` — tests only
+    // need the `Ok` variant, so thread the wrapping through a helper
+    // to keep fixtures readable.
+    fn arr(values: Vec<Value>) -> Value {
+        Value::Array(values.into_iter().map(Ok).collect())
+    }
+
+    fn min_major(raw: &Value) -> Result<u32, String> {
+        let bodies = collect_info_bodies(raw)?;
+        bodies
+            .iter()
+            .map(|b| parse_valkey_major_version(b))
+            .collect::<Result<Vec<_>, _>>()?
+            .into_iter()
+            .min()
+            .ok_or_else(|| "empty".to_owned())
     }
 
     #[test]
-    fn extract_info_body_simple_string() {
+    fn collect_bulk_string_yields_one_body() {
+        let raw = body("8.0.0");
+        let bodies = collect_info_bodies(&raw).unwrap();
+        assert_eq!(bodies.len(), 1);
+        assert!(bodies[0].contains("valkey_version:8.0.0"));
+    }
+
+    #[test]
+    fn collect_simple_string_yields_one_body() {
         let raw = Value::SimpleString("valkey_version:8.1.0".to_owned());
-        assert_eq!(extract_info_body(&raw).unwrap(), "valkey_version:8.1.0");
+        let bodies = collect_info_bodies(&raw).unwrap();
+        assert_eq!(bodies.len(), 1);
     }
 
     #[test]
-    fn extract_info_body_cluster_map_picks_first() {
+    fn cluster_map_collects_every_node_and_min_wins() {
+        // Rolling-upgrade regression: one node is still on 7.x, another
+        // is 8.0. Picking the first entry (FF's ff-server behavior)
+        // would sometimes pass boot against a partially-upgraded
+        // cluster; taking the min forces the outer retry loop to keep
+        // waiting until every node is past the floor.
         let raw = Value::Map(vec![
-            (
-                Value::SimpleString("node-a".into()),
-                Value::BulkString(b"valkey_version:8.0.0\n".as_slice().into()),
-            ),
-            (
-                Value::SimpleString("node-b".into()),
-                Value::BulkString(b"valkey_version:8.0.1\n".as_slice().into()),
-            ),
+            (Value::SimpleString("node-a".into()), body("8.0.0")),
+            (Value::SimpleString("node-b".into()), body("7.2.4")),
         ]);
-        let body = extract_info_body(&raw).unwrap();
-        assert!(body.contains("valkey_version:8.0.0"));
+        assert_eq!(min_major(&raw).unwrap(), 7);
     }
 
     #[test]
-    fn extract_info_body_empty_cluster_map_errors() {
+    fn cluster_map_all_upgraded_passes_at_min() {
+        let raw = Value::Map(vec![
+            (Value::SimpleString("node-a".into()), body("8.1.0")),
+            (Value::SimpleString("node-b".into()), body("8.0.2")),
+        ]);
+        assert_eq!(min_major(&raw).unwrap(), 8);
+    }
+
+    #[test]
+    fn empty_cluster_map_errors() {
         let raw = Value::Map(vec![]);
-        assert!(extract_info_body(&raw).is_err());
+        assert!(collect_info_bodies(&raw).is_err());
+    }
+
+    #[test]
+    fn cluster_array_nested_pairs_resp2() {
+        // RESP2 cluster INFO can arrive as [[addr, body], [addr, body]].
+        // Every other multi-shape parser in the crate handles this
+        // (parse_multi_stream_xread, parse_field_pairs, parse_string_map);
+        // the version check needs to, too, or a RESP2 cluster connection
+        // hangs for 60 s and then boots with a misleading "unexpected
+        // INFO shape" error.
+        let raw = arr(vec![
+            arr(vec![Value::SimpleString("node-a".into()), body("8.0.0")]),
+            arr(vec![Value::SimpleString("node-b".into()), body("7.4.0")]),
+        ]);
+        assert_eq!(min_major(&raw).unwrap(), 7);
+    }
+
+    #[test]
+    fn cluster_array_flat_pairs_resp2() {
+        // RESP2 flat shape: [addr, body, addr, body, ...].
+        let raw = arr(vec![
+            Value::SimpleString("node-a".into()),
+            body("8.0.0"),
+            Value::SimpleString("node-b".into()),
+            body("8.0.1"),
+        ]);
+        assert_eq!(min_major(&raw).unwrap(), 8);
+    }
+
+    #[test]
+    fn empty_cluster_array_errors() {
+        let raw = arr(vec![]);
+        assert!(collect_info_bodies(&raw).is_err());
+    }
+
+    #[test]
+    fn cluster_array_odd_length_errors() {
+        // Malformed — neither nested-pairs nor flat-pairs.
+        let raw = arr(vec![
+            Value::SimpleString("node-a".into()),
+            body("8.0.0"),
+            body("8.0.0"),
+        ]);
+        assert!(collect_info_bodies(&raw).is_err());
     }
 
     // Compile-time invariant: recommended floor must sit above the hard
