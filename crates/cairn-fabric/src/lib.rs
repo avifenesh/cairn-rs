@@ -33,12 +33,12 @@
 //! let worker = cairn_fabric::CairnWorker::connect(&worker_config, bridge.clone()).await?;
 //! loop {
 //!     let grant = match fabric.scheduler.claim_for_worker(
-//!         &worker_id, &worker_instance_id, &lane, &capabilities, grant_ttl_ms,
+//!         &lane, &worker_id, &worker_instance_id, grant_ttl_ms,
 //!     ).await? {
 //!         Some(g) => g,
 //!         None => { tokio::time::sleep(poll_interval).await; continue; }
 //!     };
-//!     let task = worker.claim_from_grant(&grant).await?;
+//!     let task = worker.claim_from_grant(lane.clone(), grant).await?;
 //!     task.complete_with_result(None).await?;
 //! }
 //!
