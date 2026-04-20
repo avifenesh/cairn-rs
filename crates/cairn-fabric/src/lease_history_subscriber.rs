@@ -50,6 +50,7 @@ use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
 use crate::event_bridge::{BridgeEvent, EventBridge};
+use crate::helpers::try_parse_project_key;
 
 /// How often each per-partition task refreshes the `lease_expiry`
 /// membership set. Trades off discovery latency for Valkey command
@@ -376,17 +377,30 @@ impl Worker {
             "lease-history subscriber: received frame"
         );
 
-        match event_kind.as_str() {
+        // Advance the cursor only when dispatch succeeded OR the
+        // frame was permanently skipped (unknown event kind / tags
+        // don't identify a cairn execution). A transient Valkey
+        // failure during dispatch returns Err — we keep the cursor
+        // pinned so the next poll retries, avoiding silent data
+        // loss.
+        let dispatch = match event_kind.as_str() {
             "expired" => self.dispatch_expired(partition, exec_id, frame).await,
             "reclaimed" => self.dispatch_reclaimed(partition, exec_id, frame).await,
             other => {
                 tracing::trace!(exec_id, event = %other, "lease_history: unknown event kind");
+                Ok(())
             }
+        };
+        if let Err(e) = dispatch {
+            tracing::warn!(
+                partition = %partition_tag,
+                exec_id,
+                error = %e,
+                "lease-history subscriber: dispatch failed, retrying on next poll"
+            );
+            return;
         }
 
-        // Persist cursor regardless of whether we emitted — we don't
-        // want to re-process the same frame after a restart just
-        // because we didn't recognize the event kind.
         self.cursors.insert(
             (partition_tag.to_owned(), exec_id.to_owned()),
             frame.stream_id.clone(),
@@ -407,9 +421,16 @@ impl Worker {
         }
     }
 
-    async fn dispatch_expired(&self, partition: &Partition, exec_id: &str, frame: &StreamFrame) {
-        let Some(ctx) = self.fetch_entity_context(partition, exec_id).await else {
-            return;
+    /// `Ok(())` = emitted or permanently skipped (cursor advance ok).
+    /// `Err` = transient Valkey failure; cursor should stay pinned.
+    async fn dispatch_expired(
+        &self,
+        partition: &Partition,
+        exec_id: &str,
+        _frame: &StreamFrame,
+    ) -> Result<(), String> {
+        let Some(ctx) = self.fetch_entity_context(partition, exec_id).await? else {
+            return Ok(());
         };
         match ctx {
             EntityContext::Task { project, task_id } => {
@@ -433,21 +454,26 @@ impl Worker {
                     .await;
             }
         }
-        let _ = frame;
+        Ok(())
     }
 
-    async fn dispatch_reclaimed(&self, partition: &Partition, exec_id: &str, frame: &StreamFrame) {
+    async fn dispatch_reclaimed(
+        &self,
+        partition: &Partition,
+        exec_id: &str,
+        frame: &StreamFrame,
+    ) -> Result<(), String> {
         // On reclaim FF writes a new lease_id + lease_epoch and a new
         // worker_id. For tasks we emit TaskLeaseClaimed so the
         // projection can mark the task leased under the new worker.
         // For runs, there is no "RunLeaseClaimed" BridgeEvent variant
         // today — the next cairn-side transition (start / complete /
         // fail) will re-sync the projection, so silence is acceptable.
-        let Some(ctx) = self.fetch_entity_context(partition, exec_id).await else {
-            return;
+        let Some(ctx) = self.fetch_entity_context(partition, exec_id).await? else {
+            return Ok(());
         };
         let EntityContext::Task { project, task_id } = ctx else {
-            return;
+            return Ok(());
         };
         let lease_owner = frame.fields.get("worker_id").cloned().unwrap_or_default();
         let lease_epoch: u64 = frame
@@ -473,6 +499,7 @@ impl Worker {
                 lease_expires_at_ms,
             })
             .await;
+        Ok(())
     }
 
     /// HGETALL on the exec's `:tags` hash, return a classified
@@ -480,12 +507,25 @@ impl Worker {
     /// lack cairn.task_id / cairn.run_id — another tenant sharing
     /// the Valkey (integration-test harness collision), not our
     /// execution. Also returns None on any parse failure.
+    /// Fetch the exec's cairn tag bundle and classify it as a Task
+    /// or Run. Returns:
+    /// - `Ok(Some(ctx))` — successfully classified our execution.
+    /// - `Ok(None)` — HGETALL succeeded but the tags don't carry
+    ///   `cairn.task_id` / `cairn.run_id` (either another tenant on
+    ///   a shared Valkey, or missing/mis-shaped tags). Permanent:
+    ///   cursor can advance past this frame safely.
+    /// - `Err(_)` — transient Valkey failure. `handle_frame` treats
+    ///   this as "don't advance the cursor" so we retry on the next
+    ///   poll and don't lose the event.
     async fn fetch_entity_context(
         &self,
         partition: &Partition,
         exec_id: &str,
-    ) -> Option<EntityContext> {
-        let eid = ExecutionId::parse(exec_id).ok()?;
+    ) -> Result<Option<EntityContext>, String> {
+        let Ok(eid) = ExecutionId::parse(exec_id) else {
+            // Unparseable ExecutionIds are permanent; advance past.
+            return Ok(None);
+        };
         let ctx = ExecKeyContext::new(partition, &eid);
         let raw: Value = self
             .client
@@ -493,20 +533,26 @@ impl Worker {
             .arg(ctx.tags())
             .execute()
             .await
-            .ok()?;
-        let tags = parse_string_map(&raw)?;
-        let project_str = tags.get("cairn.project")?;
-        let project = parse_project_key(project_str)?;
+            .map_err(|e| format!("HGETALL tags: {e}"))?;
+        let Some(tags) = parse_string_map(&raw) else {
+            return Ok(None);
+        };
+        let Some(project_str) = tags.get("cairn.project") else {
+            return Ok(None);
+        };
+        let Some(project) = try_parse_project_key(project_str) else {
+            return Ok(None);
+        };
         if let Some(task_id) = tags.get("cairn.task_id") {
-            Some(EntityContext::Task {
+            Ok(Some(EntityContext::Task {
                 project,
                 task_id: TaskId::new(task_id.clone()),
-            })
+            }))
         } else {
-            tags.get("cairn.run_id").map(|run_id| EntityContext::Run {
+            Ok(tags.get("cairn.run_id").map(|run_id| EntityContext::Run {
                 project,
                 run_id: RunId::new(run_id.clone()),
-            })
+            }))
         }
     }
 
@@ -700,6 +746,10 @@ fn value_to_string(v: &Value) -> Option<String> {
     }
 }
 
+/// Parse an HGETALL reply. RESP3 returns `Value::Map`, RESP2 returns
+/// `Value::Array` of alternating k, v scalars. ferriskey selects at
+/// connection time, so we handle both so the subscriber works on
+/// either protocol.
 fn parse_string_map(raw: &Value) -> Option<HashMap<String, String>> {
     match raw {
         Value::Map(m) => {
@@ -711,17 +761,21 @@ fn parse_string_map(raw: &Value) -> Option<HashMap<String, String>> {
             }
             Some(out)
         }
+        Value::Array(arr) => {
+            let mut out = HashMap::new();
+            let items: Vec<String> = arr
+                .iter()
+                .filter_map(|r| r.as_ref().ok().and_then(value_to_string))
+                .collect();
+            let mut it = items.into_iter();
+            while let (Some(k), Some(v)) = (it.next(), it.next()) {
+                out.insert(k, v);
+            }
+            Some(out)
+        }
         Value::Nil => None,
         _ => None,
     }
-}
-
-fn parse_project_key(raw: &str) -> Option<ProjectKey> {
-    let parts: Vec<&str> = raw.split('/').collect();
-    if parts.len() != 3 {
-        return None;
-    }
-    Some(ProjectKey::new(parts[0], parts[1], parts[2]))
 }
 
 fn now_ms() -> u64 {
