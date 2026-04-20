@@ -5,7 +5,7 @@
 //! `BridgeEvent::TaskStateChanged` emission on `ActiveTaskRegistry`
 //! membership. Tasks claimed via any path that did not populate the
 //! registry (external API callers, `CairnWorker::claim_next` under
-//! `insecure-direct-claim`, or a cairn process restart between claim
+//! `direct-valkey-claim`, or a cairn process restart between claim
 //! and completion) silently skipped emission — and the cairn-store
 //! `TaskReadModel` projection drifted from FF's exec_core truth.
 //!

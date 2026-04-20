@@ -28,7 +28,7 @@
 //! let fabric = FabricServices::start(config, event_log).await?;
 //!
 //! // Use fabric.runs, fabric.tasks, fabric.budgets, fabric.quotas, etc.
-//! // Worker loop (direct-claim path, behind the `insecure-direct-claim`
+//! // Worker loop (direct-claim path, behind the `direct-valkey-claim`
 //! // feature — production callers go through cairn-orchestrator):
 //! let worker = cairn_fabric::CairnWorker::connect(&worker_config, bridge.clone()).await?;
 //! while let Some(task) = worker.claim_next().await? {

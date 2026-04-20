@@ -18,16 +18,16 @@
 //! — not that Valkey sorted them. Driving the sink directly would only
 //! prove the Valkey invariant, not the cairn-side emission order.
 //!
-//! # Why `insecure-direct-claim`?
+//! # Why `direct-valkey-claim`?
 //!
 //! The only public path to a live `CairnTask` today is
 //! `CairnWorker::claim_next`, which is gated behind the
-//! `insecure-direct-claim` feature (`ClaimedTask::new` is `pub(crate)`
+//! `direct-valkey-claim` feature (`ClaimedTask::new` is `pub(crate)`
 //! on ff-sdk — see `crates/cairn-fabric/src/worker_sdk.rs` module
 //! docstring). The test is cfg-gated so default CI runs skip it; the
 //! pre-push + fabric-integration CI job enables the feature.
 
-#![cfg(feature = "insecure-direct-claim")]
+#![cfg(feature = "direct-valkey-claim")]
 
 use std::collections::BTreeSet;
 use std::path::PathBuf;

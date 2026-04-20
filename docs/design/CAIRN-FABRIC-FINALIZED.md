@@ -67,7 +67,7 @@ unsupported (FF is the only correctness-guaranteed path).
 | `CAIRN_FABRIC_WORKER_CAPABILITIES` | empty set | env var | Comma-separated capability tokens. Passed to `ff_scheduler::Scheduler::claim_for_worker`. Empty = matches only executions with no capability requirements. |
 | `CAIRN_FABRIC_HOST` / `_PORT` / `_TLS` / `_CLUSTER` | `localhost` / `6379` / off / off | env var | Valkey connection. `_CLUSTER=1` uses cluster mode; all FCALL KEYS on a single `{p:N}` hash tag so this is cluster-safe without extra wiring. |
 | `CAIRN_FABRIC_LEASE_TTL_MS` / `_GRANT_TTL_MS` | `30_000` / `5_000` | env var | Timing knobs. |
-| `insecure-direct-claim` | off | cargo feature | Forwards to `ff-sdk/insecure-direct-claim`, exposing `CairnWorker::claim_next`. **Test / local dev only** — the direct path skips budget + quota admission that only ff-scheduler enforces. Production must go through `FabricSchedulerService::claim_for_worker`. |
+| `direct-valkey-claim` | off | cargo feature | Forwards to `ff-sdk/direct-valkey-claim`, exposing `CairnWorker::claim_next`. **Test / local dev only** — the direct path skips budget + quota admission that only ff-scheduler enforces. Production must go through `FabricSchedulerService::claim_for_worker`. |
 
 ---
 
@@ -329,7 +329,7 @@ Severity ordered. Each item has a follow-up round scoped.
 
 *Status*: fixed on `feat/task-emission-gate-fix`.
 
-Was: `FabricTaskService::complete` / `fail` / `cancel` gated `BridgeEvent::TaskStateChanged` emission on `ActiveTaskRegistry` membership, so tasks claimed via any path other than `FabricTaskService::claim` (external API callers, `CairnWorker::claim_next` under `insecure-direct-claim`, cross-process claim/complete) silently skipped projection emission and drifted the cairn-store `TaskReadModel` from FF's exec_core.
+Was: `FabricTaskService::complete` / `fail` / `cancel` gated `BridgeEvent::TaskStateChanged` emission on `ActiveTaskRegistry` membership, so tasks claimed via any path other than `FabricTaskService::claim` (external API callers, `CairnWorker::claim_next` under `direct-valkey-claim`, cross-process claim/complete) silently skipped projection emission and drifted the cairn-store `TaskReadModel` from FF's exec_core.
 
 Now: emission is unconditional after FF confirms the terminal transition. Projections are idempotent on `(task_id, event_id)`, so a redundant emit from a parallel path is a no-op re-write. Regression guards land in `crates/cairn-fabric/tests/integration/test_event_emission.rs` — four tests exercising the happy-path baseline plus complete/fail/cancel via a fresh `FabricTaskService` (simulating cross-process claim + terminal).
 
