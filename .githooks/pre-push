@@ -4,37 +4,29 @@ set -euo pipefail
 echo "═══ pre-push gate ═══"
 
 # Rust tests — mirror CI shape:
-#  - Workspace lib tests under `--features cairn-app/in-memory-runtime`.
-#    The runtime / orchestrator / app test modules are gated on this
-#    feature (PR #27); without it the binaries compile to zero tests
-#    and the hook would ship blind. This is what CI's `test` job runs.
-#  - Workspace integration tests (`--tests`) for cairn-runtime,
-#    cairn-orchestrator, and cairn-app under the same feature. CLAUDE.md
-#    hard rule #2 requires integration coverage; `--lib` alone skips the
-#    78 files under `crates/*/tests/*.rs` (full_workspace_suite,
-#    e2e_lifecycle, approval_blocking_e2e, checkpoint_recovery_e2e, …).
-#    This is what CI's `integration-tests` job runs.
+#  - Workspace lib tests (cargo test --workspace --lib). Post in-memory-
+#    runtime removal, every per-crate lib test runs unconditionally on
+#    the Fabric-only workspace.
+#  - cairn-app integration tests ride the FakeFabric read-only fixture
+#    under `crates/cairn-app/tests/support/` — no Valkey required.
 #  - cairn-fabric integration suite runs separately against a
 #    testcontainers-managed Valkey (docker required; skipped if the
 #    daemon is unreachable so laptops without docker can still push).
-#    This is what CI's `fabric-integration` job runs.
-echo "  rust lib tests (--features in-memory-runtime)..."
-if ! output=$(cargo test --workspace --lib --features cairn-app/in-memory-runtime 2>&1); then
+echo "  rust lib tests..."
+if ! output=$(cargo test --workspace --lib 2>&1); then
   echo "  ❌ rust lib tests failed."
   echo "$output" | grep "FAILED\|failures" | head -10
   exit 1
 fi
 echo "  ✓ rust lib tests"
 
-echo "  rust integration tests (runtime + orchestrator + app)..."
-if ! output=$(cargo test --tests \
-    -p cairn-runtime -p cairn-orchestrator -p cairn-app \
-    --features cairn-app/in-memory-runtime 2>&1); then
-  echo "  ❌ rust integration tests failed."
+echo "  cairn-app integration tests (FakeFabric fixture)..."
+if ! output=$(cargo test --tests -p cairn-app 2>&1); then
+  echo "  ❌ cairn-app integration tests failed."
   echo "$output" | grep "FAILED\|failures" | head -10
   exit 1
 fi
-echo "  ✓ rust integration tests"
+echo "  ✓ cairn-app integration tests"
 
 echo "  fabric integration (testcontainers)..."
 if docker info >/dev/null 2>&1; then
