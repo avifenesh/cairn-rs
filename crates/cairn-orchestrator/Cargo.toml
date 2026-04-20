@@ -22,10 +22,3 @@ cairn-providers = { path = "../cairn-providers" }
 reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
 tokio   = { version = "1", features = ["rt", "rt-multi-thread", "macros", "time"] }
 
-[features]
-default = []
-# Forwards to cairn-runtime/in-memory-runtime so tests here can construct
-# `RunServiceImpl` / `TaskServiceImpl` directly for unit testing. Not
-# needed for production runtime use — production wires `Arc<dyn Trait>`
-# through AppState.runtime.
-in-memory-runtime = ["cairn-runtime/in-memory-runtime"]

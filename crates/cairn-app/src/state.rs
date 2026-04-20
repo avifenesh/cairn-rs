@@ -293,9 +293,10 @@ pub struct AppState {
     /// Model catalog — per-model metadata including cost rates and capabilities.
     /// Operators can override entries at runtime via the admin API.
     pub model_registry: ModelRegistry,
-    /// FlowFabric services aggregate — `Some` in default production
-    /// builds (when `build_runtime_with_optional_fabric` successfully
-    /// boots `FabricServices`). `None` under `--features in-memory-runtime`.
+    /// FlowFabric services aggregate — `Some` in production (when
+    /// `build_runtime_with_optional_fabric` successfully boots
+    /// `FabricServices`). `None` only when a test fixture has injected a
+    /// read-only runtime (see `crates/cairn-app/tests/support/fake_fabric.rs`).
     /// When `Some`, `runtime.runs / tasks / sessions` are the Fabric
     /// adapters (see `crate::fabric_adapter`); handlers call through the
     /// trait unchanged.
@@ -726,15 +727,28 @@ impl AppState {
     }
 
     pub async fn new(config: BootstrapConfig) -> Result<Self, String> {
-        // Default build: construct FabricServices + install the
-        // FabricAdapter trio for runs/tasks/sessions. Under
-        // `--features in-memory-runtime`, fall back to the event-log-only
-        // courtesy impls (no Valkey, no scanners, no correctness guarantees
-        // — for local tinkering and test harnesses only). Any boot failure
-        // on the Fabric path (unreachable Valkey, HMAC validation, …)
-        // surfaces here before cairn-app starts serving traffic — no silent
-        // fall-back.
+        // Construct FabricServices + install the FabricAdapter trio for
+        // runs/tasks/sessions. Any boot failure on the Fabric path
+        // (unreachable Valkey, HMAC validation, …) surfaces here before
+        // cairn-app starts serving traffic — no silent fall-back.
         let (runtime, fabric) = build_runtime_with_optional_fabric().await?;
+        Self::new_with_runtime(config, runtime, fabric).await
+    }
+
+    /// Build an `AppState` around a caller-provided runtime.
+    ///
+    /// Used by integration tests that need to inject a test fixture
+    /// (e.g. `FakeFabric` under `tests/support/`) in place of live Fabric —
+    /// the ancillary state (graph, eval services, metrics, tokens) wires up
+    /// identically either way.
+    ///
+    /// Production callers use [`Self::new`], which builds the runtime via
+    /// `build_runtime_with_optional_fabric` and then delegates here.
+    pub async fn new_with_runtime(
+        config: BootstrapConfig,
+        runtime: Arc<InMemoryServices>,
+        fabric: Option<Arc<cairn_fabric::FabricServices>>,
+    ) -> Result<Self, String> {
         let graph = Arc::new(InMemoryGraphStore::new());
         let plugin_registry = Arc::new(InMemoryPluginRegistry::new());
         let document_store = Arc::new(InMemoryDocumentStore::new());
@@ -1064,33 +1078,18 @@ fn default_sandbox_base_dir() -> PathBuf {
 
 /// Build the runtime aggregate.
 ///
-/// Path is selected at **compile time** by the `in-memory-runtime` cargo
-/// feature — there is no longer an `CAIRN_FABRIC_ENABLED` env var:
+/// Constructs `FabricServices` from env config, wires the
+/// `FabricRunServiceAdapter` / `Task` / `Session` trio on top of a shared
+/// `InMemoryStore`, and installs them via
+/// `InMemoryServices::with_store_and_core`. Boot failure on the Fabric
+/// path (unreachable Valkey, HMAC validation, …) surfaces here before
+/// cairn-app serves traffic — no silent fall-back.
 ///
-/// - **Default build (feature OFF)**: constructs `FabricServices` from env
-///   config, wires `FabricRunServiceAdapter` / `Task` / `Session` on top of
-///   a shared `InMemoryStore`, installs them via
-///   `InMemoryServices::with_store_and_core`, and returns the fabric handle.
-///   This is the production path; the in-memory courtesy impls are not even
-///   compiled in.
-/// - **`--features in-memory-runtime` build**: returns
-///   `(InMemoryServices::new(), None)` — the pre-Fabric event-log path.
-///   Correctness guarantees only hold on the Fabric path; this feature
-///   exists for local tinkering, cargo-test harnesses, and CI jobs that
-///   exercise the event-log-only surface.
-#[cfg(feature = "in-memory-runtime")]
-async fn build_runtime_with_optional_fabric() -> Result<
-    (
-        Arc<InMemoryServices>,
-        Option<Arc<cairn_fabric::FabricServices>>,
-    ),
-    String,
-> {
-    tracing::debug!("in-memory-runtime feature enabled; using event-log-only runs/tasks/sessions");
-    Ok((Arc::new(InMemoryServices::new()), None))
-}
-
-#[cfg(not(feature = "in-memory-runtime"))]
+/// Integration tests that need to stand up an AppState without a live
+/// Valkey build a `FakeFabric`-backed `InMemoryServices` (see
+/// `crates/cairn-app/tests/support/fake_fabric.rs`) and call
+/// [`AppBootstrap::router_with_injected_runtime`] directly, bypassing
+/// this constructor.
 async fn build_runtime_with_optional_fabric() -> Result<
     (
         Arc<InMemoryServices>,

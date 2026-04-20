@@ -1,6 +1,6 @@
-#![cfg(feature = "in-memory-runtime")]
-
 //! RFC 003 source refresh scheduling integration tests.
+
+mod support;
 
 use axum::{
     body::{to_bytes, Body},
@@ -8,7 +8,6 @@ use axum::{
 };
 use cairn_api::auth::AuthPrincipal;
 use cairn_api::bootstrap::BootstrapConfig;
-use cairn_app::AppBootstrap;
 use cairn_domain::tenancy::TenantKey;
 use cairn_domain::OperatorId;
 use tower::ServiceExt;
@@ -17,10 +16,8 @@ const TOKEN: &str = "refresh-test-token";
 const TENANT: &str = "t_refresh";
 
 async fn make_app() -> axum::Router {
-    let (app, _, tokens) = AppBootstrap::router_with_runtime_and_tokens(BootstrapConfig::default())
-        .await
-        .unwrap();
-    tokens.register(
+    let (app, state) = support::build_test_router_fake_fabric(BootstrapConfig::default()).await;
+    state.service_tokens.register(
         TOKEN.to_string(),
         AuthPrincipal::Operator {
             operator_id: OperatorId::new("test_op"),

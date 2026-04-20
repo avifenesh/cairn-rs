@@ -1,8 +1,7 @@
 //! Bridges trait-based handlers to FabricServices.
 //!
 //! Reads go to store projection; writes go to Fabric. Installed on
-//! `state.runtime.{runs,tasks,sessions}` by `AppState::new` in every
-//! default build; skipped only under `--features in-memory-runtime`.
+//! `state.runtime.{runs,tasks,sessions}` by `AppState::new`.
 //!
 //! This module exists so that HTTP handlers can continue to call
 //! `state.runtime.runs.get(...)` (a trait method with bare IDs) while the
@@ -10,12 +9,6 @@
 //! requires a `ProjectKey` for every operation. The adapter resolves the
 //! missing project context by reading the cairn-store projection first, then
 //! delegates to the Fabric service.
-//!
-//! The `in-memory-runtime` cargo feature (see
-//! [`crate::state::build_runtime_with_optional_fabric`]) selects which impl
-//! the handlers see at compile time — `*ServiceImpl` against the in-process
-//! store (feature ON), or the `Fabric*ServiceAdapter` against Valkey-backed
-//! FF (feature OFF, production).
 //!
 //! Scope per service (see `docs/design/notes/cairn-fabric-handler-wiring.md`):
 //!

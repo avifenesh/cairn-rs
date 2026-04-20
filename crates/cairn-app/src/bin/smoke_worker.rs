@@ -22,8 +22,8 @@
 //! Exits 0 on full green, 1 on the first failed assertion.
 //!
 //! The bin intentionally depends on **reqwest + serde only** — no runtime
-//! crates — so it works against the default Fabric build without pulling
-//! the in-memory-runtime feature into the cairn-app binary.
+//! crates — so it works against any Fabric build without bloating the
+//! cairn-app binary with test-side service dependencies.
 
 use std::process::ExitCode;
 

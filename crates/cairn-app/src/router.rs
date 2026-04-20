@@ -297,6 +297,24 @@ impl AppBootstrap {
         Ok((router, runtime, graph, service_tokens))
     }
 
+    /// Build a router around a caller-provided runtime. Integration-test
+    /// entry point; production callers use [`Self::router`] et al.
+    ///
+    /// Lets test fixtures (see `crates/cairn-app/tests/support/fake_fabric.rs`)
+    /// stand up an AppState without a live Valkey by injecting the
+    /// read-only trio via `InMemoryServices::with_store_and_core` and
+    /// passing it through here.
+    pub async fn router_with_injected_runtime(
+        config: BootstrapConfig,
+        runtime: Arc<InMemoryServices>,
+        fabric: Option<Arc<cairn_fabric::FabricServices>>,
+    ) -> Result<(Router, Arc<AppState>), String> {
+        let state = Arc::new(AppState::new_with_runtime(config, runtime, fabric).await?);
+        let router = Self::build_router(state.clone());
+        state.metrics.mark_started();
+        Ok((router, state))
+    }
+
     /// Build the catalog-driven routes WITHOUT state resolution or middleware.
     ///
     /// Returns a `Router<Arc<AppState>>` so callers can `.route()` additional
@@ -1648,6 +1666,22 @@ impl AppBootstrap {
         config: &BootstrapConfig,
     ) -> Result<(), String> {
         let router = Self::router(config.clone()).await?;
+        self.serve_with_shutdown(listener, router, std::future::pending())
+            .await
+    }
+
+    /// Serve a pre-built router on the given listener. Integration-test
+    /// entry point; production callers use [`Self::serve_with_listener`].
+    ///
+    /// Lets tests build a router via
+    /// [`Self::router_with_injected_runtime`] (typically wired to a
+    /// `FakeFabric` fixture) and then bind it, without going through
+    /// the runtime construction inside `serve_with_listener`.
+    pub async fn serve_prebuilt_router(
+        &self,
+        listener: TcpListener,
+        router: Router,
+    ) -> Result<(), String> {
         self.serve_with_shutdown(listener, router, std::future::pending())
             .await
     }

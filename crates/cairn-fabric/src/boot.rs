@@ -188,8 +188,7 @@ impl FabricRuntime {
 /// Seed the waitpoint HMAC secret across every execution partition.
 /// Fails loud if `config.waitpoint_hmac_secret` is `None` — production
 /// can't ship without it because every `ff_suspend_execution` would
-/// reject with `hmac_secret_not_initialized`. Dev / CI paths that don't
-/// need HMAC should build cairn-app with `--features in-memory-runtime`.
+/// reject with `hmac_secret_not_initialized`.
 ///
 /// Hash layout per partition:
 ///   HSET waitpoint_hmac_secrets:{p:N} current_kid <kid>
@@ -209,12 +208,10 @@ async fn seed_waitpoint_hmac_secret_if_configured(
         (Some(s), Some(k)) => (s, k),
         _ => {
             return Err(FabricError::Config(
-                "CAIRN_FABRIC_WAITPOINT_HMAC_SECRET is required in the \
-                 production (Fabric) build — boot refuses to ship a runtime \
-                 that would reject every ff_suspend_execution with \
-                 hmac_secret_not_initialized. Set the secret (64 hex chars) \
-                 plus CAIRN_FABRIC_WAITPOINT_HMAC_KID, or build cairn-app \
-                 with `--features in-memory-runtime` to skip Fabric boot."
+                "CAIRN_FABRIC_WAITPOINT_HMAC_SECRET is required — boot refuses \
+                 to ship a runtime that would reject every ff_suspend_execution \
+                 with hmac_secret_not_initialized. Set the secret (64 hex chars) \
+                 plus CAIRN_FABRIC_WAITPOINT_HMAC_KID."
                     .to_owned(),
             ));
         }

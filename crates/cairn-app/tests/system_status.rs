@@ -1,6 +1,6 @@
-#![cfg(feature = "in-memory-runtime")]
-
 //! Integration tests for RFC 010 system status page.
+
+mod support;
 
 use axum::{
     body::{to_bytes, Body},
@@ -8,7 +8,6 @@ use axum::{
 };
 use cairn_api::auth::AuthPrincipal;
 use cairn_api::bootstrap::BootstrapConfig;
-use cairn_app::AppBootstrap;
 use cairn_domain::tenancy::TenantKey;
 use cairn_domain::OperatorId;
 use tower::ServiceExt;
@@ -19,17 +18,15 @@ async fn app_with_token() -> (
     axum::Router,
     std::sync::Arc<cairn_runtime::InMemoryServices>,
 ) {
-    let (app, runtime, tokens) =
-        AppBootstrap::router_with_runtime_and_tokens(BootstrapConfig::default())
-            .await
-            .unwrap();
-    tokens.register(
+    let (app, state) = support::build_test_router_fake_fabric(BootstrapConfig::default()).await;
+    state.service_tokens.register(
         TOKEN.to_string(),
         AuthPrincipal::Operator {
             operator_id: OperatorId::new("test_op"),
             tenant: TenantKey::new("default_tenant"),
         },
     );
+    let runtime = state.runtime.clone();
     (app, runtime)
 }
 

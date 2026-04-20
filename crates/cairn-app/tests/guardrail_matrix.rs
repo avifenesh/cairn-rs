@@ -1,5 +1,3 @@
-#![cfg(feature = "in-memory-runtime")]
-
 //! Integration test: guardrail evaluation matrix.
 //!
 //! `build_guardrail_matrix` is currently a stub that always returns an empty

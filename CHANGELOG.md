@@ -9,6 +9,59 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Removed (breaking)
+
+- **`in-memory-runtime` cargo feature deleted.** The feature existed as
+  an "event-log-only courtesy backing" for `RunService` / `TaskService`
+  / `SessionService` when Valkey wasn't available — local tinkering, CI
+  escape hatch, some tests. Post the PR #66 FF dependency migration,
+  Fabric is authoritative for all runs/tasks/sessions and the in-memory
+  impls carried no correctness guarantees; keeping them meant every new
+  event shape had to be taught to two runtimes or silently skipped on
+  the in-memory side, and ~60 tests asserted behavior that might or
+  might not match Fabric without re-testing against live Valkey.
+
+  What goes:
+  - `InMemoryServices::{new, with_store, with_fabric}` + `Default` impl
+    + the three impl files `{run,task,session}_impl.rs`. The single
+    factory `InMemoryServices::with_store_and_core(store, runs, tasks,
+    sessions)` is now the only path.
+  - 18 gated runtime tests + the orchestrator_e2e test — their
+    coverage either already lives in `crates/cairn-store/tests/`
+    (projection replay, sqlite adapter) or migrates to Fabric
+    integration (see Added below).
+  - 4 gated app mutation test files (bootstrap_smoke, e2e_lifecycle,
+    full_workspace_suite, provider_lifecycle_e2e) + 19 mutating
+    tests inside bootstrap_server.rs.
+  - `#[cfg(test)]` modules across 5 tools builtins, quota_impl,
+    signal_router_impl, execute_impl, lib.rs, main.rs, telemetry_routes,
+    trigger_routes, repo_routes — all of which constructed
+    `InMemoryServices::new()` to drive handler tests.
+  - 3 feature-gated CI jobs (check feature arm, clippy feature arm,
+    integration-tests). CI now runs a single-arm check/clippy/test
+    plus the existing fabric-integration job.
+
+  Upgrade path: production builds never enabled the feature, so there
+  is no migration. Tests that were gated on `in-memory-runtime` are
+  either deleted or ride the new `FakeFabric` read-only fixture under
+  `crates/cairn-app/tests/support/`.
+
+### Added
+
+- **`AppState::new_with_runtime` + `AppBootstrap::router_with_injected_runtime`**
+  — public constructors that build cairn-app's HTTP surface around a
+  caller-provided `InMemoryServices`. Integration-test entry point used
+  by the new `FakeFabric` read-only fixture.
+- **`AppBootstrap::serve_prebuilt_router`** — serves a pre-built router
+  on a listener, bypassing the `Self::router(config)` call inside
+  `serve_with_listener` that constructs live Fabric from env.
+- **`crates/cairn-app/tests/support/fake_fabric.rs`** — read-only
+  stand-in for the production `Fabric{Run,Task,Session}ServiceAdapter`
+  trio. Forwards every read method (`get`/`list_by_session`/…) to the
+  projection store; returns `RuntimeError::Internal` on every
+  mutation. Lets cairn-app handler tests boot `AppState` without a
+  live Valkey while keeping the Fabric mutation surface honest.
+
 ### Changed
 
 - **Task dependencies migrated to FF flow edges.** `declare_dependency`
@@ -18,11 +71,6 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `ff_evaluate_flow_eligibility` + per-edge HGET on the child's dep
   hash. FF is the single source of truth; the cairn-side
   `TaskDependencyReadModel` trait is deleted.
-  - **Breaking**: `--features in-memory-runtime` no longer models
-    dependencies. `declare_dependency` returns `Validation`
-    ("requires the Fabric backend") and `check_dependencies` returns
-    empty. The `in-memory-runtime` feature is dev-only per CLAUDE.md;
-    production deployments are unaffected.
   - **Breaking behavior (pre-public, no users)**: a failed or
     cancelled prerequisite now auto-skips its dependents
     (`TaskState::Failed` + `FailureClass::DependencyFailed`).

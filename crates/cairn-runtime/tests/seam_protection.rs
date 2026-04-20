@@ -1,21 +1,81 @@
-#![cfg(feature = "in-memory-runtime")]
-
-//! Integration coverage protecting the tool invocation and external worker
-//! seams for Workers 5 and 8. Manager directive: narrow coverage against drift.
+//! Integration coverage protecting the tool-invocation seam and the
+//! external-worker progress-report seam.
+//!
+//! The services under test (`ToolInvocationService`, `ExternalWorkerService`)
+//! are projection-backed and independent of Run/Task/Session impls —
+//! they append events to the store on each call. These tests verify the
+//! seam emits the right events.
+//!
+//! Task-state coordination for external workers (terminal-report rejection,
+//! worker-report-transitions-task) lives in
+//! `crates/cairn-fabric/tests/integration/test_external_worker.rs` against
+//! live Valkey — that's where the real coordination happens in production.
 
 use std::sync::Arc;
 
 use cairn_domain::tool_invocation::{ToolInvocationOutcomeKind, ToolInvocationTarget};
-use cairn_domain::workers::{ExternalWorkerOutcome, ExternalWorkerReport};
+use cairn_domain::workers::ExternalWorkerReport;
 use cairn_domain::*;
 use cairn_runtime::{
-    ExternalWorkerService, ExternalWorkerServiceImpl, TaskService, TaskServiceImpl,
-    ToolInvocationService, ToolInvocationServiceImpl,
+    ExternalWorkerService, ExternalWorkerServiceImpl, ToolInvocationService,
+    ToolInvocationServiceImpl,
 };
 use cairn_store::{EventLog, InMemoryStore};
 
 fn project() -> ProjectKey {
     ProjectKey::new("t", "w", "p")
+}
+
+/// Seed a task directly via envelope append. The seam services read only
+/// current-state projections, not service state, so this is enough to
+/// drive worker reports.
+async fn seed_running_task(store: &Arc<InMemoryStore>, task_id: &str) {
+    let created = EventEnvelope::for_runtime_event(
+        EventId::new(format!("task_created_{task_id}")),
+        EventSource::Runtime,
+        RuntimeEvent::TaskCreated(TaskCreated {
+            project: project(),
+            task_id: TaskId::new(task_id),
+            parent_run_id: None,
+            parent_task_id: None,
+            prompt_release_id: None,
+            session_id: None,
+        }),
+    );
+    let to_leased = EventEnvelope::for_runtime_event(
+        EventId::new(format!("task_leased_{task_id}")),
+        EventSource::Runtime,
+        RuntimeEvent::TaskStateChanged(TaskStateChanged {
+            project: project(),
+            task_id: TaskId::new(task_id),
+            transition: StateTransition {
+                from: Some(TaskState::Queued),
+                to: TaskState::Leased,
+            },
+            failure_class: None,
+            pause_reason: None,
+            resume_trigger: None,
+        }),
+    );
+    let to_running = EventEnvelope::for_runtime_event(
+        EventId::new(format!("task_running_{task_id}")),
+        EventSource::Runtime,
+        RuntimeEvent::TaskStateChanged(TaskStateChanged {
+            project: project(),
+            task_id: TaskId::new(task_id),
+            transition: StateTransition {
+                from: Some(TaskState::Leased),
+                to: TaskState::Running,
+            },
+            failure_class: None,
+            pause_reason: None,
+            resume_trigger: None,
+        }),
+    );
+    store
+        .append(&[created, to_leased, to_running])
+        .await
+        .unwrap();
 }
 
 // -- ToolInvocationService seam --
@@ -126,30 +186,20 @@ async fn tool_invocation_failed_emits_event_with_outcome() {
     }
 }
 
-// -- ExternalWorkerService seam --
+// -- ExternalWorkerService seam (progress emission only) --
+//
+// Terminal-report rejection and worker-completed-transitions-task moved to
+// Fabric integration (`test_external_worker.rs`) in commit 3 — those
+// assertions depend on real task-state coordination which FF owns in
+// production.
 
 #[tokio::test]
 async fn external_worker_progress_report_emits_event() {
     let store = Arc::new(InMemoryStore::new());
-    let task_svc = TaskServiceImpl::new(store.clone());
     let worker_svc = ExternalWorkerServiceImpl::new(store.clone());
 
-    task_svc
-        .submit(&project(), None, TaskId::new("task_1"), None, None, 0)
-        .await
-        .unwrap();
-    task_svc
-        .claim(
-            None,
-            &TaskId::new("task_1"),
-            "worker-ext".to_owned(),
-            60_000,
-        )
-        .await
-        .unwrap();
-    task_svc.start(None, &TaskId::new("task_1")).await.unwrap();
+    seed_running_task(&store, "task_1").await;
 
-    // Progress report (no outcome)
     let report = ExternalWorkerReport {
         project: project(),
         worker_id: "worker-ext".into(),
@@ -172,84 +222,4 @@ async fn external_worker_progress_report_emits_event() {
         .filter(|e| matches!(e.envelope.payload, RuntimeEvent::ExternalWorkerReported(_)))
         .collect();
     assert_eq!(worker_events.len(), 1);
-}
-
-#[tokio::test]
-async fn external_worker_completed_transitions_task() {
-    let store = Arc::new(InMemoryStore::new());
-    let task_svc = TaskServiceImpl::new(store.clone());
-    let worker_svc = ExternalWorkerServiceImpl::new(store.clone());
-
-    task_svc
-        .submit(&project(), None, TaskId::new("task_1"), None, None, 0)
-        .await
-        .unwrap();
-    task_svc
-        .claim(
-            None,
-            &TaskId::new("task_1"),
-            "worker-ext".to_owned(),
-            60_000,
-        )
-        .await
-        .unwrap();
-    task_svc.start(None, &TaskId::new("task_1")).await.unwrap();
-
-    // Terminal report
-    let report = ExternalWorkerReport {
-        project: project(),
-        worker_id: "worker-ext".into(),
-        run_id: None,
-        task_id: TaskId::new("task_1"),
-        lease_token: 1,
-        reported_at_ms: 99999,
-        progress: None,
-        outcome: Some(ExternalWorkerOutcome::Completed),
-    };
-
-    worker_svc.report(report).await.unwrap();
-
-    let task = task_svc.get(&TaskId::new("task_1")).await.unwrap().unwrap();
-    assert_eq!(task.state, TaskState::Completed);
-}
-
-#[tokio::test]
-async fn external_worker_report_on_terminal_task_fails() {
-    let store = Arc::new(InMemoryStore::new());
-    let task_svc = TaskServiceImpl::new(store.clone());
-    let worker_svc = ExternalWorkerServiceImpl::new(store.clone());
-
-    task_svc
-        .submit(&project(), None, TaskId::new("task_1"), None, None, 0)
-        .await
-        .unwrap();
-    task_svc
-        .claim(
-            None,
-            &TaskId::new("task_1"),
-            "worker-ext".to_owned(),
-            60_000,
-        )
-        .await
-        .unwrap();
-    task_svc.start(None, &TaskId::new("task_1")).await.unwrap();
-    task_svc
-        .complete(None, &TaskId::new("task_1"))
-        .await
-        .unwrap();
-
-    // Report on already-completed task
-    let report = ExternalWorkerReport {
-        project: project(),
-        worker_id: "worker-ext".into(),
-        run_id: None,
-        task_id: TaskId::new("task_1"),
-        lease_token: 1,
-        reported_at_ms: 99999,
-        progress: None,
-        outcome: None,
-    };
-
-    let result = worker_svc.report(report).await;
-    assert!(result.is_err());
 }

@@ -17,15 +17,13 @@
 //! - dangling parent run (task references a run not in the projection, no
 //!   persisted session_id on the task) → `None`
 
-#![cfg(feature = "in-memory-runtime")]
-
 use std::sync::Arc;
 
 use cairn_domain::{
     EventEnvelope, EventId, EventSource, ProjectId, ProjectKey, RunCreated, RunId, RuntimeEvent,
     SessionCreated, SessionId, TaskCreated, TaskId, TenantId, WorkspaceId,
 };
-use cairn_runtime::InMemoryServices;
+use cairn_store::projections::{RunReadModel, TaskReadModel};
 use cairn_store::{EventLog, InMemoryStore};
 
 fn project() -> ProjectKey {
@@ -97,10 +95,12 @@ async fn seed_task(
 /// Mirrors the production `resolve_session_for_task_record`: reads
 /// `task.session_id` directly and only walks `parent_run_id → run.session_id`
 /// when the persisted field is None.
-async fn resolve(services: &InMemoryServices, task_id: &str) -> Option<SessionId> {
-    let task = services
-        .tasks
-        .get(&TaskId::new(task_id))
+///
+/// Reads projections directly (TaskReadModel / RunReadModel) rather than
+/// through a runtime service — the resolver is projection-state logic and
+/// the service layer would add nothing to the assertion surface.
+async fn resolve(store: &Arc<InMemoryStore>, task_id: &str) -> Option<SessionId> {
+    let task = TaskReadModel::get(store.as_ref(), &TaskId::new(task_id))
         .await
         .ok()
         .flatten()?;
@@ -108,9 +108,7 @@ async fn resolve(services: &InMemoryServices, task_id: &str) -> Option<SessionId
         return Some(sid);
     }
     let parent_run_id = task.parent_run_id.as_ref()?;
-    services
-        .runs
-        .get(parent_run_id)
+    RunReadModel::get(store.as_ref(), parent_run_id)
         .await
         .ok()
         .flatten()
@@ -120,10 +118,9 @@ async fn resolve(services: &InMemoryServices, task_id: &str) -> Option<SessionId
 #[tokio::test]
 async fn solo_task_resolves_to_none() {
     let store = Arc::new(InMemoryStore::new());
-    let services = InMemoryServices::with_store(store.clone());
     seed_task(&store, "task_solo", None, None, false).await;
 
-    assert_eq!(resolve(&services, "task_solo").await, None);
+    assert_eq!(resolve(&store, "task_solo").await, None);
 }
 
 #[tokio::test]
@@ -131,12 +128,11 @@ async fn phase3_task_with_persisted_session_resolves_directly() {
     // TaskCreated carried session_id, so the projection persisted it on
     // TaskRecord and the resolver returns it without ever reading the runs projection.
     let store = Arc::new(InMemoryStore::new());
-    let services = InMemoryServices::with_store(store.clone());
     seed_session(&store, "sess_a").await;
     seed_run(&store, "run_1", "sess_a").await;
     seed_task(&store, "task_1", Some("run_1"), Some("sess_a"), false).await;
 
-    let got = resolve(&services, "task_1").await;
+    let got = resolve(&store, "task_1").await;
     assert_eq!(got.as_ref().map(|s| s.as_str()), Some("sess_a"));
 }
 
@@ -146,12 +142,11 @@ async fn legacy_task_falls_back_to_parent_run_session() {
     // fallback pulls the run's session_id at insert time. The resolver
     // then returns it from TaskRecord.session_id without a second lookup.
     let store = Arc::new(InMemoryStore::new());
-    let services = InMemoryServices::with_store(store.clone());
     seed_session(&store, "sess_legacy").await;
     seed_run(&store, "run_legacy", "sess_legacy").await;
     seed_task(&store, "task_legacy", Some("run_legacy"), None, true).await;
 
-    let got = resolve(&services, "task_legacy").await;
+    let got = resolve(&store, "task_legacy").await;
     assert_eq!(got.as_ref().map(|s| s.as_str()), Some("sess_legacy"));
 }
 
@@ -162,7 +157,6 @@ async fn session_mismatch_prefers_task_persisted_session() {
     // binding — that is the one the ExecutionId was minted against.
     // Walking the run would return a different Valkey partition.
     let store = Arc::new(InMemoryStore::new());
-    let services = InMemoryServices::with_store(store.clone());
     seed_session(&store, "sess_task").await;
     seed_session(&store, "sess_run").await;
     seed_run(&store, "run_X", "sess_run").await;
@@ -176,7 +170,7 @@ async fn session_mismatch_prefers_task_persisted_session() {
     )
     .await;
 
-    let got = resolve(&services, "task_mismatch").await;
+    let got = resolve(&store, "task_mismatch").await;
     assert_eq!(
         got.as_ref().map(|s| s.as_str()),
         Some("sess_task"),
@@ -187,9 +181,8 @@ async fn session_mismatch_prefers_task_persisted_session() {
 #[tokio::test]
 async fn missing_task_resolves_to_none() {
     let store = Arc::new(InMemoryStore::new());
-    let services = InMemoryServices::with_store(store.clone());
 
-    assert_eq!(resolve(&services, "does_not_exist").await, None);
+    assert_eq!(resolve(&store, "does_not_exist").await, None);
 }
 
 #[tokio::test]
@@ -199,8 +192,7 @@ async fn legacy_task_with_dangling_parent_run_resolves_to_none() {
     // task.session_id is None; the resolve-time fallback also misses.
     // Caller degrades to solo mint.
     let store = Arc::new(InMemoryStore::new());
-    let services = InMemoryServices::with_store(store.clone());
     seed_task(&store, "task_orphan", Some("run_ghost"), None, true).await;
 
-    assert_eq!(resolve(&services, "task_orphan").await, None);
+    assert_eq!(resolve(&store, "task_orphan").await, None);
 }

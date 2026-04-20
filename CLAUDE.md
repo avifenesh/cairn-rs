@@ -41,7 +41,7 @@ If the docs disagree, fix the docs before inventing local behavior.
 
 ```bash
 cargo build --workspace                   # Full workspace build
-cargo run -p cairn-app                    # Local dev (Postgres via DATABASE_URL, or in-memory fallback)
+cargo run -p cairn-app                    # Local dev (Postgres via DATABASE_URL, or --db memory fallback)
 
 # With Postgres (recommended):
 DATABASE_URL=postgres://cairn:pass@localhost:5432/cairn \
