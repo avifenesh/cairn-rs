@@ -3,7 +3,7 @@ use std::sync::Arc;
 use ferriskey::Client;
 use ff_core::keys::IndexKeys;
 use ff_core::partition::{Partition, PartitionConfig, PartitionFamily};
-use ff_engine::{Engine, EngineConfig};
+use ff_engine::{CompletionListenerConfig, Engine, EngineConfig};
 
 use crate::config::FabricConfig;
 use crate::error::FabricError;
@@ -113,9 +113,27 @@ impl FabricRuntime {
         // CROSSSLOT risk under cluster.
         seed_waitpoint_hmac_secret_if_configured(&client, &config, &partition_config).await?;
 
+        // Enable the push-based DAG completion listener. FF subscribes
+        // to `ff:dag:completions` on a dedicated RESP3 connection and
+        // dispatches `ff_resolve_dependency` FCALLs synchronously with
+        // each terminal transition — DAG latency drops from
+        // `reconciler_interval × levels` (15s × depth) to
+        // `~RTT × levels` (sub-ms × depth). The reconciler keeps
+        // running as a safety net for listener reconnects and any
+        // completion that missed the publish path.
+        //
+        // This adds a third Valkey connection per FabricRuntime (main
+        // + lease-history tap + completion listener). Trivial cost.
+        let completion_listener = CompletionListenerConfig {
+            addresses: vec![(config.valkey_host.clone(), config.valkey_port)],
+            tls: config.tls,
+            cluster: config.cluster,
+        };
+
         let engine_config = EngineConfig {
             partition_config,
             lanes: vec![config.lane_id.clone()],
+            completion_listener: Some(completion_listener),
             ..EngineConfig::default()
         };
 

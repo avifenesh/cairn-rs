@@ -1,6 +1,7 @@
 pub mod budget;
 pub mod claim;
 pub mod execution;
+pub mod flow_edges;
 pub mod names;
 pub mod quota;
 pub mod session;
@@ -101,6 +102,26 @@ pub const CRITICAL_CONTRACTS: &[FcallContract] = &[
         name: names::FF_RESET_BUDGET,
         expected_keys: budget::RESET_BUDGET_KEYS,
         expected_args: budget::RESET_BUDGET_ARGS,
+    },
+    FcallContract {
+        name: names::FF_ADD_EXECUTION_TO_FLOW,
+        expected_keys: flow_edges::ADD_EXECUTION_TO_FLOW_KEYS,
+        expected_args: flow_edges::ADD_EXECUTION_TO_FLOW_ARGS,
+    },
+    FcallContract {
+        name: names::FF_STAGE_DEPENDENCY_EDGE,
+        expected_keys: flow_edges::STAGE_DEPENDENCY_EDGE_KEYS,
+        expected_args: flow_edges::STAGE_DEPENDENCY_EDGE_ARGS,
+    },
+    FcallContract {
+        name: names::FF_APPLY_DEPENDENCY_TO_CHILD,
+        expected_keys: flow_edges::APPLY_DEPENDENCY_TO_CHILD_KEYS,
+        expected_args: flow_edges::APPLY_DEPENDENCY_TO_CHILD_ARGS,
+    },
+    FcallContract {
+        name: names::FF_EVALUATE_FLOW_ELIGIBILITY,
+        expected_keys: flow_edges::EVALUATE_FLOW_ELIGIBILITY_KEYS,
+        expected_args: 0,
     },
 ];
 

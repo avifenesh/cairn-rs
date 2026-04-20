@@ -67,8 +67,6 @@ struct State {
     run_costs: HashMap<String, cairn_domain::providers::RunCostRecord>,
     /// GAP-010: LLM call trace records derived from ProviderCallCompleted events.
     llm_traces: Vec<cairn_domain::LlmCallTrace>,
-    /// Task dependency declarations.
-    task_deps: Vec<crate::projections::TaskDependencyRecord>,
     operator_profiles: HashMap<String, crate::projections::OperatorProfileRecord>,
     full_operator_profiles: HashMap<String, cairn_domain::org::OperatorProfile>,
     workspace_members: Vec<crate::projections::WorkspaceMemberRecord>,
@@ -167,7 +165,6 @@ impl InMemoryStore {
                 session_costs: HashMap::new(),
                 run_costs: HashMap::new(),
                 llm_traces: Vec::new(),
-                task_deps: Vec::new(),
                 operator_profiles: HashMap::new(),
                 full_operator_profiles: HashMap::new(),
                 workspace_members: Vec::new(),
@@ -1173,6 +1170,11 @@ impl InMemoryStore {
                     compressed_state: vec![],
                 });
             }
+            // Audit-only events — appended to the log for later
+            // reconstruction but not projected into any read model.
+            // TaskDependency{Added,Resolved} are authoritative in FF;
+            // cairn keeps them on the log for join-against-
+            // TaskStateChanged queries.
             RuntimeEvent::TaskDependencyAdded(_)
             | RuntimeEvent::TaskDependencyResolved(_)
             | RuntimeEvent::TaskLeaseExpired(_)
@@ -3155,66 +3157,10 @@ impl crate::projections::RunCostReadModel for InMemoryStore {
     }
 }
 
-// -- TaskDependencyReadModel --
-
-#[async_trait]
-impl crate::projections::TaskDependencyReadModel for InMemoryStore {
-    async fn list_blocking(
-        &self,
-        task_id: &cairn_domain::TaskId,
-    ) -> Result<Vec<crate::projections::TaskDependencyRecord>, StoreError> {
-        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
-        let results = state
-            .task_deps
-            .iter()
-            .filter(|r| &r.dependency.dependent_task_id == task_id)
-            .cloned()
-            .collect();
-        Ok(results)
-    }
-
-    async fn list_unresolved(
-        &self,
-        _project: &cairn_domain::ProjectKey,
-    ) -> Result<Vec<crate::projections::TaskDependencyRecord>, StoreError> {
-        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
-        let results = state
-            .task_deps
-            .iter()
-            .filter(|r| r.resolved_at_ms.is_none())
-            .cloned()
-            .collect();
-        Ok(results)
-    }
-
-    async fn insert_dependency(
-        &self,
-        record: crate::projections::TaskDependencyRecord,
-    ) -> Result<(), StoreError> {
-        self.state
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .task_deps
-            .push(record);
-        Ok(())
-    }
-
-    async fn resolve_dependency(
-        &self,
-        prerequisite_task_id: &cairn_domain::TaskId,
-        resolved_at_ms: u64,
-    ) -> Result<(), StoreError> {
-        let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
-        for dep in &mut state.task_deps {
-            if &dep.dependency.depends_on_task_id == prerequisite_task_id
-                && dep.resolved_at_ms.is_none()
-            {
-                dep.resolved_at_ms = Some(resolved_at_ms);
-            }
-        }
-        Ok(())
-    }
-}
+// TaskDependencyReadModel was removed — dependencies are FF-authoritative
+// (ff_stage_dependency_edge / ff_apply_dependency_to_child). Cairn no
+// longer persists dependency records; check_dependencies reads live
+// edge state from FF via ff_evaluate_flow_eligibility + per-edge HGETs.
 
 // -- OperatorProfileReadModel --
 
@@ -4685,7 +4631,6 @@ impl InMemoryStore {
         state.session_costs.clear();
         state.run_costs.clear();
         state.llm_traces.clear();
-        state.task_deps.clear();
         state.operator_profiles.clear();
         state.full_operator_profiles.clear();
         state.workspace_members.clear();
@@ -4840,7 +4785,6 @@ impl InMemoryStore {
             state.session_costs.clear();
             state.run_costs.clear();
             state.llm_traces.clear();
-            state.task_deps.clear();
             state.operator_profiles.clear();
             state.full_operator_profiles.clear();
             state.workspace_members.clear();
@@ -5147,7 +5091,6 @@ impl InMemoryStore {
         state.session_costs.clear();
         state.run_costs.clear();
         state.llm_traces.clear();
-        state.task_deps.clear();
         state.operator_profiles.clear();
         state.full_operator_profiles.clear();
         state.workspace_members.clear();

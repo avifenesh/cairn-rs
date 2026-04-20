@@ -11,6 +11,43 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- **Task dependencies migrated to FF flow edges.** `declare_dependency`
+  now issues `ff_stage_dependency_edge` + `ff_apply_dependency_to_child`
+  on FF's flow partition instead of maintaining a cairn-side
+  projection. `check_dependencies` reads live state via
+  `ff_evaluate_flow_eligibility` + per-edge HGET on the child's dep
+  hash. FF is the single source of truth; the cairn-side
+  `TaskDependencyReadModel` trait is deleted.
+  - **Breaking**: `--features in-memory-runtime` no longer models
+    dependencies. `declare_dependency` returns `Validation`
+    ("requires the Fabric backend") and `check_dependencies` returns
+    empty. The `in-memory-runtime` feature is dev-only per CLAUDE.md;
+    production deployments are unaffected.
+  - **Breaking behavior (pre-public, no users)**: a failed or
+    cancelled prerequisite now auto-skips its dependents
+    (`TaskState::Failed` + `FailureClass::DependencyFailed`).
+    Previously the dependent would stay `WaitingDependency`
+    indefinitely. FF dispatches the skip via the completion listener
+    (~RTT × depth) with a reconciler fallback at 15 s intervals.
+  - **Breaking**: task dependencies now require both tasks to be in
+    the same session. Cross-session and session-less-task declares
+    return `Validation` before any FCALL. This matches FF's flow-
+    membership contract; cross-flow edges are not representable.
+  - **Scope**: edges use FF defaults (`dependency_kind=success_only`,
+    `satisfaction_condition=all_required`). `data_passing_ref`
+    (auto-copy upstream result to child payload) is not exposed yet
+    — follow-up.
+  - **Audit**: `RuntimeEvent::TaskDependencyAdded` is still appended
+    to the EventLog on each declare, but no cairn projection reads
+    it. Callers reconstructing "which deps resolved when" join
+    against each prerequisite's `TaskStateChanged(Completed)`.
+  - **Engine config**: `FabricRuntime::start` enables
+    `CompletionListenerConfig` on the embedded `ff-engine`. Adds a
+    third Valkey connection per runtime (main + lease-history tap +
+    completion listener); the dedicated RESP3 client SUBSCRIBEs to
+    `ff:dag:completions` and dispatches `ff_resolve_dependency`
+    FCALLs per terminal transition.
+
 - **RFC-011 Phase 3: `TaskCreated.session_id` / `TaskRecord.session_id`**
   —
   the task → session binding is now persisted directly on the event and

@@ -29,6 +29,7 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use cairn_domain::TaskDependencyRecord;
 use cairn_domain::{
     ApprovalDecision, FailureClass, PauseReason, ProjectKey, ResumeTrigger, RunId, RunResumeTarget,
     SessionId, TaskId, TaskResumeTarget, TaskState,
@@ -39,8 +40,7 @@ use cairn_runtime::runs::RunService;
 use cairn_runtime::sessions::SessionService;
 use cairn_runtime::tasks::TaskService;
 use cairn_store::projections::{
-    RunReadModel, RunRecord, SessionReadModel, SessionRecord, TaskDependencyRecord, TaskReadModel,
-    TaskRecord,
+    RunReadModel, RunRecord, SessionReadModel, SessionRecord, TaskReadModel, TaskRecord,
 };
 use cairn_store::InMemoryStore;
 
@@ -614,34 +614,82 @@ impl TaskService for FabricTaskServiceAdapter {
 
     async fn declare_dependency(
         &self,
-        _dependent_task_id: &TaskId,
-        _prerequisite_task_id: &TaskId,
+        dependent_task_id: &TaskId,
+        prerequisite_task_id: &TaskId,
     ) -> Result<TaskDependencyRecord, RuntimeError> {
-        // FF flow-edge fcalls (ff_stage_dependency_edge + ff_apply_dependency_to_child)
-        // are not yet surfaced on FabricTaskService. Until they are, surface as
-        // Validation so handlers return a clear error rather than panicking.
-        Err(RuntimeError::Validation {
-            reason: "declare_dependency is not yet wired through the fabric adapter (FF flow-edge path pending)".into(),
-        })
+        // Resolve project + session for both tasks from the
+        // projection; FF flow edges can only connect members of the
+        // same flow. Reject cross-session / bare-task declares here
+        // with a Validation error rather than letting FF surface a
+        // less-useful opaque FCALL error.
+        let (dep_project, dep_session) =
+            resolve_task_project_and_session(&self.store, dependent_task_id, None).await?;
+        let (pre_project, pre_session) =
+            resolve_task_project_and_session(&self.store, prerequisite_task_id, None).await?;
+
+        if dep_project != pre_project {
+            return Err(RuntimeError::Validation {
+                reason: format!(
+                    "task dependencies must share a project: {} → {} cross project boundary",
+                    dependent_task_id.as_str(),
+                    prerequisite_task_id.as_str()
+                ),
+            });
+        }
+
+        let session_id = match (&dep_session, &pre_session) {
+            (Some(a), Some(b)) if a == b => a.clone(),
+            (Some(_), Some(_)) => {
+                return Err(RuntimeError::Validation {
+                    reason: format!(
+                        "task dependencies must share a session; {} and {} \
+                         belong to different sessions",
+                        dependent_task_id.as_str(),
+                        prerequisite_task_id.as_str()
+                    ),
+                });
+            }
+            _ => {
+                return Err(RuntimeError::Validation {
+                    reason: format!(
+                        "task dependencies require both tasks to be session-\
+                         bound; {} or {} was submitted without a session",
+                        dependent_task_id.as_str(),
+                        prerequisite_task_id.as_str()
+                    ),
+                });
+            }
+        };
+
+        self.fabric
+            .tasks
+            .declare_dependency(
+                &dep_project,
+                &session_id,
+                dependent_task_id,
+                prerequisite_task_id,
+            )
+            .await
+            .map_err(fabric_err_to_runtime)
     }
 
     async fn check_dependencies(
         &self,
         task_id: &TaskId,
     ) -> Result<Vec<TaskDependencyRecord>, RuntimeError> {
-        // Delegates to the store projection: dependency records are written
-        // by declare_dependency via the event log, so reads come from there.
-        // FF's flow-edge state is not indexed by cairn TaskId, so we can't
-        // read authoritatively from FF without declare_dependency first
-        // writing a projection. Using the projection avoids that coupling.
-        use cairn_store::projections::TaskDependencyReadModel;
-        // Projection's `list_blocking(task_id)` returns the unresolved
-        // prerequisites for THIS task — exactly what check_dependencies
-        // needs to return. `list_unresolved(project)` is a different view
-        // (all unresolved deps in a project), not what the trait asks for.
-        TaskDependencyReadModel::list_blocking(self.store.as_ref(), task_id)
+        // Bare tasks (no session) can't have dependencies — there's
+        // no flow for them to live in. Return empty rather than
+        // surfacing a less-useful error.
+        let (project, session_id) =
+            resolve_task_project_and_session(&self.store, task_id, None).await?;
+        let Some(sid) = session_id else {
+            return Ok(Vec::new());
+        };
+        self.fabric
+            .tasks
+            .check_dependencies(&project, &sid, task_id)
             .await
-            .map_err(RuntimeError::from)
+            .map_err(fabric_err_to_runtime)
     }
 
     async fn get(&self, task_id: &TaskId) -> Result<Option<TaskRecord>, RuntimeError> {

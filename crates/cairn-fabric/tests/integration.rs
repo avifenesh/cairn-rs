@@ -35,6 +35,7 @@ mod integration {
     pub mod test_run_lifecycle;
     pub mod test_session;
     pub mod test_suspension;
+    pub mod test_task_dependencies;
 }
 
 use std::sync::Arc;

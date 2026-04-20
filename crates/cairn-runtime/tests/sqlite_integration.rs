@@ -231,32 +231,6 @@ impl MailboxReadModel for SqliteStore {
 }
 
 #[async_trait]
-impl TaskDependencyReadModel for SqliteStore {
-    async fn list_blocking(
-        &self,
-        _task_id: &TaskId,
-    ) -> Result<Vec<TaskDependencyRecord>, StoreError> {
-        Ok(vec![])
-    }
-    async fn list_unresolved(
-        &self,
-        _project: &ProjectKey,
-    ) -> Result<Vec<TaskDependencyRecord>, StoreError> {
-        Ok(vec![])
-    }
-    async fn insert_dependency(&self, _record: TaskDependencyRecord) -> Result<(), StoreError> {
-        Ok(())
-    }
-    async fn resolve_dependency(
-        &self,
-        _prerequisite_task_id: &TaskId,
-        _resolved_at_ms: u64,
-    ) -> Result<(), StoreError> {
-        Ok(())
-    }
-}
-
-#[async_trait]
 impl CheckpointStrategyReadModel for SqliteStore {
     async fn get_by_run(
         &self,
