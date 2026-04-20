@@ -152,16 +152,15 @@ enum VersionCheckError {
 
 /// Run `INFO server` and extract the major component of the Valkey version.
 async fn query_valkey_version(client: &Client) -> Result<u32, VersionCheckError> {
-    let raw: Value =
-        client
-            .cmd("INFO")
-            .arg("server")
-            .execute()
-            .await
-            .map_err(|e| VersionCheckError::Transport {
-                retryable: ff_script::retry::is_retryable_kind(e.kind()),
-                error: format!("INFO server: {e}"),
-            })?;
+    let raw: Value = client
+        .cmd("INFO")
+        .arg("server")
+        .execute()
+        .await
+        .map_err(|e| VersionCheckError::Transport {
+            retryable: ff_script::retry::is_retryable_kind(e.kind()),
+            error: format!("INFO server: {e}"),
+        })?;
     let info_body = extract_info_body(&raw).map_err(VersionCheckError::Parse)?;
     parse_valkey_major_version(&info_body).map_err(VersionCheckError::Parse)
 }
