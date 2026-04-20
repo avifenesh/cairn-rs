@@ -1081,33 +1081,18 @@ fn default_sandbox_base_dir() -> PathBuf {
 
 /// Build the runtime aggregate.
 ///
-/// Path is selected at **compile time** by the `in-memory-runtime` cargo
-/// feature — there is no longer an `CAIRN_FABRIC_ENABLED` env var:
+/// Constructs `FabricServices` from env config, wires the
+/// `FabricRunServiceAdapter` / `Task` / `Session` trio on top of a shared
+/// `InMemoryStore`, and installs them via
+/// `InMemoryServices::with_store_and_core`. Boot failure on the Fabric
+/// path (unreachable Valkey, HMAC validation, …) surfaces here before
+/// cairn-app serves traffic — no silent fall-back.
 ///
-/// - **Default build (feature OFF)**: constructs `FabricServices` from env
-///   config, wires `FabricRunServiceAdapter` / `Task` / `Session` on top of
-///   a shared `InMemoryStore`, installs them via
-///   `InMemoryServices::with_store_and_core`, and returns the fabric handle.
-///   This is the production path; the in-memory courtesy impls are not even
-///   compiled in.
-/// - **`--features in-memory-runtime` build**: returns
-///   `(InMemoryServices::new(), None)` — the pre-Fabric event-log path.
-///   Correctness guarantees only hold on the Fabric path; this feature
-///   exists for local tinkering, cargo-test harnesses, and CI jobs that
-///   exercise the event-log-only surface.
-#[cfg(feature = "in-memory-runtime")]
-async fn build_runtime_with_optional_fabric() -> Result<
-    (
-        Arc<InMemoryServices>,
-        Option<Arc<cairn_fabric::FabricServices>>,
-    ),
-    String,
-> {
-    tracing::debug!("in-memory-runtime feature enabled; using event-log-only runs/tasks/sessions");
-    Ok((Arc::new(InMemoryServices::new()), None))
-}
-
-#[cfg(not(feature = "in-memory-runtime"))]
+/// Integration tests that need to stand up an AppState without a live
+/// Valkey build a `FakeFabric`-backed `InMemoryServices` (see
+/// `crates/cairn-app/tests/support/fake_fabric.rs`) and call
+/// [`AppBootstrap::router_with_injected_runtime`] directly, bypassing
+/// this constructor.
 async fn build_runtime_with_optional_fabric() -> Result<
     (
         Arc<InMemoryServices>,

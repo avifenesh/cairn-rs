@@ -15,15 +15,6 @@ path = "src/bin/smoke_worker.rs"
 
 [features]
 default = ["metrics-core"]
-# Courtesy in-memory backing for Run/Task/Session services. OFF by default
-# — the production path is Fabric-backed. Enable to run a fully local,
-# event-log-only build with no Valkey dependency (tinkering, unit-test
-# binaries).
-in-memory-runtime = [
-    "cairn-runtime/in-memory-runtime",
-    "cairn-orchestrator/in-memory-runtime",
-    "cairn-tools/in-memory-runtime",
-]
 
 # Operational Prometheus metrics: run/task lifecycle counters, tool
 # invocations, projection lag, tenant-scoped queue depths. Low cardinality,

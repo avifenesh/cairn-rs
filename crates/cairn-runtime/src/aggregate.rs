@@ -24,8 +24,6 @@ use crate::services::{
     RunSlaServiceImpl, SignalRouterServiceImpl, SignalServiceImpl, TenantServiceImpl,
     WorkspaceMembershipServiceImpl, WorkspaceServiceImpl,
 };
-#[cfg(feature = "in-memory-runtime")]
-use crate::services::{RunServiceImpl, SessionServiceImpl, TaskServiceImpl};
 use crate::sessions::SessionService;
 use crate::tasks::TaskService;
 use crate::ProviderRegistry;
@@ -33,12 +31,9 @@ use crate::ProviderRegistry;
 /// Bundled runtime services backed by `InMemoryStore`.
 ///
 /// Core execution fields (`runs`, `tasks`, `sessions`) are `Arc<dyn Trait>`
-/// so cairn-app can swap the in-memory impl for
-/// `Fabric{Run,Task,Session}ServiceAdapter` at boot. In default builds the
-/// Fabric adapters are always installed; the `in-memory-runtime` cargo
-/// feature (OFF by default) replaces them with event-log-only courtesy
-/// impls for local tinkering. All other fields remain concrete
-/// `*ServiceImpl<InMemoryStore>` — they back non-execution surfaces
+/// so cairn-app installs `Fabric{Run,Task,Session}ServiceAdapter` at boot
+/// — that is the only production path. All other fields remain concrete
+/// `*ServiceImpl<InMemoryStore>` and back non-execution surfaces
 /// (approvals, evals, provider bindings, etc.) that FF does not manage.
 pub struct InMemoryServices {
     /// The shared append-only event log + synchronous projections.
@@ -145,32 +140,6 @@ pub struct InMemoryServices {
 }
 
 impl InMemoryServices {
-    /// Create a fully-wired bundle backed by a fresh `InMemoryStore`.
-    ///
-    /// Only available under the `in-memory-runtime` feature. Default builds
-    /// must use [`Self::with_store_and_core`] and inject Fabric-backed
-    /// adapters for `runs` / `tasks` / `sessions` — the production path.
-    #[cfg(feature = "in-memory-runtime")]
-    pub fn new() -> Self {
-        let store = Arc::new(InMemoryStore::new());
-        Self::with_store(store)
-    }
-
-    /// Create a bundle wired to an existing store, defaulting
-    /// runs/tasks/sessions to the in-memory impls.
-    ///
-    /// Only available under the `in-memory-runtime` feature — the in-memory
-    /// Run/Task/Session backings carry no correctness guarantees and exist
-    /// for local tinkering and tests. Production callers use
-    /// [`Self::with_store_and_core`] with Fabric adapters.
-    #[cfg(feature = "in-memory-runtime")]
-    pub fn with_store(store: Arc<InMemoryStore>) -> Self {
-        let runs: Arc<dyn RunService> = Arc::new(RunServiceImpl::new(store.clone()));
-        let tasks: Arc<dyn TaskService> = Arc::new(TaskServiceImpl::new(store.clone()));
-        let sessions: Arc<dyn SessionService> = Arc::new(SessionServiceImpl::new(store.clone()));
-        Self::with_store_and_core(store, runs, tasks, sessions)
-    }
-
     /// Create a bundle wired to an existing store with caller-supplied core
     /// services.
     ///
@@ -239,22 +208,6 @@ impl InMemoryServices {
         }
     }
 
-    /// Create a bundle wired to an existing store with Fabric services attached.
-    ///
-    /// The `fabric` argument is type-erased to avoid a cairn-runtime -> cairn-fabric
-    /// cyclic dependency. Callers pass `Arc<cairn_fabric::FabricServices>` and
-    /// retrieve it later via `fabric::<T>()`.
-    ///
-    /// Only available under the `in-memory-runtime` feature because it
-    /// starts from `Self::with_store` which needs the in-memory impls. The
-    /// production path builds via `Self::with_store_and_core` directly.
-    #[cfg(feature = "in-memory-runtime")]
-    pub fn with_fabric(store: Arc<InMemoryStore>, fabric: Arc<dyn Any + Send + Sync>) -> Self {
-        let mut services = Self::with_store(store);
-        services.fabric = Some(fabric);
-        services
-    }
-
     /// Downcast the Fabric services to a concrete type.
     ///
     /// Returns `None` if no fabric was configured or if `T` doesn't match.
@@ -264,73 +217,3 @@ impl InMemoryServices {
     }
 }
 
-#[cfg(feature = "in-memory-runtime")]
-impl Default for InMemoryServices {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-#[cfg(all(test, feature = "in-memory-runtime"))]
-mod tests {
-    use super::InMemoryServices;
-    use crate::decisions::DecisionService;
-    use cairn_domain::decisions::{
-        DecisionEvent, DecisionKind, DecisionOutcome, DecisionRequest, DecisionSource,
-        DecisionSubject, Principal, ToolEffect,
-    };
-    use cairn_domain::ids::{CorrelationId, RunId};
-    use cairn_domain::ProjectKey;
-
-    fn observational_request() -> DecisionRequest {
-        DecisionRequest {
-            kind: DecisionKind::ToolInvocation {
-                tool_name: "grep_search".into(),
-                effect: ToolEffect::Observational,
-            },
-            principal: Principal::Run {
-                run_id: RunId::new("run_1"),
-            },
-            subject: DecisionSubject::ToolCall {
-                tool_name: "grep_search".into(),
-                args: serde_json::json!({"pattern": "TODO"}),
-            },
-            scope: ProjectKey::new("t", "w", "p"),
-            cost_estimate: None,
-            requested_at: 1_700_000_000_000,
-            correlation_id: CorrelationId::new("cor_aggregate"),
-        }
-    }
-
-    #[tokio::test]
-    async fn decision_service_handles_share_cache() {
-        let runtime = InMemoryServices::new();
-        let request = observational_request();
-        let scope = request.scope.clone();
-
-        let initial = runtime
-            .decision_service
-            .evaluate(request.clone())
-            .await
-            .unwrap();
-        assert_eq!(initial.outcome, DecisionOutcome::Allowed);
-
-        let cached = runtime.decisions.list_cached(&scope, 10).await.unwrap();
-        assert!(
-            cached
-                .iter()
-                .any(|entry| entry.decision_id == initial.decision_id),
-            "expected cache entries from the injected decision service to be visible through runtime.decisions",
-        );
-
-        let second = runtime.decisions.evaluate(request).await.unwrap();
-        if let DecisionEvent::DecisionRecorded { source, .. } = &second.event {
-            assert!(
-                matches!(source, DecisionSource::CacheHit { .. }),
-                "expected runtime.decisions to reuse cache populated via runtime.decision_service",
-            );
-        } else {
-            panic!("expected DecisionRecorded");
-        }
-    }
-}
