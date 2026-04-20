@@ -19,10 +19,10 @@
 #   FF_PATH                 FlowFabric checkout path (default: /tmp/FlowFabric)
 #   FF_BRANCH               FlowFabric branch (default: main)
 #   FF_REPO                 clone URL if FF_PATH missing (default: https://github.com/avifenesh/FlowFabric.git)
-#   FF_REV                  FlowFabric SHA — MUST match the rev pinned in
-#                           crates/cairn-fabric/Cargo.toml, otherwise the Lua
-#                           bundle loaded into Valkey drifts from the Rust-side
-#                           FCALL signatures. Default tracks that pin.
+#   FF_REV                  FlowFabric SHA for the Lua bundle loaded into Valkey.
+#                           Must match the crates.io release used in
+#                           crates/cairn-fabric/Cargo.toml (`ff-* = "0.1"` →
+#                           FF v0.1.1 tag). Default tracks that tag.
 #
 # Exit codes: 0 = tests passed, non-zero = setup or test failure.
 # =============================================================================
@@ -54,8 +54,12 @@ VALKEY_CONTAINER="${VALKEY_CONTAINER:-cairn-fabric-integ-valkey}"
 FF_PATH="${FF_PATH:-/tmp/FlowFabric}"
 FF_BRANCH="${FF_BRANCH:-main}"
 FF_REPO="${FF_REPO:-https://github.com/avifenesh/FlowFabric.git}"
-# Keep in lockstep with crates/cairn-fabric/Cargo.toml `rev = ...`.
-FF_REV="${FF_REV:-01f6327ff18b413c96224cf1648d99e6e47568e4}"
+# Checked out to load FF's Lua functions into the test Valkey. The
+# Rust crates in crates/cairn-fabric/Cargo.toml are now pinned to
+# crates.io (`ff-core = "0.1"` etc.), so this ref only controls
+# which Lua version lives in the test instance. Track the published
+# v0.1.1 tag so the Lua matches the Rust.
+FF_REV="${FF_REV:-00608ef62c0bdd1c4f6fed6b41be93f4d64af41a}"  # v0.1.1
 TEST_URL="${CAIRN_TEST_VALKEY_URL:-redis://localhost:${VALKEY_PORT}}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
