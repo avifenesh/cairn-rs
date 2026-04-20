@@ -65,4 +65,19 @@ pub trait RunReadModel: Send + Sync {
         project: &ProjectKey,
         limit: usize,
     ) -> Result<Vec<RunRecord>, StoreError>;
+
+    /// List child runs of `parent_run_id`, ordered by `created_at` ASC.
+    ///
+    /// Indexed: Postgres/SQLite use `idx_runs_parent` (partial index on
+    /// `parent_run_id WHERE NOT NULL`); InMemoryStore filters the live
+    /// map. Replaces the pre-existing pattern of scanning 10 000
+    /// `EventLog` entries for `RunCreated.parent_run_id == …` and
+    /// silently truncating at the window — at high event rates the scan
+    /// missed children created before the window rolled off. Callers
+    /// get every child with no truncation.
+    async fn list_by_parent_run(
+        &self,
+        parent_run_id: &RunId,
+        limit: usize,
+    ) -> Result<Vec<RunRecord>, StoreError>;
 }

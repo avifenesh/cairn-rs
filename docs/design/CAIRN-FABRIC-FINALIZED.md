@@ -364,11 +364,9 @@ Bugs of this shape are invisible to unit tests (services write to FF correctly) 
 
 The `TaskLeaseClaimed` bridge event payload carries `lease_expires_at_ms`, which is also stored on FF's `exec_core` as `current_lease_expires_at`. This is a moment-in-time snapshot for projection display, not a cached field with invalidation semantics — consumers must not treat the value as tracked (FF can extend / renew the lease after the event is emitted). Documented here so future readers don't mistake it for live state.
 
-### LOW — `list_child_runs` silently truncates at 10k events
+### ~~LOW — `list_child_runs` silently truncates at 10k events~~ (resolved)
 
-*Location*: `crates/cairn-app/src/fabric_adapter.rs` (`FabricRunServiceAdapter::list_child_runs`) and `crates/cairn-runtime/src/services/run_impl.rs` (`RunServiceImpl::list_child_runs`).
-
-Both implementations scan up to 10,000 `EventLog` events and truncate silently if the parent run's `RunCreated` is older than that window. At high event rates this could miss child runs. `RunReadModel` has no `list_by_parent_run` projection index today, so the scan is the only option. Pre-existing across both paths — not introduced by finalization — flagged for a future round that adds the projection index (then both impls delegate to a single indexed read with no truncation).
+Both `FabricRunServiceAdapter::list_child_runs` and `RunServiceImpl::list_child_runs` now delegate to `RunReadModel::list_by_parent_run` (added on the trait in this round). The projection is served by the existing `idx_runs_parent` partial index (V003__create_runs.sql) on Postgres / SQLite, and by a direct HashMap filter on `InMemoryStore`. No event-log scan, no 10k truncation.
 
 ## 8. Versioning
 

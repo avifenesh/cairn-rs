@@ -324,33 +324,13 @@ impl RunService for FabricRunServiceAdapter {
         parent_run_id: &RunId,
         limit: usize,
     ) -> Result<Vec<RunRecord>, RuntimeError> {
-        // Parent→child linkage lives in the RunCreated event that set
-        // `parent_run_id`. FF has no native parent-run index (child runs get
-        // distinct execution ids via id_map), so the projection is the
-        // authoritative read. Mirrors RunServiceImpl::list_child_runs.
-        use cairn_store::event_log::EventLog;
+        // Parent→child linkage is indexed in the projection (Postgres
+        // / SQLite `idx_runs_parent`, InMemory HashMap filter). FF has
+        // no native parent-run index (child runs get distinct
+        // execution ids via id_map), so the store projection is the
+        // authoritative read.
         use cairn_store::projections::RunReadModel;
-        let events = EventLog::read_stream(self.store.as_ref(), None, 10_000).await?;
-        let child_run_ids: Vec<RunId> = events
-            .into_iter()
-            .filter_map(|stored| {
-                if let cairn_domain::RuntimeEvent::RunCreated(e) = stored.envelope.payload {
-                    if e.parent_run_id.as_ref() == Some(parent_run_id) {
-                        return Some(e.run_id);
-                    }
-                }
-                None
-            })
-            .take(limit)
-            .collect();
-
-        let mut records = Vec::new();
-        for run_id in child_run_ids {
-            if let Some(record) = RunReadModel::get(self.store.as_ref(), &run_id).await? {
-                records.push(record);
-            }
-        }
-        Ok(records)
+        Ok(RunReadModel::list_by_parent_run(self.store.as_ref(), parent_run_id, limit).await?)
     }
 }
 
