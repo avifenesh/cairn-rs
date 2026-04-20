@@ -635,12 +635,14 @@ impl crate::projections::FfLeaseHistoryCursorStore for PgAdapter {
         .fetch_optional(&self.pool)
         .await
         .map_err(|e| StoreError::Internal(e.to_string()))?;
-        Ok(row.map(|(p, e, s, ts)| crate::projections::FfLeaseHistoryCursor {
-            partition_id: p,
-            execution_id: e,
-            last_stream_id: s,
-            updated_at_ms: ts as u64,
-        }))
+        Ok(
+            row.map(|(p, e, s, ts)| crate::projections::FfLeaseHistoryCursor {
+                partition_id: p,
+                execution_id: e,
+                last_stream_id: s,
+                updated_at_ms: ts as u64,
+            }),
+        )
     }
 
     async fn list_by_partition(

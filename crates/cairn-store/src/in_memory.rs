@@ -98,8 +98,7 @@ struct State {
     resource_shares: HashMap<String, cairn_domain::resource_sharing::SharedResource>,
     /// FF lease_history subscriber cursors, keyed by `(partition_id,
     /// execution_id)`.
-    ff_lease_history_cursors:
-        HashMap<(String, String), crate::projections::FfLeaseHistoryCursor>,
+    ff_lease_history_cursors: HashMap<(String, String), crate::projections::FfLeaseHistoryCursor>,
 }
 
 pub struct InMemoryStore {

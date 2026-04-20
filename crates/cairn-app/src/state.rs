@@ -976,9 +976,17 @@ async fn build_runtime_with_optional_fabric() -> Result<
     let store = Arc::new(cairn_store::InMemoryStore::new());
     let event_log: Arc<dyn cairn_store::event_log::EventLog + Send + Sync> = store.clone();
 
-    let fabric = cairn_fabric::FabricServices::start(fabric_config, event_log)
-        .await
-        .map_err(|e| format!("FabricServices::start failed: {e}"))?;
+    // Wire the in-memory store under the cursor-store trait so the
+    // lease-history subscriber can persist its XREAD cursors across
+    // restarts against the same backing the rest of the projections use.
+    let cursor_store: Arc<dyn cairn_store::projections::FfLeaseHistoryCursorStore> = store.clone();
+    let fabric = cairn_fabric::FabricServices::start_with_lease_history(
+        fabric_config,
+        event_log,
+        cursor_store,
+    )
+    .await
+    .map_err(|e| format!("FabricServices::start failed: {e}"))?;
     let fabric = Arc::new(fabric);
 
     // Build the adapters that implement the cairn-runtime traits but
