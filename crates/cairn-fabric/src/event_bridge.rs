@@ -375,7 +375,7 @@ fn bridge_event_to_runtime_event(event: &BridgeEvent) -> RuntimeEvent {
         BridgeEvent::TaskCreated {
             task_id,
             project,
-            session_id: _,
+            session_id,
             parent_run_id,
             parent_task_id,
         } => RuntimeEvent::TaskCreated(TaskCreated {
@@ -384,6 +384,11 @@ fn bridge_event_to_runtime_event(event: &BridgeEvent) -> RuntimeEvent {
             parent_run_id: parent_run_id.clone(),
             parent_task_id: parent_task_id.clone(),
             prompt_release_id: None,
+            // RFC-011 Phase 3: forward the session binding the Fabric layer
+            // already carries on the bridge event. Previously this was
+            // dropped into `_`, forcing the projection to walk parent_run_id
+            // to recover it.
+            session_id: session_id.clone(),
         }),
         BridgeEvent::TaskLeaseClaimed {
             task_id,

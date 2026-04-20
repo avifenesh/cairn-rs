@@ -243,7 +243,7 @@ impl RunReadModel for PgAdapter {
 impl TaskReadModel for PgAdapter {
     async fn get(&self, task_id: &TaskId) -> Result<Option<TaskRecord>, StoreError> {
         let row = sqlx::query_as::<_, TaskRow>(
-            "SELECT task_id, tenant_id, workspace_id, project_id, parent_run_id, parent_task_id,
+            "SELECT task_id, tenant_id, workspace_id, project_id, parent_run_id, parent_task_id, session_id,
                     state, failure_class, lease_owner, lease_expires_at, title, description, version, created_at, updated_at
              FROM tasks
              WHERE task_id = $1",
@@ -263,7 +263,7 @@ impl TaskReadModel for PgAdapter {
         limit: usize,
     ) -> Result<Vec<TaskRecord>, StoreError> {
         let rows = sqlx::query_as::<_, TaskRow>(
-            "SELECT task_id, tenant_id, workspace_id, project_id, parent_run_id, parent_task_id,
+            "SELECT task_id, tenant_id, workspace_id, project_id, parent_run_id, parent_task_id, session_id,
                     state, failure_class, lease_owner, lease_expires_at, title, description, version, created_at, updated_at
              FROM tasks
              WHERE tenant_id = $1 AND workspace_id = $2 AND project_id = $3 AND state = $4
@@ -288,7 +288,7 @@ impl TaskReadModel for PgAdapter {
         limit: usize,
     ) -> Result<Vec<TaskRecord>, StoreError> {
         let rows = sqlx::query_as::<_, TaskRow>(
-            "SELECT task_id, tenant_id, workspace_id, project_id, parent_run_id, parent_task_id,
+            "SELECT task_id, tenant_id, workspace_id, project_id, parent_run_id, parent_task_id, session_id,
                     state, failure_class, lease_owner, lease_expires_at, title, description, version, created_at, updated_at
              FROM tasks
              WHERE state = 'leased'
@@ -312,7 +312,7 @@ impl TaskReadModel for PgAdapter {
         limit: usize,
     ) -> Result<Vec<TaskRecord>, StoreError> {
         let rows = sqlx::query_as::<_, TaskRow>(
-            "SELECT task_id, tenant_id, workspace_id, project_id, parent_run_id, parent_task_id,
+            "SELECT task_id, tenant_id, workspace_id, project_id, parent_run_id, parent_task_id, session_id,
                     state, failure_class, lease_owner, lease_expires_at, title, description, version, created_at, updated_at
              FROM tasks
              WHERE parent_run_id = $1
@@ -750,6 +750,7 @@ struct TaskRow {
     project_id: String,
     parent_run_id: Option<String>,
     parent_task_id: Option<String>,
+    session_id: Option<String>,
     state: String,
     failure_class: Option<String>,
     lease_owner: Option<String>,
@@ -768,6 +769,7 @@ impl TaskRow {
             project: ProjectKey::new(self.tenant_id, self.workspace_id, self.project_id),
             parent_run_id: self.parent_run_id.map(RunId::new),
             parent_task_id: self.parent_task_id.map(TaskId::new),
+            session_id: self.session_id.map(cairn_domain::SessionId::new),
             state: parse_string_enum::<TaskState>(&self.state)?,
             prompt_release_id: None,
             failure_class: self

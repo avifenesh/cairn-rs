@@ -67,6 +67,7 @@ fn task_evt(event_id: &str, run_id: &str, task_id: &str) -> EventEnvelope<Runtim
             parent_run_id: Some(RunId::new(run_id)),
             parent_task_id: None,
             prompt_release_id: None,
+            session_id: None,
         }),
     )
 }

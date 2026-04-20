@@ -9,6 +9,34 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- **RFC-011 Phase 3: `TaskCreated.session_id` / `TaskRecord.session_id`**
+  —
+  the task → session binding is now persisted directly on the event and
+  projection row instead of being derived at resolve-time from
+  `parent_run_id → RunRecord.session_id`. This removes a read-model
+  round-trip from every task mutation hot path (claim, start, complete,
+  heartbeat, release, cancel, fail) and closes the last window where a
+  projection-lag parent-run lookup could silently degrade a
+  session-scoped task to the solo ExecutionId mint path (wrong Valkey
+  hash slot → unexplained Fabric 404).
+  - **Schema**: `V021__add_task_session_id.sql` adds a nullable
+    `tasks.session_id` column + partial index. Both Postgres and SQLite
+    backends use `COALESCE` at insert time to pull the parent run's
+    session when the event predates Phase 3 — no data backfill required
+    for existing deployments.
+  - **Event compat**: `TaskCreated.session_id` is
+    `#[serde(default, skip_serializing_if = "Option::is_none")]`, so
+    replaying pre-Phase-3 event streams still deserializes. The
+    projection's COALESCE fallback handles the `None`-on-event case
+    at replay time.
+  - **Resolvers**: `resolve_session_for_task_record`,
+    `load_task_with_session_for_tenant`, and
+    `resolve_task_project_and_session` (fabric adapter) prefer
+    `task.session_id` and only walk the parent run when it is `None`.
+    The legacy fallback still propagates 500/404 from the Phase-2 fix.
+
 ### Added
 
 - **`POST /v1/runs/:id/claim`** — activates a run's FlowFabric execution lease

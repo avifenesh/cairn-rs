@@ -88,6 +88,7 @@ async fn checkpoint_recorded_and_readable() {
                     parent_run_id: Some(run_id()),
                     parent_task_id: None,
                     prompt_release_id: None,
+                    session_id: None,
                 }),
             ),
             ev(
@@ -98,6 +99,7 @@ async fn checkpoint_recorded_and_readable() {
                     parent_run_id: Some(run_id()),
                     parent_task_id: Some(TaskId::new("task_1")),
                     prompt_release_id: None,
+                    session_id: None,
                 }),
             ),
         ])
@@ -329,6 +331,7 @@ async fn read_after_checkpoint_position_returns_only_post_checkpoint_events() {
                     parent_run_id: Some(run_id()),
                     parent_task_id: None,
                     prompt_release_id: None,
+                    session_id: None,
                 }),
             ),
         ])
@@ -361,6 +364,7 @@ async fn read_after_checkpoint_position_returns_only_post_checkpoint_events() {
                     parent_run_id: Some(run_id()),
                     parent_task_id: None,
                     prompt_release_id: None,
+                    session_id: None,
                 }),
             ),
             ev(
@@ -371,6 +375,7 @@ async fn read_after_checkpoint_position_returns_only_post_checkpoint_events() {
                     parent_run_id: Some(run_id()),
                     parent_task_id: Some(TaskId::new("post_task_2")),
                     prompt_release_id: None,
+                    session_id: None,
                 }),
             ),
         ])

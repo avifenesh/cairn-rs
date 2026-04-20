@@ -133,6 +133,7 @@ async fn read_by_entity_returns_only_matching_events() {
                     parent_run_id: Some(run_id("1")),
                     parent_task_id: None,
                     prompt_release_id: None,
+                    session_id: None,
                 }),
             ),
             ev(
@@ -423,6 +424,7 @@ async fn read_stream_returns_all_events_in_order() {
                     parent_run_id: Some(run_id("r1")),
                     parent_task_id: None,
                     prompt_release_id: None,
+                    session_id: None,
                 }),
             ),
             ev(
@@ -513,6 +515,7 @@ async fn entity_ref_matching_all_types() {
                     parent_run_id: Some(run_id("x")),
                     parent_task_id: None,
                     prompt_release_id: None,
+                    session_id: None,
                 }),
             ),
             // Approval

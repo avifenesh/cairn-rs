@@ -314,6 +314,7 @@ mod tests {
             parent_run_id: None,
             parent_task_id: None,
             prompt_release_id: None,
+            session_id: None,
         });
         let stored = test_stored_event(event, 42);
         let frame = build_sse_frame(&stored).unwrap();
@@ -332,6 +333,7 @@ mod tests {
             parent_run_id: None,
             parent_task_id: None,
             prompt_release_id: None,
+            session_id: None,
         });
         let stored = test_stored_event(event, 7);
         let record = TaskRecord {
@@ -339,6 +341,7 @@ mod tests {
             project: ProjectKey::new("t", "w", "p"),
             parent_run_id: None,
             parent_task_id: None,
+            session_id: None,
             state: TaskState::Running,
             prompt_release_id: None,
             failure_class: None,
@@ -438,6 +441,7 @@ mod tests {
                 parent_run_id: None,
                 parent_task_id: None,
                 prompt_release_id: None,
+                session_id: None,
             }),
         );
         let positions = store.append(&[envelope]).await.unwrap();
@@ -469,6 +473,7 @@ mod tests {
                 parent_run_id: None,
                 parent_task_id: None,
                 prompt_release_id: None,
+                session_id: None,
             }),
         );
         let dependency = EventEnvelope::for_runtime_event(
@@ -513,6 +518,7 @@ mod tests {
                 parent_run_id: None,
                 parent_task_id: None,
                 prompt_release_id: None,
+                session_id: None,
             }),
         );
         let dependency = EventEnvelope::for_runtime_event(
@@ -633,6 +639,7 @@ mod tests {
                 parent_run_id: None,
                 parent_task_id: None,
                 prompt_release_id: None,
+                session_id: None,
             }),
             9,
         );

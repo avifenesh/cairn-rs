@@ -315,6 +315,7 @@ mod tests {
                     parent_run_id: Some(RunId::new("run_1")),
                     parent_task_id: None,
                     prompt_release_id: None,
+                    session_id: None,
                 })),
             ])
             .await

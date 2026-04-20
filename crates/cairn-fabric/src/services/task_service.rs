@@ -223,6 +223,10 @@ impl FabricTaskService {
 
         let parent_run_id_str = tags.get("cairn.parent_run_id").cloned();
         let parent_task_id_str = tags.get("cairn.parent_task_id").cloned();
+        // RFC-011 Phase 3: session binding is written at submit time
+        // (task_service.rs insert of "cairn.session_id"). Surface it on
+        // the TaskRecord so callers no longer need to walk parent_run_id.
+        let session_id_str = tags.get("cairn.session_id").cloned();
         let tag_project = match tags
             .get("cairn.project")
             .and_then(|s| try_parse_project_key(s))
@@ -256,6 +260,7 @@ impl FabricTaskService {
             parent_task_id: parent_task_id_str
                 .filter(|s| !s.is_empty())
                 .map(TaskId::new),
+            session_id: session_id_str.filter(|s| !s.is_empty()).map(SessionId::new),
             state: task_state,
             prompt_release_id: None,
             failure_class,

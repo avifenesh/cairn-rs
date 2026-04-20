@@ -781,6 +781,7 @@ mod tests {
                     parent_run_id: Some(RunId::new("run")),
                     parent_task_id: None,
                     prompt_release_id: None,
+                    session_id: None,
                 })),
             ])
             .await
@@ -815,6 +816,7 @@ mod tests {
                     parent_run_id: None,
                     parent_task_id: None,
                     prompt_release_id: None,
+                    session_id: None,
                 })),
                 make_stored(RuntimeEvent::TaskCreated(TaskCreated {
                     project: ProjectKey::new("t", "w", "p"),
@@ -822,6 +824,7 @@ mod tests {
                     parent_run_id: None,
                     parent_task_id: Some(TaskId::new("parent_task")),
                     prompt_release_id: None,
+                    session_id: None,
                 })),
             ])
             .await

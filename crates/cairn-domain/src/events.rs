@@ -656,6 +656,16 @@ pub struct TaskCreated {
     pub parent_run_id: Option<RunId>,
     pub parent_task_id: Option<TaskId>,
     pub prompt_release_id: Option<crate::ids::PromptReleaseId>,
+    /// Session the task is scoped to — authoritative source for RFC-011
+    /// co-location. `None` for bare (session-less) submissions that route
+    /// through the solo `task_to_execution_id` mint path.
+    ///
+    /// Serialized with `#[serde(default)]` so replaying event streams
+    /// written before this field existed (pre-V018) still deserialize;
+    /// the projection falls back to walking `parent_run_id → session`
+    /// when the field is `None` on an historical event.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_id: Option<SessionId>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -2221,6 +2231,7 @@ mod tests {
             parent_run_id: None,
             parent_task_id: None,
             prompt_release_id: None,
+            session_id: None,
         });
         let approval_event = RuntimeEvent::ApprovalRequested(ApprovalRequested {
             project: project.clone(),

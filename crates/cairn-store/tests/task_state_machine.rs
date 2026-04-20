@@ -87,6 +87,7 @@ fn setup(run_id: &str, task_id: &str) -> Vec<EventEnvelope<RuntimeEvent>> {
                 parent_run_id: Some(RunId::new(run_id)),
                 parent_task_id: None,
                 prompt_release_id: None,
+                session_id: None,
             }),
         ),
     ]
@@ -527,6 +528,7 @@ async fn list_by_parent_run_returns_tasks_with_correct_states() {
                     parent_run_id: Some(RunId::new("run_list")),
                     parent_task_id: None,
                     prompt_release_id: None,
+                    session_id: None,
                 }),
             ),
             // Task B: will fail.
@@ -538,6 +540,7 @@ async fn list_by_parent_run_returns_tasks_with_correct_states() {
                     parent_run_id: Some(RunId::new("run_list")),
                     parent_task_id: None,
                     prompt_release_id: None,
+                    session_id: None,
                 }),
             ),
             // Task C: still queued.
@@ -549,6 +552,7 @@ async fn list_by_parent_run_returns_tasks_with_correct_states() {
                     parent_run_id: Some(RunId::new("run_list")),
                     parent_task_id: None,
                     prompt_release_id: None,
+                    session_id: None,
                 }),
             ),
         ])
@@ -680,6 +684,7 @@ async fn list_by_parent_run_scoped_to_run() {
                     parent_run_id: Some(RunId::new("run_iso_1")),
                     parent_task_id: None,
                     prompt_release_id: None,
+                    session_id: None,
                 }),
             ),
             evt(
@@ -690,6 +695,7 @@ async fn list_by_parent_run_scoped_to_run() {
                     parent_run_id: Some(RunId::new("run_iso_2")),
                     parent_task_id: None,
                     prompt_release_id: None,
+                    session_id: None,
                 }),
             ),
         ])

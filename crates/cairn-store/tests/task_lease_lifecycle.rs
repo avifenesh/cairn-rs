@@ -65,6 +65,7 @@ async fn seed_task(store: &Arc<InMemoryStore>, tid: &str) {
                     parent_run_id: Some(run_id()),
                     parent_task_id: None,
                     prompt_release_id: None,
+                    session_id: None,
                 }),
             ),
         ])
@@ -354,6 +355,7 @@ async fn list_by_parent_run_returns_tasks_with_lease_state() {
                     parent_run_id: Some(run_id()),
                     parent_task_id: None,
                     prompt_release_id: None,
+                    session_id: None,
                 }),
             ),
             ev(
@@ -364,6 +366,7 @@ async fn list_by_parent_run_returns_tasks_with_lease_state() {
                     parent_run_id: Some(run_id()),
                     parent_task_id: None,
                     prompt_release_id: None,
+                    session_id: None,
                 }),
             ),
             ev(
@@ -374,6 +377,7 @@ async fn list_by_parent_run_returns_tasks_with_lease_state() {
                     parent_run_id: Some(run_id()),
                     parent_task_id: None,
                     prompt_release_id: None,
+                    session_id: None,
                 }),
             ),
         ])
@@ -475,6 +479,7 @@ async fn concurrent_leases_on_different_tasks() {
                     parent_run_id: Some(run_id()),
                     parent_task_id: None,
                     prompt_release_id: None,
+                    session_id: None,
                 }),
             ),
             ev(
@@ -485,6 +490,7 @@ async fn concurrent_leases_on_different_tasks() {
                     parent_run_id: Some(run_id()),
                     parent_task_id: None,
                     prompt_release_id: None,
+                    session_id: None,
                 }),
             ),
         ])

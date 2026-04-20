@@ -179,6 +179,7 @@ fn build_20_events() -> Vec<EventEnvelope<RuntimeEvent>> {
                 parent_run_id: Some(RunId::new("run_1")),
                 parent_task_id: None,
                 prompt_release_id: None,
+                session_id: None,
             }),
         ),
         // 9
@@ -190,6 +191,7 @@ fn build_20_events() -> Vec<EventEnvelope<RuntimeEvent>> {
                 parent_run_id: Some(RunId::new("run_2")),
                 parent_task_id: None,
                 prompt_release_id: None,
+                session_id: None,
             }),
         ),
         // 10
@@ -201,6 +203,7 @@ fn build_20_events() -> Vec<EventEnvelope<RuntimeEvent>> {
                 parent_run_id: Some(RunId::new("run_2")),
                 parent_task_id: Some(TaskId::new("task_2")),
                 prompt_release_id: None,
+                session_id: None,
             }),
         ),
         // ── approvals (2) ────────────────────────────────────────────

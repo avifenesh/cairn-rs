@@ -459,20 +459,24 @@ async fn resolve_task_project_and_session(
     // Derive session_id from the parent run when present. Bare tasks
     // (no parent_run_id) carry no session binding and must be minted
     // via the solo `task_to_execution_id` path.
-    let derived_session_id = match &task.parent_run_id {
-        Some(parent_run_id) => {
-            // Parent run is mandatory for session-scoped ExecutionId minting
-            // under RFC-011. A silent None fallback would route to the solo
-            // mint path and land on the wrong Valkey partition.
-            let run = RunReadModel::get(store.as_ref(), parent_run_id)
-                .await?
-                .ok_or_else(|| RuntimeError::NotFound {
-                    entity: "run",
-                    id: parent_run_id.to_string(),
-                })?;
-            Some(run.session_id)
+    // RFC-011 Phase 3: task row carries its own session binding under V021.
+    // Only fall back to walking parent_run_id when the projection row is
+    // legacy (persisted session_id is None).
+    let derived_session_id = if let Some(sid) = task.session_id.clone() {
+        Some(sid)
+    } else {
+        match &task.parent_run_id {
+            Some(parent_run_id) => {
+                let run = RunReadModel::get(store.as_ref(), parent_run_id)
+                    .await?
+                    .ok_or_else(|| RuntimeError::NotFound {
+                        entity: "run",
+                        id: parent_run_id.to_string(),
+                    })?;
+                Some(run.session_id)
+            }
+            None => None,
         }
-        None => None,
     };
 
     if let Some(caller) = caller_session_id {
@@ -1075,6 +1079,7 @@ mod tests {
                 parent_run_id: parent_run_id.cloned(),
                 parent_task_id: None,
                 prompt_release_id: None,
+                session_id: None,
             }))])
             .await
             .unwrap();

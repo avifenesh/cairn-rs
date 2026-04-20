@@ -477,6 +477,7 @@ fn runtime_events_map_to_correct_sse_surfaces() {
                 parent_run_id: None,
                 parent_task_id: None,
                 prompt_release_id: None,
+                session_id: None,
             }),
             Some(SseEventName::TaskUpdate),
         ),

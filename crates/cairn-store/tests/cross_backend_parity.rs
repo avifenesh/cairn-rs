@@ -285,6 +285,7 @@ mod sqlite_parity {
                 parent_run_id: Some(RunId::new("r1")),
                 parent_task_id: None,
                 prompt_release_id: None,
+                session_id: None,
             }))])
             .await
             .unwrap();
@@ -753,6 +754,7 @@ mod sqlite_parity {
                 parent_run_id: Some(RunId::new("r_parent")),
                 parent_task_id: None,
                 prompt_release_id: None,
+                session_id: None,
             })),
             make_envelope(RuntimeEvent::TaskCreated(TaskCreated {
                 project: project.clone(),
@@ -760,6 +762,7 @@ mod sqlite_parity {
                 parent_run_id: Some(RunId::new("r_parent")),
                 parent_task_id: None,
                 prompt_release_id: None,
+                session_id: None,
             })),
             make_envelope(RuntimeEvent::TaskCreated(TaskCreated {
                 project: project.clone(),
@@ -767,6 +770,7 @@ mod sqlite_parity {
                 parent_run_id: Some(RunId::new("r_parent")),
                 parent_task_id: None,
                 prompt_release_id: None,
+                session_id: None,
             })),
         ])
         .await
@@ -904,6 +908,7 @@ mod sqlite_parity {
                 parent_run_id: Some(RunId::new("r1")),
                 parent_task_id: None,
                 prompt_release_id: None,
+                session_id: None,
             })),
             make_envelope(RuntimeEvent::TaskStateChanged(TaskStateChanged {
                 project: project.clone(),

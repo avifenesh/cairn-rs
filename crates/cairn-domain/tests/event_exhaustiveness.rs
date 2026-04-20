@@ -597,6 +597,7 @@ fn all_variants() -> Vec<RuntimeEvent> {
             parent_run_id: Some(run()),
             parent_task_id: None,
             prompt_release_id: None,
+            session_id: None,
         }),
         RuntimeEvent::TaskLeaseClaimed(cairn_domain::TaskLeaseClaimed {
             project: p(),
@@ -1595,6 +1596,7 @@ fn entity_scoped_events_have_non_sentinel_project() {
             parent_run_id: Some(run()),
             parent_task_id: None,
             prompt_release_id: None,
+            session_id: None,
         }),
     ];
     for event in &entity_events {

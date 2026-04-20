@@ -101,6 +101,7 @@ fn task_event(
             parent_run_id: Some(RunId::new(run)),
             parent_task_id: None,
             prompt_release_id: None,
+            session_id: None,
         }),
     )
 }
