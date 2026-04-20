@@ -1,26 +1,21 @@
-//! RFC-011 Phase 3: regression tests for the task → session resolver.
+//! Tests for the task → session resolver.
 //!
-//! Phase 2 resolved the binding by walking `task.parent_run_id →
-//! RunRecord.session_id`, which cost a second read-model lookup on every
-//! hot-path call and could silently degrade to solo-mint if the parent run
-//! fell out of the projection. Phase 3 persists the binding directly on
-//! `TaskCreated.session_id` / `TaskRecord.session_id`, so the resolve
-//! collapses to a single read. The parent-run walk remains as a fallback
-//! for legacy (pre-V021) tasks whose event had no session_id.
+//! The resolver reads `TaskRecord.session_id` directly when present.
+//! For tasks whose event carried no session binding, it falls back to
+//! walking `parent_run_id → RunRecord.session_id`.
 //!
 //! These tests cover:
 //! - solo task (no parent run, no session) → `None`
 //! - session-bound task where `TaskCreated` carried session_id directly →
 //!   resolves without ever touching the runs projection
-//! - legacy task where `TaskCreated.session_id` is None but `parent_run_id`
-//!   is set → falls back to the parent-run walk
+//! - task where `TaskCreated.session_id` is None but `parent_run_id` is
+//!   set → falls back to the parent-run walk
 //! - session mismatch (task's persisted session differs from its parent
 //!   run's session — not reachable via the submit API, but guards against
 //!   projection drift) → returns the task's own session, not the run's
 //! - missing task → `None`
 //! - dangling parent run (task references a run not in the projection, no
-//!   persisted session_id on the task) → `None` (caller falls back to
-//!   solo mint, same as Phase 2)
+//!   persisted session_id on the task) → `None`
 
 #![cfg(feature = "in-memory-runtime")]
 
@@ -69,10 +64,9 @@ async fn seed_run(store: &Arc<InMemoryStore>, run_id: &str, session_id: &str) {
     store.append(&[env]).await.unwrap();
 }
 
-/// Seed a task via a TaskCreated event. `session_id` is the authoritative
-/// Phase-3 binding written on the event (what new callers always emit).
-/// `legacy` forces the event to be emitted with `session_id = None` even
-/// when `parent_run_id` is set, to exercise the projection's fallback path.
+/// Seed a task via a TaskCreated event. `session_id` is the binding written
+/// on the event. `legacy` forces `session_id = None` even when `parent_run_id`
+/// is set, to exercise the projection's fallback path.
 async fn seed_task(
     store: &Arc<InMemoryStore>,
     task_id: &str,
@@ -100,10 +94,9 @@ async fn seed_task(
     store.append(&[env]).await.unwrap();
 }
 
-/// Phase-3 resolver: the hot path reads `task.session_id` directly and only
-/// walks `parent_run_id → run.session_id` when the persisted field is None
-/// (legacy task). Mirrors the production `resolve_session_for_task_record`
-/// fallback behavior.
+/// Mirrors the production `resolve_session_for_task_record`: reads
+/// `task.session_id` directly and only walks `parent_run_id → run.session_id`
+/// when the persisted field is None.
 async fn resolve(services: &InMemoryServices, task_id: &str) -> Option<SessionId> {
     let task = services
         .tasks
@@ -135,9 +128,8 @@ async fn solo_task_resolves_to_none() {
 
 #[tokio::test]
 async fn phase3_task_with_persisted_session_resolves_directly() {
-    // Phase-3 happy path: TaskCreated carried session_id, so the projection
-    // persisted it on TaskRecord and the resolver returns it without ever
-    // reading the runs projection.
+    // TaskCreated carried session_id, so the projection persisted it on
+    // TaskRecord and the resolver returns it without ever reading the runs projection.
     let store = Arc::new(InMemoryStore::new());
     let services = InMemoryServices::with_store(store.clone());
     seed_session(&store, "sess_a").await;
@@ -150,11 +142,9 @@ async fn phase3_task_with_persisted_session_resolves_directly() {
 
 #[tokio::test]
 async fn legacy_task_falls_back_to_parent_run_session() {
-    // Pre-Phase-3 tasks have no session_id on the event. The projection's
-    // COALESCE fallback (in_memory.rs / sqlite / pg) pulls the run's
-    // session_id at insert time, so resolve() still returns it from
-    // TaskRecord.session_id. This proves the fallback is wired correctly
-    // at projection-time, not just at resolve-time.
+    // When TaskCreated carries no session_id, the projection's COALESCE
+    // fallback pulls the run's session_id at insert time. The resolver
+    // then returns it from TaskRecord.session_id without a second lookup.
     let store = Arc::new(InMemoryStore::new());
     let services = InMemoryServices::with_store(store.clone());
     seed_session(&store, "sess_legacy").await;
@@ -167,13 +157,10 @@ async fn legacy_task_falls_back_to_parent_run_session() {
 
 #[tokio::test]
 async fn session_mismatch_prefers_task_persisted_session() {
-    // Defensive: the submit API never lets a caller pin a task to a
-    // session that differs from its parent run's session (the adapter
-    // cross-check in fabric_adapter.rs rejects it). But if projection
-    // drift ever produced a task whose persisted session differs from its
-    // parent run's, the resolver must trust the task's own binding —
-    // that's the one the ExecutionId was minted against, and walking the
-    // run would hand out a different partition.
+    // Defensive: if projection drift produces a task whose persisted session
+    // differs from its parent run's, the resolver must trust the task's own
+    // binding — that is the one the ExecutionId was minted against.
+    // Walking the run would return a different Valkey partition.
     let store = Arc::new(InMemoryStore::new());
     let services = InMemoryServices::with_store(store.clone());
     seed_session(&store, "sess_task").await;
@@ -207,11 +194,10 @@ async fn missing_task_resolves_to_none() {
 
 #[tokio::test]
 async fn legacy_task_with_dangling_parent_run_resolves_to_none() {
-    // Legacy (pre-Phase-3) task whose parent run was never recorded and
-    // whose event carried no session_id. The projection's COALESCE
-    // fallback finds nothing, so task.session_id is None; the resolve-time
-    // fallback also misses (run not in projection). Caller must degrade
-    // to solo mint, same as Phase 2.
+    // Task whose parent run was never recorded and whose event carried no
+    // session_id. The projection's COALESCE fallback finds nothing, so
+    // task.session_id is None; the resolve-time fallback also misses.
+    // Caller degrades to solo mint.
     let store = Arc::new(InMemoryStore::new());
     let services = InMemoryServices::with_store(store.clone());
     seed_task(&store, "task_orphan", Some("run_ghost"), None, true).await;

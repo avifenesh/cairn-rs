@@ -344,17 +344,15 @@ async fn load_task_with_session_for_tenant(
         }
         Err(e) => return Err(internal_error(e.to_string()).into_response()),
     };
-    // RFC-011 Phase 3: persisted binding is authoritative, no lookup.
     if let Some(sid) = task.session_id.clone() {
         return Ok(Some(sid));
     }
     let Some(parent_run_id) = task.parent_run_id.as_ref() else {
         return Ok(None);
     };
-    // Legacy task — its session_id is mandatory for session-scoped
-    // ExecutionId minting under RFC-011. A silent `None` fallback would hit
-    // the wrong Valkey partition; propagate store errors and 404 on missing
-    // projection row instead.
+    // A task with a parent run must resolve its session.
+    // A silent None fallback would route to the solo-mint path and land on
+    // the wrong Valkey partition; propagate store errors and 404 on missing run.
     let run = state
         .runtime
         .runs

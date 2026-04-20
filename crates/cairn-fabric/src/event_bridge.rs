@@ -66,11 +66,8 @@ pub enum BridgeEvent {
     TaskCreated {
         task_id: TaskId,
         project: ProjectKey,
-        /// The session this task is scoped to. Carried through the
-        /// bridge so every downstream consumer (projection,
-        /// FF tag write, audit) sees the same session binding that the
-        /// ExecutionId was minted against via
-        /// `id_map::session_task_to_execution_id`. `None` for bare
+        /// Session the task was minted against (same binding used by
+        /// `id_map::session_task_to_execution_id`). `None` for bare
         /// (session-less) submissions.
         session_id: Option<SessionId>,
         parent_run_id: Option<RunId>,
@@ -384,10 +381,6 @@ fn bridge_event_to_runtime_event(event: &BridgeEvent) -> RuntimeEvent {
             parent_run_id: parent_run_id.clone(),
             parent_task_id: parent_task_id.clone(),
             prompt_release_id: None,
-            // RFC-011 Phase 3: forward the session binding the Fabric layer
-            // already carries on the bridge event. Previously this was
-            // dropped into `_`, forcing the projection to walk parent_run_id
-            // to recover it.
             session_id: session_id.clone(),
         }),
         BridgeEvent::TaskLeaseClaimed {

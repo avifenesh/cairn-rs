@@ -331,10 +331,8 @@ impl InMemoryStore {
                 }
             }
             RuntimeEvent::TaskCreated(e) => {
-                // RFC-011 Phase 3: prefer the session_id carried on the
-                // event itself; fall back to walking `parent_run_id →
-                // RunRecord.session_id` for legacy (pre-V018) events that
-                // predate this field.
+                // Prefer the session_id on the event; fall back to walking
+                // parent_run_id → RunRecord.session_id for tasks without one.
                 let session_id = e.session_id.clone().or_else(|| {
                     e.parent_run_id
                         .as_ref()

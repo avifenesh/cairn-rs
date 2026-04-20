@@ -456,12 +456,9 @@ async fn resolve_task_project_and_session(
             id: task_id.to_string(),
         })?;
 
-    // Derive session_id from the parent run when present. Bare tasks
-    // (no parent_run_id) carry no session binding and must be minted
-    // via the solo `task_to_execution_id` path.
-    // RFC-011 Phase 3: task row carries its own session binding under V021.
-    // Only fall back to walking parent_run_id when the projection row is
-    // legacy (persisted session_id is None).
+    // Use the session binding already on the task record when present.
+    // Bare tasks carry no binding and route via the solo mint path.
+    // If the task row has no session_id, walk parent_run_id → run.session_id.
     let derived_session_id = if let Some(sid) = task.session_id.clone() {
         Some(sid)
     } else {
@@ -607,9 +604,9 @@ impl TaskService for FabricTaskServiceAdapter {
             Some(sid) => Some(sid.clone()),
             None => match &parent_run_id {
                 Some(prid) => {
-                    // Parent run is mandatory for RFC-011 co-location —
-                    // silently falling back to solo mint would drop the
-                    // task on the wrong Valkey partition.
+                    // A task with a parent run must resolve its session.
+                    // Silently returning None would route to the solo-mint path
+                    // and land on a different Valkey partition than the parent run.
                     let run = RunReadModel::get(self.store.as_ref(), prid)
                         .await?
                         .ok_or_else(|| RuntimeError::NotFound {
@@ -640,15 +637,9 @@ impl TaskService for FabricTaskServiceAdapter {
         _dependent_task_id: &TaskId,
         _prerequisite_task_id: &TaskId,
     ) -> Result<TaskDependencyRecord, RuntimeError> {
-        // DEFERRED (Phase 3 Session→Flow DAG round): FF flow-edge fcalls
-        // (ff_stage_dependency_edge + ff_apply_dependency_to_child) are not
-        // yet surfaced on FabricTaskService. Wiring them means adding a
-        // `declare_dependency` method there that calls the two FCALLs
-        // atomically and returns a TaskDependencyRecord shaped record. That
-        // is its own review round — flagged for the Phase 3 lane.
-        //
-        // Until then, surface as Validation so handlers can return 501-style
-        // responses instead of panicking in prod.
+        // FF flow-edge fcalls (ff_stage_dependency_edge + ff_apply_dependency_to_child)
+        // are not yet surfaced on FabricTaskService. Until they are, surface as
+        // Validation so handlers return a clear error rather than panicking.
         Err(RuntimeError::Validation {
             reason: "declare_dependency is not yet wired through the fabric adapter (FF flow-edge path pending)".into(),
         })
