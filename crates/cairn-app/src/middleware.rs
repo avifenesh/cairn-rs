@@ -556,49 +556,72 @@ pub(crate) async fn observability_middleware(
     response
 }
 
+/// Cheap per-request refresh of the global active-runs / active-tasks
+/// counts. Called by the observability middleware on every request to
+/// keep the headline gauges fresh without scrape-interval lag.
 pub(crate) async fn refresh_activity_metrics(state: &AppState) {
     let active_runs = state.runtime.store.count_active_runs().await;
     let active_tasks = state.runtime.store.count_active_tasks().await;
     state
         .metrics
         .set_active_counts(active_runs as usize, active_tasks as usize);
+}
 
-    #[cfg(feature = "metrics-core")]
-    {
-        // Projection lag: for the in-memory store this is always 0 because
-        // projections are applied synchronously inside `append`. The gauge
-        // exists so Postgres / SQLite backends (which can lag) have a
-        // ready-made series. Not reading `head_position` to call out the
-        // 0-is-structural nature; update when async projections land.
-        state.metrics.set_projection_lag(0);
+/// Heavyweight refresh called only from the `/metrics` handler path.
+/// Enumerates up to 200 tenants and fans out three async store reads
+/// per tenant — cheap enough for a once-per-scrape call (operators
+/// typically scrape at 15-60 s), expensive enough that it would kill
+/// per-request latency if routed through the middleware.
+///
+/// The existing non-tenant counters (`active_runs_total`,
+/// `active_tasks_total`) are refreshed on every request via
+/// [`refresh_activity_metrics`]; this function layers tenant
+/// breakdowns + projection lag on top of that.
+#[cfg(feature = "metrics-core")]
+pub(crate) async fn refresh_scrape_metrics(state: &AppState) {
+    // Projection lag: for the in-memory store this is structurally 0
+    // (projections are applied synchronously inside `append`). The
+    // gauge ships anyway so Postgres / SQLite backends have a ready
+    // series the moment async projections land.
+    state.metrics.set_projection_lag(0);
 
-        // Tenant-scoped queue depths. Bounded to the first 200 tenants to
-        // keep the metrics handler latency predictable on large installs;
-        // operators who need per-tenant visibility past that point should
-        // move to an async collector.
-        if let Ok(tenants) = state.runtime.tenants.list(200, 0).await {
-            for t in tenants {
-                let tenant_id = t.tenant_id.as_str();
-                let runs = state
-                    .runtime
-                    .store
-                    .count_active_runs_for_tenant(&t.tenant_id)
-                    .await;
-                let tasks = state
-                    .runtime
-                    .store
-                    .count_active_tasks_for_tenant(&t.tenant_id)
-                    .await;
-                let pending = state
-                    .runtime
-                    .store
-                    .count_pending_approvals_for_tenant(&t.tenant_id)
-                    .await;
-                state
-                    .metrics
-                    .set_tenant_queue_depth(tenant_id, runs, tasks, pending);
-            }
+    // Tenant-scoped queue depths. Clear the active-tenant set each
+    // pass so tenants that disappear (deleted, or past the 200-row
+    // window) drop out of the metric instead of lingering as phantom
+    // series.
+    let tenants = match state.runtime.tenants.list(200, 0).await {
+        Ok(t) => t,
+        Err(err) => {
+            tracing::warn!(error = %err, "refresh_scrape_metrics: tenant list failed");
+            return;
         }
+    };
+
+    let active_ids: Vec<String> = tenants
+        .iter()
+        .map(|t| t.tenant_id.as_str().to_owned())
+        .collect();
+    state.metrics.retain_tenant_queue_depth(&active_ids);
+
+    for t in &tenants {
+        let runs = state
+            .runtime
+            .store
+            .count_active_runs_for_tenant(&t.tenant_id)
+            .await;
+        let tasks = state
+            .runtime
+            .store
+            .count_active_tasks_for_tenant(&t.tenant_id)
+            .await;
+        let pending = state
+            .runtime
+            .store
+            .count_pending_approvals_for_tenant(&t.tenant_id)
+            .await;
+        state
+            .metrics
+            .set_tenant_queue_depth(t.tenant_id.as_str(), runs, tasks, pending);
     }
 }
 

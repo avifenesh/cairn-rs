@@ -283,6 +283,75 @@ async fn unrelated_events_do_not_bump_counters() {
 }
 
 #[tokio::test]
+async fn run_failed_with_lease_expired_bumps_run_entity_counter() {
+    // Symmetric to the task path: the lease-history subscriber emits
+    // ExecutionFailed { failure_class: LeaseExpired } when FF reclaims
+    // a dead run. That surfaces as RunStateChanged to Failed with
+    // failure_class=LeaseExpired, which must bump the
+    // `entity="run"` series on cairn_lease_expiries_total. Without
+    // this, run-level worker deaths are invisible in the metric the
+    // PR description says covers them.
+    let (store, metrics, tap) = setup().await;
+    let p = project("t1", "w1", "p1");
+
+    store
+        .append(&[envelope(
+            RuntimeEvent::RunStateChanged(RunStateChanged {
+                project: p.clone(),
+                run_id: RunId::new("run_dead"),
+                transition: StateTransition {
+                    from: Some(RunState::Running),
+                    to: RunState::Failed,
+                },
+                failure_class: Some(FailureClass::LeaseExpired),
+                pause_reason: None,
+                resume_trigger: None,
+            }),
+            "run_dead",
+        )])
+        .await
+        .unwrap();
+
+    drain_tap().await;
+
+    let output = metrics.render_prometheus();
+    assert!(
+        output.contains(r#"cairn_lease_expiries_total{entity="run"} 1"#),
+        "missing run lease_expiry counter:\n{output}"
+    );
+
+    tap.shutdown().await;
+}
+
+#[tokio::test]
+async fn retain_tenant_queue_depth_prunes_stale_entries() {
+    // Simulate a scrape cycle: set depth for three tenants, then a
+    // follow-up refresh sees only two. The missing tenant's entry
+    // must be dropped from the Prometheus output so deleted tenants
+    // don't linger as phantom series.
+    let (_store, metrics, tap) = setup().await;
+    metrics.set_tenant_queue_depth("t_a", 1, 2, 3);
+    metrics.set_tenant_queue_depth("t_b", 4, 5, 6);
+    metrics.set_tenant_queue_depth("t_gone", 7, 8, 9);
+
+    let before = metrics.render_prometheus();
+    assert!(before.contains(r#"cairn_active_runs_by_tenant{tenant="t_gone"} 7"#));
+
+    // Scrape-time refresh sees only t_a and t_b as live.
+    metrics.retain_tenant_queue_depth(&["t_a".to_owned(), "t_b".to_owned()]);
+
+    let after = metrics.render_prometheus();
+    assert!(after.contains(r#"cairn_active_runs_by_tenant{tenant="t_a"} 1"#));
+    assert!(after.contains(r#"cairn_active_runs_by_tenant{tenant="t_b"} 4"#));
+    assert!(
+        !after.contains("t_gone"),
+        "t_gone series must be pruned from output:\n{after}"
+    );
+
+    tap.shutdown().await;
+}
+
+#[tokio::test]
 async fn render_prometheus_surface_always_present() {
     // Even before any events, the Prometheus render must include
     // the metric HELP/TYPE lines for every metrics-core series so

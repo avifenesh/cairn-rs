@@ -378,6 +378,8 @@ pub(crate) async fn ready_handler(State(state): State<Arc<AppState>>) -> impl In
 
 pub(crate) async fn metrics_handler(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     refresh_activity_metrics(state.as_ref()).await;
+    #[cfg(feature = "metrics-core")]
+    crate::middleware::refresh_scrape_metrics(state.as_ref()).await;
     (
         StatusCode::OK,
         [(

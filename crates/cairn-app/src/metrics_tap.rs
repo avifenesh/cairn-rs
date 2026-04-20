@@ -121,6 +121,18 @@ fn process_event(metrics: &AppMetrics, event: &RuntimeEvent) {
                     failure_class,
                 );
             }
+            // Symmetric to the task path: `ExecutionFailed { failure_class:
+            // LeaseExpired }` surfaces as a Failed transition on a run. The
+            // `cairn_lease_expiries_total{entity="run"}` series would never
+            // bump otherwise even though the subscriber emits it.
+            if matches!(e.transition.to, RunState::Failed)
+                && matches!(
+                    e.failure_class,
+                    Some(cairn_domain::lifecycle::FailureClass::LeaseExpired)
+                )
+            {
+                metrics.record_lease_expiry("run");
+            }
         }
         RuntimeEvent::TaskCreated(e) => {
             metrics.record_task_created(

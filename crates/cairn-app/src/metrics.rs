@@ -102,15 +102,23 @@ pub struct AppMetrics {
     lease_expiries: Mutex<HashMap<LeaseExpiryKey, u64>>,
     #[cfg(feature = "metrics-core")]
     projection_lag_events: AtomicU64,
-    /// Per-tenant active-runs gauge. Extends `active_runs_total` with
-    /// a tenant breakdown so an operator running multiple tenants can
-    /// see which one is generating load.
+    /// Per-tenant queue-depth gauges bundled into one mutex so a
+    /// single tenant update takes one lock and one string hash, not
+    /// three. Reader side (render_prometheus) clones the whole map
+    /// once per scrape.
     #[cfg(feature = "metrics-core")]
-    active_runs_by_tenant: Mutex<HashMap<String, u64>>,
-    #[cfg(feature = "metrics-core")]
-    active_tasks_by_tenant: Mutex<HashMap<String, u64>>,
-    #[cfg(feature = "metrics-core")]
-    pending_approvals_by_tenant: Mutex<HashMap<String, u64>>,
+    tenant_queue_depth: Mutex<HashMap<String, TenantQueueDepth>>,
+}
+
+/// Per-tenant gauge bundle. Held behind a single mutex so updates
+/// are atomic per tenant and reader-side iteration doesn't need to
+/// cross-reference three maps.
+#[cfg(feature = "metrics-core")]
+#[derive(Clone, Copy, Debug, Default)]
+pub(crate) struct TenantQueueDepth {
+    pub(crate) active_runs: u64,
+    pub(crate) active_tasks: u64,
+    pub(crate) pending_approvals: u64,
 }
 
 impl AppMetrics {
@@ -271,19 +279,30 @@ impl AppMetrics {
         active_tasks: u64,
         pending_approvals: u64,
     ) {
-        let tenant = tenant.to_owned();
-        self.active_runs_by_tenant
+        self.tenant_queue_depth
             .lock()
             .unwrap_or_else(|e| e.into_inner())
-            .insert(tenant.clone(), active_runs);
-        self.active_tasks_by_tenant
+            .insert(
+                tenant.to_owned(),
+                TenantQueueDepth {
+                    active_runs,
+                    active_tasks,
+                    pending_approvals,
+                },
+            );
+    }
+
+    /// Prune tenant-queue-depth entries not present in `keep`. Called
+    /// by the scrape-time refresh so tenants that have been deleted
+    /// (or paged out past the enumeration window) stop appearing in
+    /// Prometheus output as phantom series.
+    #[cfg(feature = "metrics-core")]
+    pub fn retain_tenant_queue_depth(&self, keep: &[String]) {
+        let keep_set: std::collections::HashSet<&str> = keep.iter().map(String::as_str).collect();
+        self.tenant_queue_depth
             .lock()
             .unwrap_or_else(|e| e.into_inner())
-            .insert(tenant.clone(), active_tasks);
-        self.pending_approvals_by_tenant
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .insert(tenant, pending_approvals);
+            .retain(|k, _| keep_set.contains(k.as_str()));
     }
 
     /// Approximate latency percentile (p50 or p95) from histogram buckets.
@@ -419,6 +438,10 @@ impl AppMetrics {
 
     #[cfg(feature = "metrics-core")]
     fn render_core_into(&self, lines: &mut Vec<String>) {
+        // Sort rows by label-tuple before emitting so the Prometheus
+        // output is byte-stable across scrapes. HashMap iteration is
+        // nondeterministic; stable output keeps log analysis + golden
+        // test assertions sane.
         fn render_entity_counter(
             lines: &mut Vec<String>,
             name: &str,
@@ -428,7 +451,22 @@ impl AppMetrics {
         ) {
             lines.push(format!("# HELP {name} {help}"));
             lines.push(format!("# TYPE {name} counter"));
-            for (key, value) in data {
+            let mut entries: Vec<(&EntityCountKey, &u64)> = data.iter().collect();
+            entries.sort_by(|a, b| {
+                (
+                    &a.0.tenant,
+                    &a.0.workspace,
+                    &a.0.outcome,
+                    &a.0.failure_class,
+                )
+                    .cmp(&(
+                        &b.0.tenant,
+                        &b.0.workspace,
+                        &b.0.outcome,
+                        &b.0.failure_class,
+                    ))
+            });
+            for (key, value) in entries {
                 let mut labels = format!(
                     "tenant=\"{}\",workspace=\"{}\"",
                     prometheus_label(&key.tenant),
@@ -506,7 +544,9 @@ impl AppMetrics {
             "# HELP cairn_tool_invocations_total Tool invocations by name and outcome.".to_owned(),
         );
         lines.push("# TYPE cairn_tool_invocations_total counter".to_owned());
-        for (key, value) in tool_invocations {
+        let mut tool_entries: Vec<_> = tool_invocations.iter().collect();
+        tool_entries.sort_by(|a, b| (&a.0.tool, &a.0.outcome).cmp(&(&b.0.tool, &b.0.outcome)));
+        for (key, value) in tool_entries {
             lines.push(format!(
                 "cairn_tool_invocations_total{{tool=\"{}\",outcome=\"{}\"}} {}",
                 prometheus_label(&key.tool),
@@ -526,7 +566,9 @@ impl AppMetrics {
                 .to_owned(),
         );
         lines.push("# TYPE cairn_lease_expiries_total counter".to_owned());
-        for (key, value) in lease_expiries {
+        let mut expiry_entries: Vec<_> = lease_expiries.iter().collect();
+        expiry_entries.sort_by(|a, b| a.0.entity.cmp(&b.0.entity));
+        for (key, value) in expiry_entries {
             lines.push(format!(
                 "cairn_lease_expiries_total{{entity=\"{}\"}} {}",
                 prometheus_label(&key.entity),
@@ -546,55 +588,49 @@ impl AppMetrics {
             self.projection_lag_events.load(Ordering::Relaxed),
         ));
 
-        let active_runs_by_tenant = self
-            .active_runs_by_tenant
+        let tenant_queue_depth = self
+            .tenant_queue_depth
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .clone();
+        let mut tenant_entries: Vec<(String, TenantQueueDepth)> =
+            tenant_queue_depth.into_iter().collect();
+        tenant_entries.sort_by(|a, b| a.0.cmp(&b.0));
+
         lines.push(
             "# HELP cairn_active_runs_by_tenant Active non-terminal runs per tenant.".to_owned(),
         );
         lines.push("# TYPE cairn_active_runs_by_tenant gauge".to_owned());
-        for (tenant, value) in active_runs_by_tenant {
+        for (tenant, depth) in &tenant_entries {
             lines.push(format!(
                 "cairn_active_runs_by_tenant{{tenant=\"{}\"}} {}",
-                prometheus_label(&tenant),
-                value,
+                prometheus_label(tenant),
+                depth.active_runs,
             ));
         }
 
-        let active_tasks_by_tenant = self
-            .active_tasks_by_tenant
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .clone();
         lines.push(
             "# HELP cairn_active_tasks_by_tenant Active non-terminal tasks per tenant.".to_owned(),
         );
         lines.push("# TYPE cairn_active_tasks_by_tenant gauge".to_owned());
-        for (tenant, value) in active_tasks_by_tenant {
+        for (tenant, depth) in &tenant_entries {
             lines.push(format!(
                 "cairn_active_tasks_by_tenant{{tenant=\"{}\"}} {}",
-                prometheus_label(&tenant),
-                value,
+                prometheus_label(tenant),
+                depth.active_tasks,
             ));
         }
 
-        let pending_approvals_by_tenant = self
-            .pending_approvals_by_tenant
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .clone();
         lines.push(
             "# HELP cairn_pending_approvals_by_tenant Pending approvals awaiting decision per tenant."
                 .to_owned(),
         );
         lines.push("# TYPE cairn_pending_approvals_by_tenant gauge".to_owned());
-        for (tenant, value) in pending_approvals_by_tenant {
+        for (tenant, depth) in &tenant_entries {
             lines.push(format!(
                 "cairn_pending_approvals_by_tenant{{tenant=\"{}\"}} {}",
-                prometheus_label(&tenant),
-                value,
+                prometheus_label(tenant),
+                depth.pending_approvals,
             ));
         }
     }
