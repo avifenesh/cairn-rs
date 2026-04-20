@@ -229,6 +229,53 @@ impl OtlpExporter {
                     attributes: attrs,
                 }]
             }
+            RuntimeEvent::RouteDecisionMade(e) => {
+                let mut attrs = HashMap::new();
+                attrs.insert(
+                    "gen_ai.operation.name".into(),
+                    SpanAttributeValue::String("route_decision".into()),
+                );
+                attrs.insert(
+                    "cairn.route.operation_kind".into(),
+                    SpanAttributeValue::String(format!("{:?}", e.operation_kind)),
+                );
+                attrs.insert(
+                    "cairn.route.status".into(),
+                    SpanAttributeValue::String(format!("{:?}", e.final_status)),
+                );
+                attrs.insert(
+                    "cairn.route.attempt_count".into(),
+                    SpanAttributeValue::Int(i64::from(e.attempt_count)),
+                );
+                attrs.insert(
+                    "cairn.route.fallback_used".into(),
+                    SpanAttributeValue::Bool(e.fallback_used),
+                );
+                if let Some(binding) = &e.selected_provider_binding_id {
+                    attrs.insert(
+                        "cairn.route.selected_binding".into(),
+                        SpanAttributeValue::String(binding.to_string()),
+                    );
+                }
+                vec![ExportableSpan {
+                    span_id: format!("{:016x}", hash_id(e.route_decision_id.as_ref())),
+                    // Route decisions are preludes to a ProviderCall; no
+                    // natural parent in the cairn hierarchy, so they root
+                    // their own trace. The ProviderCall that follows nests
+                    // under its run via the existing run_id path.
+                    parent_span_id: None,
+                    trace_id: format!("{:032x}", hash_id(e.route_decision_id.as_ref())),
+                    name: "route_decision".into(),
+                    start_time_ns: e.decided_at * 1_000_000,
+                    end_time_ns: e.decided_at * 1_000_000,
+                    kind: "internal".into(),
+                    status: match e.final_status {
+                        cairn_domain::providers::RouteDecisionStatus::Selected => "ok".into(),
+                        _ => "error".into(),
+                    },
+                    attributes: attrs,
+                }]
+            }
             // All other events — no span export in v1.
             _ => vec![],
         }

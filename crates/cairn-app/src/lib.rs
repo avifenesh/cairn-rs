@@ -14,6 +14,8 @@ pub mod handlers;
 pub mod helpers;
 pub mod marketplace_routes;
 pub mod metrics;
+#[cfg(feature = "metrics-otel")]
+pub mod metrics_otel;
 #[cfg(any(feature = "metrics-core", feature = "metrics-providers"))]
 pub mod metrics_tap;
 pub mod middleware;

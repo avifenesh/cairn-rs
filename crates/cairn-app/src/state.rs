@@ -309,6 +309,11 @@ pub struct AppState {
     /// process; drop/cancel is managed by shutdown paths.
     #[cfg(any(feature = "metrics-core", feature = "metrics-providers"))]
     pub metrics_tap: Option<crate::metrics_tap::MetricsTap>,
+    /// Background task exporting RuntimeEvents as OTLP spans over
+    /// HTTP/protobuf. Enabled when the `metrics-otel` feature is on
+    /// AND `CAIRN_OTLP_ENABLED` is truthy at boot. `None` otherwise.
+    #[cfg(feature = "metrics-otel")]
+    pub otlp_tap: Option<crate::metrics_otel::OtlpTap>,
 }
 
 // ── GitHubIntegration ────────────────────────────────────────────────────────
@@ -902,7 +907,11 @@ impl AppState {
             memory_api,
             memory_proposal_hook,
             started_at: Instant::now(),
+            // Placeholder — swapped out below if metrics-otel is
+            // enabled AND `CAIRN_OTLP_ENABLED` is set at boot.
             otlp_exporter: Arc::new(cairn_runtime::telemetry::OtlpExporter::disabled()),
+            #[cfg(feature = "metrics-otel")]
+            otlp_tap: None,
             runtime_sse_tx,
             sse_event_buffer,
             sse_seq,
@@ -934,6 +943,52 @@ impl AppState {
                 state.metrics.clone(),
             );
             state.metrics_tap = Some(tap);
+        }
+
+        #[cfg(feature = "metrics-otel")]
+        {
+            use cairn_runtime::telemetry::OtlpExporter;
+            let cfg = crate::metrics_otel::otlp_config_from_env();
+            if cfg.enabled {
+                // Wrap HttpProtoSink in BatchingSink so bursty event
+                // streams don't blast the collector with one POST per
+                // event. 64 spans or 2 s, whichever fires first —
+                // matches the defaults in RFC 021's exporter sketch.
+                let transport = std::sync::Arc::new(crate::metrics_otel::HttpProtoSink::new(
+                    &cfg.endpoint,
+                    &cfg.service_name,
+                ));
+                let batched = std::sync::Arc::new(crate::metrics_otel::BatchingSink::new(
+                    transport,
+                    64,
+                    std::time::Duration::from_millis(2_000),
+                ));
+                // The OtlpExporter holds the sink in a Box; wrap the
+                // batcher in a shim that defers to the shared Arc so
+                // both the exporter and the tap/state can keep a
+                // handle if ever needed.
+                struct SinkArc(std::sync::Arc<dyn cairn_runtime::telemetry::SpanExportSink>);
+                #[async_trait::async_trait]
+                impl cairn_runtime::telemetry::SpanExportSink for SinkArc {
+                    async fn export(
+                        &self,
+                        spans: &[cairn_runtime::telemetry::ExportableSpan],
+                    ) -> Result<(), String> {
+                        self.0.export(spans).await
+                    }
+                }
+                let exporter = Arc::new(OtlpExporter::new(cfg.clone(), Box::new(SinkArc(batched))));
+                state.otlp_exporter = exporter.clone();
+                state.otlp_tap = Some(crate::metrics_otel::OtlpTap::spawn(
+                    state.runtime.store.clone(),
+                    exporter,
+                ));
+                tracing::info!(
+                    endpoint = %cfg.endpoint,
+                    redact_content = cfg.redact_content,
+                    "OTLP export enabled"
+                );
+            }
         }
 
         Ok(state)
