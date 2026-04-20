@@ -14,7 +14,7 @@ pub mod handlers;
 pub mod helpers;
 pub mod marketplace_routes;
 pub mod metrics;
-#[cfg(feature = "metrics-core")]
+#[cfg(any(feature = "metrics-core", feature = "metrics-providers"))]
 pub mod metrics_tap;
 pub mod middleware;
 pub mod repo_routes;
