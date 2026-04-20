@@ -65,4 +65,15 @@ pub trait RunReadModel: Send + Sync {
         project: &ProjectKey,
         limit: usize,
     ) -> Result<Vec<RunRecord>, StoreError>;
+
+    /// List child runs of `parent_run_id`, ordered `(created_at, run_id)` ASC.
+    ///
+    /// Postgres / SQLite use `idx_runs_parent` (partial index on
+    /// `parent_run_id WHERE NOT NULL`); InMemoryStore filters the live
+    /// map. Caller supplies `limit`; there is no implicit cap.
+    async fn list_by_parent_run(
+        &self,
+        parent_run_id: &RunId,
+        limit: usize,
+    ) -> Result<Vec<RunRecord>, StoreError>;
 }

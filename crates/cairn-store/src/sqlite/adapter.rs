@@ -279,6 +279,29 @@ impl RunReadModel for SqliteAdapter {
             .map(RunRow::into_record)
             .collect()
     }
+
+    async fn list_by_parent_run(
+        &self,
+        parent_run_id: &RunId,
+        limit: usize,
+    ) -> Result<Vec<RunRecord>, StoreError> {
+        // Served by `idx_runs_parent` (V003__create_runs.sql partial
+        // index on `parent_run_id WHERE NOT NULL`).
+        let rows = sqlx::query_as::<_, RunRow>(
+            "SELECT run_id, session_id, parent_run_id, tenant_id, workspace_id, project_id,
+                    state, failure_class, version, created_at, updated_at
+             FROM runs
+             WHERE parent_run_id = $1
+             ORDER BY created_at ASC, run_id ASC
+             LIMIT $2",
+        )
+        .bind(parent_run_id.as_str())
+        .bind(limit as i64)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| StoreError::Internal(e.to_string()))?;
+        rows.into_iter().map(RunRow::into_record).collect()
+    }
 }
 
 #[async_trait]

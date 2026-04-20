@@ -222,6 +222,19 @@ mod tests {
         ) -> Result<Vec<RunRecord>, StoreError> {
             Ok(self.records.iter().take(limit).cloned().collect())
         }
+        async fn list_by_parent_run(
+            &self,
+            parent_run_id: &RunId,
+            limit: usize,
+        ) -> Result<Vec<RunRecord>, StoreError> {
+            Ok(self
+                .records
+                .iter()
+                .filter(|r| r.parent_run_id.as_ref() == Some(parent_run_id))
+                .take(limit)
+                .cloned()
+                .collect())
+        }
     }
 
     fn run_record(id: &str, state: RunState) -> RunRecord {

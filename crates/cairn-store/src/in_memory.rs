@@ -2097,6 +2097,28 @@ impl RunReadModel for InMemoryStore {
         results.truncate(limit);
         Ok(results)
     }
+
+    async fn list_by_parent_run(
+        &self,
+        parent_run_id: &RunId,
+        limit: usize,
+    ) -> Result<Vec<RunRecord>, StoreError> {
+        let store = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        // Sort borrowed refs so the per-comparison key doesn't
+        // allocate a String for each run_id; only the records that
+        // survive truncation get cloned.
+        let mut refs: Vec<&RunRecord> = store
+            .runs
+            .values()
+            .filter(|r| r.parent_run_id.as_ref() == Some(parent_run_id))
+            .collect();
+        refs.sort_by(|a, b| {
+            a.created_at
+                .cmp(&b.created_at)
+                .then_with(|| a.run_id.as_str().cmp(b.run_id.as_str()))
+        });
+        Ok(refs.into_iter().take(limit).cloned().collect())
+    }
 }
 
 // -- TaskReadModel --
@@ -5287,6 +5309,81 @@ mod tests {
         let run = RunReadModel::get(&store, &run_id).await.unwrap().unwrap();
         assert_eq!(run.state, RunState::Completed);
         assert_eq!(run.version, 3);
+    }
+
+    #[tokio::test]
+    async fn list_by_parent_run_returns_only_children_of_that_parent() {
+        // Replaces the pre-existing 10k-event scan that silently
+        // truncated older children. Verifies: parent + N children +
+        // unrelated run → list returns exactly N, no truncation at
+        // absurdly-low-limit defaults, unrelated run not included.
+        let store = InMemoryStore::new();
+        let project = test_project();
+        let session_id = SessionId::new("sess_1");
+        let parent = RunId::new("parent");
+        let unrelated = RunId::new("unrelated_root");
+
+        // Parent + unrelated root run.
+        store
+            .append(&[
+                make_envelope(RuntimeEvent::SessionCreated(SessionCreated {
+                    project: project.clone(),
+                    session_id: session_id.clone(),
+                })),
+                make_envelope(RuntimeEvent::RunCreated(RunCreated {
+                    project: project.clone(),
+                    session_id: session_id.clone(),
+                    run_id: parent.clone(),
+                    parent_run_id: None,
+                    agent_role_id: None,
+                    prompt_release_id: None,
+                })),
+                make_envelope(RuntimeEvent::RunCreated(RunCreated {
+                    project: project.clone(),
+                    session_id: session_id.clone(),
+                    run_id: unrelated.clone(),
+                    parent_run_id: None,
+                    agent_role_id: None,
+                    prompt_release_id: None,
+                })),
+            ])
+            .await
+            .unwrap();
+
+        // Three children of `parent`.
+        for i in 0..3 {
+            store
+                .append(&[make_envelope(RuntimeEvent::RunCreated(RunCreated {
+                    project: project.clone(),
+                    session_id: session_id.clone(),
+                    run_id: RunId::new(format!("child_{i}")),
+                    parent_run_id: Some(parent.clone()),
+                    agent_role_id: None,
+                    prompt_release_id: None,
+                }))])
+                .await
+                .unwrap();
+        }
+
+        let children = RunReadModel::list_by_parent_run(&store, &parent, 100)
+            .await
+            .unwrap();
+        assert_eq!(children.len(), 3);
+        assert!(children
+            .iter()
+            .all(|r| r.parent_run_id.as_ref() == Some(&parent)));
+
+        // Unrelated parent → no children.
+        let unrelated_children = RunReadModel::list_by_parent_run(&store, &unrelated, 100)
+            .await
+            .unwrap();
+        assert_eq!(unrelated_children.len(), 0);
+
+        // Limit truncation works.
+        let first_one = RunReadModel::list_by_parent_run(&store, &parent, 1)
+            .await
+            .unwrap();
+        assert_eq!(first_one.len(), 1);
     }
 
     #[tokio::test]

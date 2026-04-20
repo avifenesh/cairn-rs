@@ -124,6 +124,13 @@ impl RunReadModel for SqliteStore {
     ) -> Result<Vec<RunRecord>, StoreError> {
         RunReadModel::list_active_by_project(&self.adapter, project, limit).await
     }
+    async fn list_by_parent_run(
+        &self,
+        parent_run_id: &RunId,
+        limit: usize,
+    ) -> Result<Vec<RunRecord>, StoreError> {
+        RunReadModel::list_by_parent_run(&self.adapter, parent_run_id, limit).await
+    }
 }
 
 #[async_trait]
