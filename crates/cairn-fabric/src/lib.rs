@@ -76,6 +76,11 @@ pub mod signal_bridge;
 pub mod state_map;
 pub mod stream;
 pub mod suspension;
+/// Valkey testcontainers harness for integration tests. Gated on the
+/// `test-harness` cargo feature so production builds don't link
+/// `testcontainers`.
+#[cfg(feature = "test-harness")]
+pub mod test_harness;
 #[cfg(test)]
 pub(crate) mod test_support;
 pub mod version_check;

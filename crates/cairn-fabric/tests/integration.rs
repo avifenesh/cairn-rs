@@ -42,71 +42,9 @@ use std::sync::Arc;
 
 use cairn_domain::tenancy::ProjectKey;
 use cairn_domain::{RunId, SessionId, TaskId};
+use cairn_fabric::test_harness::valkey_endpoint;
 use cairn_fabric::{FabricConfig, FabricServices};
 use cairn_store::InMemoryStore;
-use testcontainers::{
-    core::{IntoContainerPort, WaitFor},
-    runners::AsyncRunner,
-    ContainerAsync, GenericImage,
-};
-use tokio::sync::OnceCell;
-
-// ── Shared Valkey container ──────────────────────────────────────────────
-//
-// `OnceCell<ContainerHandle>` — the container is started lazily by the
-// first test, shared across every test in the binary, and torn down when
-// the binary exits (ContainerAsync's Drop kills and removes the container).
-// Tests share one Valkey DB; isolation comes from uuid-scoped
-// (tenant, workspace, project) triples per test (see
-// `TestHarness::setup`), NOT from FLUSHDB — parallel tests must not
-// trample each other's keyspaces.
-
-struct ContainerHandle {
-    // The handle itself is held only so Drop doesn't run early.
-    _container: ContainerAsync<GenericImage>,
-    host: String,
-    port: u16,
-}
-
-static VALKEY_CONTAINER: OnceCell<ContainerHandle> = OnceCell::const_new();
-
-async fn get_valkey_endpoint() -> (String, u16) {
-    if let Ok(url) = std::env::var("CAIRN_TEST_VALKEY_URL") {
-        let parsed = url::Url::parse(&url).expect("invalid CAIRN_TEST_VALKEY_URL");
-        let host = parsed.host_str().unwrap_or("localhost").to_owned();
-        let port = parsed.port().unwrap_or(6379);
-        return (host, port);
-    }
-
-    let handle = VALKEY_CONTAINER
-        .get_or_init(|| async {
-            let container = GenericImage::new("valkey/valkey", "8-alpine")
-                .with_exposed_port(6379.tcp())
-                .with_wait_for(WaitFor::message_on_stdout("Ready to accept connections"))
-                .start()
-                .await
-                .expect("failed to start valkey container");
-
-            let host = container
-                .get_host()
-                .await
-                .expect("container host unavailable")
-                .to_string();
-            let port = container
-                .get_host_port_ipv4(6379.tcp())
-                .await
-                .expect("container port unavailable");
-
-            ContainerHandle {
-                _container: container,
-                host,
-                port,
-            }
-        })
-        .await;
-
-    (handle.host.clone(), handle.port)
-}
 
 pub struct TestHarness {
     pub fabric: FabricServices,
@@ -119,7 +57,7 @@ pub struct TestHarness {
 
 impl TestHarness {
     pub async fn setup() -> Self {
-        let (host, port) = get_valkey_endpoint().await;
+        let (host, port) = valkey_endpoint().await;
 
         // Per-test project scope — uuid-suffixed so parallel tests route
         // their FCALLs to disjoint `{p:N}` hashtags and never share state.
