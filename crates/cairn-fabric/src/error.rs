@@ -16,6 +16,18 @@ pub enum FabricError {
     Validation { reason: String },
     #[error("internal: {0}")]
     Internal(String),
+    #[error(
+        "valkey version too low: detected {detected}, required >= {required}. \
+         FlowFabric uses the Valkey Functions API (FCALL / FUNCTION LOAD), \
+         which landed in Valkey 7.0 — older versions lack the API entirely. \
+         During a rolling upgrade this check retries for 60s; if it still \
+         fails, the node we reconnect to is still pre-7.0. \
+         Note: operators are strongly encouraged to run 8.0.x+ for the Lua \
+         sandbox CVE patches (CVE-2024-46981, -31449, CVE-2025-49844, \
+         -46817/18/19) and because FlowFabric's CI only validates against \
+         8.0 — a boot-time WARN is emitted on 7.x."
+    )]
+    ValkeyVersionTooLow { detected: String, required: String },
 }
 
 #[cfg(test)]

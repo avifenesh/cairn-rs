@@ -77,7 +77,7 @@ unsupported (FF is the only correctness-guaranteed path).
 Fabric is the default — `cargo build -p cairn-app` produces a binary
 that requires Valkey at boot. To get a Fabric-backed deployment up:
 
-1. Run a Valkey 8+ instance reachable from cairn.
+1. Run a Valkey 7.0+ instance reachable from cairn. **Valkey 8.0+ strongly recommended** — the 8.x line patches a series of Lua sandbox CVEs (CVE-2024-46981, CVE-2024-31449, CVE-2025-49844, CVE-2025-46817/18/19) and is FlowFabric's tested floor. Boot emits a WARN when the detected Valkey major is below 8; boot hard-fails when below 7 (no Functions API). The check retries for 60 s to tolerate rolling upgrades — see `crates/cairn-fabric/src/version_check.rs`.
 2. Load the FlowFabric Lua library into Valkey (`scripts/run-fabric-integration-tests.sh` does this from a pinned FF checkout; production operators seed from their CI artefact).
 3. Generate a 32-byte HMAC secret: `openssl rand -hex 32`.
 4. Set env vars before boot. The HMAC secret is **required** — boot fails loud if it's missing:
