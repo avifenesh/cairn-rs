@@ -14,11 +14,9 @@ pub struct TaskRecord {
     pub project: ProjectKey,
     pub parent_run_id: Option<RunId>,
     pub parent_task_id: Option<TaskId>,
-    /// Session the task is scoped to. Populated from `TaskCreated.session_id`
-    /// on new submissions (RFC-011 Phase 3). `None` for solo (session-less)
-    /// tasks, and also for legacy tasks created before Phase 3 whose event
-    /// carried no session_id — resolvers must still fall back to walking
-    /// `parent_run_id → RunRecord.session_id` in that case.
+    /// Session the task is scoped to. `None` for solo (session-less) tasks.
+    /// Also `None` for tasks whose event carried no session_id — in that case
+    /// resolvers must fall back to walking `parent_run_id → RunRecord.session_id`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub session_id: Option<SessionId>,
     pub state: TaskState,

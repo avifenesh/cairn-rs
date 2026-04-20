@@ -207,27 +207,26 @@ pub(crate) async fn persist_run_mode_default(
         .map(|_| ())
 }
 
-/// Resolve a task's session_id. RFC-011 Phase 3: prefer the binding
-/// persisted on the task record itself (`TaskCreated.session_id`, landed
-/// in V021). Fall back to walking `parent_run_id → run.session_id` only
-/// for legacy tasks whose projection row predates Phase 3.
+/// Resolve a task's session_id.
+///
+/// Returns the `session_id` already persisted on the task record when present.
+/// Falls back to walking `parent_run_id → run.session_id` for tasks whose
+/// event carried no session binding.
 ///
 /// Returns `Ok(None)` for top-level tasks (no parent run, no session).
 ///
 /// Errors (returned as axum `Response`) in the fallback path only:
 /// - Store fetch of the parent run fails → 500.
 /// - Task has `parent_run_id` but the run is not found in the projection
-///   → 404 (minting as solo would hit the wrong Valkey partition).
+///   → 404 (a silent solo-mint fallback would land on the wrong Valkey partition).
 pub(crate) async fn resolve_session_for_task_record(
     state: &AppState,
     task: &cairn_store::projections::TaskRecord,
 ) -> Result<Option<SessionId>, axum::response::Response> {
-    // Phase-3 happy path: persisted binding, no second lookup.
     if let Some(sid) = task.session_id.clone() {
         return Ok(Some(sid));
     }
-    // Legacy fallback — task row predates V021 or was created without a
-    // session binding on the event.
+    // Fallback: task row has no persisted session binding.
     let Some(parent_run_id) = task.parent_run_id.as_ref() else {
         return Ok(None);
     };

@@ -87,10 +87,8 @@ impl PgSyncProjection {
             }
 
             RuntimeEvent::TaskCreated(e) => {
-                // RFC-011 Phase 3: persist the session binding on the task
-                // row. Prefer the session_id carried on the event; fall back
-                // to the parent run's session_id for legacy events that
-                // predate Phase 3.
+                // Prefer the session_id on the event; fall back to the
+                // parent run's session_id for tasks that carried no binding.
                 let session_id_on_event = e.session_id.as_ref().map(|s| s.as_str());
                 sqlx::query(
                     "INSERT INTO tasks (task_id, tenant_id, workspace_id, project_id, parent_run_id, parent_task_id, session_id, state, title, description, version, created_at, updated_at)

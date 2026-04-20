@@ -53,8 +53,7 @@ CREATE TABLE IF NOT EXISTS tasks (
     project_id     TEXT NOT NULL,
     parent_run_id  TEXT REFERENCES runs(run_id),
     parent_task_id TEXT REFERENCES tasks(task_id),
-    -- RFC-011 Phase 3: the task's authoritative session binding,
-    -- populated from TaskCreated.session_id at insert time.
+    -- Session binding populated from TaskCreated.session_id at insert time.
     session_id     TEXT REFERENCES sessions(session_id),
     state          TEXT NOT NULL DEFAULT 'queued',
     failure_class  TEXT,
