@@ -2551,7 +2551,18 @@ async fn prompt_template_routes_render_and_validate_required_vars() {
 }
 
 #[tokio::test]
-async fn task_dependency_routes_round_trip() {
+async fn task_dependency_routes_reject_without_fabric() {
+    // Under the default `in-memory-runtime` bootstrap, task
+    // dependencies are intentionally unimplemented — FF flow edges
+    // are the authoritative path and the in-memory runtime would
+    // have to duplicate FF's invariants with guaranteed drift. The
+    // HTTP route exists for API-shape stability but surfaces the
+    // Validation error when the backend can't honour it.
+    //
+    // Happy-path dependency behaviour (declare → resolve on
+    // completion → auto-skip on failure) is covered end-to-end in
+    // `cairn-fabric/tests/integration/test_task_dependencies.rs`
+    // against live Valkey.
     let (app, _runtime, tokens) =
         AppBootstrap::router_with_runtime_and_tokens(BootstrapConfig::default())
             .await
@@ -2581,6 +2592,10 @@ async fn task_dependency_routes_round_trip() {
         assert_eq!(response.status(), StatusCode::CREATED);
     }
 
+    // POST /v1/tasks/:id/dependencies — under in-memory-runtime this
+    // maps to `RunServiceImpl::declare_dependency` which returns
+    // `Validation("...requires the Fabric backend")`. The handler
+    // turns that into a 400.
     let add_dep_response = send_json_request(
         &app,
         "POST",
@@ -2591,53 +2606,28 @@ async fn task_dependency_routes_round_trip() {
         }),
     )
     .await;
-    assert_eq!(add_dep_response.status(), StatusCode::CREATED);
+    // Validation surfaces as 422. The handler mapping is in
+    // crates/cairn-app/src/handlers/tasks.rs::runtime_error_response.
+    assert_eq!(
+        add_dep_response.status(),
+        StatusCode::UNPROCESSABLE_ENTITY,
+        "in-memory-runtime must reject declare_dependency with 422"
+    );
 
-    let deps_before = send_empty_request(
+    // GET /v1/tasks/:id/dependencies always returns an empty list
+    // under in-memory-runtime — nothing can be declared, so nothing
+    // can be listed. The route stays wired so a pre-Fabric client
+    // probing the endpoint doesn't get a 404.
+    let deps_list = send_empty_request(
         &app,
         "GET",
         "/v1/tasks/task_dep_b/dependencies",
         "task-dependency-token",
     )
     .await;
-    assert_eq!(deps_before.status(), StatusCode::OK);
-    let deps_before_json = response_json(deps_before).await;
-    assert_eq!(deps_before_json.as_array().unwrap().len(), 1);
-    assert!(deps_before_json[0]["resolved_at_ms"].is_null());
-
-    let claim = send_json_request(
-        &app,
-        "POST",
-        "/v1/tasks/task_dep_a/claim",
-        "task-dependency-token",
-        serde_json::json!({
-            "worker_id": "worker-a",
-            "lease_duration_ms": 60000
-        }),
-    )
-    .await;
-    assert_eq!(claim.status(), StatusCode::OK);
-
-    let complete = send_empty_request(
-        &app,
-        "POST",
-        "/v1/tasks/task_dep_a/complete",
-        "task-dependency-token",
-    )
-    .await;
-    assert_eq!(complete.status(), StatusCode::OK);
-
-    let deps_after = send_empty_request(
-        &app,
-        "GET",
-        "/v1/tasks/task_dep_b/dependencies",
-        "task-dependency-token",
-    )
-    .await;
-    assert_eq!(deps_after.status(), StatusCode::OK);
-    let deps_after_json = response_json(deps_after).await;
-    assert_eq!(deps_after_json.as_array().unwrap().len(), 1);
-    assert!(deps_after_json[0]["resolved_at_ms"].as_u64().is_some());
+    assert_eq!(deps_list.status(), StatusCode::OK);
+    let deps_json = response_json(deps_list).await;
+    assert_eq!(deps_json.as_array().unwrap().len(), 0);
 }
 
 #[tokio::test]
