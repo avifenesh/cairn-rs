@@ -145,6 +145,19 @@ pub(crate) const PROVIDER_DURATION_BUCKETS_MS: [u64; 10] = [
     100, 250, 500, 1_000, 2_500, 5_000, 10_000, 30_000, 60_000, 120_000,
 ];
 
+// Belt-and-suspenders: `HistogramSample::bucket_counts` is sized to
+// `HTTP_DURATION_BUCKETS_MS.len()`. The provider path reuses the same
+// type but indexes with `PROVIDER_DURATION_BUCKETS_MS`; if someone
+// grows one array without the other, the loop in
+// `record_provider_call` panics at runtime. This static assert turns
+// that into a compile error.
+#[cfg(feature = "metrics-providers")]
+const _: () = assert!(
+    PROVIDER_DURATION_BUCKETS_MS.len() == HTTP_DURATION_BUCKETS_MS.len(),
+    "provider histogram reuses HistogramSample's fixed-size bucket_counts array — \
+     keep PROVIDER_DURATION_BUCKETS_MS and HTTP_DURATION_BUCKETS_MS the same length",
+);
+
 #[cfg(feature = "metrics-providers")]
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub(crate) struct ProviderCallKey {
@@ -375,43 +388,37 @@ impl AppMetrics {
         input_tokens: Option<u32>,
         output_tokens: Option<u32>,
     ) {
-        // Counter
+        // Counter — build the key before taking the lock so allocations
+        // don't happen under contention.
+        let call_key = ProviderCallKey {
+            provider_connection: provider_connection.to_owned(),
+            model: model.to_owned(),
+            operation_kind: operation_kind.to_owned(),
+            status: status.to_owned(),
+        };
         {
             let mut calls = self
                 .provider_calls
                 .lock()
                 .unwrap_or_else(|e| e.into_inner());
-            *calls
-                .entry(ProviderCallKey {
-                    provider_connection: provider_connection.to_owned(),
-                    model: model.to_owned(),
-                    operation_kind: operation_kind.to_owned(),
-                    status: status.to_owned(),
-                })
-                .or_insert(0) += 1;
+            *calls.entry(call_key).or_insert(0) += 1;
         }
 
-        // Duration histogram (only if the call actually returned)
+        // Duration histogram (only if the call actually returned).
         if let Some(latency_ms) = latency_ms {
+            let duration_key = ProviderCallDurationKey {
+                provider_connection: provider_connection.to_owned(),
+                model: model.to_owned(),
+                operation_kind: operation_kind.to_owned(),
+            };
             let mut durations = self
                 .provider_call_durations
                 .lock()
                 .unwrap_or_else(|e| e.into_inner());
-            let sample = durations
-                .entry(ProviderCallDurationKey {
-                    provider_connection: provider_connection.to_owned(),
-                    model: model.to_owned(),
-                    operation_kind: operation_kind.to_owned(),
-                })
-                .or_insert_with(|| HistogramSample {
-                    bucket_counts: [0; HTTP_DURATION_BUCKETS_MS.len()],
-                    sum_ms: 0,
-                    count: 0,
-                });
-            // Reuse HistogramSample's fixed array size by taking the
-            // wider PROVIDER bucket set here — same shape, different
-            // upper bound. The len is identical (10), chosen that
-            // way so HistogramSample stays a single type.
+            // HistogramSample::default() gives us the zeroed
+            // bucket_counts array; the static_assert above guarantees
+            // its fixed length matches PROVIDER_DURATION_BUCKETS_MS.
+            let sample = durations.entry(duration_key).or_default();
             sample.count += 1;
             sample.sum_ms = sample.sum_ms.saturating_add(latency_ms);
             for (idx, bucket) in PROVIDER_DURATION_BUCKETS_MS.iter().enumerate() {
@@ -421,28 +428,33 @@ impl AppMetrics {
             }
         }
 
-        // Token counters
+        // Token counters. Skip the lock entirely when neither side of
+        // the token pair is present; build each key outside the lock
+        // so cloning happens before contention. When both are present
+        // we pay two key allocations — unavoidable given they differ
+        // in the `kind` label, which is part of the hash.
+        if input_tokens.is_none() && output_tokens.is_none() {
+            return;
+        }
+        let input_key = input_tokens.map(|_| ProviderTokenKey {
+            provider_connection: provider_connection.to_owned(),
+            model: model.to_owned(),
+            kind: "input".to_owned(),
+        });
+        let output_key = output_tokens.map(|_| ProviderTokenKey {
+            provider_connection: provider_connection.to_owned(),
+            model: model.to_owned(),
+            kind: "output".to_owned(),
+        });
         let mut tokens = self
             .provider_tokens
             .lock()
             .unwrap_or_else(|e| e.into_inner());
-        if let Some(n) = input_tokens {
-            *tokens
-                .entry(ProviderTokenKey {
-                    provider_connection: provider_connection.to_owned(),
-                    model: model.to_owned(),
-                    kind: "input".to_owned(),
-                })
-                .or_insert(0) += u64::from(n);
+        if let (Some(key), Some(n)) = (input_key, input_tokens) {
+            *tokens.entry(key).or_insert(0) += u64::from(n);
         }
-        if let Some(n) = output_tokens {
-            *tokens
-                .entry(ProviderTokenKey {
-                    provider_connection: provider_connection.to_owned(),
-                    model: model.to_owned(),
-                    kind: "output".to_owned(),
-                })
-                .or_insert(0) += u64::from(n);
+        if let (Some(key), Some(n)) = (output_key, output_tokens) {
+            *tokens.entry(key).or_insert(0) += u64::from(n);
         }
     }
 
