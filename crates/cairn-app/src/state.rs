@@ -314,6 +314,12 @@ pub struct AppState {
     /// AND `CAIRN_OTLP_ENABLED` is truthy at boot. `None` otherwise.
     #[cfg(feature = "metrics-otel")]
     pub otlp_tap: Option<crate::metrics_otel::OtlpTap>,
+    /// Handle to the batching sink wrapping the OTLP transport.
+    /// Kept separately so `shutdown_telemetry()` can flush any
+    /// buffered spans before process exit. `None` when the OTLP
+    /// export is not wired.
+    #[cfg(feature = "metrics-otel")]
+    pub otlp_batch: Option<Arc<crate::metrics_otel::BatchingSink>>,
 }
 
 // ── GitHubIntegration ────────────────────────────────────────────────────────
@@ -912,6 +918,8 @@ impl AppState {
             otlp_exporter: Arc::new(cairn_runtime::telemetry::OtlpExporter::disabled()),
             #[cfg(feature = "metrics-otel")]
             otlp_tap: None,
+            #[cfg(feature = "metrics-otel")]
+            otlp_batch: None,
             runtime_sse_tx,
             sse_event_buffer,
             sse_seq,
@@ -950,6 +958,22 @@ impl AppState {
             use cairn_runtime::telemetry::OtlpExporter;
             let cfg = crate::metrics_otel::otlp_config_from_env();
             if cfg.enabled {
+                // Only HTTP/protobuf is wired today. Warn loudly if
+                // the operator asked for a transport we can't
+                // deliver so the mismatch is visible in boot logs
+                // instead of silently falling back.
+                if !matches!(
+                    cfg.protocol,
+                    cairn_domain::protocols::OtlpProtocol::HttpBinary
+                ) {
+                    tracing::warn!(
+                        requested = ?cfg.protocol,
+                        fallback = "http/protobuf",
+                        "CAIRN_OTLP_PROTOCOL requested an unsupported transport; \
+                         falling back to http/protobuf. gRPC + http/json are \
+                         tracked as follow-up work."
+                    );
+                }
                 // Wrap HttpProtoSink in BatchingSink so bursty event
                 // streams don't blast the collector with one POST per
                 // event. 64 spans or 2 s, whichever fires first —
@@ -965,8 +989,8 @@ impl AppState {
                 ));
                 // The OtlpExporter holds the sink in a Box; wrap the
                 // batcher in a shim that defers to the shared Arc so
-                // both the exporter and the tap/state can keep a
-                // handle if ever needed.
+                // AppState can retain the Arc for graceful
+                // shutdown-flush while the exporter owns its Box.
                 struct SinkArc(std::sync::Arc<dyn cairn_runtime::telemetry::SpanExportSink>);
                 #[async_trait::async_trait]
                 impl cairn_runtime::telemetry::SpanExportSink for SinkArc {
@@ -977,12 +1001,21 @@ impl AppState {
                         self.0.export(spans).await
                     }
                 }
-                let exporter = Arc::new(OtlpExporter::new(cfg.clone(), Box::new(SinkArc(batched))));
+                let sink_for_exporter: std::sync::Arc<
+                    dyn cairn_runtime::telemetry::SpanExportSink,
+                > = batched.clone();
+                let exporter = Arc::new(OtlpExporter::new(
+                    cfg.clone(),
+                    Box::new(SinkArc(sink_for_exporter)),
+                ));
                 state.otlp_exporter = exporter.clone();
                 state.otlp_tap = Some(crate::metrics_otel::OtlpTap::spawn(
                     state.runtime.store.clone(),
                     exporter,
                 ));
+                // Retain the batcher so shutdown_telemetry() can
+                // flush buffered spans before process exit.
+                state.otlp_batch = Some(batched);
                 tracing::info!(
                     endpoint = %cfg.endpoint,
                     redact_content = cfg.redact_content,
@@ -992,6 +1025,34 @@ impl AppState {
         }
 
         Ok(state)
+    }
+
+    /// Graceful shutdown of background telemetry tasks. Call from
+    /// the process-exit path so any buffered OTLP spans are flushed
+    /// to the collector before the process ends; without this call
+    /// the BatchingSink's timer task is cancelled asynchronously
+    /// and the final batch is dropped.
+    ///
+    /// Idempotent — safe to call multiple times; second call is a
+    /// no-op because both shutdown hooks `take()` their handles.
+    pub async fn shutdown_telemetry(&self) {
+        #[cfg(feature = "metrics-otel")]
+        {
+            // Stop the tap first so no new spans enter the
+            // batcher's buffer after we've started draining.
+            if let Some(tap) = &self.otlp_tap {
+                tap.shutdown().await;
+            }
+            if let Some(batch) = &self.otlp_batch {
+                batch.shutdown().await;
+            }
+        }
+        #[cfg(any(feature = "metrics-core", feature = "metrics-providers"))]
+        {
+            if let Some(tap) = &self.metrics_tap {
+                tap.shutdown().await;
+            }
+        }
     }
 }
 

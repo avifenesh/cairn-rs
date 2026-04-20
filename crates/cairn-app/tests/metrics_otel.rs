@@ -303,3 +303,44 @@ async fn batching_sink_flushes_on_timer() {
 
     tap.shutdown().await;
 }
+
+#[tokio::test]
+async fn batching_sink_shutdown_awaits_final_flush() {
+    // Regression for the Cursor/Gemini review finding: the old
+    // shutdown() returned before the final-flush block completed,
+    // so buffered spans were silently lost on process exit. Now
+    // shutdown() awaits the timer task, which runs the final flush
+    // before returning.
+    let (addr, received) = start_mock_collector().await;
+    let endpoint = format!("http://{addr}");
+
+    // Batch size 100 (never fires), timer 60 s (never fires during
+    // this test). The only way the single enqueued span reaches the
+    // collector is via the shutdown final-flush path.
+    let transport: Arc<dyn cairn_runtime::telemetry::SpanExportSink> =
+        Arc::new(HttpProtoSink::new(&endpoint, "cairn-rs-test"));
+    let batched = Arc::new(BatchingSink::new(transport, 100, Duration::from_secs(60)));
+
+    // Enqueue one span directly via the SpanExportSink contract.
+    let span = cairn_runtime::telemetry::ExportableSpan {
+        span_id: "0000000000000001".into(),
+        parent_span_id: None,
+        trace_id: "00000000000000000000000000000001".into(),
+        name: "shutdown_flush_probe".into(),
+        start_time_ns: 1_000_000,
+        end_time_ns: 2_000_000,
+        kind: "internal".into(),
+        status: "ok".into(),
+        attributes: std::collections::HashMap::new(),
+    };
+    use cairn_runtime::telemetry::SpanExportSink;
+    batched.export(std::slice::from_ref(&span)).await.unwrap();
+
+    // Asserting collector silence BEFORE shutdown, then non-silence
+    // AFTER, would be correct but racy on slow CI — instead we rely
+    // on the batch config (100 / 60s) to make pre-shutdown arrival
+    // structurally impossible within the test timeout.
+    batched.shutdown().await;
+
+    wait_for(&received, 1).await;
+}

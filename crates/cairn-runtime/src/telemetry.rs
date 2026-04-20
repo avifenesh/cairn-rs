@@ -259,10 +259,14 @@ impl OtlpExporter {
                 }
                 vec![ExportableSpan {
                     span_id: format!("{:016x}", hash_id(e.route_decision_id.as_ref())),
-                    // Route decisions are preludes to a ProviderCall; no
-                    // natural parent in the cairn hierarchy, so they root
-                    // their own trace. The ProviderCall that follows nests
-                    // under its run via the existing run_id path.
+                    // Route decisions structurally can't correlate with
+                    // the enclosing run: `RouteDecisionMade` carries no
+                    // `run_id`. The downstream `ProviderCallCompleted`
+                    // both references this decision (via
+                    // route_decision_id) and does carry run_id, so
+                    // operators can join the two in their OTLP
+                    // backend. Adding run_id to the event is a domain
+                    // change tracked as a follow-up.
                     parent_span_id: None,
                     trace_id: format!("{:032x}", hash_id(e.route_decision_id.as_ref())),
                     name: "route_decision".into(),

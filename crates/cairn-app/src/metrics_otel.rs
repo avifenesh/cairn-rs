@@ -242,7 +242,11 @@ pub struct BatchingSink {
     buffer: Arc<Mutex<Vec<ExportableSpan>>>,
     max_batch_size: usize,
     cancel: CancellationToken,
-    _timer_handle: JoinHandle<()>,
+    /// `Mutex<Option<_>>` so `shutdown` can `take()` and `await` the
+    /// handle — otherwise the final-flush block inside the timer
+    /// task races against process teardown and buffered spans go
+    /// missing on restart.
+    timer_handle: Mutex<Option<JoinHandle<()>>>,
 }
 
 impl BatchingSink {
@@ -294,12 +298,21 @@ impl BatchingSink {
             buffer,
             max_batch_size,
             cancel,
-            _timer_handle: timer_handle,
+            timer_handle: Mutex::new(Some(timer_handle)),
         }
     }
 
+    /// Cancel the timer and await its termination. The timer task
+    /// runs the final-flush block before returning, so when this
+    /// future resolves any buffered spans have been flushed to the
+    /// inner sink. Idempotent.
     pub async fn shutdown(&self) {
         self.cancel.cancel();
+        if let Some(handle) = self.timer_handle.lock().await.take() {
+            if let Err(e) = handle.await {
+                tracing::warn!(error = %e, "OTLP batching sink: timer task panicked");
+            }
+        }
     }
 }
 
