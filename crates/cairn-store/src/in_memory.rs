@@ -2104,15 +2104,20 @@ impl RunReadModel for InMemoryStore {
         limit: usize,
     ) -> Result<Vec<RunRecord>, StoreError> {
         let store = self.state.lock().unwrap_or_else(|e| e.into_inner());
-        let mut results: Vec<RunRecord> = store
+        // Sort borrowed refs so the per-comparison key doesn't
+        // allocate a String for each run_id; only the records that
+        // survive truncation get cloned.
+        let mut refs: Vec<&RunRecord> = store
             .runs
             .values()
             .filter(|r| r.parent_run_id.as_ref() == Some(parent_run_id))
-            .cloned()
             .collect();
-        results.sort_by_key(|r| (r.created_at, r.run_id.as_str().to_owned()));
-        results.truncate(limit);
-        Ok(results)
+        refs.sort_by(|a, b| {
+            a.created_at
+                .cmp(&b.created_at)
+                .then_with(|| a.run_id.as_str().cmp(b.run_id.as_str()))
+        });
+        Ok(refs.into_iter().take(limit).cloned().collect())
     }
 }
 
