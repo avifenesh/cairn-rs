@@ -372,6 +372,6 @@ Both implementations scan up to 10,000 `EventLog` events and truncate silently i
 
 ## 8. Versioning
 
-- Pinned FF rev: `1b19dd108ec0f9af7c344d2e129d053449edcb6f` (in every `crates/cairn-fabric/Cargo.toml` `rev = …` entry). Bumped from `a09871000574388256b1dd7c910239e992c0d3a6` in RFC-011 phase-1 sweep.
+- FF crates: `ff-core = "0.1"`, `ff-sdk = "0.1"`, `ff-engine = "0.1"`, `ff-scheduler = "0.1"`, `ff-script = "0.1"`, `ferriskey = "0.1"` — consumed from crates.io as of FlowFabric v0.1.1. The caret requirement tracks 0.1.x patches automatically; bump to `^0.2` only when FF cuts a deliberate breaking release.
 - Cairn-fabric crate version: `0.1.0` (unpublished, `publish = false`).
-- Bumping the FF rev requires the `scripts/run-fabric-integration-tests.sh` `FF_REV` env var to match. The script fails fast on mismatch.
+- `scripts/run-fabric-integration-tests.sh` `FF_REV` pins the upstream tag solely to load the matching `flowfabric.lua` bundle into the test Valkey; the Rust crates come from crates.io, so this ref only controls Lua-bundle parity.

@@ -6,14 +6,15 @@ license = "BSL-1.1"
 publish = false
 
 [dependencies]
-# FlowFabric crates — pinned to upstream main until FF publishes to crates.io.
-# Bump rev in lockstep across all six entries when FF moves forward.
-ff-core = { git = "https://github.com/avifenesh/FlowFabric.git", rev = "01f6327ff18b413c96224cf1648d99e6e47568e4" }
-ff-sdk = { git = "https://github.com/avifenesh/FlowFabric.git", rev = "01f6327ff18b413c96224cf1648d99e6e47568e4" }
-ff-engine = { git = "https://github.com/avifenesh/FlowFabric.git", rev = "01f6327ff18b413c96224cf1648d99e6e47568e4" }
-ff-scheduler = { git = "https://github.com/avifenesh/FlowFabric.git", rev = "01f6327ff18b413c96224cf1648d99e6e47568e4" }
-ff-script = { git = "https://github.com/avifenesh/FlowFabric.git", rev = "01f6327ff18b413c96224cf1648d99e6e47568e4" }
-ferriskey = { git = "https://github.com/avifenesh/FlowFabric.git", rev = "01f6327ff18b413c96224cf1648d99e6e47568e4" }
+# FlowFabric crates — consumed from crates.io as of v0.1.1. Caret
+# requirement tracks 0.1.x patches automatically; bump to `^0.2` only
+# when FF cuts a deliberate breaking release.
+ff-core = "0.1"
+ff-sdk = "0.1"
+ff-engine = "0.1"
+ff-scheduler = "0.1"
+ff-script = "0.1"
+ferriskey = "0.1"
 
 # Cairn crates
 cairn-domain = { path = "../cairn-domain" }
