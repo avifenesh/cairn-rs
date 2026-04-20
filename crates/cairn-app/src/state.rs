@@ -304,6 +304,11 @@ pub struct AppState {
     /// through this field to `FabricServices::budgets`, `quotas`,
     /// `scheduler`, `signals` which aren't on the core trait surface.
     pub fabric: Option<Arc<cairn_fabric::FabricServices>>,
+    /// Background task that derives lifecycle metrics from the event
+    /// log broadcast. Kept on `AppState` so its lifetime tracks the
+    /// process; drop/cancel is managed by shutdown paths.
+    #[cfg(feature = "metrics-core")]
+    pub metrics_tap: Option<crate::metrics_tap::MetricsTap>,
 }
 
 // ── GitHubIntegration ────────────────────────────────────────────────────────
@@ -864,7 +869,8 @@ impl AppState {
             .await
             .map_err(|err| format!("failed to seed default license: {err}"))?;
 
-        let state = Self {
+        #[allow(unused_mut)]
+        let mut state = Self {
             config,
             document_store,
             retrieval,
@@ -916,8 +922,20 @@ impl AppState {
             model_registry: ModelRegistry::with_bundled()
                 .unwrap_or_else(|_| ModelRegistry::empty()),
             fabric,
+            #[cfg(feature = "metrics-core")]
+            metrics_tap: None,
         };
         state.runtime.store.reset_usage_counters();
+
+        #[cfg(feature = "metrics-core")]
+        {
+            let tap = crate::metrics_tap::MetricsTap::spawn(
+                state.runtime.store.clone(),
+                state.metrics.clone(),
+            );
+            state.metrics_tap = Some(tap);
+        }
+
         Ok(state)
     }
 }

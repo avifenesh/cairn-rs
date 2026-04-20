@@ -16,6 +16,8 @@ use cairn_api::auth::Authenticator;
 use cairn_api::auth::{AuthPrincipal, ServiceTokenAuthenticator};
 use cairn_domain::{ProjectKey, PromptReleaseId, WorkspaceId, WorkspaceKey, WorkspaceRole};
 use cairn_runtime::set_current_trace_id;
+#[cfg(feature = "metrics-core")]
+use cairn_runtime::TenantService;
 use cairn_runtime::WorkspaceService;
 use cairn_store::projections::{PromptReleaseReadModel, WorkspaceMembershipReadModel};
 use uuid::Uuid;
@@ -560,6 +562,44 @@ pub(crate) async fn refresh_activity_metrics(state: &AppState) {
     state
         .metrics
         .set_active_counts(active_runs as usize, active_tasks as usize);
+
+    #[cfg(feature = "metrics-core")]
+    {
+        // Projection lag: for the in-memory store this is always 0 because
+        // projections are applied synchronously inside `append`. The gauge
+        // exists so Postgres / SQLite backends (which can lag) have a
+        // ready-made series. Not reading `head_position` to call out the
+        // 0-is-structural nature; update when async projections land.
+        state.metrics.set_projection_lag(0);
+
+        // Tenant-scoped queue depths. Bounded to the first 200 tenants to
+        // keep the metrics handler latency predictable on large installs;
+        // operators who need per-tenant visibility past that point should
+        // move to an async collector.
+        if let Ok(tenants) = state.runtime.tenants.list(200, 0).await {
+            for t in tenants {
+                let tenant_id = t.tenant_id.as_str();
+                let runs = state
+                    .runtime
+                    .store
+                    .count_active_runs_for_tenant(&t.tenant_id)
+                    .await;
+                let tasks = state
+                    .runtime
+                    .store
+                    .count_active_tasks_for_tenant(&t.tenant_id)
+                    .await;
+                let pending = state
+                    .runtime
+                    .store
+                    .count_pending_approvals_for_tenant(&t.tenant_id)
+                    .await;
+                state
+                    .metrics
+                    .set_tenant_queue_depth(tenant_id, runs, tasks, pending);
+            }
+        }
+    }
 }
 
 // ── Private helpers ─────────────────────────────────────────────────────────
