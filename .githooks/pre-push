@@ -46,16 +46,16 @@ if docker info >/dev/null 2>&1; then
     exit 1
   fi
   echo "  ✓ fabric integration"
-  # Separate run with the insecure-direct-claim feature so the
-  # #[cfg(feature = "insecure-direct-claim")]-gated orchestrator-stream
+  # Separate run with the direct-valkey-claim feature so the
+  # #[cfg(feature = "direct-valkey-claim")]-gated orchestrator-stream
   # regression test actually executes. Without this, those tests
   # compile to zero and the gate is CI-dark locally.
-  if ! cargo test -p cairn-fabric --test integration --features insecure-direct-claim --quiet >/dev/null 2>&1; then
-    echo "  ❌ fabric integration tests (insecure-direct-claim) failed."
-    cargo test -p cairn-fabric --test integration --features insecure-direct-claim 2>&1 | grep "FAILED\|failures" | head -10
+  if ! cargo test -p cairn-fabric --test integration --features direct-valkey-claim --quiet >/dev/null 2>&1; then
+    echo "  ❌ fabric integration tests (direct-valkey-claim) failed."
+    cargo test -p cairn-fabric --test integration --features direct-valkey-claim 2>&1 | grep "FAILED\|failures" | head -10
     exit 1
   fi
-  echo "  ✓ fabric integration (insecure-direct-claim)"
+  echo "  ✓ fabric integration (direct-valkey-claim)"
 else
   echo "  ⊘ fabric integration (skipped — docker daemon unreachable)"
 fi

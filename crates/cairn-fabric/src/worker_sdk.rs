@@ -4,7 +4,7 @@
 //!
 //! Upstream FF gates `ff_sdk::worker::{claim_next, issue_claim_grant,
 //! claim_execution, claim_resumed_execution}` behind
-//! `#[cfg(feature = "insecure-direct-claim")]`, and `ClaimedTask::new` is
+//! `#[cfg(feature = "direct-valkey-claim")]`, and `ClaimedTask::new` is
 //! `pub(crate)` — so cairn cannot build a `ClaimedTask` from a
 //! scheduler-issued `ClaimGrant` without that feature.
 //!
@@ -14,8 +14,8 @@
 //!      drive their own claim FCALL) go through this. Same pattern as
 //!      `task_service::claim`.
 //!   2. Legacy direct: `CairnWorker::claim_next` — gated behind the cairn
-//!      feature `insecure-direct-claim`, forwards to
-//!      `ff-sdk/insecure-direct-claim`. Off by default. For integration
+//!      feature `direct-valkey-claim`, forwards to
+//!      `ff-sdk/direct-valkey-claim`. Off by default. For integration
 //!      tests and local dev only; skips budget/quota admission.
 
 use std::sync::Arc;
@@ -29,7 +29,7 @@ use ff_sdk::{FlowFabricWorker, WorkerConfig};
 use crate::config::FabricConfig;
 use crate::error::FabricError;
 use crate::event_bridge::{BridgeEvent, EventBridge};
-#[cfg(feature = "insecure-direct-claim")]
+#[cfg(feature = "direct-valkey-claim")]
 use crate::helpers;
 use crate::stream::StreamWriter;
 use crate::suspension;
@@ -38,7 +38,7 @@ pub struct CairnWorker {
     inner: FlowFabricWorker,
     // Only read inside `claim_next` (feature-gated); kept on the struct so
     // the constructor signature stays stable across feature flips.
-    #[cfg_attr(not(feature = "insecure-direct-claim"), allow(dead_code))]
+    #[cfg_attr(not(feature = "direct-valkey-claim"), allow(dead_code))]
     bridge: Arc<EventBridge>,
 }
 
@@ -76,7 +76,7 @@ impl CairnWorker {
     }
 
     /// Direct (scheduler-bypassing) claim. Gated behind the cairn feature
-    /// `insecure-direct-claim` — default builds don't expose it.
+    /// `direct-valkey-claim` — default builds don't expose it.
     ///
     /// Production callers should use `FabricSchedulerService::claim_for_worker`
     /// to obtain a `ClaimGrant` (which goes through budget + quota admission),
@@ -88,7 +88,7 @@ impl CairnWorker {
     /// registry: every lease field is re-read from FF's exec_core on demand
     /// by `FabricTaskService`, and `ClaimedTask` is carried inside `CairnTask`
     /// itself.
-    #[cfg(feature = "insecure-direct-claim")]
+    #[cfg(feature = "direct-valkey-claim")]
     pub async fn claim_next(&self) -> Result<Option<CairnTask>, FabricError> {
         let claimed = self
             .inner
@@ -482,7 +482,7 @@ impl CairnTask {
 // Used by `claim_next` (feature-gated) and by the unit tests below. When the
 // feature is off in a non-test build, the function has no callers — mark it
 // allow(dead_code) to keep cargo check quiet without hiding real dead code.
-#[cfg_attr(not(feature = "insecure-direct-claim"), allow(dead_code))]
+#[cfg_attr(not(feature = "direct-valkey-claim"), allow(dead_code))]
 fn extract_tag(tags: &std::collections::HashMap<String, String>, key: &str) -> Option<String> {
     tags.get(key)
         .map(|v| v.trim())

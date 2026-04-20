@@ -85,7 +85,7 @@ impl FabricTaskService {
     // terminal op, but that cache is a lean-bridge violation — FF owns every
     // field authoritatively. A stale cache also silently skipped projection
     // emission for tasks claimed outside `FabricTaskService::claim`
-    // (insecure-direct-claim, external API callers), which was the HIGH bug
+    // (direct-valkey-claim, external API callers), which was the HIGH bug
     // fixed in the companion commit.
     async fn resolve_active_lease(
         &self,

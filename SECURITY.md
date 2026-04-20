@@ -45,7 +45,7 @@ Out of scope:
 - `CAIRN_ADMIN_TOKEN` is the admin authentication for the HTTP surface. Dev
   defaults (`dev-admin-token`, `cairn-demo-token`) must not be used in
   production. Boot logs warn when defaults are active.
-- The `insecure-direct-claim` cargo feature exposes FCALL paths that skip
+- The `direct-valkey-claim` cargo feature exposes FCALL paths that skip
   scheduler admission and budget checks. It is OFF by default and must
   stay OFF in production builds.
 - FlowFabric HMAC secret (`CAIRN_FABRIC_WAITPOINT_HMAC_SECRET`) is required
