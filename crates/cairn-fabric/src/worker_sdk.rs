@@ -1,44 +1,37 @@
 //! Thin worker wrapper over `ff_sdk::FlowFabricWorker`.
 //!
-//! # Claim paths
+//! Cairn claims run through the in-process scheduler: callers ask
+//! [`FabricSchedulerService::claim_for_worker`] for a `ClaimGrant`
+//! (budget + quota + capability admission all run server-side inside
+//! cairn), then hand that grant to
+//! [`CairnWorker::claim_from_grant`] to materialize a
+//! [`CairnTask`]. The external-process HTTP claim path
+//! (`claim_via_server` in ff-sdk) is not used — cairn is a single
+//! binary with the scheduler embedded.
 //!
-//! Upstream FF gates `ff_sdk::worker::{claim_next, issue_claim_grant,
-//! claim_execution, claim_resumed_execution}` behind
-//! `#[cfg(feature = "direct-valkey-claim")]`, and `ClaimedTask::new` is
-//! `pub(crate)` — so cairn cannot build a `ClaimedTask` from a
-//! scheduler-issued `ClaimGrant` without that feature.
+//! Terminal ops on the returned `CairnTask` read every lease field
+//! from FF's exec_core on demand; no cairn-side registry is cached.
 //!
-//! Two paths:
-//!   1. Production: `FabricSchedulerService::claim_for_worker` returns a
-//!      `ff_scheduler::ClaimGrant`. Callers that only need a grant (and
-//!      drive their own claim FCALL) go through this. Same pattern as
-//!      `task_service::claim`.
-//!   2. Legacy direct: `CairnWorker::claim_next` — gated behind the cairn
-//!      feature `direct-valkey-claim`, forwards to
-//!      `ff-sdk/direct-valkey-claim`. Off by default. For integration
-//!      tests and local dev only; skips budget/quota admission.
+//! [`FabricSchedulerService::claim_for_worker`]: crate::services::scheduler_service::FabricSchedulerService::claim_for_worker
 
 use std::sync::Arc;
 
 use cairn_domain::ids::{RunId, SessionId};
 use cairn_domain::lifecycle::{FailureClass, RunState};
 use cairn_domain::tenancy::ProjectKey;
-use ff_sdk::task::{ClaimedTask, FailOutcome, SuspendOutcome};
+use ff_core::contracts::ClaimGrant;
+use ff_sdk::task::{ClaimedTask, FailOutcome, ResumeSignal, SuspendOutcome};
 use ff_sdk::{FlowFabricWorker, WorkerConfig};
 
 use crate::config::FabricConfig;
 use crate::error::FabricError;
 use crate::event_bridge::{BridgeEvent, EventBridge};
-#[cfg(feature = "direct-valkey-claim")]
 use crate::helpers;
 use crate::stream::StreamWriter;
 use crate::suspension;
 
 pub struct CairnWorker {
     inner: FlowFabricWorker,
-    // Only read inside `claim_next` (feature-gated); kept on the struct so
-    // the constructor signature stays stable across feature flips.
-    #[cfg_attr(not(feature = "direct-valkey-claim"), allow(dead_code))]
     bridge: Arc<EventBridge>,
 }
 
@@ -47,10 +40,9 @@ impl CairnWorker {
         config: &FabricConfig,
         bridge: Arc<EventBridge>,
     ) -> Result<Self, FabricError> {
-        // WorkerConfig.capabilities is a `Vec<String>` on ff-sdk; sort + dedup
-        // mirrors the BTreeSet semantics carried by FabricConfig so both the
-        // scheduler path and the direct-claim path advertise an identical,
-        // deterministic set. FF re-validates on ingress.
+        // FF's WorkerConfig carries capabilities as a Vec<String>; our
+        // FabricConfig uses a BTreeSet for deterministic ordering.
+        // Collecting preserves that order on the wire.
         let capabilities: Vec<String> = config.worker_capabilities.iter().cloned().collect();
 
         let worker_config = WorkerConfig {
@@ -75,43 +67,34 @@ impl CairnWorker {
         Ok(Self { inner, bridge })
     }
 
-    /// Direct (scheduler-bypassing) claim. Gated behind the cairn feature
-    /// `direct-valkey-claim` — default builds don't expose it.
+    /// Consume a `ClaimGrant` (from
+    /// [`FabricSchedulerService::claim_for_worker`]) and materialize a
+    /// [`CairnTask`] with the cairn tag fields (run_id, session_id,
+    /// project) pre-extracted.
     ///
-    /// Production callers should use `FabricSchedulerService::claim_for_worker`
-    /// to obtain a `ClaimGrant` (which goes through budget + quota admission),
-    /// then consume that grant via the direct FCALL pattern in
-    /// `task_service::claim`. See the module-level dispute note for why a
-    /// scheduler-mediated `CairnTask` wrapper is not available today.
-    ///
-    /// Terminal ops on the returned `CairnTask` do NOT require any cairn-side
-    /// registry: every lease field is re-read from FF's exec_core on demand
-    /// by `FabricTaskService`, and `ClaimedTask` is carried inside `CairnTask`
-    /// itself.
-    #[cfg(feature = "direct-valkey-claim")]
-    pub async fn claim_next(&self) -> Result<Option<CairnTask>, FabricError> {
-        let claimed = self
+    /// [`FabricSchedulerService::claim_for_worker`]: crate::services::scheduler_service::FabricSchedulerService::claim_for_worker
+    pub async fn claim_from_grant(
+        &self,
+        lane: ff_core::types::LaneId,
+        grant: ClaimGrant,
+    ) -> Result<CairnTask, FabricError> {
+        let task = self
             .inner
-            .claim_next()
+            .claim_from_grant(lane, grant)
             .await
-            .map_err(|e| FabricError::Bridge(format!("claim_next: {e}")))?;
-
-        let task = match claimed {
-            Some(t) => t,
-            None => return Ok(None),
-        };
+            .map_err(|e| FabricError::Bridge(format!("claim_from_grant: {e}")))?;
 
         let run_id = extract_tag(task.tags(), "cairn.run_id");
         let session_id = extract_tag(task.tags(), "cairn.session_id");
         let project_str = extract_tag(task.tags(), "cairn.project");
 
-        Ok(Some(CairnTask {
+        Ok(CairnTask {
             task: Some(task),
             bridge: self.bridge.clone(),
             run_id: run_id.map(RunId::new),
             session_id: session_id.map(SessionId::new),
             project: project_str.and_then(|s| helpers::try_parse_project_key(&s)),
-        }))
+        })
     }
 
     pub fn inner(&self) -> &FlowFabricWorker {
@@ -208,6 +191,17 @@ impl CairnTask {
 
     pub fn input_payload(&self) -> &[u8] {
         self.task().input_payload()
+    }
+
+    /// Signals that satisfied the waitpoint and triggered the current
+    /// resume. Returns an empty list for fresh claims (task was not
+    /// resumed from suspension). Useful for workers that branch on
+    /// *which* of several possible signals woke them.
+    pub async fn resume_signals(&self) -> Result<Vec<ResumeSignal>, FabricError> {
+        self.try_task()?
+            .resume_signals()
+            .await
+            .map_err(|e| FabricError::Bridge(format!("resume_signals: {e}")))
     }
 
     pub fn stream_writer(&self) -> StreamWriter<'_> {
@@ -479,10 +473,6 @@ impl CairnTask {
     }
 }
 
-// Used by `claim_next` (feature-gated) and by the unit tests below. When the
-// feature is off in a non-test build, the function has no callers — mark it
-// allow(dead_code) to keep cargo check quiet without hiding real dead code.
-#[cfg_attr(not(feature = "direct-valkey-claim"), allow(dead_code))]
 fn extract_tag(tags: &std::collections::HashMap<String, String>, key: &str) -> Option<String> {
     tags.get(key)
         .map(|v| v.trim())

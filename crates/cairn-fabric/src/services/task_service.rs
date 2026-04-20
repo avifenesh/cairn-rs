@@ -82,9 +82,9 @@ impl FabricTaskService {
 
     // Always read the lease triple from FF's exec_core — FF owns every
     // field authoritatively. Caching (lease_id, lease_epoch, attempt_index)
-    // in the registry would also silently skip projection emission for
-    // tasks claimed outside `FabricTaskService::claim` (the
-    // direct-valkey-claim path, external API callers).
+    // in a registry would silently skip projection emission for tasks
+    // claimed outside `FabricTaskService::claim` (external API callers
+    // and worker-SDK consumers).
     async fn resolve_active_lease(
         &self,
         task_id: &TaskId,

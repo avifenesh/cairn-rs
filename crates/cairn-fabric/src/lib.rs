@@ -28,10 +28,17 @@
 //! let fabric = FabricServices::start(config, event_log).await?;
 //!
 //! // Use fabric.runs, fabric.tasks, fabric.budgets, fabric.quotas, etc.
-//! // Worker loop (direct-claim path, behind the `direct-valkey-claim`
-//! // feature — production callers go through cairn-orchestrator):
+//! // Worker loop — scheduler-routed claim, admission checks on every
+//! // grant:
 //! let worker = cairn_fabric::CairnWorker::connect(&worker_config, bridge.clone()).await?;
-//! while let Some(task) = worker.claim_next().await? {
+//! loop {
+//!     let grant = match fabric.scheduler.claim_for_worker(
+//!         &worker_id, &worker_instance_id, &lane, &capabilities, grant_ttl_ms,
+//!     ).await? {
+//!         Some(g) => g,
+//!         None => { tokio::time::sleep(poll_interval).await; continue; }
+//!     };
+//!     let task = worker.claim_from_grant(&grant).await?;
 //!     task.complete_with_result(None).await?;
 //! }
 //!

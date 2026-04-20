@@ -17,17 +17,6 @@
 //! asserted order means the loop wrote the frames in the correct order
 //! — not that Valkey sorted them. Driving the sink directly would only
 //! prove the Valkey invariant, not the cairn-side emission order.
-//!
-//! # Why `direct-valkey-claim`?
-//!
-//! The only public path to a live `CairnTask` today is
-//! `CairnWorker::claim_next`, which is gated behind the
-//! `direct-valkey-claim` feature (`ClaimedTask::new` is `pub(crate)`
-//! on ff-sdk — see `crates/cairn-fabric/src/worker_sdk.rs` module
-//! docstring). The test is cfg-gated so default CI runs skip it; the
-//! pre-push + fabric-integration CI job enables the feature.
-
-#![cfg(feature = "direct-valkey-claim")]
 
 use std::collections::BTreeSet;
 use std::path::PathBuf;
@@ -126,14 +115,15 @@ async fn orchestrator_loop_emits_four_frames_in_per_iteration_order() {
         .await
         .expect("submit failed");
 
-    // 2. Claim through CairnWorker to get a live CairnTask. (Scheduler
-    //    window is rolling 32 partitions per poll; loop with a short
-    //    backoff until a task comes up.)
+    // 2. Ask the in-process scheduler for a claim grant against the
+    //    harness lane, then materialize it into a live CairnTask.
+    //    Scheduler polls a rolling 32-partition window per call, so
+    //    loop with a short backoff until a grant comes up.
     let worker_config = worker_config_from(&h);
     let worker = CairnWorker::connect(&worker_config, h.fabric.bridge.clone())
         .await
         .expect("CairnWorker::connect failed");
-    let claimed = claim_with_retry(&worker).await;
+    let claimed = grant_and_claim_with_retry(&h, &worker_config, &worker).await;
 
     // 3. Build the OrchestrationContext + scripted phases that emit
     //    exactly one tool proposal (so log_tool_call + log_tool_result
@@ -364,34 +354,52 @@ fn worker_config_from(h: &TestHarness) -> FabricConfig {
     }
 }
 
-/// `CairnWorker::claim_next` scans a rolling 32-partition window per
-/// call (`PARTITION_SCAN_CHUNK` in ff-sdk). With 256 partitions up to
-/// 8 polls are needed to cover the full keyspace. Loop with a short
-/// backoff until a task comes up; deadline-bounded to surface real
-/// failures.
-async fn claim_with_retry(worker: &CairnWorker) -> cairn_fabric::CairnTask {
+/// The scheduler's `claim_for_worker` scans a rolling 32-partition
+/// window per call (`PARTITION_SCAN_CHUNK` in ff-sdk). With 256
+/// partitions up to 8 polls are needed to cover the full keyspace.
+/// Loop with a short backoff until a grant comes up; deadline-bounded
+/// to surface real failures.
+async fn grant_and_claim_with_retry(
+    h: &TestHarness,
+    worker_config: &FabricConfig,
+    worker: &CairnWorker,
+) -> cairn_fabric::CairnTask {
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
     loop {
-        match worker.claim_next().await {
-            Ok(Some(task)) => return task,
+        let grant = match h
+            .fabric
+            .scheduler
+            .claim_for_worker(
+                &worker_config.lane_id,
+                &worker_config.worker_id,
+                &worker_config.worker_instance_id,
+                worker_config.grant_ttl_ms,
+            )
+            .await
+        {
+            Ok(Some(g)) => g,
             Ok(None) => {
                 if std::time::Instant::now() >= deadline {
                     panic!(
                         "no eligible task returned within 10s — lane/capability/partition \
-                         mismatch between harness submit path and worker claim path"
+                         mismatch between harness submit path and scheduler claim path"
                     );
                 }
                 tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+                continue;
             }
-            Err(e) => panic!("claim_next RPC failed: {e}"),
+            Err(e) => panic!("scheduler claim_for_worker failed: {e}"),
+        };
+        match worker
+            .claim_from_grant(worker_config.lane_id.clone(), grant)
+            .await
+        {
+            Ok(task) => return task,
+            Err(e) => panic!("claim_from_grant failed: {e}"),
         }
     }
 }
 
-// Silence unused-import warning on `TaskId` under cfg-off builds —
-// cfg-gate is at the file level so this path only compiles with the
-// feature, but the import chain is wide enough that keeping TaskId
-// explicit aids search/grep.
 #[allow(dead_code)]
 fn _task_id_is_imported(_: TaskId) {}
 
