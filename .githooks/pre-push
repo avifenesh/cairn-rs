@@ -19,30 +19,28 @@ echo "═══ pre-push gate ═══"
 #    daemon is unreachable so laptops without docker can still push).
 #    This is what CI's `fabric-integration` job runs.
 echo "  rust lib tests (--features in-memory-runtime)..."
-if ! cargo test --workspace --lib --features cairn-app/in-memory-runtime --quiet >/dev/null 2>&1; then
+if ! output=$(cargo test --workspace --lib --features cairn-app/in-memory-runtime 2>&1); then
   echo "  ❌ rust lib tests failed."
-  cargo test --workspace --lib --features cairn-app/in-memory-runtime 2>&1 | grep "FAILED\|failures" | head -10
+  echo "$output" | grep "FAILED\|failures" | head -10
   exit 1
 fi
 echo "  ✓ rust lib tests"
 
 echo "  rust integration tests (runtime + orchestrator + app)..."
-if ! cargo test --tests \
+if ! output=$(cargo test --tests \
     -p cairn-runtime -p cairn-orchestrator -p cairn-app \
-    --features cairn-app/in-memory-runtime --quiet >/dev/null 2>&1; then
+    --features cairn-app/in-memory-runtime 2>&1); then
   echo "  ❌ rust integration tests failed."
-  cargo test --tests \
-    -p cairn-runtime -p cairn-orchestrator -p cairn-app \
-    --features cairn-app/in-memory-runtime 2>&1 | grep "FAILED\|failures" | head -10
+  echo "$output" | grep "FAILED\|failures" | head -10
   exit 1
 fi
 echo "  ✓ rust integration tests"
 
 echo "  fabric integration (testcontainers)..."
 if docker info >/dev/null 2>&1; then
-  if ! cargo test -p cairn-fabric --test integration --quiet >/dev/null 2>&1; then
+  if ! output=$(cargo test -p cairn-fabric --test integration 2>&1); then
     echo "  ❌ fabric integration tests failed."
-    cargo test -p cairn-fabric --test integration 2>&1 | grep "FAILED\|failures" | head -10
+    echo "$output" | grep "FAILED\|failures" | head -10
     exit 1
   fi
   echo "  ✓ fabric integration"
@@ -50,9 +48,9 @@ if docker info >/dev/null 2>&1; then
   # #[cfg(feature = "direct-valkey-claim")]-gated orchestrator-stream
   # regression test actually executes. Without this, those tests
   # compile to zero and the gate is CI-dark locally.
-  if ! cargo test -p cairn-fabric --test integration --features direct-valkey-claim --quiet >/dev/null 2>&1; then
+  if ! output=$(cargo test -p cairn-fabric --test integration --features direct-valkey-claim 2>&1); then
     echo "  ❌ fabric integration tests (direct-valkey-claim) failed."
-    cargo test -p cairn-fabric --test integration --features direct-valkey-claim 2>&1 | grep "FAILED\|failures" | head -10
+    echo "$output" | grep "FAILED\|failures" | head -10
     exit 1
   fi
   echo "  ✓ fabric integration (direct-valkey-claim)"
