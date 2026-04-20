@@ -1,5 +1,3 @@
-#![cfg(feature = "in-memory-runtime")]
-
 //! SSE event streaming end-to-end integration tests.
 //!
 //! Verifies that the runtime SSE endpoint at /v1/streams/runtime:
@@ -11,13 +9,14 @@
 //! The frame-emission test follows the pattern used in bootstrap_server.rs
 //! but with a tighter timeout to keep the suite fast.
 
+mod support;
+
 use axum::{
     body::Body,
     http::{Request, StatusCode},
 };
 use cairn_api::auth::AuthPrincipal;
 use cairn_api::bootstrap::BootstrapConfig;
-use cairn_app::AppBootstrap;
 use cairn_domain::tenancy::TenantKey;
 use cairn_domain::OperatorId;
 use tower::ServiceExt;
@@ -27,19 +26,18 @@ use tower::ServiceExt;
 async fn make_app() -> (
     axum::Router,
     std::sync::Arc<cairn_api::auth::ServiceTokenRegistry>,
+    std::sync::Arc<cairn_app::AppState>,
 ) {
-    let (app, _runtime, tokens) =
-        AppBootstrap::router_with_runtime_and_tokens(BootstrapConfig::default())
-            .await
-            .unwrap();
-    tokens.register(
+    let (app, state) = support::build_test_router_fake_fabric(BootstrapConfig::default()).await;
+    state.service_tokens.register(
         "sse-test-token".to_string(),
         AuthPrincipal::Operator {
             operator_id: OperatorId::new("op_sse"),
             tenant: TenantKey::new("default_tenant"),
         },
     );
-    (app, tokens)
+    let tokens = state.service_tokens.clone();
+    (app, tokens, state)
 }
 
 // ── Test 1: SSE endpoint returns 200 with text/event-stream ──────────────────
@@ -48,7 +46,7 @@ async fn make_app() -> (
 /// and set Content-Type: text/event-stream.
 #[tokio::test]
 async fn sse_endpoint_returns_200_with_event_stream_content_type() {
-    let (app, _tokens) = make_app().await;
+    let (app, _tokens, _state) = make_app().await;
 
     let response = app
         .oneshot(
@@ -85,7 +83,7 @@ async fn sse_endpoint_returns_200_with_event_stream_content_type() {
 /// Requests without a valid bearer token must be rejected with 401 Unauthorized.
 #[tokio::test]
 async fn sse_endpoint_rejects_unauthenticated_request() {
-    let (app, _tokens) = make_app().await;
+    let (app, _tokens, _state) = make_app().await;
 
     let response = app
         .oneshot(
@@ -111,7 +109,7 @@ async fn sse_endpoint_rejects_unauthenticated_request() {
 /// signals replay intent; the server must honour it without erroring.
 #[tokio::test]
 async fn sse_endpoint_accepts_last_event_id_header() {
-    let (app, _tokens) = make_app().await;
+    let (app, _tokens, _state) = make_app().await;
 
     let response = app
         .oneshot(
@@ -153,60 +151,52 @@ async fn sse_endpoint_accepts_last_event_id_header() {
 // preconditions: that events *are* appended to the store and the SSE endpoint
 // is active, leaving broadcast-delivery assertions for a real network test.
 
-/// After creating a session and run, verify: (a) both commands succeed,
-/// (b) the SSE endpoint remains responsive and returns 200 again after the
-/// events have been stored.
+/// After appending runtime events directly to the store, verify the SSE
+/// endpoint remains responsive and returns 200 text/event-stream.
+///
+/// The events are appended via `EventLog::append` rather than driving
+/// `POST /v1/sessions` + `POST /v1/runs` through handlers — the FakeFabric
+/// fixture fails mutations by design. The precondition this test cares
+/// about is "events sit in the store"; the source of those events does
+/// not matter for SSE endpoint health.
 #[tokio::test]
 async fn sse_stream_emits_frame_after_session_created() {
-    let (app, _tokens) = make_app().await;
+    use cairn_domain::{
+        EventEnvelope, EventId, EventSource, ProjectKey, RunCreated, RunId, RuntimeEvent,
+        SessionCreated, SessionId,
+    };
+    use cairn_store::EventLog;
 
-    // Create a session and run — both must succeed.
-    let session_resp = app
-        .clone()
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri("/v1/sessions")
-                .header("authorization", "Bearer sse-test-token")
-                .header("content-type", "application/json")
-                .body(Body::from(
-                    serde_json::json!({
-                        "tenant_id": "default_tenant",
-                        "workspace_id": "default_workspace",
-                        "project_id": "default_project",
-                        "session_id": "sess_sse_e2e"
-                    })
-                    .to_string(),
-                ))
-                .unwrap(),
-        )
+    let (app, _tokens, state) = make_app().await;
+
+    let project = ProjectKey::new("default_tenant", "default_workspace", "default_project");
+    state
+        .runtime
+        .store
+        .append(&[
+            EventEnvelope::for_runtime_event(
+                EventId::new("evt_sse_sess"),
+                EventSource::Runtime,
+                RuntimeEvent::SessionCreated(SessionCreated {
+                    project: project.clone(),
+                    session_id: SessionId::new("sess_sse_e2e"),
+                }),
+            ),
+            EventEnvelope::for_runtime_event(
+                EventId::new("evt_sse_run"),
+                EventSource::Runtime,
+                RuntimeEvent::RunCreated(RunCreated {
+                    project,
+                    session_id: SessionId::new("sess_sse_e2e"),
+                    run_id: RunId::new("run_sse_e2e"),
+                    parent_run_id: None,
+                    prompt_release_id: None,
+                    agent_role_id: None,
+                }),
+            ),
+        ])
         .await
         .unwrap();
-    assert_eq!(session_resp.status(), StatusCode::CREATED);
-
-    let run_resp = app
-        .clone()
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri("/v1/runs")
-                .header("authorization", "Bearer sse-test-token")
-                .header("content-type", "application/json")
-                .body(Body::from(
-                    serde_json::json!({
-                        "tenant_id": "default_tenant",
-                        "workspace_id": "default_workspace",
-                        "project_id": "default_project",
-                        "session_id": "sess_sse_e2e",
-                        "run_id": "run_sse_e2e"
-                    })
-                    .to_string(),
-                ))
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(run_resp.status(), StatusCode::CREATED);
 
     // After appending events, the SSE endpoint must still respond with 200.
     // (Frame delivery via broadcast channel requires a persistent connection;
@@ -242,7 +232,7 @@ async fn sse_stream_emits_frame_after_session_created() {
 /// The endpoint must not 404 or 400 for a valid numeric last-event-id.
 #[tokio::test]
 async fn sse_last_event_id_replay_accepted() {
-    let (app, _tokens) = make_app().await;
+    let (app, _tokens, _state) = make_app().await;
 
     // First request: no Last-Event-Id.
     let r1 = app

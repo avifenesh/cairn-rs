@@ -1,8 +1,8 @@
-#![cfg(feature = "in-memory-runtime")]
-
 //! Integration tests for RFC 014 entitlement enforcement.
 //! Verifies that feature-gated endpoints return 403 in local_eval tier
 //! and 201/200 in team_self_hosted tier.
+
+mod support;
 
 use axum::{
     body::Body,
@@ -10,7 +10,6 @@ use axum::{
 };
 use cairn_api::auth::AuthPrincipal;
 use cairn_api::bootstrap::BootstrapConfig;
-use cairn_app::AppBootstrap;
 use cairn_domain::tenancy::TenantKey;
 use cairn_domain::OperatorId;
 use tower::ServiceExt;
@@ -18,11 +17,8 @@ use tower::ServiceExt;
 const TOKEN: &str = "entitlement-test-token";
 
 async fn local_app() -> axum::Router {
-    let (app, _runtime, tokens) =
-        AppBootstrap::router_with_runtime_and_tokens(BootstrapConfig::default())
-            .await
-            .unwrap();
-    tokens.register(
+    let (app, state) = support::build_test_router_fake_fabric(BootstrapConfig::default()).await;
+    state.service_tokens.register(
         TOKEN.to_string(),
         AuthPrincipal::Operator {
             operator_id: OperatorId::new("test_op"),
@@ -33,12 +29,11 @@ async fn local_app() -> axum::Router {
 }
 
 async fn team_app() -> axum::Router {
-    let (app, _runtime, tokens) = AppBootstrap::router_with_runtime_and_tokens(
-        BootstrapConfig::team("postgres://localhost/cairn_test"),
-    )
-    .await
-    .unwrap();
-    tokens.register(
+    let (app, state) = support::build_test_router_fake_fabric(BootstrapConfig::team(
+        "postgres://localhost/cairn_test",
+    ))
+    .await;
+    state.service_tokens.register(
         TOKEN.to_string(),
         AuthPrincipal::Operator {
             operator_id: OperatorId::new("test_op"),

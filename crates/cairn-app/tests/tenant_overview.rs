@@ -1,6 +1,6 @@
-#![cfg(feature = "in-memory-runtime")]
-
 //! Integration test for RFC 008 tenant overview endpoint.
+
+mod support;
 
 use axum::{
     body::{to_bytes, Body},
@@ -8,7 +8,6 @@ use axum::{
 };
 use cairn_api::auth::AuthPrincipal;
 use cairn_api::bootstrap::BootstrapConfig;
-use cairn_app::AppBootstrap;
 use cairn_domain::tenancy::TenantKey;
 use cairn_domain::tenancy::WorkspaceRole;
 use cairn_domain::{OperatorId, TenantId, WorkspaceId, WorkspaceKey};
@@ -19,11 +18,9 @@ const TOKEN: &str = "tenant-overview-token";
 
 #[tokio::test]
 async fn tenant_overview_returns_workspace_and_member_counts() {
-    let (app, runtime, tokens) =
-        AppBootstrap::router_with_runtime_and_tokens(BootstrapConfig::default())
-            .await
-            .unwrap();
-    tokens.register(
+    let (app, state) = support::build_test_router_fake_fabric(BootstrapConfig::default()).await;
+    let runtime = state.runtime.clone();
+    state.service_tokens.register(
         TOKEN.to_string(),
         AuthPrincipal::Operator {
             operator_id: OperatorId::new("test_op"),
@@ -140,11 +137,8 @@ async fn tenant_overview_returns_workspace_and_member_counts() {
 
 #[tokio::test]
 async fn tenant_overview_returns_404_for_unknown_tenant() {
-    let (app, _runtime, tokens) =
-        AppBootstrap::router_with_runtime_and_tokens(BootstrapConfig::default())
-            .await
-            .unwrap();
-    tokens.register(
+    let (app, state) = support::build_test_router_fake_fabric(BootstrapConfig::default()).await;
+    state.service_tokens.register(
         TOKEN.to_string(),
         AuthPrincipal::Operator {
             operator_id: OperatorId::new("test_op"),

@@ -1,5 +1,3 @@
-#![cfg(feature = "in-memory-runtime")]
-
 //! Integration test: eval memory quality matrix builds from IngestDiagnostics.
 
 use std::sync::Arc;

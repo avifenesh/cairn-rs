@@ -5,7 +5,7 @@
 //! appends events to an `InMemoryStore`, and asserts the spans land
 //! on the wire with the right attributes.
 
-#![cfg(all(feature = "metrics-otel", feature = "in-memory-runtime"))]
+#![cfg(feature = "metrics-otel")]
 
 use std::net::SocketAddr;
 use std::sync::Arc;

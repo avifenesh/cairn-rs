@@ -8,7 +8,7 @@
 //! broadcast consumer is what's under test; the events it consumes
 //! are the same shape any production service emits.
 
-#![cfg(all(feature = "metrics-core", feature = "in-memory-runtime"))]
+#![cfg(feature = "metrics-core")]
 
 use std::sync::Arc;
 use std::time::Duration;

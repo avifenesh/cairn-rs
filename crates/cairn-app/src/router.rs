@@ -1670,6 +1670,22 @@ impl AppBootstrap {
             .await
     }
 
+    /// Serve a pre-built router on the given listener. Integration-test
+    /// entry point; production callers use [`Self::serve_with_listener`].
+    ///
+    /// Lets tests build a router via
+    /// [`Self::router_with_injected_runtime`] (typically wired to a
+    /// `FakeFabric` fixture) and then bind it, without going through
+    /// the runtime construction inside `serve_with_listener`.
+    pub async fn serve_prebuilt_router(
+        &self,
+        listener: TcpListener,
+        router: Router,
+    ) -> Result<(), String> {
+        self.serve_with_shutdown(listener, router, std::future::pending())
+            .await
+    }
+
     async fn serve_with_shutdown<F>(
         &self,
         listener: TcpListener,

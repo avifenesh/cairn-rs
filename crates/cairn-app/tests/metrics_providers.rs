@@ -6,7 +6,7 @@
 //! to an `InMemoryStore` with a live `MetricsTap` attached. The events
 //! are the same shape any production provider emits.
 
-#![cfg(all(feature = "metrics-providers", feature = "in-memory-runtime"))]
+#![cfg(feature = "metrics-providers")]
 
 use std::sync::Arc;
 use std::time::Duration;
