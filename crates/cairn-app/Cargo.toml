@@ -62,7 +62,7 @@ metrics-otel = ["dep:opentelemetry-proto", "dep:prost"]
 #
 # Default: OFF. CI integration tests build with this feature; release
 # artefacts do not. See SECURITY.md for the full threat-model summary.
-debug-endpoints = []
+debug-endpoints = ["dep:ff-core"]
 
 [dependencies]
 cairn-api = { path = "../cairn-api" }
@@ -115,6 +115,9 @@ sha2 = "0.10"
 # Both optional — only compiled when `metrics-otel` is enabled.
 opentelemetry-proto = { version = "0.31", features = ["gen-tonic-messages", "trace"], optional = true, default-features = false }
 prost = { version = "0.14", optional = true }
+# Optional: only compiled when `debug-endpoints` feature is enabled.
+# Used by the RFC-011 debug endpoint to compute partition placement.
+ff-core = { version = "0.1", optional = true }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "process", "io-util"] }
