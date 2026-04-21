@@ -33,8 +33,8 @@ use crate::error::RuntimeError;
 /// 3. `None` (solo-mint path, A2A tasks).
 ///
 /// The adapter is the single source of truth for partition placement.
-/// HTTP handlers do **not** need to pre-resolve session — the
-/// redundancy was removed in RFC-011 Phase 2 closure.
+/// HTTP handlers do **not** need to pre-resolve session — calling
+/// the trait method with `None` is the contract.
 ///
 /// One caller-side exception survives in `cairn-app`'s
 /// `create_task_handler`: when submitting with `parent_task_id` but no

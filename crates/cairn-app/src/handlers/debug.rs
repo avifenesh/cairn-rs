@@ -34,7 +34,7 @@ use cairn_domain::{ProjectKey, RunId, TaskId};
 use cairn_fabric::id_map;
 use cairn_store::projections::{RunReadModel, TaskReadModel};
 
-use crate::errors::AppApiError;
+use crate::errors::{store_error_response, AppApiError};
 use crate::extractors::AdminRoleGuard;
 use crate::state::AppState;
 
@@ -89,14 +89,11 @@ pub(crate) async fn debug_partition_handler(
                     return AppApiError::new(StatusCode::NOT_FOUND, "not_found", "run not found")
                         .into_response();
                 }
-                Err(err) => {
-                    return AppApiError::new(
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        "store_error",
-                        err.to_string(),
-                    )
-                    .into_response();
-                }
+                // SEC-007: route store errors through the shared helper so
+                // the client body carries only the standard opaque shape
+                // (connection strings, table names, internal detail stay
+                // in tracing logs).
+                Err(err) => return store_error_response(err),
             };
             let eid = id_map::session_run_to_execution_id(
                 &record.project,
@@ -125,29 +122,32 @@ pub(crate) async fn debug_partition_handler(
                     return AppApiError::new(StatusCode::NOT_FOUND, "not_found", "task not found")
                         .into_response();
                 }
-                Err(err) => {
-                    return AppApiError::new(
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        "store_error",
-                        err.to_string(),
-                    )
-                    .into_response();
-                }
+                Err(err) => return store_error_response(err),
             };
+            // Match the production adapter
+            // (`FabricTaskServiceAdapter::resolve_task_project_and_session`)
+            // exactly: if the task has `parent_run_id` set but the parent
+            // run is missing from the projection, that is a NotFound, not
+            // a silent fall-through to the solo partition. Reporting
+            // "solo" here would misrepresent where the mutation would
+            // actually route at runtime — the whole point of the
+            // diagnostic is to surface real placement.
             let resolved_session = match record.session_id.clone() {
                 Some(sid) => Some(sid),
                 None => match &record.parent_run_id {
                     Some(prid) => match RunReadModel::get(store.as_ref(), prid).await {
                         Ok(Some(run)) => Some(run.session_id),
-                        Ok(None) => None,
-                        Err(err) => {
+                        Ok(None) => {
                             return AppApiError::new(
-                                StatusCode::INTERNAL_SERVER_ERROR,
-                                "store_error",
-                                err.to_string(),
+                                StatusCode::NOT_FOUND,
+                                "parent_run_not_found",
+                                format!(
+                                    "task references parent run {prid} which is not in the projection",
+                                ),
                             )
                             .into_response();
                         }
+                        Err(err) => return store_error_response(err),
                     },
                     None => None,
                 },

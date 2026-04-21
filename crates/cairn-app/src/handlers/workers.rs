@@ -234,7 +234,7 @@ pub(crate) async fn worker_claim_task_handler(
     }
 
     let task_id = TaskId::new(body.task_id);
-    // RFC-011 Phase 2: adapter derives session from the projection.
+    // Adapter derives session from the projection on every mutation.
     match state
         .runtime
         .tasks
@@ -302,7 +302,7 @@ pub(crate) async fn worker_heartbeat_handler(
     }
 
     let hb_task_id = TaskId::new(body.task_id.clone());
-    // RFC-011 Phase 2: adapter derives session from the projection.
+    // Adapter derives session from the projection on every mutation.
     match state
         .runtime
         .tasks
