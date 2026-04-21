@@ -128,9 +128,8 @@ pub fn dependency_edge_id(
     upstream_eid: &ExecutionId,
     downstream_eid: &ExecutionId,
 ) -> EdgeId {
-    let input = format!(
-        "v{NAMESPACE_VERSION}:dep_edge:\0{flow_id}\0{upstream_eid}\0{downstream_eid}",
-    );
+    let input =
+        format!("v{NAMESPACE_VERSION}:dep_edge:\0{flow_id}\0{upstream_eid}\0{downstream_eid}",);
     let uuid = Uuid::new_v5(&CAIRN_NAMESPACE, input.as_bytes());
     EdgeId::from_uuid(uuid)
 }
