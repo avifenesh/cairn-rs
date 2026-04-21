@@ -306,11 +306,7 @@ pub(crate) async fn worker_heartbeat_handler(
     match state
         .runtime
         .tasks
-        .heartbeat(
-            None,
-            &hb_task_id,
-            body.lease_extension_ms.unwrap_or(60_000),
-        )
+        .heartbeat(None, &hb_task_id, body.lease_extension_ms.unwrap_or(60_000))
         .await
     {
         Ok(task) => {

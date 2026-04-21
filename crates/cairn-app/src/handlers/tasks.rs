@@ -528,11 +528,7 @@ pub(crate) async fn heartbeat_task_handler(
     match state
         .runtime
         .tasks
-        .heartbeat(
-            None,
-            &task_id,
-            body.lease_extension_ms.unwrap_or(60_000),
-        )
+        .heartbeat(None, &task_id, body.lease_extension_ms.unwrap_or(60_000))
         .await
     {
         Ok(task) => {
@@ -560,8 +556,7 @@ pub(crate) async fn release_task_lease_handler(
 
     // RFC-011 Phase 2: see claim_task_handler for rationale.
     let before = current_event_head(&state).await;
-    match state.runtime.tasks.release_lease(None, &task_id).await
-    {
+    match state.runtime.tasks.release_lease(None, &task_id).await {
         Ok(task) => {
             publish_runtime_frames_since(&state, before).await;
             (StatusCode::OK, Json(task)).into_response()
@@ -587,8 +582,7 @@ pub(crate) async fn cancel_task_handler(
     };
 
     let before = current_event_head(&state).await;
-    match state.runtime.tasks.cancel(None, &task_id).await
-    {
+    match state.runtime.tasks.cancel(None, &task_id).await {
         Ok(record) => {
             let _ = state
                 .runtime

@@ -172,7 +172,10 @@ async fn a2a_bare_task_routes_to_solo_partition() {
     );
     // Sanity: partition index must be valid (default 256 partitions).
     let idx = info["partition_index"].as_u64().expect("index is u64");
-    assert!(idx < 1024, "partition index outside plausible range: {info}");
+    assert!(
+        idx < 1024,
+        "partition index outside plausible range: {info}"
+    );
 }
 
 #[tokio::test]
