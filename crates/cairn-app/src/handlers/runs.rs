@@ -393,6 +393,7 @@ pub(crate) async fn get_run_handler(
 pub(crate) async fn create_run_handler(
     State(state): State<Arc<AppState>>,
     Extension(principal): Extension<AuthPrincipal>,
+    trace_id: Option<Extension<crate::middleware::TraceId>>,
     project_scope: ProjectJson<CreateRunRequest>,
 ) -> impl IntoResponse {
     let body = project_scope.into_inner();
@@ -437,17 +438,39 @@ pub(crate) async fn create_run_handler(
         }
     }
     let before = current_event_head(&state).await;
-    match state
-        .runtime
-        .runs
-        .start(
-            &project,
-            &session_id,
-            RunId::new(body.run_id),
-            body.parent_run_id.map(RunId::new),
-        )
-        .await
-    {
+    // RFC 011: if the request arrived with an `x-trace-id` header the
+    // middleware put it on extensions as a `TraceId`. Thread it through
+    // to Fabric so the emitted `RunCreated` envelope's correlation_id
+    // matches the trace id, making `GET /v1/trace/:id` non-empty.
+    let correlation_id = trace_id.map(|Extension(t)| t.as_str().to_owned());
+    let start_result = match correlation_id.as_deref() {
+        Some(corr) if !corr.is_empty() => {
+            state
+                .runtime
+                .runs
+                .start_with_correlation(
+                    &project,
+                    &session_id,
+                    RunId::new(body.run_id),
+                    body.parent_run_id.map(RunId::new),
+                    corr,
+                )
+                .await
+        }
+        _ => {
+            state
+                .runtime
+                .runs
+                .start(
+                    &project,
+                    &session_id,
+                    RunId::new(body.run_id),
+                    body.parent_run_id.map(RunId::new),
+                )
+                .await
+        }
+    };
+    match start_result {
         Ok(run) => {
             if let Some(mode) = body.mode.as_ref() {
                 if let Err(err) =

@@ -178,7 +178,13 @@ pub(crate) async fn rate_limit_middleware(
 #[derive(Clone, Debug)]
 pub(crate) struct RequestId(#[allow(dead_code)] pub(crate) String);
 #[derive(Clone, Debug)]
-pub(crate) struct TraceId(#[allow(dead_code)] String);
+pub(crate) struct TraceId(String);
+
+impl TraceId {
+    pub(crate) fn as_str(&self) -> &str {
+        self.0.as_str()
+    }
+}
 #[derive(Clone, Debug)]
 pub(crate) struct SpanId(#[allow(dead_code)] String);
 
