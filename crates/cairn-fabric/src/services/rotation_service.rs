@@ -167,11 +167,15 @@ enum OkVariant {
     Noop,
 }
 
-/// Inspect a success envelope (`check_fcall_success` has already
-/// confirmed the leading Int(1)) and pick out whether this partition
-/// rotated or was a replay. FF returns:
-///   `ok("rotated", previous_kid_or_empty, new_kid, gc_count)`
-///   `ok("noop",    kid)`
+/// Inspect a success envelope (`fcall_error_code` already returned
+/// `None`) and pick out whether this partition rotated or was a
+/// replay.
+///
+/// FF's ok(...) envelope packs as `[Int(1), BulkString("OK"),
+/// ...caller_args]`. For rotation the caller_args are either
+/// `"rotated", previous_kid_or_empty, new_kid, gc_count`
+/// or `"noop", kid`. Variant discriminator lives at index 2 (after
+/// the leading status int and the fixed "OK" marker).
 fn classify_ok_variant(raw: &ferriskey::Value) -> Result<OkVariant, FabricError> {
     let arr = match raw {
         ferriskey::Value::Array(arr) => arr,
@@ -181,9 +185,7 @@ fn classify_ok_variant(raw: &ferriskey::Value) -> Result<OkVariant, FabricError>
             ))
         }
     };
-    // arr[0] is the Int(1) OK marker verified earlier; arr[1] is the
-    // variant discriminator string.
-    let variant = match arr.get(1) {
+    let variant = match arr.get(2) {
         Some(Ok(ferriskey::Value::BulkString(b))) => String::from_utf8_lossy(b).into_owned(),
         Some(Ok(ferriskey::Value::SimpleString(s))) => s.clone(),
         _ => {
@@ -205,10 +207,12 @@ fn classify_ok_variant(raw: &ferriskey::Value) -> Result<OkVariant, FabricError>
 mod tests {
     use super::*;
 
+    // Envelope shape: [Int(1), "OK", variant, ...caller_args].
     #[test]
     fn classify_ok_variant_rotated() {
         let raw = ferriskey::Value::Array(vec![
             Ok(ferriskey::Value::Int(1)),
+            Ok(ferriskey::Value::BulkString(b"OK".to_vec().into())),
             Ok(ferriskey::Value::BulkString(b"rotated".to_vec().into())),
             Ok(ferriskey::Value::BulkString(b"kid_v1".to_vec().into())),
             Ok(ferriskey::Value::BulkString(b"kid_v2".to_vec().into())),
@@ -221,6 +225,7 @@ mod tests {
     fn classify_ok_variant_noop() {
         let raw = ferriskey::Value::Array(vec![
             Ok(ferriskey::Value::Int(1)),
+            Ok(ferriskey::Value::BulkString(b"OK".to_vec().into())),
             Ok(ferriskey::Value::BulkString(b"noop".to_vec().into())),
             Ok(ferriskey::Value::BulkString(b"kid_v2".to_vec().into())),
         ]);
@@ -231,6 +236,7 @@ mod tests {
     fn classify_ok_variant_unknown_variant_errors() {
         let raw = ferriskey::Value::Array(vec![
             Ok(ferriskey::Value::Int(1)),
+            Ok(ferriskey::Value::BulkString(b"OK".to_vec().into())),
             Ok(ferriskey::Value::BulkString(b"stranger".to_vec().into())),
         ]);
         assert!(classify_ok_variant(&raw).is_err());

@@ -1649,7 +1649,14 @@ impl AppBootstrap {
             get(crate::handlers::debug::debug_partition_handler),
         );
 
-        router
+        // Waitpoint HMAC rotation. Admin-only; fans out the FF 0.2
+        // ff_rotate_waitpoint_hmac_secret FCALL across every
+        // execution partition. Unconditionally compiled — not a debug
+        // surface.
+        router.route(
+            "/v1/admin/rotate-waitpoint-hmac",
+            post(crate::handlers::admin::rotate_waitpoint_hmac_handler),
+        )
     }
 
     /// Apply the standard middleware stack (auth, CORS, rate-limit, tracing)
