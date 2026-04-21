@@ -831,24 +831,17 @@ impl FabricTaskService {
                 }
             };
             // Resolve upstream execution_id → cairn task_id via the
-            // `cairn.task_id` tag on the upstream execution. This is
-            // the only way today: FF doesn't index executions by
-            // cairn TaskId. When FF 0.3 ships execution tags as a
-            // first-class read (FlowFabric#58), this stays a single
-            // describe_execution call; until then it's cairn's cheapest
-            // path because the snapshot also carries cairn.project,
-            // cairn.parent_run_id, etc. that we might want later.
-            let upstream_snap = match self
+            // Resolve upstream execution_id → cairn task_id via the
+            // targeted tag read. One HGET per upstream — avoids the
+            // 2N HGETALL amplification that a full `describe_execution`
+            // would cause in this per-blocker loop.
+            let upstream_task_id = match self
                 .engine
-                .describe_execution(&edge.upstream_execution_id)
+                .get_execution_tag(&edge.upstream_execution_id, "cairn.task_id")
                 .await?
             {
-                Some(s) => s,
+                Some(s) => TaskId::new(s),
                 None => continue,
-            };
-            let upstream_task_id = match upstream_snap.tags.get("cairn.task_id") {
-                Some(s) if !s.is_empty() => TaskId::new(s.as_str()),
-                _ => continue,
             };
             blockers.push(TaskDependencyRecord {
                 dependency: TaskDependency {

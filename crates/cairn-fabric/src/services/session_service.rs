@@ -263,9 +263,11 @@ fn build_session_record(
         state,
         // graph_revision is monotonic across the flow's lifetime;
         // cairn uses it as the SessionRecord optimistic-concurrency
-        // version. Snapshot guarantees 0 on fresh flows; bump by
-        // 1 so callers always see >= 1 as before.
-        version: snapshot.graph_revision.max(1),
+        // version. Matches `SessionService::create`'s `version: 0`
+        // on fresh flows — a read right after create sees the same
+        // value the creator saw, so optimistic-concurrency checks
+        // don't misfire.
+        version: snapshot.graph_revision,
         created_at: snapshot.created_at.0 as u64,
         updated_at: snapshot.last_mutation_at.0 as u64,
     }
@@ -382,7 +384,8 @@ mod tests {
         let record = build_session_record(&sid, &test_project(), &snap);
         assert_eq!(record.state, SessionState::Open);
         assert_eq!(record.project.tenant_id.as_str(), "t");
-        assert_eq!(record.version, 1);
+        // Fresh flow has graph_revision=0; match SessionService::create.
+        assert_eq!(record.version, 0);
         assert_eq!(record.created_at, 0);
     }
 

@@ -101,4 +101,22 @@ pub trait Engine: Send + Sync {
         &self,
         execution_id: &ExecutionId,
     ) -> Result<Vec<EdgeSnapshot>, FabricError>;
+
+    /// Fetch a single tag value from an execution's tag hash.
+    ///
+    /// Targeted read — cheaper than
+    /// [`Self::describe_execution`](Engine::describe_execution) when
+    /// the caller only needs one field (e.g. the `cairn.task_id`
+    /// back-reference stamped on an upstream execution). Avoids the
+    /// N+1 amplification that full snapshot reads would cause in
+    /// loops like `check_dependencies`'s per-blocker resolve.
+    ///
+    /// Returns `Ok(None)` if the execution's tag hash doesn't exist
+    /// or the tag is absent. Empty-string values are normalised to
+    /// `None`.
+    async fn get_execution_tag(
+        &self,
+        id: &ExecutionId,
+        key: &str,
+    ) -> Result<Option<String>, FabricError>;
 }

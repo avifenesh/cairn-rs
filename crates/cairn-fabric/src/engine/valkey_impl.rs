@@ -176,6 +176,22 @@ impl Engine for ValkeyEngine {
 
         Ok(edges)
     }
+
+    async fn get_execution_tag(
+        &self,
+        id: &ExecutionId,
+        key: &str,
+    ) -> Result<Option<String>, FabricError> {
+        let partition = execution_partition(id, &self.runtime.partition_config);
+        let ctx = ExecKeyContext::new(&partition, id);
+        let value: Option<String> = self
+            .runtime
+            .client
+            .hget(&ctx.tags(), key)
+            .await
+            .map_err(|e| FabricError::Internal(format!("valkey HGET exec_tags.{key}: {e}")))?;
+        Ok(value.filter(|s| !s.is_empty()))
+    }
 }
 
 // ─── Parsers ─────────────────────────────────────────────────────────────
@@ -387,11 +403,11 @@ fn parse_edge_snapshot(
     let upstream_execution_id = ExecutionId::parse(upstream_eid_str)
         .map_err(|e| FabricError::Internal(format!("parse edge.upstream_eid: {e}")))?;
 
-    // downstream_execution_id is optional on child-side dep_hash
-    // (apply_dependency_to_child writes it, but some older edges
-    // might not have it). Fall back to parsing from the requesting
-    // context if absent — though in practice the dep_hash always
-    // has it in FF 0.2.
+    // `downstream_execution_id` is always written by FF's Lua
+    // (both `ff_stage_dependency_edge` on the flow-side edge hash
+    // and `ff_apply_dependency_to_child` on the child-side dep hash).
+    // Its absence means schema drift — surface as Internal so the
+    // failure is loud, not silently papered over.
     let downstream_execution_id = match fields
         .get("downstream_execution_id")
         .filter(|s| !s.is_empty())
