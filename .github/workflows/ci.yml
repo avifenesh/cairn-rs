@@ -92,14 +92,16 @@ jobs:
         timeout-minutes: 8
         env:
           CARGO_BUILD_JOBS: "2"
-      - name: integration tests (runtime + orchestrator + app)
-        # Handler tests run against the read-only FakeFabric fixture
-        # under `crates/cairn-app/tests/support/` (no Valkey required).
+      - name: integration tests (runtime + orchestrator)
         # cairn-runtime and cairn-orchestrator contribute 41 + 1
         # non-gated integration test binaries that exercise service,
         # projection, and orchestrator surfaces — they must run here
         # because `--workspace --lib` only covers `src/` unit tests.
-        run: cargo test --tests -p cairn-runtime -p cairn-orchestrator -p cairn-app
+        #
+        # cairn-app integration tests moved to the `fabric-integration`
+        # job: they now spawn the real cairn-app binary against a live
+        # Valkey testcontainer and require the docker daemon.
+        run: cargo test --tests -p cairn-runtime -p cairn-orchestrator
         timeout-minutes: 15
         env:
           CARGO_BUILD_JOBS: "2"
@@ -130,6 +132,13 @@ jobs:
             ${{ runner.os }}-cargo-
       - name: cargo test --test integration (default — parallel)
         run: cargo test -p cairn-fabric --test integration
+        timeout-minutes: 10
+      # HTTP-lifecycle integration tests: launch the real cairn-app
+      # binary per harness on an ephemeral port, drive via reqwest,
+      # share the Valkey testcontainer. Same runtime constraints as
+      # the fabric suite above (needs testcontainers-capable Docker).
+      - name: cargo test -p cairn-app --tests
+        run: cargo test -p cairn-app --tests --
         timeout-minutes: 10
 
   # ── 6. UI Build + Type Check + Component Tests ──────────────────────────────
