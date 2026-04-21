@@ -20,6 +20,7 @@ pub const FF_REPORT_USAGE_AND_CHECK: &str = "ff_report_usage_and_check";
 pub const FF_CREATE_QUOTA_POLICY: &str = "ff_create_quota_policy";
 pub const FF_CHECK_ADMISSION_AND_RECORD: &str = "ff_check_admission_and_record";
 pub const FF_RESET_BUDGET: &str = "ff_reset_budget";
+pub const FF_ROTATE_WAITPOINT_HMAC_SECRET: &str = "ff_rotate_waitpoint_hmac_secret";
 
 #[cfg(test)]
 mod tests {
@@ -46,6 +47,7 @@ mod tests {
             FF_CREATE_QUOTA_POLICY,
             FF_CHECK_ADMISSION_AND_RECORD,
             FF_RESET_BUDGET,
+            FF_ROTATE_WAITPOINT_HMAC_SECRET,
         ];
         for name in names {
             assert!(name.starts_with("ff_"), "{name} missing ff_ prefix");

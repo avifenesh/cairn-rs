@@ -117,7 +117,9 @@ opentelemetry-proto = { version = "0.31", features = ["gen-tonic-messages", "tra
 prost = { version = "0.14", optional = true }
 # Optional: only compiled when `debug-endpoints` feature is enabled.
 # Used by the RFC-011 debug endpoint to compute partition placement.
-ff-core = { version = "0.1", optional = true }
+# Must track cairn-fabric's ff-core version so debug.rs's types match
+# FabricServices.runtime.partition_config.
+ff-core = { version = "0.2", optional = true }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "process", "io-util"] }

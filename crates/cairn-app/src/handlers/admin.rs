@@ -1356,3 +1356,176 @@ pub(crate) async fn import_litellm_handler(
     )
         .into_response()
 }
+
+// ── Waitpoint HMAC rotation ──────────────────────────────────────────────────
+
+/// Request body for `POST /v1/admin/rotate-waitpoint-hmac`.
+///
+/// `new_kid` must be non-empty and must not contain `:` (FF uses `:` as
+/// the separator in the on-disk secret hash).
+///
+/// `new_secret_hex` must be non-empty, even-length hex. Operators
+/// generate it with e.g. `openssl rand -hex 32`.
+///
+/// `grace_ms` is how long the previously-installed kid stays accepted
+/// for verification after rotation. Defaults to 60_000 (1 minute) when
+/// unset — enough for in-flight waitpoints to resume without
+/// fabricating a verification failure. Zero means instant cutover
+/// (can fail in-flight waitpoints signed with the old key).
+#[derive(Clone, Debug, serde::Deserialize, ToSchema)]
+pub(crate) struct RotateWaitpointHmacRequest {
+    pub new_kid: String,
+    pub new_secret_hex: String,
+    #[serde(default)]
+    pub grace_ms: Option<u64>,
+}
+
+/// Response body for `POST /v1/admin/rotate-waitpoint-hmac`.
+///
+/// Returned with HTTP 200 when at least one partition accepted the
+/// rotation (or replied `noop` on exact replay). Partial failures list
+/// their partition indices + typed FF error code in `failed`; the
+/// rotation is idempotent on the same `(new_kid, new_secret_hex)` so
+/// a retry after the underlying fault clears converges.
+///
+/// Returned with HTTP 400 when every partition rejected with the same
+/// input-validation code (`invalid_kid`, `invalid_secret_hex`,
+/// `invalid_grace_ms`, `rotation_conflict`) — the rotation never had
+/// a chance.
+///
+/// Returned with HTTP 500 when no partition responded (transport
+/// failure fan-out).
+#[derive(Clone, Debug, serde::Serialize, ToSchema)]
+pub(crate) struct RotateWaitpointHmacResponse {
+    /// Count of partitions that accepted a fresh rotation.
+    pub rotated: u16,
+    /// Count of partitions that replied `noop` (exact replay of the
+    /// same kid + secret). Idempotent retry path.
+    pub noop: u16,
+    /// Per-partition failures. Empty on full success.
+    pub failed: Vec<RotateWaitpointHmacFailure>,
+    /// Echoed back for operator confirmation.
+    pub new_kid: String,
+}
+
+#[derive(Clone, Debug, serde::Serialize, ToSchema)]
+pub(crate) struct RotateWaitpointHmacFailure {
+    pub partition_index: u16,
+    /// FF typed error code when the Lua envelope returned one;
+    /// `null` for transport / timeout failures.
+    pub code: Option<String>,
+    pub detail: String,
+}
+
+/// Default grace window for rotation when the caller omits `grace_ms`.
+/// 60 seconds is long enough for a typical in-flight waitpoint to
+/// resume under normal load and short enough that an operator can
+/// redeploy a new kid and expect full cutover within a few minutes.
+const DEFAULT_ROTATE_GRACE_MS: u64 = 60_000;
+
+/// `POST /v1/admin/rotate-waitpoint-hmac` — rotate the waitpoint HMAC
+/// signing kid across every execution partition.
+///
+/// Admin-only. Delegates to `FabricRotationService::rotate_waitpoint_hmac`
+/// which fans out the FCALL across all partitions. See the service's
+/// rustdoc for idempotency and partial-success semantics.
+///
+/// Returns 503 when the fabric runtime is not installed (read-only
+/// fixture deployments). Production deployments always have `fabric`.
+pub(crate) async fn rotate_waitpoint_hmac_handler(
+    State(state): State<Arc<AppState>>,
+    _role: AdminRoleGuard,
+    Json(body): Json<RotateWaitpointHmacRequest>,
+) -> impl IntoResponse {
+    let Some(fabric) = state.fabric.as_ref() else {
+        return AppApiError::new(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "fabric_unavailable",
+            "waitpoint HMAC rotation requires the fabric runtime; this deployment has none",
+        )
+        .into_response();
+    };
+
+    let grace_ms = body.grace_ms.unwrap_or(DEFAULT_ROTATE_GRACE_MS);
+    let outcome = fabric
+        .rotation
+        .rotate_waitpoint_hmac(&body.new_kid, &body.new_secret_hex, grace_ms)
+        .await;
+
+    let failed: Vec<RotateWaitpointHmacFailure> = outcome
+        .failed
+        .iter()
+        .map(|f| RotateWaitpointHmacFailure {
+            partition_index: f.partition_index,
+            code: f.code.clone(),
+            detail: f.detail.clone(),
+        })
+        .collect();
+
+    let resp = RotateWaitpointHmacResponse {
+        rotated: outcome.rotated,
+        noop: outcome.noop,
+        failed,
+        new_kid: outcome.new_kid.clone(),
+    };
+
+    // All partitions failed with the same Lua-level input-validation
+    // code → 400. This is the "operator typo" path (empty kid, bad
+    // hex, etc.) and the rotation never did anything useful anywhere.
+    if outcome.rotated == 0 && outcome.noop == 0 {
+        if let Some(code) = unanimous_input_error_code(&outcome.failed) {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({
+                    "error": "rotation rejected by every partition",
+                    "code": code,
+                    "outcome": resp,
+                })),
+            )
+                .into_response();
+        }
+        // Every partition failed but not with a unanimous input code →
+        // transport or mixed failure. 500 so the operator sees this
+        // as a service fault rather than a validation issue.
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({
+                "error": "rotation failed on every partition",
+                "outcome": resp,
+            })),
+        )
+            .into_response();
+    }
+
+    // Any success (rotated or noop) → 200 with the full outcome
+    // breakdown. Partial failure is visible in `failed[]` but does
+    // not demote the status — the rotation is idempotent and
+    // operators retry with the same (new_kid, new_secret_hex) to
+    // converge.
+    (StatusCode::OK, Json(resp)).into_response()
+}
+
+/// If every partition failed with the same FF input-validation code,
+/// return it. These are Lua-level rejects that mean the rotation
+/// never had a chance and the operator needs to fix the input before
+/// retry. `rotation_conflict` is included because it blocks the
+/// rotation completely (operator must pick a fresh kid).
+fn unanimous_input_error_code(
+    failures: &[cairn_fabric::services::RotationFailure],
+) -> Option<String> {
+    const INPUT_CODES: &[&str] = &[
+        "invalid_kid",
+        "invalid_secret_hex",
+        "invalid_grace_ms",
+        "rotation_conflict",
+    ];
+    let first = failures.first()?.code.as_deref()?;
+    if !INPUT_CODES.contains(&first) {
+        return None;
+    }
+    if failures.iter().all(|f| f.code.as_deref() == Some(first)) {
+        Some(first.to_owned())
+    } else {
+        None
+    }
+}

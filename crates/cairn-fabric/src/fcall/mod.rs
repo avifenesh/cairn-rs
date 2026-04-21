@@ -4,6 +4,7 @@ pub mod execution;
 pub mod flow_edges;
 pub mod names;
 pub mod quota;
+pub mod rotation;
 pub mod session;
 pub mod suspension;
 
@@ -102,6 +103,11 @@ pub const CRITICAL_CONTRACTS: &[FcallContract] = &[
         name: names::FF_RESET_BUDGET,
         expected_keys: budget::RESET_BUDGET_KEYS,
         expected_args: budget::RESET_BUDGET_ARGS,
+    },
+    FcallContract {
+        name: names::FF_ROTATE_WAITPOINT_HMAC_SECRET,
+        expected_keys: rotation::ROTATE_WAITPOINT_HMAC_SECRET_KEYS,
+        expected_args: rotation::ROTATE_WAITPOINT_HMAC_SECRET_ARGS,
     },
     FcallContract {
         name: names::FF_ADD_EXECUTION_TO_FLOW,

@@ -10,8 +10,8 @@ use crate::error::FabricError;
 use crate::event_bridge::EventBridge;
 use crate::lease_history_subscriber::LeaseHistorySubscriber;
 use crate::services::{
-    FabricBudgetService, FabricQuotaService, FabricRunService, FabricSchedulerService,
-    FabricSessionService, FabricTaskService, FabricWorkerService,
+    FabricBudgetService, FabricQuotaService, FabricRotationService, FabricRunService,
+    FabricSchedulerService, FabricSessionService, FabricTaskService, FabricWorkerService,
 };
 use crate::signal_bridge::SignalBridge;
 
@@ -25,6 +25,7 @@ pub struct FabricServices {
     pub worker: FabricWorkerService,
     pub budgets: FabricBudgetService,
     pub quotas: FabricQuotaService,
+    pub rotation: FabricRotationService,
     pub signals: SignalBridge,
     bridge_handle: JoinHandle<()>,
     lease_history: Option<LeaseHistorySubscriber>,
@@ -102,6 +103,7 @@ impl FabricServices {
         let worker = FabricWorkerService::new(runtime.clone());
         let budgets = FabricBudgetService::new(runtime.clone());
         let quotas = FabricQuotaService::new(runtime.clone());
+        let rotation = FabricRotationService::new(runtime.clone());
         let signals = SignalBridge::new(&runtime);
 
         Ok(Self {
@@ -114,6 +116,7 @@ impl FabricServices {
             worker,
             budgets,
             quotas,
+            rotation,
             signals,
             bridge_handle,
             lease_history,
@@ -131,6 +134,7 @@ impl FabricServices {
             worker: _,
             budgets: _,
             quotas: _,
+            rotation: _,
             signals: _,
             bridge_handle,
             lease_history,
