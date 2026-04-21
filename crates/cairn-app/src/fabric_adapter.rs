@@ -110,9 +110,17 @@ fn fabric_err_to_runtime(err: FabricError) -> RuntimeError {
         // get hidden behind a 409.
         FabricError::Internal(ref msg) if is_claim_contention(msg) => {
             tracing::debug!(fabric_err = %msg, "fabric claim contention (409 to caller)");
+            // SEC-007: the 409 body must not leak the FF FCALL name.
+            // `is_claim_contention` already verified the `"<fcall> rejected:
+            // <code>"` format; surface only the documented contention code
+            // so callers can dispatch without seeing the FCALL internals.
+            let code = msg
+                .rsplit_once(": ")
+                .map(|(_, c)| c.trim().to_owned())
+                .unwrap_or_else(|| "claim_contention".to_owned());
             RuntimeError::Conflict {
                 entity: "execution",
-                id: msg.clone(),
+                id: code,
             }
         }
         // SEC-007: Valkey / script / bridge / config / internal variants
