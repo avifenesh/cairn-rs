@@ -36,6 +36,34 @@ metrics-providers = []
 # Opt-in.
 metrics-otel = ["dep:opentelemetry-proto", "dep:prost"]
 
+# ── SECURITY-SENSITIVE FEATURE — READ BEFORE ENABLING ─────────────────
+#
+# Enables GET /v1/admin/debug/partition, an admin-only introspection
+# endpoint that returns the FF ExecutionId and Valkey partition index
+# for a given run or task. Used by the RFC-011 co-location integration
+# tests; NOT intended for production.
+#
+# What turning this on exposes to an authenticated admin caller:
+#   * The FF-internal ExecutionId (previously never on any HTTP surface).
+#     An attacker with both a compromised admin token AND Valkey access
+#     could target `exec_core:{fp:N}:<uuid>` keys directly, bypassing
+#     cairn-side tenant scoping.
+#   * The Valkey partition index for any run/task. Repeated queries
+#     can be used to map tenant → partition distribution, revealing
+#     hot-shard patterns useful for targeted DoS.
+#   * The derivation code path (`session_flow` vs `solo`), leaking
+#     structural details of the task-session relationship.
+#
+# Mitigations if you still need to enable this in production:
+#   1. Restrict admin token distribution to ops personnel only.
+#   2. Monitor the request log for /v1/admin/debug/* access patterns.
+#   3. Prefer turning it on for a diagnostic window, then rebuilding
+#      and redeploying without the feature.
+#
+# Default: OFF. CI integration tests build with this feature; release
+# artefacts do not. See SECURITY.md for the full threat-model summary.
+debug-endpoints = []
+
 [dependencies]
 cairn-api = { path = "../cairn-api" }
 cairn-memory = { path = "../cairn-memory" }
