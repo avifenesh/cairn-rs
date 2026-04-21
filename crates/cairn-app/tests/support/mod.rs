@@ -6,6 +6,7 @@
 #![allow(dead_code)] // Not every test file uses every helper.
 
 pub mod fake_fabric;
+pub mod live_fabric;
 
 use std::sync::Arc;
 

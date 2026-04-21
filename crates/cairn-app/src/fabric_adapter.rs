@@ -97,6 +97,32 @@ fn fabric_err_to_runtime(err: FabricError) -> RuntimeError {
     match err {
         FabricError::NotFound { entity, id } => RuntimeError::NotFound { entity, id },
         FabricError::Validation { reason } => RuntimeError::Validation { reason },
+        // FF FCALL contention codes are caller-retriable, not operator 5xx:
+        // they fire when two workers race for the same lease, when a grant
+        // TTL expires mid-claim, or when a scheduler-routed eligible set
+        // changes under the caller's feet. Surface them as 409 Conflict so
+        // clients can back off + retry instead of triggering ops alerts.
+        //
+        // The rejection is packed as `FabricError::Internal("<fcall> rejected:
+        // <code>")` by `check_fcall_success`; pattern-match on the `: <code>`
+        // suffix. Keep the list tight — only FF-documented contention codes
+        // belong here; anything else stays Internal so legitimate bugs don't
+        // get hidden behind a 409.
+        FabricError::Internal(ref msg) if is_claim_contention(msg) => {
+            tracing::debug!(fabric_err = %msg, "fabric claim contention (409 to caller)");
+            // SEC-007: the 409 body must not leak the FF FCALL name.
+            // `is_claim_contention` already verified the `"<fcall> rejected:
+            // <code>"` format; surface only the documented contention code
+            // so callers can dispatch without seeing the FCALL internals.
+            let code = msg
+                .rsplit_once(": ")
+                .map(|(_, c)| c.trim().to_owned())
+                .unwrap_or_else(|| "claim_contention".to_owned());
+            RuntimeError::Conflict {
+                entity: "execution",
+                id: code,
+            }
+        }
         // SEC-007: Valkey / script / bridge / config / internal variants
         // carry FCALL names, key names, and occasionally secret-hash
         // references — none of which should reach the 500 response body.
@@ -107,6 +133,43 @@ fn fabric_err_to_runtime(err: FabricError) -> RuntimeError {
             RuntimeError::Internal("fabric layer error".into())
         }
     }
+}
+
+/// FF typed error codes that represent caller-retriable contention rather
+/// than an operator-alert system fault. See `ff-script::ScriptError` for
+/// the canonical list and `claim_common::issue_grant_and_claim` for the
+/// call sites that produce them.
+fn is_claim_contention(msg: &str) -> bool {
+    const CONTENTION_CODES: &[&str] = &[
+        "lease_conflict",
+        "invalid_claim_grant",
+        "claim_grant_expired",
+        "execution_not_leaseable",
+        "execution_not_eligible",
+        "execution_not_eligible_for_attempt",
+        // Scheduler-routed contention: another scheduler already pulled
+        // the execution out of the eligible set before this caller's
+        // grant-issue FCALL landed. Caller-retriable (wait for the
+        // winner to finish or for a new execution to become eligible).
+        "execution_not_in_eligible_set",
+        // Grant-step contention: another worker's grant was still
+        // active (within grant_ttl_ms) when this caller tried to
+        // issue its own. This is the dominant shape of the
+        // concurrent-claim race: N callers hit ff_issue_claim_grant
+        // simultaneously, the first wins, the others see this.
+        "grant_already_exists",
+        "execution_not_found",
+        // Replay/terminal contention: a terminal path (cancellation,
+        // completion) mutated state between eligibility and claim.
+        "execution_not_active",
+        "no_active_lease",
+        "no_eligible_execution",
+    ];
+    // Format (from check_fcall_success): "<fcall> rejected: <code>".
+    let Some((_, code)) = msg.rsplit_once(": ") else {
+        return false;
+    };
+    CONTENTION_CODES.contains(&code.trim())
 }
 
 // ── RunService adapter ───────────────────────────────────────────────────────

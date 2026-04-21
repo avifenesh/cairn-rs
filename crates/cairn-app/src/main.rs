@@ -1095,7 +1095,13 @@ async fn main() {
             .await
             .unwrap_or_else(|e| panic!("failed to bind {addr}: {e}"));
 
-        eprintln!("cairn-app listening on http://{addr}");
+        // Use the bound address rather than the requested one — when
+        // `listen_port == 0`, the kernel picks a free port and integration
+        // tests scrape this line to discover it.
+        let bound = listener
+            .local_addr()
+            .unwrap_or_else(|e| panic!("failed to read bound addr: {e}"));
+        eprintln!("cairn-app listening on http://{bound}");
 
         // ── Graceful shutdown wiring ─────────────────────────────────────────
         let (signal_tx, signal_rx) = tokio::sync::watch::channel(false);
