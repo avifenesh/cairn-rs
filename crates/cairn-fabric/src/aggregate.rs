@@ -6,6 +6,7 @@ use tokio::task::JoinHandle;
 
 use crate::boot::FabricRuntime;
 use crate::config::FabricConfig;
+use crate::engine::{Engine, ValkeyEngine};
 use crate::error::FabricError;
 use crate::event_bridge::EventBridge;
 use crate::lease_history_subscriber::LeaseHistorySubscriber;
@@ -18,6 +19,12 @@ use crate::signal_bridge::SignalBridge;
 pub struct FabricServices {
     pub runtime: Arc<FabricRuntime>,
     pub bridge: Arc<EventBridge>,
+    /// Cairn-side read abstraction over FF state. Every service that
+    /// needs to read an execution / flow / edge snapshot goes through
+    /// this handle instead of reaching into Valkey directly. One impl
+    /// today ([`ValkeyEngine`]); swappable when FF 0.3 ships the
+    /// upstream `describe_*` primitives (FlowFabric#58).
+    pub engine: Arc<dyn Engine>,
     pub runs: FabricRunService,
     pub tasks: FabricTaskService,
     pub sessions: FabricSessionService,
@@ -69,9 +76,12 @@ impl FabricServices {
             )
         });
 
+        let engine: Arc<dyn Engine> = Arc::new(ValkeyEngine::new(runtime.clone()));
+
         let result = Self::build_services(
             runtime.clone(),
             bridge.clone(),
+            engine,
             bridge_handle,
             lease_history,
         );
@@ -93,12 +103,13 @@ impl FabricServices {
     fn build_services(
         runtime: Arc<FabricRuntime>,
         bridge: Arc<EventBridge>,
+        engine: Arc<dyn Engine>,
         bridge_handle: JoinHandle<()>,
         lease_history: Option<LeaseHistorySubscriber>,
     ) -> Result<Self, (FabricError, JoinHandle<()>)> {
-        let runs = FabricRunService::new(runtime.clone(), bridge.clone());
-        let tasks = FabricTaskService::new(runtime.clone(), bridge.clone());
-        let sessions = FabricSessionService::new(runtime.clone(), bridge.clone());
+        let runs = FabricRunService::new(runtime.clone(), bridge.clone(), engine.clone());
+        let tasks = FabricTaskService::new(runtime.clone(), bridge.clone(), engine.clone());
+        let sessions = FabricSessionService::new(runtime.clone(), bridge.clone(), engine.clone());
         let scheduler = FabricSchedulerService::new(&runtime);
         let worker = FabricWorkerService::new(runtime.clone());
         let budgets = FabricBudgetService::new(runtime.clone());
@@ -109,6 +120,7 @@ impl FabricServices {
         Ok(Self {
             runtime,
             bridge,
+            engine,
             runs,
             tasks,
             sessions,
@@ -127,6 +139,7 @@ impl FabricServices {
         let Self {
             runtime,
             bridge,
+            engine: _,
             runs: _,
             tasks: _,
             sessions: _,

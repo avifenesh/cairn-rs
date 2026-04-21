@@ -154,7 +154,11 @@ async fn task_complete_emits_when_claim_and_complete_use_distinct_services() {
     //    second `FabricTaskService` sharing the same runtime + bridge
     //    but with NO registry entry (registry is gone entirely post-fix;
     //    pre-fix this instance would have had an empty registry).
-    let fresh_tasks = FabricTaskService::new(h.fabric.runtime.clone(), h.fabric.bridge.clone());
+    let fresh_tasks = FabricTaskService::new(
+        h.fabric.runtime.clone(),
+        h.fabric.bridge.clone(),
+        h.fabric.engine.clone(),
+    );
 
     // 3. Complete through the fresh instance. FF sees the transition;
     //    the bridge event MUST still fire or the projection drifts.
@@ -212,7 +216,11 @@ async fn task_cancel_emits_when_called_from_registry_less_service() {
         .await
         .expect("claim failed");
 
-    let fresh_tasks = FabricTaskService::new(h.fabric.runtime.clone(), h.fabric.bridge.clone());
+    let fresh_tasks = FabricTaskService::new(
+        h.fabric.runtime.clone(),
+        h.fabric.bridge.clone(),
+        h.fabric.engine.clone(),
+    );
     let record = fresh_tasks
         .cancel(&h.project, Some(&session_id), &task_id)
         .await
@@ -268,7 +276,11 @@ async fn task_terminal_fail_emits_when_called_from_registry_less_service() {
                 panic!("attempt {attempt}: task not eligible within 10s — delayed_promoter down?")
             });
 
-        let fresh_tasks = FabricTaskService::new(h.fabric.runtime.clone(), h.fabric.bridge.clone());
+        let fresh_tasks = FabricTaskService::new(
+            h.fabric.runtime.clone(),
+            h.fabric.bridge.clone(),
+            h.fabric.engine.clone(),
+        );
         fresh_tasks
             .claim(
                 &h.project,
@@ -280,7 +292,11 @@ async fn task_terminal_fail_emits_when_called_from_registry_less_service() {
             .await
             .unwrap_or_else(|e| panic!("attempt {attempt}: claim via fresh service: {e}"));
 
-        let fresh_fail = FabricTaskService::new(h.fabric.runtime.clone(), h.fabric.bridge.clone());
+        let fresh_fail = FabricTaskService::new(
+            h.fabric.runtime.clone(),
+            h.fabric.bridge.clone(),
+            h.fabric.engine.clone(),
+        );
         let record = fresh_fail
             .fail(
                 &h.project,

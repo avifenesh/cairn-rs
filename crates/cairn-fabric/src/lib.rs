@@ -65,6 +65,7 @@ pub mod aggregate;
 pub mod boot;
 pub mod config;
 pub mod constants;
+pub mod engine;
 pub mod error;
 pub mod event_bridge;
 pub mod fcall;

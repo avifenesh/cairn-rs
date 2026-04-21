@@ -21,11 +21,21 @@ use crate::state_map;
 pub struct FabricRunService {
     runtime: Arc<FabricRuntime>,
     bridge: Arc<EventBridge>,
+    #[allow(dead_code)] // wired-in for the B-phase ports
+    engine: Arc<dyn crate::engine::Engine>,
 }
 
 impl FabricRunService {
-    pub fn new(runtime: Arc<FabricRuntime>, bridge: Arc<EventBridge>) -> Self {
-        Self { runtime, bridge }
+    pub fn new(
+        runtime: Arc<FabricRuntime>,
+        bridge: Arc<EventBridge>,
+        engine: Arc<dyn crate::engine::Engine>,
+    ) -> Self {
+        Self {
+            runtime,
+            bridge,
+            engine,
+        }
     }
 
     /// Mint the session-scoped `ExecutionId` for a cairn run.
@@ -68,56 +78,30 @@ impl FabricRunService {
         run_id: &RunId,
     ) -> Result<RunRecord, FabricError> {
         let eid = self.execution_id(project, session_id, run_id);
-        let partition = self.partition(&eid);
-        let ctx = ExecKeyContext::new(&partition, &eid);
+        let snapshot =
+            self.engine
+                .describe_execution(&eid)
+                .await?
+                .ok_or_else(|| FabricError::NotFound {
+                    entity: "run",
+                    id: run_id.to_string(),
+                })?;
 
-        let fields: HashMap<String, String> = self
-            .runtime
-            .client
-            .hgetall(&ctx.core())
-            .await
-            .map_err(|e| FabricError::Internal(format!("valkey HGETALL: {e}")))?;
-
-        if fields.is_empty() {
-            return Err(FabricError::NotFound {
-                entity: "run",
-                id: run_id.to_string(),
-            });
-        }
-
-        let tags: HashMap<String, String> = self
-            .runtime
-            .client
-            .hgetall(&ctx.tags())
-            .await
-            .unwrap_or_else(|e| {
-                tracing::warn!(run_id = %run_id, error = %e, "failed to read execution tags");
-                HashMap::new()
-            });
-
-        let public_state_str = fields.get("public_state").cloned().unwrap_or_default();
-        let public_state = parse_public_state(&public_state_str);
+        let public_state = parse_public_state(&snapshot.public_state);
         let (run_state, failure_class) = state_map::ff_public_state_to_run_state(public_state);
-        let blocking_reason = fields.get("blocking_reason").cloned().unwrap_or_default();
-        let run_state =
-            state_map::adjust_run_state_for_blocking_reason(run_state, &blocking_reason);
+        let run_state = state_map::adjust_run_state_for_blocking_reason(
+            run_state,
+            snapshot.blocking_reason.as_deref().unwrap_or_default(),
+        );
 
-        let created_at = fields
-            .get("created_at")
-            .and_then(|v| v.parse().ok())
-            .unwrap_or(0);
-        let updated_at = fields
-            .get("last_mutation_at")
-            .and_then(|v| v.parse().ok())
-            .unwrap_or(created_at);
-        let version = fields
-            .get("current_lease_epoch")
-            .and_then(|v| v.parse().ok())
-            .unwrap_or(1);
-
-        let session_id_str = tags.get("cairn.session_id").cloned().unwrap_or_default();
-        let parent_run_id_str = tags.get("cairn.parent_run_id").cloned();
-        let tag_project = match tags
+        let session_id_str = snapshot
+            .tags
+            .get("cairn.session_id")
+            .cloned()
+            .unwrap_or_default();
+        let parent_run_id_str = snapshot.tags.get("cairn.parent_run_id").cloned();
+        let tag_project = match snapshot
+            .tags
             .get("cairn.project")
             .and_then(|s| try_parse_project_key(s))
         {
@@ -146,9 +130,9 @@ impl FabricRunService {
             failure_class,
             pause_reason: None,
             resume_trigger: None,
-            version,
-            created_at,
-            updated_at,
+            version: snapshot.current_lease_epoch.map(|e| e.0).unwrap_or(1),
+            created_at: snapshot.created_at.0 as u64,
+            updated_at: snapshot.last_mutation_at.0 as u64,
         })
     }
 

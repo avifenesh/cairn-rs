@@ -8,8 +8,7 @@ use crate::error::FabricError;
 use crate::event_bridge::{BridgeEvent, EventBridge};
 use crate::helpers::{
     check_fcall_success, is_duplicate_result, parse_eligibility_result, parse_fail_outcome,
-    parse_public_state, parse_stage_result_revision, parse_string_array, try_parse_project_key,
-    FailOutcome,
+    parse_public_state, parse_stage_result_revision, try_parse_project_key, FailOutcome,
 };
 use ff_core::keys::{ExecKeyContext, IndexKeys};
 use ff_core::partition::execution_partition;
@@ -22,11 +21,21 @@ use crate::state_map;
 pub struct FabricTaskService {
     runtime: Arc<FabricRuntime>,
     bridge: Arc<EventBridge>,
+    #[allow(dead_code)] // wired-in for the B-phase ports
+    engine: Arc<dyn crate::engine::Engine>,
 }
 
 impl FabricTaskService {
-    pub fn new(runtime: Arc<FabricRuntime>, bridge: Arc<EventBridge>) -> Self {
-        Self { runtime, bridge }
+    pub fn new(
+        runtime: Arc<FabricRuntime>,
+        bridge: Arc<EventBridge>,
+        engine: Arc<dyn crate::engine::Engine>,
+    ) -> Self {
+        Self {
+            runtime,
+            bridge,
+            engine,
+        }
     }
 
     /// Mint the `ExecutionId` for a task.
@@ -57,35 +66,11 @@ impl FabricTaskService {
         }
     }
 
-    async fn read_valkey_lease_fields(
-        &self,
-        task_id: &TaskId,
-        project: &ProjectKey,
-        session_id: Option<&SessionId>,
-    ) -> Result<HashMap<String, String>, FabricError> {
-        let eid = self.task_to_execution_id(project, session_id, task_id);
-        let partition = execution_partition(&eid, &self.runtime.partition_config);
-        let exec_ctx = ExecKeyContext::new(&partition, &eid);
-        let fields: HashMap<String, String> =
-            self.runtime
-                .client
-                .hgetall(&exec_ctx.core())
-                .await
-                .map_err(|e| FabricError::Internal(format!("valkey HGETALL: {e}")))?;
-        if fields.is_empty() {
-            return Err(FabricError::NotFound {
-                entity: "task",
-                id: task_id.to_string(),
-            });
-        }
-        Ok(fields)
-    }
-
-    // Always read the lease triple from FF's exec_core — FF owns every
-    // field authoritatively. Caching (lease_id, lease_epoch, attempt_index)
-    // in a registry would silently skip projection emission for tasks
-    // claimed outside `FabricTaskService::claim` (external API callers
-    // and worker-SDK consumers).
+    /// Resolve the active-lease triple (lease_id, epoch, attempt_index)
+    /// by reading the execution snapshot. FF owns these authoritatively;
+    /// cairn never caches them. Returns `NotFound` on the `"task_lease"`
+    /// entity when the execution exists but has no active lease — the
+    /// caller path needs the lease_id and cannot proceed without it.
     async fn resolve_active_lease(
         &self,
         task_id: &TaskId,
@@ -99,37 +84,28 @@ impl FabricTaskService {
         ),
         FabricError,
     > {
-        let fields = self
-            .read_valkey_lease_fields(task_id, project, session_id)
-            .await?;
-        let lease_id = ff_core::types::LeaseId::parse(
-            fields
-                .get("current_lease_id")
-                .filter(|s| !s.is_empty())
+        let eid = self.task_to_execution_id(project, session_id, task_id);
+        let snapshot =
+            self.engine
+                .describe_execution(&eid)
+                .await?
                 .ok_or_else(|| FabricError::NotFound {
-                    entity: "task_lease",
+                    entity: "task",
                     id: task_id.to_string(),
-                })?,
-        )
-        .map_err(|e| FabricError::Internal(format!("bad lease_id: {e}")))?;
-        let epoch = ff_core::types::LeaseEpoch::new(
-            fields
-                .get("current_lease_epoch")
-                .and_then(|s| s.parse().ok())
-                .unwrap_or(1),
-        );
-        let att_idx = ff_core::types::AttemptIndex::new(
-            fields
-                .get("current_attempt_index")
-                .and_then(|s| s.parse().ok())
-                .unwrap_or(0),
-        );
-        Ok((lease_id, epoch, att_idx))
+                })?;
+        let lease = snapshot
+            .current_lease
+            .ok_or_else(|| FabricError::NotFound {
+                entity: "task_lease",
+                id: task_id.to_string(),
+            })?;
+        Ok((lease.lease_id, lease.epoch, lease.attempt_index))
     }
 
-    // Same HGETALL-only pattern as resolve_active_lease, but tolerates an
-    // empty current_lease_id (returns a nil LeaseId placeholder) for the
-    // cancel-while-unclaimed path.
+    /// Same as [`Self::resolve_active_lease`] but tolerates an absent
+    /// active lease (returns a nil `LeaseId` placeholder). Used by
+    /// the cancel-while-unclaimed path which must proceed even
+    /// without an active lease to cancel.
     async fn resolve_lease_or_placeholder(
         &self,
         task_id: &TaskId,
@@ -143,27 +119,28 @@ impl FabricTaskService {
         ),
         FabricError,
     > {
-        let fields = self
-            .read_valkey_lease_fields(task_id, project, session_id)
-            .await?;
-        let lease_id = match fields.get("current_lease_id").filter(|s| !s.is_empty()) {
-            Some(s) => ff_core::types::LeaseId::parse(s)
-                .map_err(|e| FabricError::Internal(format!("bad lease_id: {e}")))?,
-            None => ff_core::types::LeaseId::from_uuid(uuid::Uuid::nil()),
-        };
-        let epoch = ff_core::types::LeaseEpoch::new(
-            fields
-                .get("current_lease_epoch")
-                .and_then(|s| s.parse().ok())
-                .unwrap_or(0),
-        );
-        let att_idx = ff_core::types::AttemptIndex::new(
-            fields
-                .get("current_attempt_index")
-                .and_then(|s| s.parse().ok())
-                .unwrap_or(0),
-        );
-        Ok((lease_id, epoch, att_idx))
+        let eid = self.task_to_execution_id(project, session_id, task_id);
+        let snapshot =
+            self.engine
+                .describe_execution(&eid)
+                .await?
+                .ok_or_else(|| FabricError::NotFound {
+                    entity: "task",
+                    id: task_id.to_string(),
+                })?;
+        match snapshot.current_lease {
+            Some(lease) => Ok((lease.lease_id, lease.epoch, lease.attempt_index)),
+            None => Ok((
+                ff_core::types::LeaseId::from_uuid(uuid::Uuid::nil()),
+                snapshot
+                    .current_lease_epoch
+                    .unwrap_or_else(|| ff_core::types::LeaseEpoch::new(0)),
+                snapshot
+                    .current_attempt
+                    .map(|a| a.index)
+                    .unwrap_or_else(|| ff_core::types::AttemptIndex::new(0)),
+            )),
+        }
     }
 
     async fn read_task_record(
@@ -173,59 +150,29 @@ impl FabricTaskService {
         task_id: &TaskId,
     ) -> Result<TaskRecord, FabricError> {
         let eid = self.task_to_execution_id(project, session_id, task_id);
-        let partition = execution_partition(&eid, &self.runtime.partition_config);
-        let ctx = ExecKeyContext::new(&partition, &eid);
+        let snapshot =
+            self.engine
+                .describe_execution(&eid)
+                .await?
+                .ok_or_else(|| FabricError::NotFound {
+                    entity: "task",
+                    id: task_id.to_string(),
+                })?;
 
-        let fields: HashMap<String, String> = self
-            .runtime
-            .client
-            .hgetall(&ctx.core())
-            .await
-            .map_err(|e| FabricError::Internal(format!("valkey HGETALL: {e}")))?;
-
-        if fields.is_empty() {
-            return Err(FabricError::NotFound {
-                entity: "task",
-                id: task_id.to_string(),
-            });
-        }
-
-        let tags: HashMap<String, String> = self
-            .runtime
-            .client
-            .hgetall(&ctx.tags())
-            .await
-            .unwrap_or_else(|e| {
-                tracing::warn!(task_id = %task_id, error = %e, "failed to read execution tags");
-                HashMap::new()
-            });
-
-        let public_state_str = fields.get("public_state").cloned().unwrap_or_default();
-        let public_state = parse_public_state(&public_state_str);
+        let public_state = parse_public_state(&snapshot.public_state);
         let (task_state, failure_class) = state_map::ff_public_state_to_task_state(public_state);
-        let blocking_reason = fields.get("blocking_reason").cloned().unwrap_or_default();
-        let task_state =
-            state_map::adjust_task_state_for_blocking_reason(task_state, &blocking_reason);
+        let task_state = state_map::adjust_task_state_for_blocking_reason(
+            task_state,
+            snapshot.blocking_reason.as_deref().unwrap_or_default(),
+        );
 
-        let created_at = fields
-            .get("created_at")
-            .and_then(|v| v.parse().ok())
-            .unwrap_or(0);
-        let updated_at = fields
-            .get("last_mutation_at")
-            .and_then(|v| v.parse().ok())
-            .unwrap_or(created_at);
-        let version = fields
-            .get("current_lease_epoch")
-            .and_then(|v| v.parse().ok())
-            .unwrap_or(1);
-
-        let parent_run_id_str = tags.get("cairn.parent_run_id").cloned();
-        let parent_task_id_str = tags.get("cairn.parent_task_id").cloned();
+        let parent_run_id_str = snapshot.tags.get("cairn.parent_run_id").cloned();
+        let parent_task_id_str = snapshot.tags.get("cairn.parent_task_id").cloned();
         // Session binding written at submit time via the cairn.session_id
         // tag so callers can read the TaskRecord without walking parent_run_id.
-        let session_id_str = tags.get("cairn.session_id").cloned();
-        let tag_project = match tags
+        let session_id_str = snapshot.tags.get("cairn.session_id").cloned();
+        let tag_project = match snapshot
+            .tags
             .get("cairn.project")
             .and_then(|s| try_parse_project_key(s))
         {
@@ -243,13 +190,13 @@ impl FabricTaskService {
             None => project.clone(),
         };
 
-        let lease_owner = fields.get("current_worker_instance_id").cloned();
-        let lease_expires_at = fields.get("lease_expires_at").and_then(|v| v.parse().ok());
-
-        let retry_count = fields
-            .get("total_attempt_count")
-            .and_then(|v| v.parse().ok())
-            .unwrap_or(0);
+        let (lease_owner, lease_expires_at) = match snapshot.current_lease.as_ref() {
+            Some(l) => (
+                Some(l.owner.clone()).filter(|s| !s.is_empty()),
+                Some(l.expires_at.0 as u64).filter(|&v| v > 0),
+            ),
+            None => (None, None),
+        };
 
         Ok(TaskRecord {
             task_id: task_id.clone(),
@@ -264,14 +211,14 @@ impl FabricTaskService {
             failure_class,
             pause_reason: None,
             resume_trigger: None,
-            retry_count,
+            retry_count: snapshot.total_attempt_count,
             lease_owner,
             lease_expires_at,
             title: None,
             description: None,
-            version,
-            created_at,
-            updated_at,
+            version: snapshot.current_lease_epoch.map(|e| e.0).unwrap_or(1),
+            created_at: snapshot.created_at.0 as u64,
+            updated_at: snapshot.last_mutation_at.0 as u64,
         })
     }
 }
@@ -635,7 +582,7 @@ impl FabricTaskService {
                         //     silently losing their new ref.
                         return self
                             .reconcile_existing_dependency_edge(
-                                &fctx,
+                                &fid,
                                 &edge_id,
                                 project,
                                 dependent_task_id,
@@ -738,16 +685,16 @@ impl FabricTaskService {
         })
     }
 
-    /// Reconcile a replay hit on `dependency_already_exists`. FF's
-    /// edge hash at `fctx.edge(edge_id)` carries the original
-    /// `dependency_kind` and `data_passing_ref`. Re-declare with
-    /// identical values is idempotent success; re-declare with
-    /// different values surfaces as a `DependencyConflict` so the
+    /// Reconcile a replay hit on `dependency_already_exists` via the
+    /// engine's [`describe_edge`](crate::engine::Engine::describe_edge)
+    /// primitive. Re-declare with identical values is idempotent
+    /// success; re-declare with a different `dependency_kind` or
+    /// `data_passing_ref` surfaces as a `DependencyConflict` so the
     /// HTTP caller sees 409 instead of silently losing their update.
     #[allow(clippy::too_many_arguments)]
     async fn reconcile_existing_dependency_edge(
         &self,
-        fctx: &ff_core::keys::FlowKeyContext,
+        flow_id: &ff_core::types::FlowId,
         edge_id: &ff_core::types::EdgeId,
         project: &ProjectKey,
         dependent_task_id: &TaskId,
@@ -755,71 +702,52 @@ impl FabricTaskService {
         requested_kind: DependencyKind,
         requested_data_ref: Option<&str>,
     ) -> Result<TaskDependencyRecord, FabricError> {
-        let edge_key = fctx.edge(edge_id);
-
-        // One HGETALL replaces three sequential HGETs. The edge hash
-        // is small (≤10 fields) so the extra bytes are negligible
-        // compared to the RTT savings.
-        let fields: HashMap<String, String> = self
-            .runtime
-            .client
-            .hgetall(&edge_key)
-            .await
-            .map_err(|e| FabricError::Internal(format!("hgetall edge: {e}")))?;
-
-        // Missing `dependency_kind` on a pre-existing edge (e.g. one
-        // staged before the kind field was surfaced) must NOT force
-        // a 409 against callers that request the current default.
-        // FF's own server-side default is `success_only`, so treat
-        // the absent-field case as equivalent to the default enum
-        // value and let idempotent replay win.
-        let existing_kind_raw = fields
-            .get("dependency_kind")
-            .filter(|s| !s.is_empty())
-            .cloned()
-            .unwrap_or_else(|| DependencyKind::default().as_ff_str().to_owned());
-        // FF stores an empty string when data_passing_ref is absent
-        // (see ff_stage_dependency_edge Lua HSET), so normalise to
-        // None for comparison against the caller's Option<&str>.
-        let existing_data_ref_opt = match fields.get("data_passing_ref").map(String::as_str) {
-            None | Some("") => None,
-            Some(s) => Some(s.to_owned()),
+        let existing = match self.engine.describe_edge(flow_id, edge_id).await? {
+            Some(edge) => edge,
+            None => {
+                // The FCALL returned `dependency_already_exists` but
+                // the edge hash is now empty — a TOCTOU race between
+                // the FCALL and the describe_edge read. Extremely
+                // unlikely in practice (edges are not concurrently
+                // deleted), but surface it cleanly rather than
+                // silently treating as success.
+                return Err(FabricError::Internal(
+                    "dependency_already_exists but edge hash missing on describe_edge".into(),
+                ));
+            }
         };
 
-        let requested_kind_str = requested_kind.as_ff_str();
+        // Normalise the caller's ref (empty string → None) so it
+        // compares equal to how FF stores absent refs.
         let requested_data_ref_opt: Option<String> = requested_data_ref
             .filter(|s| !s.is_empty())
             .map(str::to_owned);
+        let requested_kind_str = requested_kind.as_ff_str();
 
-        if existing_kind_raw.as_str() != requested_kind_str
-            || existing_data_ref_opt != requested_data_ref_opt
+        if existing.kind.as_str() != requested_kind_str
+            || existing.data_passing_ref != requested_data_ref_opt
         {
             return Err(FabricError::DependencyConflict(Box::new(
                 crate::error::DependencyConflictDetail {
                     dependent_task_id: dependent_task_id.to_string(),
                     prerequisite_task_id: prerequisite_task_id.to_string(),
-                    existing_kind: existing_kind_raw,
-                    existing_data_passing_ref: existing_data_ref_opt,
+                    existing_kind: existing.kind,
+                    existing_data_passing_ref: existing.data_passing_ref,
                     requested_kind: requested_kind_str.to_owned(),
                     requested_data_passing_ref: requested_data_ref_opt,
                 },
             )));
         }
 
-        // Match — return the stored record. `created_at_ms` comes from
-        // the edge hash so the caller sees the original declaration
-        // timestamp, not the replay time.
-        let created_at_ms: u64 = fields
-            .get("created_at")
-            .and_then(|s| s.parse().ok())
-            .unwrap_or(0);
-
+        // Match — return the stored record. `created_at_ms` comes
+        // from the edge hash (via the snapshot) so the caller sees
+        // the original declaration timestamp, not the replay time.
         Ok(TaskDependencyRecord {
             dependency: TaskDependency {
                 dependent_task_id: dependent_task_id.clone(),
                 depends_on_task_id: prerequisite_task_id.clone(),
                 project: project.clone(),
-                created_at_ms,
+                created_at_ms: existing.created_at.0 as u64,
                 dependency_kind: requested_kind,
                 data_passing_ref: requested_data_ref_opt,
             },
@@ -874,105 +802,55 @@ impl FabricTaskService {
             return Ok(Vec::new());
         }
 
-        // Read the child's in-adjacency set — SMEMBERS over all
-        // edge_ids applied to this execution. For each, HGET `state`
-        // on the per-execution dep record (written by
-        // ff_apply_dependency_to_child and mutated by
-        // ff_resolve_dependency). Values: `unsatisfied` (blocker),
-        // `satisfied` (prerequisite completed), `impossible`
-        // (prerequisite failed/cancelled → child will be skipped).
-        // Only `unsatisfied` counts as a current blocker.
-        //
-        // Then resolve the upstream execution_id → cairn task_id via
-        // the `cairn.task_id` tag on the upstream exec_core (set at
-        // submit time, see crates/cairn-fabric/src/services/
-        // task_service.rs:296).
+        // Enumerate incoming edges via the engine primitive — one
+        // typed call replaces the prior `SMEMBERS deps_all_edges` +
+        // per-edge `HGETALL dep_edge` loop. Each returned
+        // [`EdgeSnapshot`](crate::engine::EdgeSnapshot) carries
+        // state + kind + data_passing_ref already parsed.
+        let incoming = self.engine.list_incoming_edges(&eid).await?;
 
-        // SMEMBERS on the child's deps_all_edges set (raw cmd —
-        // ferriskey doesn't expose a typed smembers() helper).
-        let smembers_raw: ferriskey::Value = self
-            .runtime
-            .client
-            .cmd("SMEMBERS")
-            .arg(exec_ctx.deps_all_edges())
-            .execute()
-            .await
-            .map_err(|e| FabricError::Internal(format!("smembers deps_all_edges: {e}")))?;
-        let edge_ids: Vec<String> = parse_string_array(&smembers_raw);
-
-        let mut blockers = Vec::new();
-        for edge_id_str in &edge_ids {
-            let edge_id = ff_core::types::EdgeId::parse(edge_id_str)
-                .map_err(|e| FabricError::Internal(format!("parse edge_id {edge_id_str}: {e}")))?;
-            let dep_key = exec_ctx.dep_edge(&edge_id);
-            // One HGETALL replaces four sequential HGETs per blocker —
-            // with N dependencies the reduction is 4N → N round-trips.
-            // The dep_hash has ~8 fields, so the marginal bytes are
-            // negligible vs. the RTT savings.
-            let fields: HashMap<String, String> = self
-                .runtime
-                .client
-                .hgetall(&dep_key)
-                .await
-                .map_err(|e| FabricError::Internal(format!("hgetall dep_edge: {e}")))?;
-            let state = fields.get("state").map(String::as_str).unwrap_or_default();
-            if state != "unsatisfied" {
+        let mut blockers = Vec::with_capacity(incoming.len());
+        for edge in incoming {
+            // Only `unsatisfied` edges count as current blockers.
+            // `satisfied` means the upstream completed in a
+            // satisfying way; `impossible` means the push listener
+            // has already scheduled a skip for this child.
+            if edge.state != crate::engine::EdgeState::Unsatisfied {
                 continue;
             }
-            let upstream_eid_str = match fields.get("upstream_execution_id") {
-                Some(s) if !s.is_empty() => s.clone(),
-                _ => continue,
-            };
-            // Map the FF string back to the typed enum. Missing field
-            // (legacy edges pre-dating this PR) defaults to FF's own
-            // server-side default (`success_only`). Unknown values
-            // are surfaced as Internal so an FF-side kind addition
+            // Map the FF kind string back to the typed enum. Unknown
+            // values surface as Internal so an FF-side kind addition
             // forces a visible cairn update rather than silent
             // mis-categorisation.
-            let dependency_kind = match fields.get("dependency_kind").map(String::as_str) {
-                Some("success_only") | None | Some("") => DependencyKind::SuccessOnly,
-                Some(other) => {
+            let dependency_kind = match edge.kind.as_str() {
+                "success_only" | "" => DependencyKind::SuccessOnly,
+                other => {
                     return Err(FabricError::Internal(format!(
                         "unknown dependency_kind on stored edge: {other}"
                     )));
                 }
             };
-            let data_passing_ref = match fields.get("data_passing_ref").map(String::as_str) {
-                None | Some("") => None,
-                Some(s) => Some(s.to_owned()),
-            };
-            // Resolve upstream execution_id → cairn task_id via the tag.
-            let upstream_eid = ff_core::types::ExecutionId::parse(&upstream_eid_str)
-                .map_err(|e| FabricError::Internal(format!("parse upstream_eid: {e}")))?;
-            let upstream_partition = ff_core::partition::execution_partition(
-                &upstream_eid,
-                &self.runtime.partition_config,
-            );
-            let upstream_ctx =
-                ff_core::keys::ExecKeyContext::new(&upstream_partition, &upstream_eid);
-            let upstream_task: Option<String> = self
-                .runtime
-                .client
-                .hget(&upstream_ctx.tags(), "cairn.task_id")
-                .await
-                .map_err(|e| FabricError::Internal(format!("hget cairn.task_id tag: {e}")))?;
-            let upstream_task_id = match upstream_task {
-                Some(s) if !s.is_empty() => TaskId::new(s),
-                _ => continue,
+            // Resolve upstream execution_id → cairn task_id via the
+            // Resolve upstream execution_id → cairn task_id via the
+            // targeted tag read. One HGET per upstream — avoids the
+            // 2N HGETALL amplification that a full `describe_execution`
+            // would cause in this per-blocker loop.
+            let upstream_task_id = match self
+                .engine
+                .get_execution_tag(&edge.upstream_execution_id, "cairn.task_id")
+                .await?
+            {
+                Some(s) => TaskId::new(s),
+                None => continue,
             };
             blockers.push(TaskDependencyRecord {
                 dependency: TaskDependency {
                     dependent_task_id: task_id.clone(),
                     depends_on_task_id: upstream_task_id,
                     project: project.clone(),
-                    // created_at_ms isn't carried on the edge record
-                    // in a form we can recover cheaply; the audit
-                    // event has it, but we'd need to scan the
-                    // EventLog. Callers that need it should read the
-                    // log directly.
-                    created_at_ms: 0,
+                    created_at_ms: edge.created_at.0 as u64,
                     dependency_kind,
-                    data_passing_ref,
+                    data_passing_ref: edge.data_passing_ref,
                 },
                 resolved_at_ms: None,
             });

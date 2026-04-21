@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::sync::Arc;
 
 use cairn_domain::lifecycle::SessionState;
@@ -18,11 +17,21 @@ use crate::id_map;
 pub struct FabricSessionService {
     runtime: Arc<FabricRuntime>,
     bridge: Arc<EventBridge>,
+    #[allow(dead_code)] // wired-in for the B-phase ports
+    engine: Arc<dyn crate::engine::Engine>,
 }
 
 impl FabricSessionService {
-    pub fn new(runtime: Arc<FabricRuntime>, bridge: Arc<EventBridge>) -> Self {
-        Self { runtime, bridge }
+    pub fn new(
+        runtime: Arc<FabricRuntime>,
+        bridge: Arc<EventBridge>,
+        engine: Arc<dyn crate::engine::Engine>,
+    ) -> Self {
+        Self {
+            runtime,
+            bridge,
+            engine,
+        }
     }
 
     fn flow_id(&self, project: &ProjectKey, session_id: &SessionId) -> FlowId {
@@ -37,56 +46,16 @@ impl FabricSessionService {
         id_map::tenant_to_namespace(&project.tenant_id)
     }
 
-    async fn read_flow_summary(
-        &self,
-        project: &ProjectKey,
-        session_id: &SessionId,
-    ) -> Result<Option<HashMap<String, String>>, FabricError> {
-        let fid = self.flow_id(project, session_id);
-        let partition = self.flow_partition(&fid);
-        let fctx = FlowKeyContext::new(&partition, &fid);
-
-        let fields: HashMap<String, String> = self
-            .runtime
-            .client
-            .hgetall(&fctx.summary())
-            .await
-            .map_err(|e| FabricError::Internal(format!("valkey HGETALL flow summary: {e}")))?;
-
-        if fields.is_empty() {
-            return Ok(None);
-        }
-        Ok(Some(fields))
-    }
-
     async fn read_session_record(
         &self,
         project: &ProjectKey,
         session_id: &SessionId,
     ) -> Result<Option<SessionRecord>, FabricError> {
         let fid = self.flow_id(project, session_id);
-        let partition = self.flow_partition(&fid);
-        let fctx = FlowKeyContext::new(&partition, &fid);
-
-        let core: HashMap<String, String> = self
-            .runtime
-            .client
-            .hgetall(&fctx.core())
-            .await
-            .map_err(|e| FabricError::Internal(format!("valkey HGETALL flow core: {e}")))?;
-
-        if core.is_empty() {
-            return Ok(None);
+        match self.engine.describe_flow(&fid).await? {
+            None => Ok(None),
+            Some(snapshot) => Ok(Some(build_session_record(session_id, project, &snapshot))),
         }
-
-        let summary = self
-            .read_flow_summary(project, session_id)
-            .await?
-            .unwrap_or_default();
-
-        Ok(Some(build_session_record(
-            session_id, project, &core, &summary,
-        )))
     }
 
     pub async fn create(
@@ -194,14 +163,10 @@ impl FabricSessionService {
         let partition = self.flow_partition(&fid);
         let fctx = FlowKeyContext::new(&partition, &fid);
 
-        let exists: std::collections::HashMap<String, String> = self
-            .runtime
-            .client
-            .hgetall(&fctx.core())
-            .await
-            .map_err(|e| FabricError::Internal(format!("valkey HGETALL flow core: {e}")))?;
-
-        if exists.is_empty() {
+        // Check the flow exists before issuing the FF-side cancel.
+        // Uses the typed snapshot rather than a raw HGETALL — same
+        // semantics, just goes through the engine abstraction.
+        if self.engine.describe_flow(&fid).await?.is_none() {
             return Err(FabricError::NotFound {
                 entity: "session",
                 id: session_id.to_string(),
@@ -273,50 +238,38 @@ fn flow_state_to_session_state(state: &str) -> SessionState {
 fn build_session_record(
     session_id: &SessionId,
     caller_project: &ProjectKey,
-    core: &HashMap<String, String>,
-    summary: &HashMap<String, String>,
+    snapshot: &crate::engine::FlowSnapshot,
 ) -> SessionRecord {
-    let project = core
+    let project = snapshot
+        .tags
         .get("cairn.project")
         .and_then(|s| try_parse_project_key(s))
         .unwrap_or_else(|| caller_project.clone());
 
-    let is_archived = core
+    let is_archived = snapshot
+        .tags
         .get("cairn.archived")
         .map(|v| v == "true")
         .unwrap_or(false);
     let state = if is_archived {
         SessionState::Archived
     } else {
-        let flow_state = summary
-            .get("public_state")
-            .or_else(|| core.get("state"))
-            .cloned()
-            .unwrap_or_default();
-        flow_state_to_session_state(&flow_state)
+        flow_state_to_session_state(&snapshot.public_flow_state)
     };
-
-    let created_at = core
-        .get("created_at")
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(0);
-    let updated_at = summary
-        .get("last_mutation_at")
-        .or_else(|| core.get("last_mutation_at"))
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(created_at);
-    let version = core
-        .get("graph_revision")
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(1);
 
     SessionRecord {
         session_id: session_id.clone(),
         project,
         state,
-        version,
-        created_at,
-        updated_at,
+        // graph_revision is monotonic across the flow's lifetime;
+        // cairn uses it as the SessionRecord optimistic-concurrency
+        // version. Matches `SessionService::create`'s `version: 0`
+        // on fresh flows — a read right after create sees the same
+        // value the creator saw, so optimistic-concurrency checks
+        // don't misfire.
+        version: snapshot.graph_revision,
+        created_at: snapshot.created_at.0 as u64,
+        updated_at: snapshot.last_mutation_at.0 as u64,
     }
 }
 
@@ -368,19 +321,44 @@ mod tests {
         assert_ne!(fid1, fid2);
     }
 
+    /// Test helper: build a FlowSnapshot with common fields for
+    /// build_session_record regression tests. Keeps tests readable
+    /// without reconstructing the full struct every time.
+    fn fake_flow_snapshot(
+        project_tag: Option<&str>,
+        public_flow_state: &str,
+        graph_revision: u64,
+        created_at: i64,
+        last_mutation_at: i64,
+        archived: bool,
+    ) -> crate::engine::FlowSnapshot {
+        use std::collections::BTreeMap;
+        let mut tags = BTreeMap::new();
+        if let Some(p) = project_tag {
+            tags.insert("cairn.project".to_owned(), p.to_owned());
+        }
+        if archived {
+            tags.insert("cairn.archived".to_owned(), "true".to_owned());
+        }
+        crate::engine::FlowSnapshot {
+            flow_id: FlowId::from_uuid(uuid::Uuid::nil()),
+            kind: "cairn_session".to_owned(),
+            namespace: Namespace::new("default"),
+            node_count: 0,
+            edge_count: 0,
+            graph_revision,
+            public_flow_state: public_flow_state.to_owned(),
+            created_at: TimestampMs::from_millis(created_at),
+            last_mutation_at: TimestampMs::from_millis(last_mutation_at),
+            tags,
+        }
+    }
+
     #[test]
     fn build_record_completed_flow() {
         let sid = SessionId::new("sess_test");
-        let mut core = HashMap::new();
-        core.insert("cairn.project".to_owned(), "t/w/p".to_owned());
-        core.insert("created_at".to_owned(), "1000".to_owned());
-        core.insert("graph_revision".to_owned(), "3".to_owned());
-
-        let mut summary = HashMap::new();
-        summary.insert("public_state".to_owned(), "completed".to_owned());
-        summary.insert("last_mutation_at".to_owned(), "2000".to_owned());
-
-        let record = build_session_record(&sid, &test_project(), &core, &summary);
+        let snap = fake_flow_snapshot(Some("t/w/p"), "completed", 3, 1000, 2000, false);
+        let record = build_session_record(&sid, &test_project(), &snap);
         assert_eq!(record.session_id.as_str(), "sess_test");
         assert_eq!(record.project.tenant_id.as_str(), "t");
         assert_eq!(record.project.workspace_id.as_str(), "w");
@@ -394,111 +372,60 @@ mod tests {
     #[test]
     fn build_record_open_when_active() {
         let sid = SessionId::new("sess_active");
-        let mut core = HashMap::new();
-        core.insert("cairn.project".to_owned(), "t/w/p".to_owned());
-        core.insert("created_at".to_owned(), "500".to_owned());
-
-        let mut summary = HashMap::new();
-        summary.insert("public_state".to_owned(), "running".to_owned());
-
-        let record = build_session_record(&sid, &test_project(), &core, &summary);
+        let snap = fake_flow_snapshot(Some("t/w/p"), "running", 0, 500, 500, false);
+        let record = build_session_record(&sid, &test_project(), &snap);
         assert_eq!(record.state, SessionState::Open);
-    }
-
-    #[test]
-    fn build_record_falls_back_to_core_state() {
-        let sid = SessionId::new("sess_core");
-        let mut core = HashMap::new();
-        core.insert("cairn.project".to_owned(), "t/w/p".to_owned());
-        core.insert("created_at".to_owned(), "100".to_owned());
-        core.insert("state".to_owned(), "failed".to_owned());
-
-        let summary = HashMap::new();
-
-        let record = build_session_record(&sid, &test_project(), &core, &summary);
-        assert_eq!(record.state, SessionState::Failed);
     }
 
     #[test]
     fn build_record_defaults_when_empty() {
         let sid = SessionId::new("sess_empty");
-        let core = HashMap::new();
-        let summary = HashMap::new();
-
-        let record = build_session_record(&sid, &test_project(), &core, &summary);
+        let snap = fake_flow_snapshot(None, "", 0, 0, 0, false);
+        let record = build_session_record(&sid, &test_project(), &snap);
         assert_eq!(record.state, SessionState::Open);
         assert_eq!(record.project.tenant_id.as_str(), "t");
-        assert_eq!(record.version, 1);
+        // Fresh flow has graph_revision=0; match SessionService::create.
+        assert_eq!(record.version, 0);
         assert_eq!(record.created_at, 0);
     }
 
     #[test]
-    fn build_record_updated_at_falls_back_to_created_at() {
+    fn build_record_updated_at_from_snapshot() {
         let sid = SessionId::new("sess_no_update");
-        let mut core = HashMap::new();
-        core.insert("cairn.project".to_owned(), "t/w/p".to_owned());
-        core.insert("created_at".to_owned(), "999".to_owned());
-
-        let summary = HashMap::new();
-
-        let record = build_session_record(&sid, &test_project(), &core, &summary);
+        let snap = fake_flow_snapshot(Some("t/w/p"), "", 0, 999, 999, false);
+        let record = build_session_record(&sid, &test_project(), &snap);
         assert_eq!(record.updated_at, 999);
     }
 
     #[test]
     fn build_record_failed_flow() {
         let sid = SessionId::new("sess_fail");
-        let mut core = HashMap::new();
-        core.insert("cairn.project".to_owned(), "x/y/z".to_owned());
-        core.insert("created_at".to_owned(), "100".to_owned());
-
-        let mut summary = HashMap::new();
-        summary.insert("public_state".to_owned(), "failed".to_owned());
-
-        let record = build_session_record(&sid, &test_project(), &core, &summary);
+        let snap = fake_flow_snapshot(Some("x/y/z"), "failed", 0, 100, 100, false);
+        let record = build_session_record(&sid, &test_project(), &snap);
         assert_eq!(record.state, SessionState::Failed);
     }
 
     #[test]
     fn build_record_cancelled_maps_to_failed() {
         let sid = SessionId::new("sess_cancel");
-        let mut core = HashMap::new();
-        core.insert("cairn.project".to_owned(), "t/w/p".to_owned());
-        core.insert("created_at".to_owned(), "100".to_owned());
-
-        let mut summary = HashMap::new();
-        summary.insert("public_state".to_owned(), "cancelled".to_owned());
-
-        let record = build_session_record(&sid, &test_project(), &core, &summary);
+        let snap = fake_flow_snapshot(Some("t/w/p"), "cancelled", 0, 100, 100, false);
+        let record = build_session_record(&sid, &test_project(), &snap);
         assert_eq!(record.state, SessionState::Failed);
     }
 
     #[test]
     fn build_record_archived_overrides_flow_state() {
         let sid = SessionId::new("sess_archived");
-        let mut core = HashMap::new();
-        core.insert("cairn.project".to_owned(), "t/w/p".to_owned());
-        core.insert("created_at".to_owned(), "100".to_owned());
-        core.insert("cairn.archived".to_owned(), "true".to_owned());
-
-        let mut summary = HashMap::new();
-        summary.insert("public_state".to_owned(), "cancelled".to_owned());
-
-        let record = build_session_record(&sid, &test_project(), &core, &summary);
+        let snap = fake_flow_snapshot(Some("t/w/p"), "cancelled", 0, 100, 100, true);
+        let record = build_session_record(&sid, &test_project(), &snap);
         assert_eq!(record.state, SessionState::Archived);
     }
 
     #[test]
     fn build_record_not_archived_when_flag_absent() {
         let sid = SessionId::new("sess_not_archived");
-        let mut core = HashMap::new();
-        core.insert("cairn.project".to_owned(), "t/w/p".to_owned());
-        core.insert("created_at".to_owned(), "100".to_owned());
-
-        let mut summary = HashMap::new();
-        summary.insert("public_state".to_owned(), "completed".to_owned());
-
-        let record = build_session_record(&sid, &test_project(), &core, &summary);
+        let snap = fake_flow_snapshot(Some("t/w/p"), "completed", 0, 100, 100, false);
+        let record = build_session_record(&sid, &test_project(), &snap);
         assert_eq!(record.state, SessionState::Completed);
     }
 }
