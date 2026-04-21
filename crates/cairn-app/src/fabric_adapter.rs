@@ -97,6 +97,24 @@ fn fabric_err_to_runtime(err: FabricError) -> RuntimeError {
     match err {
         FabricError::NotFound { entity, id } => RuntimeError::NotFound { entity, id },
         FabricError::Validation { reason } => RuntimeError::Validation { reason },
+        // FF FCALL contention codes are caller-retriable, not operator 5xx:
+        // they fire when two workers race for the same lease, when a grant
+        // TTL expires mid-claim, or when a scheduler-routed eligible set
+        // changes under the caller's feet. Surface them as 409 Conflict so
+        // clients can back off + retry instead of triggering ops alerts.
+        //
+        // The rejection is packed as `FabricError::Internal("<fcall> rejected:
+        // <code>")` by `check_fcall_success`; pattern-match on the `: <code>`
+        // suffix. Keep the list tight — only FF-documented contention codes
+        // belong here; anything else stays Internal so legitimate bugs don't
+        // get hidden behind a 409.
+        FabricError::Internal(ref msg) if is_claim_contention(msg) => {
+            tracing::debug!(fabric_err = %msg, "fabric claim contention (409 to caller)");
+            RuntimeError::Conflict {
+                entity: "execution",
+                id: msg.clone(),
+            }
+        }
         // SEC-007: Valkey / script / bridge / config / internal variants
         // carry FCALL names, key names, and occasionally secret-hash
         // references — none of which should reach the 500 response body.
@@ -107,6 +125,26 @@ fn fabric_err_to_runtime(err: FabricError) -> RuntimeError {
             RuntimeError::Internal("fabric layer error".into())
         }
     }
+}
+
+/// FF typed error codes that represent caller-retriable contention rather
+/// than an operator-alert system fault. See `ff-script::ScriptError` for
+/// the canonical list and `claim_common::issue_grant_and_claim` for the
+/// call sites that produce them.
+fn is_claim_contention(msg: &str) -> bool {
+    const CONTENTION_CODES: &[&str] = &[
+        "lease_conflict",
+        "invalid_claim_grant",
+        "claim_grant_expired",
+        "execution_not_leaseable",
+        "execution_not_eligible",
+        "execution_not_eligible_for_attempt",
+    ];
+    // Format (from check_fcall_success): "<fcall> rejected: <code>".
+    let Some((_, code)) = msg.rsplit_once(": ") else {
+        return false;
+    };
+    CONTENTION_CODES.contains(&code.trim())
 }
 
 // ── RunService adapter ───────────────────────────────────────────────────────
