@@ -8,8 +8,7 @@ use crate::error::FabricError;
 use crate::event_bridge::{BridgeEvent, EventBridge};
 use crate::helpers::{
     check_fcall_success, is_duplicate_result, parse_eligibility_result, parse_fail_outcome,
-    parse_public_state, parse_stage_result_revision, try_parse_project_key,
-    FailOutcome,
+    parse_public_state, parse_stage_result_revision, try_parse_project_key, FailOutcome,
 };
 use ff_core::keys::{ExecKeyContext, IndexKeys};
 use ff_core::partition::execution_partition;

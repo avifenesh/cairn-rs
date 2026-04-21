@@ -208,7 +208,8 @@ fn parse_execution_snapshot(
 
     let current_attempt = match (
         core.get("current_attempt_id").filter(|s| !s.is_empty()),
-        core.get("current_attempt_index").and_then(|s| s.parse().ok()),
+        core.get("current_attempt_index")
+            .and_then(|s| s.parse().ok()),
     ) {
         (Some(id_str), Some(idx)) => {
             let id = AttemptId::parse(id_str)

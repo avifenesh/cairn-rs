@@ -23,7 +23,14 @@ async fn describe_execution_on_fresh_task_returns_typed_snapshot() {
 
     h.fabric
         .tasks
-        .submit(&h.project, task_id.clone(), None, None, 0, Some(&session_id))
+        .submit(
+            &h.project,
+            task_id.clone(),
+            None,
+            None,
+            0,
+            Some(&session_id),
+        )
         .await
         .expect("submit task");
 
@@ -139,7 +146,12 @@ async fn describe_flow_on_missing_flow_returns_none() {
     let absent_session = h.unique_session_id();
     let fid = cairn_fabric::id_map::session_to_flow_id(&h.project, &absent_session);
 
-    let result = h.fabric.engine.describe_flow(&fid).await.expect("describe_flow");
+    let result = h
+        .fabric
+        .engine
+        .describe_flow(&fid)
+        .await
+        .expect("describe_flow");
     assert!(result.is_none());
 
     h.teardown().await;
@@ -240,7 +252,14 @@ async fn describe_execution_after_claim_surfaces_lease_summary() {
 
     h.fabric
         .tasks
-        .submit(&h.project, task_id.clone(), None, None, 0, Some(&session_id))
+        .submit(
+            &h.project,
+            task_id.clone(),
+            None,
+            None,
+            0,
+            Some(&session_id),
+        )
         .await
         .expect("submit");
     h.fabric
@@ -271,10 +290,7 @@ async fn describe_execution_after_claim_surfaces_lease_summary() {
 
     let lease = snap.current_lease.expect("claimed execution has a lease");
     assert!(lease.epoch.0 >= 1, "epoch monotonic ≥ 1 after claim");
-    assert!(
-        lease.expires_at.0 > 0,
-        "expires_at populated after claim"
-    );
+    assert!(lease.expires_at.0 > 0, "expires_at populated after claim");
     assert!(!lease.owner.is_empty(), "owner populated");
     // Sanity: clean up so the shared Valkey doesn't keep the leased
     // state around (other tests see it via different ProjectKeys so
