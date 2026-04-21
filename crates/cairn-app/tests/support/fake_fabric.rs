@@ -243,6 +243,8 @@ impl TaskService for FakeFabricTasks {
         &self,
         _dependent_task_id: &TaskId,
         _prerequisite_task_id: &TaskId,
+        _dependency_kind: cairn_domain::DependencyKind,
+        _data_passing_ref: Option<String>,
     ) -> Result<cairn_domain::TaskDependencyRecord, RuntimeError> {
         Err(readonly("tasks.declare_dependency"))
     }

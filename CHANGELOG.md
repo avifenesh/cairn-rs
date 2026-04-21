@@ -9,7 +9,46 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- **Task dependency declaration now accepts `dependency_kind` and
+  `data_passing_ref`.** `POST /v1/tasks/{id}/dependencies` surfaces
+  both fields from FF 0.2's flow-edge FCALLs:
+  - `dependency_kind` is an enum (today only `success_only`; unknown
+    strings return 422 at the JSON extractor).
+  - `data_passing_ref` is an opaque caller-supplied string stored on
+    the FF edge and forwarded to the downstream task after upstream
+    resolution. Cairn never dereferences it; downstream consumers are
+    responsible for interpreting the value. Validated at the handler
+    (length ≤ 256 bytes, charset `[A-Za-z0-9._:/-]`, empty string
+    treated as absent). See `SECURITY.md` for the opaque-string
+    contract.
+
+  Existing callers that omit the fields get the previous defaults.
+  `GET /v1/tasks/{id}/dependencies` now returns both fields on each
+  blocker record.
+
 ### Changed
+
+- **Dependency `edge_id` is now deterministic** (UUID-v5 over
+  `flow_id || upstream_eid || downstream_eid`) instead of random. The
+  replay path (`dependency_already_exists`) can read the staged edge
+  directly via `HGETALL fctx.edge(edge_id)` and compare
+  `(dependency_kind, data_passing_ref)` against the caller's values:
+  identical replay is idempotent 201; a different kind or ref now
+  returns **409 `dependency_conflict`** carrying both existing and
+  requested values (previously returned 201 and silently kept the
+  original). This also makes `BridgeEvent::TaskDependencyAdded`'s
+  `edge_id` stable across caller retries, fixing a latent correlation
+  gap for consumers of the bridge event stream.
+- `TaskDependency` / `TaskDependencyRecord` now carry `dependency_kind`
+  and `data_passing_ref` fields. Backward-compatible via
+  `#[serde(default)]` so prior event-log records deserialise.
+- **Fix**: `GET /v1/tasks/{id}/dependencies` now respects the admin
+  token bypass; previously an admin-token call hit an open-coded
+  tenant check that always returned 404 regardless of `is_admin`.
+  Aligns with `load_task_visible_to_tenant` used by every other
+  task-mutation endpoint.
 
 - **FlowFabric bumped to 0.2**: `ff-core`, `ff-sdk`, `ff-engine`, `ff-scheduler`,
   `ff-script`, and `ferriskey` all move from `"0.1"` to `"0.2"`. FF 0.2 is

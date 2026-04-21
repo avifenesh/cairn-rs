@@ -79,7 +79,7 @@ pub use selectors::*;
 pub use signal::*;
 pub use skills::*;
 pub use sla::*;
-pub use task_dependencies::{TaskDependency, TaskDependencyRecord};
+pub use task_dependencies::{DependencyKind, TaskDependency, TaskDependencyRecord};
 pub use tenancy::*;
 pub use tool_invocation::*;
 pub use voice::{

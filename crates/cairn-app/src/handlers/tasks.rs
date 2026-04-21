@@ -23,7 +23,7 @@ use utoipa::ToSchema;
 
 use crate::errors::{
     bad_request_response, parse_task_state, runtime_error_response, store_error_response,
-    AppApiError,
+    validation_error_response, AppApiError,
 };
 use crate::extractors::{HasProjectScope, ProjectJson, ProjectScope, TenantScope};
 use crate::helpers::resolve_session_for_task_record;
@@ -164,6 +164,58 @@ pub(crate) struct ExpireLeasesResponse {
 #[derive(Clone, Debug, serde::Deserialize)]
 pub(crate) struct AddTaskDependencyRequest {
     pub(crate) depends_on_task_id: String,
+    /// Edge kind. Defaults to `success_only`. Unknown strings are
+    /// rejected at deserialisation time (serde returns 422 via the
+    /// JSON extractor).
+    #[serde(default)]
+    pub(crate) dependency_kind: cairn_domain::DependencyKind,
+    /// Opaque reference stored on the FF edge and surfaced to the
+    /// downstream task after upstream resolution. Cairn never
+    /// dereferences this value; see `SECURITY.md`. Validated at
+    /// handler time (length ≤ 256 bytes, charset `[A-Za-z0-9._:/-]`).
+    /// An empty string is treated as absent.
+    #[serde(default)]
+    pub(crate) data_passing_ref: Option<String>,
+}
+
+/// Upper bound chosen to fit common artifact identifiers (S3 ETags,
+/// Git SHAs, URLs with one short query param) while rejecting payload
+/// smuggling. Cairn never parses the value; it's forwarded verbatim
+/// to FF edge storage.
+const DATA_PASSING_REF_MAX_LEN: usize = 256;
+
+/// Validate `data_passing_ref` client-side and normalise empty string
+/// → `None`. Returns a caller-facing error message on invalid input;
+/// handlers translate to HTTP 422.
+///
+/// Allowed charset: `[A-Za-z0-9._:/-]`. Deliberately excludes
+/// whitespace, control chars, null bytes, and non-ASCII so the value
+/// is safe to log + round-trip through Valkey's Lua HSET without
+/// quoting surprises.
+fn validate_data_passing_ref(v: &mut Option<String>) -> Result<(), String> {
+    match v.as_deref() {
+        None => Ok(()),
+        Some("") => {
+            *v = None;
+            Ok(())
+        }
+        Some(s) if s.len() > DATA_PASSING_REF_MAX_LEN => Err(format!(
+            "data_passing_ref exceeds {DATA_PASSING_REF_MAX_LEN} bytes (got {})",
+            s.len()
+        )),
+        Some(s)
+            if !s.bytes().all(|b| {
+                matches!(b,
+                    b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9'
+                    | b'.' | b'_' | b':' | b'/' | b'-')
+            }) =>
+        {
+            Err("data_passing_ref contains disallowed characters \
+                 (allowed: [A-Za-z0-9._:/-])"
+                .into())
+        }
+        Some(_) => Ok(()),
+    }
 }
 
 // ── Handlers ─────────────────────────────────────────────────────────────────
@@ -338,8 +390,18 @@ pub(crate) async fn add_task_dependency_handler(
     Path(id): Path<String>,
     Json(body): Json<AddTaskDependencyRequest>,
 ) -> impl IntoResponse {
+    let AddTaskDependencyRequest {
+        depends_on_task_id,
+        dependency_kind,
+        mut data_passing_ref,
+    } = body;
     let task_id = TaskId::new(id);
-    let depends_on = TaskId::new(body.depends_on_task_id);
+    let depends_on = TaskId::new(depends_on_task_id);
+
+    // Validate the opaque reference before any I/O.
+    if let Err(msg) = validate_data_passing_ref(&mut data_passing_ref) {
+        return validation_error_response(msg);
+    }
 
     // T6a-C3: both tasks must be in the caller's tenant.
     if let Err(resp) = load_task_visible_to_tenant(state.as_ref(), &tenant_scope, &task_id).await {
@@ -354,7 +416,7 @@ pub(crate) async fn add_task_dependency_handler(
     match state
         .runtime
         .tasks
-        .declare_dependency(&task_id, &depends_on)
+        .declare_dependency(&task_id, &depends_on, dependency_kind, data_passing_ref)
         .await
     {
         Ok(record) => {
@@ -371,20 +433,15 @@ pub(crate) async fn list_task_dependencies_handler(
     Path(id): Path<String>,
 ) -> impl IntoResponse {
     let task_id = TaskId::new(id);
-    // Go through TaskService::check_dependencies so the HTTP surface
-    // stays backend-agnostic. Under Fabric the result comes from FF
-    // edge state; under the dev-only in-memory runtime the result is
-    // always empty (see RunServiceImpl::check_dependencies).
-    match state.runtime.tasks.get(&task_id).await {
-        Ok(Some(task)) if task.project.tenant_id == *tenant_scope.tenant_id() => {
-            match state.runtime.tasks.check_dependencies(&task_id).await {
-                Ok(records) => (StatusCode::OK, Json(records)).into_response(),
-                Err(err) => runtime_error_response(err),
-            }
-        }
-        Ok(Some(_)) | Ok(None) => {
-            AppApiError::new(StatusCode::NOT_FOUND, "not_found", "task not found").into_response()
-        }
+    // T6a-C3: respect admin bypass. The dev-only open-coded tenant
+    // check used to miss `is_admin`, causing admin-token calls to
+    // always 404. `load_task_visible_to_tenant` is the shared helper
+    // used by every other task endpoint with the same shape.
+    if let Err(resp) = load_task_visible_to_tenant(state.as_ref(), &tenant_scope, &task_id).await {
+        return resp;
+    }
+    match state.runtime.tasks.check_dependencies(&task_id).await {
+        Ok(records) => (StatusCode::OK, Json(records)).into_response(),
         Err(err) => runtime_error_response(err),
     }
 }

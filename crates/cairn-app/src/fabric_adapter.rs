@@ -97,6 +97,16 @@ fn fabric_err_to_runtime(err: FabricError) -> RuntimeError {
     match err {
         FabricError::NotFound { entity, id } => RuntimeError::NotFound { entity, id },
         FabricError::Validation { reason } => RuntimeError::Validation { reason },
+        FabricError::DependencyConflict(detail) => RuntimeError::DependencyConflict(Box::new(
+            cairn_runtime::error::DependencyConflictDetail {
+                dependent_task_id: detail.dependent_task_id,
+                prerequisite_task_id: detail.prerequisite_task_id,
+                existing_kind: detail.existing_kind,
+                existing_data_passing_ref: detail.existing_data_passing_ref,
+                requested_kind: detail.requested_kind,
+                requested_data_passing_ref: detail.requested_data_passing_ref,
+            },
+        )),
         // FF FCALL contention codes are caller-retriable, not operator 5xx:
         // they fire when two workers race for the same lease, when a grant
         // TTL expires mid-claim, or when a scheduler-routed eligible set
@@ -672,6 +682,8 @@ impl TaskService for FabricTaskServiceAdapter {
         &self,
         dependent_task_id: &TaskId,
         prerequisite_task_id: &TaskId,
+        dependency_kind: cairn_domain::DependencyKind,
+        data_passing_ref: Option<String>,
     ) -> Result<TaskDependencyRecord, RuntimeError> {
         // Resolve project + session for both tasks from the
         // projection; FF flow edges can only connect members of the
@@ -724,6 +736,8 @@ impl TaskService for FabricTaskServiceAdapter {
                 &session_id,
                 dependent_task_id,
                 prerequisite_task_id,
+                dependency_kind,
+                data_passing_ref.as_deref(),
             )
             .await
             .map_err(fabric_err_to_runtime)

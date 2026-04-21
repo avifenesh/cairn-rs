@@ -25,7 +25,7 @@
 use cairn_domain::tenancy::ProjectKey;
 use cairn_domain::{RunId, SessionId, TaskId, TenantId};
 use ff_core::partition::PartitionConfig;
-use ff_core::types::{ExecutionId, FlowId, LaneId, Namespace};
+use ff_core::types::{EdgeId, ExecutionId, FlowId, LaneId, Namespace};
 use uuid::Uuid;
 
 // Stable namespace UUID for all cairn→FF ID mappings (UUID v5).
@@ -105,6 +105,33 @@ pub fn session_run_to_execution_id(
     let uuid = Uuid::new_v5(&CAIRN_NAMESPACE, input.as_bytes());
     let flow = session_to_flow_id(project, session_id);
     ExecutionId::deterministic_for_flow(&flow, config, uuid)
+}
+
+/// Mint a deterministic `EdgeId` for a task-dependency edge.
+///
+/// Derived from `(flow_id, upstream_execution_id, downstream_execution_id)`
+/// via UUID v5 in the cairn namespace. Two properties matter for
+/// correctness:
+/// 1. **Determinism** — re-declaring the same edge produces the same
+///    `EdgeId`, so the `dependency_already_exists` replay path can
+///    `HGETALL fctx.edge(edge_id)` to compare the stored edge against
+///    the replayed inputs without a scan.
+/// 2. **Stability across retries** — downstream consumers of
+///    `BridgeEvent::TaskDependencyAdded` see a stable `edge_id` for the
+///    same edge across caller retries, not a fresh random UUID per
+///    attempt.
+///
+/// The recipe MUST remain stable: changing it orphans staged edges in
+/// Valkey. Bump `NAMESPACE_VERSION` for migrations.
+pub fn dependency_edge_id(
+    flow_id: &FlowId,
+    upstream_eid: &ExecutionId,
+    downstream_eid: &ExecutionId,
+) -> EdgeId {
+    let input =
+        format!("v{NAMESPACE_VERSION}:dep_edge:\0{flow_id}\0{upstream_eid}\0{downstream_eid}",);
+    let uuid = Uuid::new_v5(&CAIRN_NAMESPACE, input.as_bytes());
+    EdgeId::from_uuid(uuid)
 }
 
 /// Mint an `ExecutionId` scoped to a session's `FlowId` for a given task.
@@ -658,5 +685,48 @@ mod tests {
             "task must co-locate with runs in same session"
         );
         assert_eq!(p_task_a, p_task_b, "tasks in same session must co-locate");
+    }
+
+    fn edge_test_ids() -> (FlowId, ExecutionId, ExecutionId) {
+        let p = test_project();
+        let cfg = PartitionConfig::default();
+        let sid = SessionId::new("sess_dep");
+        let fid = session_to_flow_id(&p, &sid);
+        let eid_a = session_task_to_execution_id(&p, &sid, &TaskId::new("task_a"), &cfg);
+        let eid_b = session_task_to_execution_id(&p, &sid, &TaskId::new("task_b"), &cfg);
+        (fid, eid_a, eid_b)
+    }
+
+    #[test]
+    fn dependency_edge_id_deterministic() {
+        let (fid, up, down) = edge_test_ids();
+        let e1 = dependency_edge_id(&fid, &up, &down);
+        let e2 = dependency_edge_id(&fid, &up, &down);
+        assert_eq!(e1, e2);
+    }
+
+    #[test]
+    fn dependency_edge_id_direction_sensitive() {
+        // A -> B and B -> A must mint different edges — otherwise a
+        // caller declaring the reverse edge on the same flow would
+        // collide with the forward edge.
+        let (fid, up, down) = edge_test_ids();
+        let forward = dependency_edge_id(&fid, &up, &down);
+        let reverse = dependency_edge_id(&fid, &down, &up);
+        assert_ne!(forward, reverse);
+    }
+
+    #[test]
+    fn dependency_edge_id_flow_scoped() {
+        // Different flows yield different edge IDs for the same
+        // upstream/downstream exec IDs. In practice flow membership
+        // is already enforced by FF, but namespacing by flow is
+        // defence-in-depth.
+        let (fid1, up, down) = edge_test_ids();
+        let fid2 = session_to_flow_id(&test_project(), &SessionId::new("sess_other"));
+        assert_ne!(fid1, fid2);
+        let e1 = dependency_edge_id(&fid1, &up, &down);
+        let e2 = dependency_edge_id(&fid2, &up, &down);
+        assert_ne!(e1, e2);
     }
 }
