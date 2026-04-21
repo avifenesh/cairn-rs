@@ -139,6 +139,23 @@ fn is_claim_contention(msg: &str) -> bool {
         "execution_not_leaseable",
         "execution_not_eligible",
         "execution_not_eligible_for_attempt",
+        // Scheduler-routed contention: another scheduler already pulled
+        // the execution out of the eligible set before this caller's
+        // grant-issue FCALL landed. Caller-retriable (wait for the
+        // winner to finish or for a new execution to become eligible).
+        "execution_not_in_eligible_set",
+        // Grant-step contention: another worker's grant was still
+        // active (within grant_ttl_ms) when this caller tried to
+        // issue its own. This is the dominant shape of the
+        // concurrent-claim race: N callers hit ff_issue_claim_grant
+        // simultaneously, the first wins, the others see this.
+        "grant_already_exists",
+        "execution_not_found",
+        // Replay/terminal contention: a terminal path (cancellation,
+        // completion) mutated state between eligibility and claim.
+        "execution_not_active",
+        "no_active_lease",
+        "no_eligible_execution",
     ];
     // Format (from check_fcall_success): "<fcall> rejected: <code>".
     let Some((_, code)) = msg.rsplit_once(": ") else {
