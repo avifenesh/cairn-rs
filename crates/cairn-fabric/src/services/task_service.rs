@@ -757,30 +757,31 @@ impl FabricTaskService {
     ) -> Result<TaskDependencyRecord, FabricError> {
         let edge_key = fctx.edge(edge_id);
 
-        let existing_kind_str: Option<String> = self
+        // One HGETALL replaces three sequential HGETs. The edge hash
+        // is small (≤10 fields) so the extra bytes are negligible
+        // compared to the RTT savings.
+        let fields: HashMap<String, String> = self
             .runtime
             .client
-            .hget(&edge_key, "dependency_kind")
+            .hgetall(&edge_key)
             .await
-            .map_err(|e| FabricError::Internal(format!("hget edge dependency_kind: {e}")))?;
-        let existing_data_ref: Option<String> = self
-            .runtime
-            .client
-            .hget(&edge_key, "data_passing_ref")
-            .await
-            .map_err(|e| FabricError::Internal(format!("hget edge data_passing_ref: {e}")))?;
-        let existing_created_at_str: Option<String> = self
-            .runtime
-            .client
-            .hget(&edge_key, "created_at")
-            .await
-            .map_err(|e| FabricError::Internal(format!("hget edge created_at: {e}")))?;
+            .map_err(|e| FabricError::Internal(format!("hgetall edge: {e}")))?;
 
-        let existing_kind_raw = existing_kind_str.unwrap_or_default();
+        // Missing `dependency_kind` on a pre-existing edge (e.g. one
+        // staged before the kind field was surfaced) must NOT force
+        // a 409 against callers that request the current default.
+        // FF's own server-side default is `success_only`, so treat
+        // the absent-field case as equivalent to the default enum
+        // value and let idempotent replay win.
+        let existing_kind_raw = fields
+            .get("dependency_kind")
+            .filter(|s| !s.is_empty())
+            .cloned()
+            .unwrap_or_else(|| DependencyKind::default().as_ff_str().to_owned());
         // FF stores an empty string when data_passing_ref is absent
         // (see ff_stage_dependency_edge Lua HSET), so normalise to
         // None for comparison against the caller's Option<&str>.
-        let existing_data_ref_opt = match existing_data_ref.as_deref() {
+        let existing_data_ref_opt = match fields.get("data_passing_ref").map(String::as_str) {
             None | Some("") => None,
             Some(s) => Some(s.to_owned()),
         };
@@ -808,7 +809,8 @@ impl FabricTaskService {
         // Match — return the stored record. `created_at_ms` comes from
         // the edge hash so the caller sees the original declaration
         // timestamp, not the replay time.
-        let created_at_ms: u64 = existing_created_at_str
+        let created_at_ms: u64 = fields
+            .get("created_at")
             .and_then(|s| s.parse().ok())
             .unwrap_or(0);
 
@@ -903,55 +905,39 @@ impl FabricTaskService {
             let edge_id = ff_core::types::EdgeId::parse(edge_id_str)
                 .map_err(|e| FabricError::Internal(format!("parse edge_id {edge_id_str}: {e}")))?;
             let dep_key = exec_ctx.dep_edge(&edge_id);
-            let dep_state: Option<String> = self
+            // One HGETALL replaces four sequential HGETs per blocker —
+            // with N dependencies the reduction is 4N → N round-trips.
+            // The dep_hash has ~8 fields, so the marginal bytes are
+            // negligible vs. the RTT savings.
+            let fields: HashMap<String, String> = self
                 .runtime
                 .client
-                .hget(&dep_key, "state")
+                .hgetall(&dep_key)
                 .await
-                .map_err(|e| FabricError::Internal(format!("hget dep state: {e}")))?;
-            let upstream_eid_str: Option<String> = self
-                .runtime
-                .client
-                .hget(&dep_key, "upstream_execution_id")
-                .await
-                .map_err(|e| FabricError::Internal(format!("hget upstream_execution_id: {e}")))?;
-            let state = dep_state.unwrap_or_default();
+                .map_err(|e| FabricError::Internal(format!("hgetall dep_edge: {e}")))?;
+            let state = fields.get("state").map(String::as_str).unwrap_or_default();
             if state != "unsatisfied" {
                 continue;
             }
-            let upstream_eid_str = match upstream_eid_str {
-                Some(s) if !s.is_empty() => s,
+            let upstream_eid_str = match fields.get("upstream_execution_id") {
+                Some(s) if !s.is_empty() => s.clone(),
                 _ => continue,
             };
-            // Pull `dependency_kind` and `data_passing_ref` off the
-            // child-side dep record (apply_dependency_to_child mirrors
-            // both fields onto `{p:N}` so `check_dependencies` doesn't
-            // have to cross-slot to `{fp:N}:edge`).
-            let kind_str: Option<String> = self
-                .runtime
-                .client
-                .hget(&dep_key, "dependency_kind")
-                .await
-                .map_err(|e| FabricError::Internal(format!("hget dep dependency_kind: {e}")))?;
-            let data_ref_str: Option<String> = self
-                .runtime
-                .client
-                .hget(&dep_key, "data_passing_ref")
-                .await
-                .map_err(|e| FabricError::Internal(format!("hget dep data_passing_ref: {e}")))?;
-            // Map the FF string back to the typed enum. Unknown values
-            // default to `SuccessOnly` defensively — today only that
-            // kind exists; if FF 0.3 adds new kinds this default hides
-            // the upgrade, so gate on a known string instead.
-            let dependency_kind = match kind_str.as_deref() {
-                Some("success_only") | None => DependencyKind::SuccessOnly,
+            // Map the FF string back to the typed enum. Missing field
+            // (legacy edges pre-dating this PR) defaults to FF's own
+            // server-side default (`success_only`). Unknown values
+            // are surfaced as Internal so an FF-side kind addition
+            // forces a visible cairn update rather than silent
+            // mis-categorisation.
+            let dependency_kind = match fields.get("dependency_kind").map(String::as_str) {
+                Some("success_only") | None | Some("") => DependencyKind::SuccessOnly,
                 Some(other) => {
                     return Err(FabricError::Internal(format!(
                         "unknown dependency_kind on stored edge: {other}"
                     )));
                 }
             };
-            let data_passing_ref = match data_ref_str.as_deref() {
+            let data_passing_ref = match fields.get("data_passing_ref").map(String::as_str) {
                 None | Some("") => None,
                 Some(s) => Some(s.to_owned()),
             };
