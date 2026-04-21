@@ -247,26 +247,6 @@ pub(crate) async fn resolve_session_for_task_record(
     Ok(Some(run.session_id))
 }
 
-/// Fetch the task by id, then resolve its session_id via
-/// [`resolve_session_for_task_record`]. Returns `Ok(None)` if the task does not
-/// exist (the caller will typically surface that as a 404 on its own path) or
-/// has no parent run. Errors propagate store and missing-parent-run failures.
-pub(crate) async fn resolve_session_for_task_id(
-    state: &AppState,
-    task_id: &TaskId,
-) -> Result<Option<SessionId>, axum::response::Response> {
-    let Some(task) = state
-        .runtime
-        .tasks
-        .get(task_id)
-        .await
-        .map_err(runtime_error_response)?
-    else {
-        return Ok(None);
-    };
-    resolve_session_for_task_record(state, &task).await
-}
-
 pub(crate) async fn build_run_record_view(state: &AppState, run: RunRecord) -> RunRecordView {
     let created_by_trigger_id =
         resolve_run_string_default(state, &run.project, &run.run_id, "created_by_trigger_id").await;
