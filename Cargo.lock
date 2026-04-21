@@ -496,7 +496,7 @@ dependencies = [
  "cairn-workspace",
  "chrono",
  "dotenvy",
- "ff-core 0.1.1",
+ "ff-core",
  "futures",
  "http-body-util",
  "mime_guess",
@@ -567,7 +567,7 @@ dependencies = [
  "cairn-orchestrator",
  "cairn-store",
  "ferriskey",
- "ff-core 0.2.0",
+ "ff-core",
  "ff-engine",
  "ff-scheduler",
  "ff-script",
@@ -1241,19 +1241,6 @@ dependencies = [
 
 [[package]]
 name = "ff-core"
-version = "0.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9f8b2ba0a37d0a3934fdace1ece861b3135c2254a9abc2d2acd7fc0515189c34"
-dependencies = [
- "crc16",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
- "uuid",
-]
-
-[[package]]
-name = "ff-core"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cfcc8f4046489a7f49d479ed5bf1d3a6045e4cffbe548f4633263a904575686a"
@@ -1272,7 +1259,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ac500dfee3db3a9d3d1f24a292fa40600e162bd823f6dd80986a4f9a616aa496"
 dependencies = [
  "ferriskey",
- "ff-core 0.2.0",
+ "ff-core",
  "futures",
  "serde",
  "serde_json",
@@ -1287,7 +1274,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ad3c5f37038bca1917068e726ee498335be7668b4e0272906d2f7c464e409f1e"
 dependencies = [
  "ferriskey",
- "ff-core 0.2.0",
+ "ff-core",
  "ff-script",
  "thiserror 2.0.18",
  "tracing",
@@ -1300,7 +1287,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b4f768189ef131f8510af70a1bd21ad8ce88d0f75409bcb701c3ab6bbd61a6b3"
 dependencies = [
  "ferriskey",
- "ff-core 0.2.0",
+ "ff-core",
  "serde_json",
  "thiserror 2.0.18",
  "tokio",
@@ -1314,7 +1301,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e8b8523644466111ed403aa879e2decb4bd8632c56526fdd26582fe3ff7edb95"
 dependencies = [
  "ferriskey",
- "ff-core 0.2.0",
+ "ff-core",
  "ff-script",
  "reqwest",
  "serde",

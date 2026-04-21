@@ -28,7 +28,7 @@ use ff_core::partition::{Partition, PartitionFamily};
 use crate::boot::FabricRuntime;
 use crate::error::FabricError;
 use crate::fcall;
-use crate::helpers::fcall_error_code;
+use crate::helpers::{check_fcall_success, fcall_error_code};
 
 /// Outcome of a rotation fan-out. Mirrors ff-server's
 /// `RotateWaitpointSecretResult` shape (`rotated`, `failed`, `new_kid`)
@@ -54,19 +54,31 @@ pub struct RotateOutcome {
 }
 
 /// Per-partition failure detail for the rotation fan-out.
+///
+/// SEC-007: only the `code` and `partition_index` reach the HTTP
+/// response body. The raw `FabricError` / parse error — which can
+/// carry FCALL names, Valkey transport internals, or key names — is
+/// logged server-side via `tracing::debug!` and NOT surfaced in
+/// `RotationFailure`. The public `detail` field carries a
+/// classification hint only (`"lua_rejected"`, `"transport_error"`,
+/// `"unparseable_envelope"`) that operators can use to triage
+/// without any internal detail leaking.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RotationFailure {
     pub partition_index: u16,
     /// FF typed error code when the Lua envelope returned one
     /// (`rotation_conflict`, `invalid_kid`, `invalid_secret_hex`,
     /// `invalid_grace_ms`). `None` when the call failed before FCALL
-    /// reply (transport / timeout).
+    /// reply (transport / timeout / malformed envelope).
     pub code: Option<String>,
-    /// Human-readable detail. For transport failures this is the
-    /// underlying error string; for Lua rejections it repeats the code
-    /// plus any details the FCALL envelope carried.
+    /// Opaque classification hint. Does NOT contain raw error
+    /// strings, FCALL names, or other internals.
     pub detail: String,
 }
+
+const DETAIL_LUA_REJECTED: &str = "lua_rejected";
+const DETAIL_TRANSPORT_ERROR: &str = "transport_error";
+const DETAIL_UNPARSEABLE_ENVELOPE: &str = "unparseable_envelope";
 
 /// Cairn-side rotation service.
 pub struct FabricRotationService {
@@ -125,30 +137,72 @@ impl FabricRotationService {
             {
                 Ok(raw) => {
                     if let Some(code) = fcall_error_code(&raw) {
+                        tracing::debug!(
+                            partition = index,
+                            code = %code,
+                            "waitpoint hmac rotation rejected by FCALL"
+                        );
                         failed.push(RotationFailure {
                             partition_index: index,
-                            code: Some(code.clone()),
-                            detail: format!("partition {index} rejected: {code}"),
+                            code: Some(code),
+                            detail: DETAIL_LUA_REJECTED.to_owned(),
                         });
-                    } else {
-                        match classify_ok_variant(&raw) {
-                            Ok(OkVariant::Rotated) => rotated += 1,
-                            Ok(OkVariant::Noop) => noop += 1,
-                            Err(e) => failed.push(RotationFailure {
+                        continue;
+                    }
+                    // Belt-and-suspenders catch-all: a non-1 status int whose
+                    // second element isn't a parseable BulkString would
+                    // slip through `fcall_error_code` as `None`. The
+                    // established pattern (see `claim_common.rs`) runs
+                    // `check_fcall_success` as the second guard before
+                    // treating the envelope as a success. If the envelope
+                    // is not a recognised FCALL shape (non-array raw,
+                    // etc.) `check_fcall_success` returns Ok and we fall
+                    // through to the variant classifier — which has its
+                    // own error path for malformed shapes.
+                    if let Err(err) =
+                        check_fcall_success(&raw, fcall::names::FF_ROTATE_WAITPOINT_HMAC_SECRET)
+                    {
+                        tracing::debug!(
+                            partition = index,
+                            fabric_err = %err,
+                            "waitpoint hmac rotation rejected without typed code"
+                        );
+                        failed.push(RotationFailure {
+                            partition_index: index,
+                            code: None,
+                            detail: DETAIL_LUA_REJECTED.to_owned(),
+                        });
+                        continue;
+                    }
+                    match classify_ok_variant(&raw) {
+                        Ok(OkVariant::Rotated) => rotated += 1,
+                        Ok(OkVariant::Noop) => noop += 1,
+                        Err(e) => {
+                            tracing::debug!(
+                                partition = index,
+                                parse_err = %e,
+                                "waitpoint hmac rotation envelope unparseable"
+                            );
+                            failed.push(RotationFailure {
                                 partition_index: index,
                                 code: None,
-                                detail: format!(
-                                    "partition {index} returned unparseable envelope: {e}"
-                                ),
-                            }),
+                                detail: DETAIL_UNPARSEABLE_ENVELOPE.to_owned(),
+                            });
                         }
                     }
                 }
-                Err(err) => failed.push(RotationFailure {
-                    partition_index: index,
-                    code: None,
-                    detail: format!("partition {index} transport error: {err}"),
-                }),
+                Err(err) => {
+                    tracing::debug!(
+                        partition = index,
+                        fabric_err = %err,
+                        "waitpoint hmac rotation transport error"
+                    );
+                    failed.push(RotationFailure {
+                        partition_index: index,
+                        code: None,
+                        detail: DETAIL_TRANSPORT_ERROR.to_owned(),
+                    });
+                }
             }
         }
 
