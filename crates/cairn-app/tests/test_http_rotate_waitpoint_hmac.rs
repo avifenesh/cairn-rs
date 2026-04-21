@@ -69,8 +69,15 @@ async fn rotate_waitpoint_hmac_end_to_end() {
     );
     let body: Value = res.json().await.expect("stage 1 json");
     let rotated = body["rotated"].as_u64().expect("rotated u64");
-    assert!(rotated > 0, "stage 1: rotated > 0 on fresh rotation: {body}");
-    assert_eq!(body["failed"].as_array().unwrap().len(), 0, "stage 1 no failures: {body}");
+    assert!(
+        rotated > 0,
+        "stage 1: rotated > 0 on fresh rotation: {body}"
+    );
+    assert_eq!(
+        body["failed"].as_array().unwrap().len(),
+        0,
+        "stage 1 no failures: {body}"
+    );
     assert_eq!(body["new_kid"].as_str().unwrap(), kid_a);
     let partition_count = rotated + body["noop"].as_u64().unwrap();
 
@@ -87,7 +94,11 @@ async fn rotate_waitpoint_hmac_end_to_end() {
     assert_eq!(res.status().as_u16(), 200, "stage 2 replay");
     let body: Value = res.json().await.expect("stage 2 json");
     // Expect all partitions to noop. Zero fresh rotations.
-    assert_eq!(body["rotated"].as_u64().unwrap(), 0, "stage 2 no fresh rotations: {body}");
+    assert_eq!(
+        body["rotated"].as_u64().unwrap(),
+        0,
+        "stage 2 no fresh rotations: {body}"
+    );
     assert_eq!(
         body["noop"].as_u64().unwrap(),
         partition_count,
@@ -121,9 +132,16 @@ async fn rotate_waitpoint_hmac_end_to_end() {
         }),
     )
     .await;
-    assert_eq!(res.status().as_u16(), 200, "stage 4 fresh rotation after conflict");
+    assert_eq!(
+        res.status().as_u16(),
+        200,
+        "stage 4 fresh rotation after conflict"
+    );
     let body: Value = res.json().await.expect("stage 4 json");
-    assert!(body["rotated"].as_u64().unwrap() > 0, "stage 4 rotated > 0: {body}");
+    assert!(
+        body["rotated"].as_u64().unwrap() > 0,
+        "stage 4 rotated > 0: {body}"
+    );
 
     // ── Stage 5: empty kid → invalid_kid → 400 ──────────────────────
     let res = post_rotate(

@@ -46,10 +46,84 @@ Out of scope:
   defaults (`dev-admin-token`, `cairn-demo-token`) must not be used in
   production. Boot logs warn when defaults are active.
 - FlowFabric HMAC secret (`CAIRN_FABRIC_WAITPOINT_HMAC_SECRET`) is required
-  when the Fabric backend is enabled; boot fails loud if unset.
+  when the Fabric backend is enabled; boot fails loud if unset. Operators
+  rotate it at runtime via `POST /v1/admin/rotate-waitpoint-hmac` without
+  restarting — see "Waitpoint HMAC secret rotation" below.
 - All worker claim paths route through `FabricSchedulerService::claim_for_worker`
   which runs budget / quota / capability admission. There is no direct-Valkey
   bypass.
+
+## Waitpoint HMAC secret rotation
+
+The waitpoint HMAC secret (`CAIRN_FABRIC_WAITPOINT_HMAC_SECRET`) is seeded
+at boot into every execution partition's `ff:sec:{fp:N}:waitpoint_hmac`
+hash under a named kid (`CAIRN_FABRIC_WAITPOINT_HMAC_KID`, defaults to
+`cairn-v1`). Cairn signs every waitpoint token with the current kid and
+verifies tokens against both the current kid and any previously
+installed kid still within its grace window.
+
+### When to rotate
+
+- Periodic: quarterly (or per internal key-rotation policy).
+- Reactive: immediately if the secret may have leaked (operator
+  laptop compromise, Git leak, compliance finding).
+- After a cairn-app deployment that changed the env-var source (for
+  example, moving from raw env to a Vault-sourced secret).
+
+### How to rotate (zero-downtime)
+
+1. Generate a new 32-byte secret:
+   ```bash
+   openssl rand -hex 32
+   ```
+2. Pick a fresh kid name that does NOT contain `:` (FF uses `:` as a
+   field separator in the on-disk hash). `cairn-v2`, `q1-2026`, etc.
+3. Call the admin endpoint with a current admin bearer:
+   ```bash
+   curl -X POST https://<cairn-host>/v1/admin/rotate-waitpoint-hmac \
+     -H "Authorization: Bearer $CAIRN_ADMIN_TOKEN" \
+     -H "Content-Type: application/json" \
+     -d '{
+       "new_kid": "cairn-v2",
+       "new_secret_hex": "<hex from step 1>",
+       "grace_ms": 60000
+     }'
+   ```
+4. Expect HTTP 200 with `rotated` equal to your partition count and
+   `failed` empty. Partial failure? Rotation is idempotent on the
+   same `(new_kid, new_secret_hex)` — re-run the exact same request
+   once the underlying transport / Valkey fault clears. The
+   previously-installed kid stays accepted for `grace_ms` so
+   in-flight waitpoints don't fail verification mid-rotation.
+5. Update your persistent config store (Vault / env file / container
+   secret) so a future restart seeds the new kid + secret. Restart
+   before `grace_ms` elapses if you want a clean boot-seed cycle;
+   after elapses is also safe, FF cleans up expired kids on the next
+   rotation.
+
+### Operational constraints
+
+- **Kid reuse with a different secret is rejected.** Reusing an
+  already-installed kid with a new secret returns
+  `code: rotation_conflict`. Pick a fresh kid.
+- **Concurrent rotate calls serialize per partition.** The FCALL is
+  the atomicity boundary; two admins hitting the endpoint
+  simultaneously will each observe a consistent outcome (one goes
+  first, the other sees either `noop` or `rotation_conflict`).
+- **All admin audit log entries for rotations include the kid.** Do
+  not include the raw secret in any log, ticket, or rotation
+  announcement. Only the kid is safe to share.
+
+### Threat model covered
+
+- Secret disclosure via env-var leak, process dump, or logs: rotation
+  installs a new kid; after `grace_ms` the old secret cannot sign new
+  waitpoints. Tokens signed before rotation that the operator wants
+  to invalidate immediately can be forced out by setting `grace_ms:
+  0`, at the cost of in-flight waitpoints failing verification.
+- Admin token compromise: an attacker with the admin bearer CAN
+  rotate the HMAC, but the rotation is visible in the admin audit
+  log and recoverable by rotating again with a known-good secret.
 
 ## Debug endpoints feature (`debug-endpoints`)
 

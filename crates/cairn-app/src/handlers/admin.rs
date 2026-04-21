@@ -1357,7 +1357,6 @@ pub(crate) async fn import_litellm_handler(
         .into_response()
 }
 
-
 // ── Waitpoint HMAC rotation ──────────────────────────────────────────────────
 
 /// Request body for `POST /v1/admin/rotate-waitpoint-hmac`.
@@ -1524,10 +1523,7 @@ fn unanimous_input_error_code(
     if !INPUT_CODES.contains(&first) {
         return None;
     }
-    if failures
-        .iter()
-        .all(|f| f.code.as_deref() == Some(first))
-    {
+    if failures.iter().all(|f| f.code.as_deref() == Some(first)) {
         Some(first.to_owned())
     } else {
         None

@@ -179,11 +179,7 @@ enum OkVariant {
 fn classify_ok_variant(raw: &ferriskey::Value) -> Result<OkVariant, FabricError> {
     let arr = match raw {
         ferriskey::Value::Array(arr) => arr,
-        _ => {
-            return Err(FabricError::Internal(
-                "rotate envelope not an array".into(),
-            ))
-        }
+        _ => return Err(FabricError::Internal("rotate envelope not an array".into())),
     };
     let variant = match arr.get(2) {
         Some(Ok(ferriskey::Value::BulkString(b))) => String::from_utf8_lossy(b).into_owned(),

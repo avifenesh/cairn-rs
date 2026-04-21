@@ -63,8 +63,7 @@ mod tests {
     #[test]
     fn builds_expected_keys_and_args() {
         let idx = test_idx();
-        let (keys, args) =
-            build_rotate_waitpoint_hmac_secret(&idx, "kid_v2", "deadbeef", 60_000);
+        let (keys, args) = build_rotate_waitpoint_hmac_secret(&idx, "kid_v2", "deadbeef", 60_000);
         assert_eq!(keys.len(), ROTATE_WAITPOINT_HMAC_SECRET_KEYS);
         assert_eq!(args.len(), ROTATE_WAITPOINT_HMAC_SECRET_ARGS);
         assert_eq!(keys[0], idx.waitpoint_hmac_secrets());

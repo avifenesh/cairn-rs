@@ -11,6 +11,15 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- **FlowFabric bumped to 0.2**: `ff-core`, `ff-sdk`, `ff-engine`, `ff-scheduler`,
+  `ff-script`, and `ferriskey` all move from `"0.1"` to `"0.2"`. FF 0.2 is
+  behavior-compatible for claim / submit / complete paths — the 32
+  cairn-fabric integration tests pass unchanged. The semver break is
+  `ScriptError` gaining `#[non_exhaustive]`; cairn never matches
+  exhaustively so no source change was required. `ferriskey::Value::BulkString`
+  switched its inner type from `Vec<u8>` to `bytes::Bytes`; test fixtures
+  in the new rotation service use `.to_vec().into()` accordingly.
+
 - **RFC-011 Phase 2 closure**: per-session runs and tasks co-locate on the
   session's FlowId partition (`{fp:N}` hash tag). Runs are session-bound at
   the `RunService` trait; tasks remain `Option<&SessionId>` at `TaskService`
@@ -25,6 +34,22 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   solo partition.
 
 ### Added
+
+- **`POST /v1/admin/rotate-waitpoint-hmac`** — admin-only endpoint that
+  rotates the waitpoint HMAC signing kid across every execution
+  partition without a restart. Delegates to FF 0.2's
+  `ff_rotate_waitpoint_hmac_secret` FCALL. Request body:
+  `{ new_kid, new_secret_hex, grace_ms? }`. Response body:
+  `{ rotated, noop, failed[], new_kid }`. Idempotent on the same
+  `(new_kid, new_secret_hex)` — replays report `noop` per partition.
+  `grace_ms` (default 60_000) is the window in which the previously
+  installed kid stays accepted for verification so in-flight
+  waitpoints don't fail mid-rotation. Status mapping: 200 on any
+  success, 400 on unanimous input-validation failure across all
+  partitions (`invalid_kid`, `invalid_secret_hex`, `invalid_grace_ms`,
+  `rotation_conflict`), 500 on whole-fleet transport failure, 503 when
+  the fabric runtime is absent. See SECURITY.md → "Waitpoint HMAC
+  secret rotation" for operator guidance. Closes #114.
 
 - **`debug-endpoints` Cargo feature on `cairn-app`** (OFF by default).
   Enables `GET /v1/admin/debug/partition?kind=<run|task>&id=<id>` for
