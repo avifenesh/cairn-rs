@@ -102,6 +102,12 @@ pub(crate) fn runtime_error_response(err: cairn_runtime::RuntimeError) -> axum::
         cairn_runtime::RuntimeError::Conflict { .. } => {
             AppApiError::new(StatusCode::CONFLICT, "conflict", err.to_string()).into_response()
         }
+        cairn_runtime::RuntimeError::DependencyConflict { .. } => AppApiError::new(
+            StatusCode::CONFLICT,
+            "dependency_conflict",
+            err.to_string(),
+        )
+        .into_response(),
         cairn_runtime::RuntimeError::PolicyDenied { .. } => {
             AppApiError::new(StatusCode::FORBIDDEN, "permission_denied", err.to_string())
                 .into_response()

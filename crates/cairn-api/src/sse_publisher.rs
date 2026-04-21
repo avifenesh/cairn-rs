@@ -485,6 +485,8 @@ mod tests {
                 added_at_ms: 123,
                 dependent_task_id: TaskId::new("task_dependency"),
                 depends_on_task_id: TaskId::new("task_upstream"),
+                dependency_kind: cairn_domain::DependencyKind::SuccessOnly,
+                data_passing_ref: None,
             }),
         );
         store.append(&[created, dependency]).await.unwrap();
@@ -530,6 +532,8 @@ mod tests {
                 added_at_ms: 456,
                 dependent_task_id: TaskId::default(),
                 depends_on_task_id: TaskId::default(),
+                dependency_kind: cairn_domain::DependencyKind::SuccessOnly,
+                data_passing_ref: None,
             }),
         );
         store.append(&[created, dependency]).await.unwrap();

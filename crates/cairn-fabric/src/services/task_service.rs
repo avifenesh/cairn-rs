@@ -466,12 +466,27 @@ impl FabricTaskService {
     /// supplies the shared `(project, session_id)`; the adapter layer
     /// validates that the two tasks agree before this method is
     /// invoked, so reaching here with mismatched sessions is a bug.
+    ///
+    /// `dependency_kind` selects the edge kind (today only
+    /// `DependencyKind::SuccessOnly`). `data_passing_ref` is an opaque
+    /// caller-supplied string stored on the FF edge and surfaced to
+    /// the downstream task after upstream resolution; cairn never
+    /// dereferences it.
+    ///
+    /// Idempotency: replaying the same `(project, session, dependent,
+    /// prerequisite)` with identical `dependency_kind` and
+    /// `data_passing_ref` returns the existing record. Replaying with
+    /// a different kind or ref returns `FabricError::DependencyConflict`
+    /// (the HTTP layer maps to 409), surfacing both existing and
+    /// requested values so operators can see the divergence.
     pub async fn declare_dependency(
         &self,
         project: &ProjectKey,
         session_id: &SessionId,
         dependent_task_id: &TaskId,
         prerequisite_task_id: &TaskId,
+        dependency_kind: DependencyKind,
+        data_passing_ref: Option<&str>,
     ) -> Result<TaskDependencyRecord, FabricError> {
         // Self-dependency: reject client-side. FF's Lua also rejects
         // with `self_referencing_edge`, but a clearer message here
@@ -506,7 +521,32 @@ impl FabricTaskService {
             .unwrap_or_default()
             .as_millis() as u64;
 
-        let edge_id = ff_core::types::EdgeId::new();
+        // Deterministic edge ID: replay of the same (flow, upstream,
+        // downstream) triple mints the same ID, so the
+        // `dependency_already_exists` branch below can read the
+        // staged edge's `(dependency_kind, data_passing_ref)` via
+        // HGETALL and compare without scanning.
+        let edge_id = id_map::dependency_edge_id(&fid, &pre_eid, &dep_eid);
+        let kind_ff = dependency_kind.as_ff_str();
+        let data_ref_ff = data_passing_ref.unwrap_or("");
+
+        // Safe-to-log observability (SEC-007): data_passing_ref can be
+        // caller-supplied opaque content (artifact IDs, signed URLs,
+        // etc.). Live traces surface length + first 16 chars only; the
+        // persisted BridgeEvent carries the full value for operator
+        // event streams.
+        let data_ref_len = data_ref_ff.len();
+        let data_ref_prefix: String = data_ref_ff.chars().take(16).collect();
+        tracing::debug!(
+            flow_id = %fid,
+            edge_id = %edge_id,
+            dependent_task_id = %dependent_task_id,
+            prerequisite_task_id = %prerequisite_task_id,
+            dependency_kind = kind_ff,
+            data_passing_ref.len = data_ref_len,
+            data_passing_ref.prefix = %data_ref_prefix,
+            "declare_dependency staging edge",
+        );
 
         // Retry budget for stale_graph_revision. Concurrent declarers
         // on the same session's flow all compete for the HINCRBY;
@@ -534,8 +574,8 @@ impl FabricTaskService {
                 &edge_id,
                 &pre_eid,
                 &dep_eid,
-                "success_only",
-                "",
+                kind_ff,
+                data_ref_ff,
                 current_rev,
                 now_ms,
             );
@@ -583,21 +623,27 @@ impl FabricTaskService {
                         });
                     }
                     "dependency_already_exists" => {
-                        // Treat as success — idempotent declare. The
-                        // caller's intent is "B depends on A"; if
-                        // that edge already exists, the intent is
-                        // satisfied. Return a synthesized record;
-                        // the existing edge_id (which we don't have)
-                        // isn't surfaced anywhere.
-                        return Ok(TaskDependencyRecord {
-                            dependency: TaskDependency {
-                                dependent_task_id: dependent_task_id.clone(),
-                                depends_on_task_id: prerequisite_task_id.clone(),
-                                project: project.clone(),
-                                created_at_ms: now_ms,
-                            },
-                            resolved_at_ms: None,
-                        });
+                        // Edge already staged. Deterministic edge_id
+                        // means we can read the staged edge hash and
+                        // compare `(dependency_kind, data_passing_ref)`
+                        // against the replayed caller's values:
+                        //   - match → idempotent success, return the
+                        //     existing record with the stored values.
+                        //   - mismatch → FabricError::DependencyConflict,
+                        //     surfaced to the HTTP layer as 409 so
+                        //     callers see the divergence instead of
+                        //     silently losing their new ref.
+                        return self
+                            .reconcile_existing_dependency_edge(
+                                &fctx,
+                                &edge_id,
+                                project,
+                                dependent_task_id,
+                                prerequisite_task_id,
+                                dependency_kind,
+                                data_passing_ref,
+                            )
+                            .await;
                     }
                     "flow_not_found" => {
                         return Err(FabricError::NotFound {
@@ -643,8 +689,8 @@ impl FabricTaskService {
             &fid,
             &pre_eid,
             new_graph_revision,
-            "success_only",
-            "",
+            kind_ff,
+            data_ref_ff,
             now_ms,
         );
         let apply_key_refs: Vec<&str> = apply_keys.iter().map(|s| s.as_str()).collect();
@@ -674,6 +720,8 @@ impl FabricTaskService {
                 edge_id: edge_id.to_string(),
                 flow_id: fid.to_string(),
                 created_at_ms: now_ms,
+                dependency_kind,
+                data_passing_ref: data_passing_ref.map(str::to_owned),
             })
             .await;
 
@@ -683,6 +731,95 @@ impl FabricTaskService {
                 depends_on_task_id: prerequisite_task_id.clone(),
                 project: project.clone(),
                 created_at_ms: now_ms,
+                dependency_kind,
+                data_passing_ref: data_passing_ref.map(str::to_owned),
+            },
+            resolved_at_ms: None,
+        })
+    }
+
+    /// Reconcile a replay hit on `dependency_already_exists`. FF's
+    /// edge hash at `fctx.edge(edge_id)` carries the original
+    /// `dependency_kind` and `data_passing_ref`. Re-declare with
+    /// identical values is idempotent success; re-declare with
+    /// different values surfaces as a `DependencyConflict` so the
+    /// HTTP caller sees 409 instead of silently losing their update.
+    #[allow(clippy::too_many_arguments)]
+    async fn reconcile_existing_dependency_edge(
+        &self,
+        fctx: &ff_core::keys::FlowKeyContext,
+        edge_id: &ff_core::types::EdgeId,
+        project: &ProjectKey,
+        dependent_task_id: &TaskId,
+        prerequisite_task_id: &TaskId,
+        requested_kind: DependencyKind,
+        requested_data_ref: Option<&str>,
+    ) -> Result<TaskDependencyRecord, FabricError> {
+        let edge_key = fctx.edge(edge_id);
+
+        let existing_kind_str: Option<String> = self
+            .runtime
+            .client
+            .hget(&edge_key, "dependency_kind")
+            .await
+            .map_err(|e| FabricError::Internal(format!("hget edge dependency_kind: {e}")))?;
+        let existing_data_ref: Option<String> = self
+            .runtime
+            .client
+            .hget(&edge_key, "data_passing_ref")
+            .await
+            .map_err(|e| FabricError::Internal(format!("hget edge data_passing_ref: {e}")))?;
+        let existing_created_at_str: Option<String> = self
+            .runtime
+            .client
+            .hget(&edge_key, "created_at")
+            .await
+            .map_err(|e| FabricError::Internal(format!("hget edge created_at: {e}")))?;
+
+        let existing_kind_raw = existing_kind_str.unwrap_or_default();
+        // FF stores an empty string when data_passing_ref is absent
+        // (see ff_stage_dependency_edge Lua HSET), so normalise to
+        // None for comparison against the caller's Option<&str>.
+        let existing_data_ref_opt = match existing_data_ref.as_deref() {
+            None | Some("") => None,
+            Some(s) => Some(s.to_owned()),
+        };
+
+        let requested_kind_str = requested_kind.as_ff_str();
+        let requested_data_ref_opt: Option<String> = requested_data_ref
+            .filter(|s| !s.is_empty())
+            .map(str::to_owned);
+
+        if existing_kind_raw.as_str() != requested_kind_str
+            || existing_data_ref_opt != requested_data_ref_opt
+        {
+            return Err(FabricError::DependencyConflict(Box::new(
+                crate::error::DependencyConflictDetail {
+                    dependent_task_id: dependent_task_id.to_string(),
+                    prerequisite_task_id: prerequisite_task_id.to_string(),
+                    existing_kind: existing_kind_raw,
+                    existing_data_passing_ref: existing_data_ref_opt,
+                    requested_kind: requested_kind_str.to_owned(),
+                    requested_data_passing_ref: requested_data_ref_opt,
+                },
+            )));
+        }
+
+        // Match — return the stored record. `created_at_ms` comes from
+        // the edge hash so the caller sees the original declaration
+        // timestamp, not the replay time.
+        let created_at_ms: u64 = existing_created_at_str
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(0);
+
+        Ok(TaskDependencyRecord {
+            dependency: TaskDependency {
+                dependent_task_id: dependent_task_id.clone(),
+                depends_on_task_id: prerequisite_task_id.clone(),
+                project: project.clone(),
+                created_at_ms,
+                dependency_kind: requested_kind,
+                data_passing_ref: requested_data_ref_opt,
             },
             resolved_at_ms: None,
         })
@@ -786,6 +923,38 @@ impl FabricTaskService {
                 Some(s) if !s.is_empty() => s,
                 _ => continue,
             };
+            // Pull `dependency_kind` and `data_passing_ref` off the
+            // child-side dep record (apply_dependency_to_child mirrors
+            // both fields onto `{p:N}` so `check_dependencies` doesn't
+            // have to cross-slot to `{fp:N}:edge`).
+            let kind_str: Option<String> = self
+                .runtime
+                .client
+                .hget(&dep_key, "dependency_kind")
+                .await
+                .map_err(|e| FabricError::Internal(format!("hget dep dependency_kind: {e}")))?;
+            let data_ref_str: Option<String> = self
+                .runtime
+                .client
+                .hget(&dep_key, "data_passing_ref")
+                .await
+                .map_err(|e| FabricError::Internal(format!("hget dep data_passing_ref: {e}")))?;
+            // Map the FF string back to the typed enum. Unknown values
+            // default to `SuccessOnly` defensively — today only that
+            // kind exists; if FF 0.3 adds new kinds this default hides
+            // the upgrade, so gate on a known string instead.
+            let dependency_kind = match kind_str.as_deref() {
+                Some("success_only") | None => DependencyKind::SuccessOnly,
+                Some(other) => {
+                    return Err(FabricError::Internal(format!(
+                        "unknown dependency_kind on stored edge: {other}"
+                    )));
+                }
+            };
+            let data_passing_ref = match data_ref_str.as_deref() {
+                None | Some("") => None,
+                Some(s) => Some(s.to_owned()),
+            };
             // Resolve upstream execution_id → cairn task_id via the tag.
             let upstream_eid = ff_core::types::ExecutionId::parse(&upstream_eid_str)
                 .map_err(|e| FabricError::Internal(format!("parse upstream_eid: {e}")))?;
@@ -816,6 +985,8 @@ impl FabricTaskService {
                     // EventLog. Callers that need it should read the
                     // log directly.
                     created_at_ms: 0,
+                    dependency_kind,
+                    data_passing_ref,
                 },
                 resolved_at_ms: None,
             });

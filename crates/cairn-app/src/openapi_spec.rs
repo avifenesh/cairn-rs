@@ -92,6 +92,31 @@ pub const OPENAPI_JSON: &str = r##"{
           "updated_at":       { "type": "integer" }
         }
       },
+      "DependencyKind": {
+        "type": "string",
+        "enum": ["success_only"],
+        "description": "Edge-kind taxonomy for task dependencies. Mirrors FF 0.2's `dependency_kind` FCALL argument. Today only `success_only` is supported (downstream becomes eligible when upstream terminates successfully; any non-success outcome cascades as skipped)."
+      },
+      "TaskDependency": {
+        "type": "object",
+        "properties": {
+          "dependent_task_id":   { "type": "string" },
+          "depends_on_task_id":  { "type": "string" },
+          "project":             { "$ref": "#/components/schemas/ProjectKey" },
+          "created_at_ms":       { "type": "integer" },
+          "dependency_kind":     { "$ref": "#/components/schemas/DependencyKind" },
+          "data_passing_ref":    { "type": "string", "nullable": true, "maxLength": 256, "pattern": "^[A-Za-z0-9._:/-]*$" }
+        },
+        "required": ["dependent_task_id","depends_on_task_id","project","created_at_ms"]
+      },
+      "TaskDependencyRecord": {
+        "type": "object",
+        "properties": {
+          "dependency":     { "$ref": "#/components/schemas/TaskDependency" },
+          "resolved_at_ms": { "type": "integer", "nullable": true }
+        },
+        "required": ["dependency"]
+      },
       "ApprovalRecord": {
         "type": "object",
         "properties": {
@@ -535,6 +560,44 @@ pub const OPENAPI_JSON: &str = r##"{
         "operationId": "releaseTaskLease",
         "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
         "responses": { "200": { "description": "Task back in queued state" } }
+      }
+    },
+    "/v1/tasks/{id}/dependencies": {
+      "get": {
+        "tags": ["Tasks"],
+        "summary": "List unresolved prerequisite tasks blocking this task",
+        "operationId": "listTaskDependencies",
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": { "200": { "description": "TaskDependencyRecord array (empty means no active blockers)" } }
+      },
+      "post": {
+        "tags": ["Tasks"],
+        "summary": "Declare a task-level dependency (FF flow edge)",
+        "description": "Both tasks must share the same session (FF flows are session-scoped). Cross-session, cross-project, or self-dependency declares are rejected with 422. Re-declaring an existing edge with a different `dependency_kind` or `data_passing_ref` returns 409 dependency_conflict; identical replay is idempotent 201. `data_passing_ref` is an opaque caller-supplied string forwarded to FF edge storage — cairn never dereferences it. Downstream consumers are responsible for interpreting the value.",
+        "operationId": "addTaskDependency",
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "depends_on_task_id": { "type": "string", "description": "Prerequisite task id (must share session with the dependent task)." },
+                  "dependency_kind":    { "type": "string", "enum": ["success_only"], "default": "success_only", "description": "Edge kind. Today only `success_only` is supported." },
+                  "data_passing_ref":   { "type": "string", "maxLength": 256, "pattern": "^[A-Za-z0-9._:/-]*$", "nullable": true, "description": "Opaque reference stored on the FF edge. Charset limited for round-trip safety; empty string treated as absent." }
+                },
+                "required": ["depends_on_task_id"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": { "description": "Dependency record (TaskDependencyRecord)" },
+          "404": { "description": "One of the tasks not found" },
+          "409": { "description": "Edge already exists with different kind/ref (dependency_conflict)" },
+          "422": { "description": "Cross-session, self-dependency, or invalid data_passing_ref" }
+        }
       }
     },
     "/v1/approvals/pending": {

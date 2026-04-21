@@ -72,10 +72,20 @@ pub trait TaskService: Send + Sync {
     /// Under the Fabric backend this issues `ff_stage_dependency_edge` +
     /// `ff_apply_dependency_to_child` against FF. Both tasks must belong
     /// to the same session (FF flows are session-scoped).
+    ///
+    /// `dependency_kind` selects the edge kind. `data_passing_ref` is
+    /// an opaque caller-supplied string stored on the FF edge; cairn
+    /// never dereferences it (see `SECURITY.md`).
+    ///
+    /// Re-declaring the same edge with a different `dependency_kind`
+    /// or `data_passing_ref` returns `RuntimeError::DependencyConflict`;
+    /// identical replay is idempotent success.
     async fn declare_dependency(
         &self,
         dependent_task_id: &TaskId,
         prerequisite_task_id: &TaskId,
+        dependency_kind: cairn_domain::DependencyKind,
+        data_passing_ref: Option<String>,
     ) -> Result<cairn_domain::TaskDependencyRecord, RuntimeError>;
 
     /// Return unresolved (blocking) dependencies for `task_id`.

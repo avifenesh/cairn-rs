@@ -146,7 +146,14 @@ async fn declare_then_complete_prereq_unblocks_dependent() {
     // Declare B → A.
     h.fabric
         .tasks
-        .declare_dependency(&h.project, &session_id, &task_b, &task_a)
+        .declare_dependency(
+            &h.project,
+            &session_id,
+            &task_b,
+            &task_a,
+            cairn_domain::DependencyKind::SuccessOnly,
+            None,
+        )
         .await
         .expect("declare_dependency");
 
@@ -223,7 +230,14 @@ async fn failed_prereq_auto_skips_dependent() {
         .expect("submit B");
     h.fabric
         .tasks
-        .declare_dependency(&h.project, &session_id, &task_b, &task_a)
+        .declare_dependency(
+            &h.project,
+            &session_id,
+            &task_b,
+            &task_a,
+            cairn_domain::DependencyKind::SuccessOnly,
+            None,
+        )
         .await
         .expect("declare B → A");
 
@@ -301,7 +315,14 @@ async fn cycle_is_rejected_with_validation() {
     // First edge: B → A. OK.
     h.fabric
         .tasks
-        .declare_dependency(&h.project, &session_id, &task_b, &task_a)
+        .declare_dependency(
+            &h.project,
+            &session_id,
+            &task_b,
+            &task_a,
+            cairn_domain::DependencyKind::SuccessOnly,
+            None,
+        )
         .await
         .expect("first declare");
 
@@ -309,7 +330,14 @@ async fn cycle_is_rejected_with_validation() {
     let err = h
         .fabric
         .tasks
-        .declare_dependency(&h.project, &session_id, &task_a, &task_b)
+        .declare_dependency(
+            &h.project,
+            &session_id,
+            &task_a,
+            &task_b,
+            cairn_domain::DependencyKind::SuccessOnly,
+            None,
+        )
         .await
         .expect_err("cycle-closing declare should fail");
 
@@ -344,7 +372,14 @@ async fn self_dependency_is_rejected() {
     let err = h
         .fabric
         .tasks
-        .declare_dependency(&h.project, &session_id, &task_a, &task_a)
+        .declare_dependency(
+            &h.project,
+            &session_id,
+            &task_a,
+            &task_a,
+            cairn_domain::DependencyKind::SuccessOnly,
+            None,
+        )
         .await
         .expect_err("self-dependency should fail");
 
@@ -384,7 +419,14 @@ async fn duplicate_declare_is_idempotent() {
 
     h.fabric
         .tasks
-        .declare_dependency(&h.project, &session_id, &task_b, &task_a)
+        .declare_dependency(
+            &h.project,
+            &session_id,
+            &task_b,
+            &task_a,
+            cairn_domain::DependencyKind::SuccessOnly,
+            None,
+        )
         .await
         .expect("first declare");
 
@@ -392,12 +434,222 @@ async fn duplicate_declare_is_idempotent() {
     let rec = h
         .fabric
         .tasks
-        .declare_dependency(&h.project, &session_id, &task_b, &task_a)
+        .declare_dependency(
+            &h.project,
+            &session_id,
+            &task_b,
+            &task_a,
+            cairn_domain::DependencyKind::SuccessOnly,
+            None,
+        )
         .await
         .expect("second declare");
 
     assert_eq!(rec.dependency.dependent_task_id, task_b);
     assert_eq!(rec.dependency.depends_on_task_id, task_a);
+
+    h.teardown().await;
+}
+
+/// `data_passing_ref` round-trips: declare with a ref, read it back
+/// via `check_dependencies` (which reads the child-side dep record
+/// via HGET), and assert the ref is preserved. Also verifies the
+/// success-path return record echoes the ref.
+#[tokio::test]
+async fn declare_dependency_with_data_passing_ref_roundtrips() {
+    let h = TestHarness::setup().await;
+    let session_id = h.unique_session_id();
+    let task_a = h.unique_task_id();
+    let task_b = h.unique_task_id();
+
+    h.fabric
+        .tasks
+        .submit(&h.project, task_a.clone(), None, None, 0, Some(&session_id))
+        .await
+        .expect("submit A");
+    h.fabric
+        .tasks
+        .submit(&h.project, task_b.clone(), None, None, 0, Some(&session_id))
+        .await
+        .expect("submit B");
+
+    let ref_value = "artifact/v1.42";
+    let rec = h
+        .fabric
+        .tasks
+        .declare_dependency(
+            &h.project,
+            &session_id,
+            &task_b,
+            &task_a,
+            cairn_domain::DependencyKind::SuccessOnly,
+            Some(ref_value),
+        )
+        .await
+        .expect("declare with ref");
+
+    assert_eq!(
+        rec.dependency.data_passing_ref.as_deref(),
+        Some(ref_value),
+        "declare_dependency response should echo the caller's ref"
+    );
+    assert_eq!(
+        rec.dependency.dependency_kind,
+        cairn_domain::DependencyKind::SuccessOnly
+    );
+
+    // `check_dependencies` on the blocked child reads the child-side
+    // dep record and must surface the same ref.
+    let blockers = h
+        .fabric
+        .tasks
+        .check_dependencies(&h.project, &session_id, &task_b)
+        .await
+        .expect("check_dependencies");
+
+    assert_eq!(blockers.len(), 1, "expected exactly one blocker");
+    assert_eq!(
+        blockers[0].dependency.data_passing_ref.as_deref(),
+        Some(ref_value),
+        "check_dependencies must surface the stored data_passing_ref"
+    );
+    assert_eq!(
+        blockers[0].dependency.dependency_kind,
+        cairn_domain::DependencyKind::SuccessOnly,
+    );
+
+    h.teardown().await;
+}
+
+/// Re-declare an existing edge with a different `data_passing_ref`.
+/// Must return `FabricError::DependencyConflict` carrying both the
+/// existing (stored) ref and the requested (replayed) ref, so the
+/// HTTP layer can render a 409 with the divergence visible.
+#[tokio::test]
+async fn declare_dependency_conflict_on_different_ref() {
+    let h = TestHarness::setup().await;
+    let session_id = h.unique_session_id();
+    let task_a = h.unique_task_id();
+    let task_b = h.unique_task_id();
+
+    h.fabric
+        .tasks
+        .submit(&h.project, task_a.clone(), None, None, 0, Some(&session_id))
+        .await
+        .expect("submit A");
+    h.fabric
+        .tasks
+        .submit(&h.project, task_b.clone(), None, None, 0, Some(&session_id))
+        .await
+        .expect("submit B");
+
+    // First declare stores ref=v1.
+    h.fabric
+        .tasks
+        .declare_dependency(
+            &h.project,
+            &session_id,
+            &task_b,
+            &task_a,
+            cairn_domain::DependencyKind::SuccessOnly,
+            Some("v1"),
+        )
+        .await
+        .expect("first declare");
+
+    // Second declare with ref=v2 — conflict.
+    let err = h
+        .fabric
+        .tasks
+        .declare_dependency(
+            &h.project,
+            &session_id,
+            &task_b,
+            &task_a,
+            cairn_domain::DependencyKind::SuccessOnly,
+            Some("v2"),
+        )
+        .await
+        .expect_err("re-declare with different ref must conflict");
+
+    match err {
+        cairn_fabric::FabricError::DependencyConflict(detail) => {
+            assert_eq!(detail.existing_data_passing_ref.as_deref(), Some("v1"));
+            assert_eq!(detail.requested_data_passing_ref.as_deref(), Some("v2"));
+            assert_eq!(detail.existing_kind, "success_only");
+            assert_eq!(detail.requested_kind, "success_only");
+        }
+        other => panic!("expected DependencyConflict, got {other:?}"),
+    }
+
+    // Third declare with the original ref is idempotent success.
+    let rec = h
+        .fabric
+        .tasks
+        .declare_dependency(
+            &h.project,
+            &session_id,
+            &task_b,
+            &task_a,
+            cairn_domain::DependencyKind::SuccessOnly,
+            Some("v1"),
+        )
+        .await
+        .expect("re-declare with original ref is idempotent");
+    assert_eq!(rec.dependency.data_passing_ref.as_deref(), Some("v1"));
+
+    h.teardown().await;
+}
+
+/// Re-declare with the same ref but treating `None` and `Some("")` as
+/// equivalent — FF stores `""` for absent refs, cairn normalises
+/// both to `None` before comparing. No conflict should fire.
+#[tokio::test]
+async fn declare_dependency_none_and_empty_string_are_equivalent() {
+    let h = TestHarness::setup().await;
+    let session_id = h.unique_session_id();
+    let task_a = h.unique_task_id();
+    let task_b = h.unique_task_id();
+
+    h.fabric
+        .tasks
+        .submit(&h.project, task_a.clone(), None, None, 0, Some(&session_id))
+        .await
+        .expect("submit A");
+    h.fabric
+        .tasks
+        .submit(&h.project, task_b.clone(), None, None, 0, Some(&session_id))
+        .await
+        .expect("submit B");
+
+    h.fabric
+        .tasks
+        .declare_dependency(
+            &h.project,
+            &session_id,
+            &task_b,
+            &task_a,
+            cairn_domain::DependencyKind::SuccessOnly,
+            None,
+        )
+        .await
+        .expect("first declare None");
+
+    // Empty string: normalise to None, treat as no-conflict replay.
+    let rec = h
+        .fabric
+        .tasks
+        .declare_dependency(
+            &h.project,
+            &session_id,
+            &task_b,
+            &task_a,
+            cairn_domain::DependencyKind::SuccessOnly,
+            Some(""),
+        )
+        .await
+        .expect("replay with empty string is idempotent");
+    assert_eq!(rec.dependency.data_passing_ref, None);
 
     h.teardown().await;
 }

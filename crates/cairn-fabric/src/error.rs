@@ -14,6 +14,25 @@ pub enum FabricError {
     NotFound { entity: &'static str, id: String },
     #[error("validation: {reason}")]
     Validation { reason: String },
+    /// Re-declaring a dependency edge with a different `dependency_kind`
+    /// or `data_passing_ref` than the staged edge. Carries both the
+    /// existing and requested values for diagnostics; the adapter maps
+    /// this to `RuntimeError::DependencyConflict` and the HTTP layer
+    /// responds 409. Boxed to keep `FabricError` small (clippy
+    /// `result_large_err`): every conflict is rare compared to the
+    /// hot-path error variants, so one allocation on the error path
+    /// is cheaper than inflating `size_of::<FabricError>()`.
+    #[error(
+        "dependency edge {} <- {} already staged with kind={} ref={:?}; re-declare specified \
+         kind={} ref={:?}",
+        .0.dependent_task_id,
+        .0.prerequisite_task_id,
+        .0.existing_kind,
+        .0.existing_data_passing_ref,
+        .0.requested_kind,
+        .0.requested_data_passing_ref
+    )]
+    DependencyConflict(Box<DependencyConflictDetail>),
     #[error("internal: {0}")]
     Internal(String),
     #[error(
@@ -28,6 +47,18 @@ pub enum FabricError {
          8.0 — a boot-time WARN is emitted on 7.x."
     )]
     ValkeyVersionTooLow { detected: String, required: String },
+}
+
+/// Payload for [`FabricError::DependencyConflict`]. Boxed in the
+/// enum so overall `size_of::<FabricError>()` stays small.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DependencyConflictDetail {
+    pub dependent_task_id: String,
+    pub prerequisite_task_id: String,
+    pub existing_kind: String,
+    pub existing_data_passing_ref: Option<String>,
+    pub requested_kind: String,
+    pub requested_data_passing_ref: Option<String>,
 }
 
 #[cfg(test)]

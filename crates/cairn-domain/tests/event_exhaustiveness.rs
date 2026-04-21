@@ -1498,6 +1498,8 @@ fn all_variants() -> Vec<RuntimeEvent> {
             added_at_ms: ts,
             dependent_task_id: task(),
             depends_on_task_id: TaskId::new("task_prereq"),
+            dependency_kind: cairn_domain::DependencyKind::SuccessOnly,
+            data_passing_ref: Some("artifact/v1".to_owned()),
         }),
         RuntimeEvent::TaskDependencyResolved(TaskDependencyResolved {
             task_id: task(),

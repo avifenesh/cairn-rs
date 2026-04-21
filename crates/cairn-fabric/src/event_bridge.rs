@@ -119,6 +119,8 @@ pub enum BridgeEvent {
         edge_id: String,
         flow_id: String,
         created_at_ms: u64,
+        dependency_kind: cairn_domain::DependencyKind,
+        data_passing_ref: Option<String>,
     },
 }
 
@@ -465,6 +467,8 @@ fn bridge_event_to_runtime_event(event: &BridgeEvent) -> RuntimeEvent {
             dependent_task_id,
             prerequisite_task_id,
             created_at_ms,
+            dependency_kind,
+            data_passing_ref,
             ..
         } => RuntimeEvent::TaskDependencyAdded(cairn_domain::events::TaskDependencyAdded {
             task_id: dependent_task_id.clone(),
@@ -472,6 +476,8 @@ fn bridge_event_to_runtime_event(event: &BridgeEvent) -> RuntimeEvent {
             added_at_ms: *created_at_ms,
             dependent_task_id: dependent_task_id.clone(),
             depends_on_task_id: prerequisite_task_id.clone(),
+            dependency_kind: *dependency_kind,
+            data_passing_ref: data_passing_ref.clone(),
         }),
     }
 }

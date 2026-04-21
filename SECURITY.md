@@ -185,3 +185,68 @@ Information that is not otherwise reachable over HTTP:
   compromise would expose more than one tenant.
 - Build pipelines that do not gate `--features debug-endpoints` behind
   an explicit review step.
+
+## Task dependency `data_passing_ref`
+
+`POST /v1/tasks/{id}/dependencies` accepts an optional
+`data_passing_ref` string that cairn forwards verbatim to FF 0.2's
+`ff_stage_dependency_edge` / `ff_apply_dependency_to_child` FCALLs.
+The value is stored on the FF edge hash and surfaced to the
+downstream task after upstream resolution.
+
+### Contract
+
+**Cairn does not dereference `data_passing_ref`.** It is an opaque
+string from cairn's perspective: cairn validates only that the bytes
+are safe to round-trip through Valkey's Lua HSET and log without
+quoting surprises. The semantic meaning of the value — URL, artifact
+ID, signed token, Valkey key, file path — is the producer's and
+consumer's concern.
+
+### Validation at ingress
+
+- Maximum length: 256 bytes.
+- Allowed charset: `[A-Za-z0-9._:/-]`.
+- Whitespace, control characters, null bytes, and non-ASCII are
+  rejected with 422 `validation_error`.
+- Empty string is normalised to absent (same as omitting the field).
+
+These rules are intentionally narrow. They deliberately forbid:
+- URL reserved chars `?`, `&`, `=`, `#` (reject passing full URLs
+  with query strings; operators who need URLs should wrap them in
+  a producer-side indirection that returns a short artifact ID).
+- Whitespace and control chars (log-injection defence).
+- Non-ASCII (simplifies audit-log review; prevents homograph tricks).
+
+### Downstream consumer responsibilities
+
+Downstream workers that interpret `data_passing_ref` MUST validate
+the value at consumption time. Specifically:
+- **URLs or network identifiers**: fetching an attacker-controlled
+  URL from inside the runtime network is an SSRF opportunity. Apply
+  allowlists at the consumer, not at cairn ingress — cairn has no
+  workload context to make that decision.
+- **Filesystem paths or Valkey keys**: treat as untrusted input;
+  apply path-traversal / scope-prefix checks before use.
+- **Signed tokens**: verify signatures before acting on them.
+
+### Logging
+
+Cairn emits `data_passing_ref.len` and `data_passing_ref.prefix`
+(first 16 chars) in `tracing::debug!` spans at declare time, never
+the full value, so log collectors don't end up hoarding signed URLs
+or tokens. The persisted `BridgeEvent::TaskDependencyAdded` event
+(visible to operators subscribed to the RuntimeEvent stream) does
+carry the full value — operators accessing their own event stream
+have the same trust level as the declare caller.
+
+### Durability
+
+`data_passing_ref` shares the durability class of every other
+FF-owned piece of Valkey state (execution records, lease history,
+waitpoint HMAC secrets, flow edges). Operators running Valkey
+without AOF appendonly persistence will lose refs across a Valkey
+restart; the downstream task then fires without a
+`data_passing_ref`. AOF is the recommended production configuration
+— see the "Waitpoint HMAC secret rotation" section above for the
+same durability requirement applied to secret storage.

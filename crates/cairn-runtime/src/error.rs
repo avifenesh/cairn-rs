@@ -15,6 +15,16 @@ pub enum RuntimeError {
     PolicyDenied { reason: String },
     /// Optimistic concurrency conflict.
     Conflict { entity: &'static str, id: String },
+    /// Re-declaring a task dependency with a different edge kind or
+    /// `data_passing_ref` than the already-staged edge. Cairn surfaces
+    /// this as HTTP 409 with both existing and requested values so
+    /// operators can see the divergence.
+    ///
+    /// Boxed to keep `RuntimeError` at a small `size_of` (clippy
+    /// `result_large_err`): this variant is rare compared to the
+    /// lifecycle variants, so paying one allocation on the error
+    /// path beats inflating every `Result<_, RuntimeError>` return.
+    DependencyConflict(Box<DependencyConflictDetail>),
     /// Lease has expired.
     LeaseExpired { task_id: String },
     /// Store error.
@@ -58,11 +68,34 @@ impl fmt::Display for RuntimeError {
                 )
             }
             RuntimeError::Validation { reason } => write!(f, "validation error: {reason}"),
+            RuntimeError::DependencyConflict(d) => write!(
+                f,
+                "dependency edge {} <- {} already exists with \
+                 kind={} ref={:?}; re-declare requested kind={} ref={:?}",
+                d.dependent_task_id,
+                d.prerequisite_task_id,
+                d.existing_kind,
+                d.existing_data_passing_ref,
+                d.requested_kind,
+                d.requested_data_passing_ref,
+            ),
         }
     }
 }
 
 impl std::error::Error for RuntimeError {}
+
+/// Payload for [`RuntimeError::DependencyConflict`]. Boxed in the
+/// enum so the overall `RuntimeError` size stays small.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DependencyConflictDetail {
+    pub dependent_task_id: String,
+    pub prerequisite_task_id: String,
+    pub existing_kind: String,
+    pub existing_data_passing_ref: Option<String>,
+    pub requested_kind: String,
+    pub requested_data_passing_ref: Option<String>,
+}
 
 impl From<cairn_store::StoreError> for RuntimeError {
     fn from(e: cairn_store::StoreError) -> Self {

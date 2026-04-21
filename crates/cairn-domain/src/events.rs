@@ -2053,6 +2053,15 @@ pub struct TaskDependencyAdded {
     /// Alias for depends_on (the prerequisite task).
     #[serde(default)]
     pub depends_on_task_id: crate::ids::TaskId,
+    /// Edge kind forwarded to FF. Default `SuccessOnly` so pre-0.2
+    /// event-log entries deserialise.
+    #[serde(default)]
+    pub dependency_kind: crate::task_dependencies::DependencyKind,
+    /// Opaque caller-supplied reference stored on the FF edge. `None`
+    /// for pre-0.2 event-log entries and for callers that don't supply
+    /// one.
+    #[serde(default)]
+    pub data_passing_ref: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
