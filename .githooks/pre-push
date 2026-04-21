@@ -37,7 +37,10 @@ if docker info >/dev/null 2>&1; then
     echo "$output" | grep "FAILED\|failures" | head -10
     exit 1
   fi
-  if ! output=$(cargo test -p cairn-app --tests 2>&1); then
+  # --features debug-endpoints activates the RFC-011 debug route so
+  # test_rfc011_colocation can assert partition placement. Release
+  # builds MUST NOT enable this feature; see SECURITY.md.
+  if ! output=$(cargo test -p cairn-app --tests --features debug-endpoints 2>&1); then
     echo "  ❌ cairn-app http integration tests failed."
     echo "$output" | grep "FAILED\|failures" | head -10
     exit 1

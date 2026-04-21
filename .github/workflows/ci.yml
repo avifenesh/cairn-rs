@@ -137,8 +137,13 @@ jobs:
       # binary per harness on an ephemeral port, drive via reqwest,
       # share the Valkey testcontainer. Same runtime constraints as
       # the fabric suite above (needs testcontainers-capable Docker).
-      - name: cargo test -p cairn-app --tests
-        run: cargo test -p cairn-app --tests --
+      #
+      # --features debug-endpoints activates the RFC-011 debug route
+      # so test_rfc011_colocation can assert partition placement.
+      # Production/release builds MUST NOT enable this feature; see
+      # SECURITY.md for the threat model.
+      - name: cargo test -p cairn-app --tests --features debug-endpoints
+        run: cargo test -p cairn-app --tests --features debug-endpoints --
         timeout-minutes: 10
 
   # ── 6. UI Build + Type Check + Component Tests ──────────────────────────────
