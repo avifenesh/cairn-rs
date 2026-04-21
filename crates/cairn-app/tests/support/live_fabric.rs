@@ -186,9 +186,17 @@ async fn wait_for_listening(stderr: tokio::process::ChildStderr) -> Option<Strin
         if let Some(rest) = line.strip_prefix("cairn-app listening on ") {
             let url = rest.trim().to_owned();
             // Drain remaining stderr in the background so the pipe
-            // doesn't fill up and backpressure the child.
+            // doesn't fill up and backpressure the child. When
+            // `CAIRN_TEST_ECHO_SERVER_STDERR` is set, tee each line to
+            // test stderr — invaluable when a test triggers server-side
+            // behavior you want to see (claim contention, FF rejections).
+            let echo = std::env::var("CAIRN_TEST_ECHO_SERVER_STDERR").is_ok();
             tokio::spawn(async move {
-                while let Ok(Some(_)) = lines.next_line().await {}
+                while let Ok(Some(line)) = lines.next_line().await {
+                    if echo {
+                        eprintln!("[cairn-app] {line}");
+                    }
+                }
             });
             return Some(url);
         }
