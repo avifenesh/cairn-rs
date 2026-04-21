@@ -9,6 +9,33 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- **RFC-011 Phase 2 closure**: per-session runs and tasks co-locate on the
+  session's FlowId partition (`{fp:N}` hash tag). Runs are session-bound at
+  the `RunService` trait; tasks remain `Option<&SessionId>` at `TaskService`
+  to accommodate A2A protocol submissions (which have no session concept).
+  The fabric adapter resolves session from the projection on every mutation:
+  `TaskRecord.session_id` OR `TaskRecord.parent_run_id → RunRecord.session_id`.
+  HTTP handlers no longer redundantly resolve session before calling
+  `TaskService` — the adapter is the single source of truth. One exception:
+  `create_task_handler` still resolves `parent_task_id → RunRecord.session_id`
+  because neither the adapter nor the `TaskCreated` projection writer walks
+  that edge, and leaving it out would silently route sub-sub-tasks to the
+  solo partition.
+
+### Added
+
+- **`debug-endpoints` Cargo feature on `cairn-app`** (OFF by default).
+  Enables `GET /v1/admin/debug/partition?kind=<run|task>&id=<id>` for
+  RFC-011 co-location diagnostics. **SECURITY: this feature is intended
+  for CI/development only.** Production release builds MUST be compiled
+  without it. Turning it on adds FF-internal `ExecutionId` and Valkey
+  partition-index disclosure (admin-gated) to the HTTP surface —
+  information not otherwise reachable except through direct Valkey
+  access. See `SECURITY.md` § "Debug endpoints feature" for the full
+  threat model.
+
 ### Removed (breaking)
 
 - **`in-memory-runtime` cargo feature deleted.** The feature existed as

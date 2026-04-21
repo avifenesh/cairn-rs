@@ -329,7 +329,7 @@ impl AppBootstrap {
     /// let app = AppBootstrap::apply_middleware(routes, state);
     /// ```
     pub fn build_catalog_routes() -> Router<Arc<AppState>> {
-        preserved_route_catalog()
+        let router: Router<Arc<AppState>> = preserved_route_catalog()
             .into_iter()
             .fold(Router::new(), |router, entry| {
                 let path = catalog_path_to_axum(&entry.path);
@@ -1634,7 +1634,22 @@ impl AppBootstrap {
             .route(
                 "/v1/webhooks/:integration_id",
                 post(dynamic_webhook_handler),
-            )
+            );
+
+        // ── RFC-011 debug endpoint ──────────────────────────────────────
+        //
+        // Gated behind the `debug-endpoints` Cargo feature. Absent the
+        // feature, the route is not registered and requests fall through
+        // to the not-found handler. See `handlers/debug.rs` for the
+        // threat model; enabling this feature in production is NOT
+        // supported.
+        #[cfg(feature = "debug-endpoints")]
+        let router = router.route(
+            "/v1/admin/debug/partition",
+            get(crate::handlers::debug::debug_partition_handler),
+        );
+
+        router
     }
 
     /// Apply the standard middleware stack (auth, CORS, rate-limit, tracing)

@@ -234,16 +234,12 @@ pub(crate) async fn worker_claim_task_handler(
     }
 
     let task_id = TaskId::new(body.task_id);
-    let session_id =
-        match crate::helpers::resolve_session_for_task_id(state.as_ref(), &task_id).await {
-            Ok(sid) => sid,
-            Err(response) => return response,
-        };
+    // Adapter derives session from the projection on every mutation.
     match state
         .runtime
         .tasks
         .claim(
-            session_id.as_ref(),
+            None,
             &task_id,
             worker_id,
             body.lease_duration_ms.unwrap_or(60_000),
@@ -306,19 +302,11 @@ pub(crate) async fn worker_heartbeat_handler(
     }
 
     let hb_task_id = TaskId::new(body.task_id.clone());
-    let hb_session_id =
-        match crate::helpers::resolve_session_for_task_id(state.as_ref(), &hb_task_id).await {
-            Ok(sid) => sid,
-            Err(response) => return response,
-        };
+    // Adapter derives session from the projection on every mutation.
     match state
         .runtime
         .tasks
-        .heartbeat(
-            hb_session_id.as_ref(),
-            &hb_task_id,
-            body.lease_extension_ms.unwrap_or(60_000),
-        )
+        .heartbeat(None, &hb_task_id, body.lease_extension_ms.unwrap_or(60_000))
         .await
     {
         Ok(task) => {

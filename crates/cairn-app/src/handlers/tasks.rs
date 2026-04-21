@@ -485,21 +485,20 @@ pub(crate) async fn claim_task_handler(
     Json(body): Json<ClaimTaskRequest>,
 ) -> impl IntoResponse {
     let task_id = TaskId::new(id);
-    let task = match load_task_visible_to_tenant(state.as_ref(), &tenant_scope, &task_id).await {
-        Ok(t) => t,
-        Err(resp) => return resp,
-    };
-    let session_id = match resolve_session_for_task_record(state.as_ref(), &task).await {
-        Ok(sid) => sid,
-        Err(response) => return response,
-    };
+    // Session resolution for the mutation lives in the fabric adapter
+    // (`resolve_task_project_and_session`); passing `None` here is the
+    // single source of truth. Open-coding it would duplicate the
+    // projection walk and risk diverging from the adapter's rules.
+    if let Err(resp) = load_task_visible_to_tenant(state.as_ref(), &tenant_scope, &task_id).await {
+        return resp;
+    }
 
     let before = current_event_head(&state).await;
     match state
         .runtime
         .tasks
         .claim(
-            session_id.as_ref(),
+            None,
             &task_id,
             body.worker_id,
             body.lease_duration_ms.unwrap_or(60_000),
@@ -521,24 +520,16 @@ pub(crate) async fn heartbeat_task_handler(
     Json(body): Json<HeartbeatTaskRequest>,
 ) -> impl IntoResponse {
     let task_id = TaskId::new(id);
-    let task = match load_task_visible_to_tenant(state.as_ref(), &tenant_scope, &task_id).await {
-        Ok(t) => t,
-        Err(resp) => return resp,
-    };
-    let session_id = match resolve_session_for_task_record(state.as_ref(), &task).await {
-        Ok(sid) => sid,
-        Err(response) => return response,
-    };
+    // Adapter resolves session from the projection; see claim_task_handler.
+    if let Err(resp) = load_task_visible_to_tenant(state.as_ref(), &tenant_scope, &task_id).await {
+        return resp;
+    }
 
     let before = current_event_head(&state).await;
     match state
         .runtime
         .tasks
-        .heartbeat(
-            session_id.as_ref(),
-            &task_id,
-            body.lease_extension_ms.unwrap_or(60_000),
-        )
+        .heartbeat(None, &task_id, body.lease_extension_ms.unwrap_or(60_000))
         .await
     {
         Ok(task) => {
@@ -555,26 +546,16 @@ pub(crate) async fn release_task_lease_handler(
     Path(id): Path<String>,
 ) -> impl IntoResponse {
     let task_id = TaskId::new(id);
-    let task = match state.runtime.tasks.get(&task_id).await {
-        Ok(Some(task)) if task.project.tenant_id == *tenant_scope.tenant_id() => task,
-        Ok(Some(_)) | Ok(None) => {
-            return AppApiError::new(StatusCode::NOT_FOUND, "not_found", "task not found")
-                .into_response();
-        }
-        Err(err) => return runtime_error_response(err),
-    };
-    let session_id = match resolve_session_for_task_record(state.as_ref(), &task).await {
-        Ok(sid) => sid,
-        Err(response) => return response,
-    };
+    // Tenant scope via the shared helper so admin bypass + cross-tenant
+    // 404 match every other task mutation. The helper's returned
+    // TaskRecord is unused here — the adapter resolves session on its
+    // own; the check runs only for the side-effect.
+    if let Err(resp) = load_task_visible_to_tenant(state.as_ref(), &tenant_scope, &task_id).await {
+        return resp;
+    }
 
     let before = current_event_head(&state).await;
-    match state
-        .runtime
-        .tasks
-        .release_lease(session_id.as_ref(), &task_id)
-        .await
-    {
+    match state.runtime.tasks.release_lease(None, &task_id).await {
         Ok(task) => {
             publish_runtime_frames_since(&state, before).await;
             (StatusCode::OK, Json(task)).into_response()
@@ -592,22 +573,15 @@ pub(crate) async fn cancel_task_handler(
     let task_id = TaskId::new(id);
     // T6a-C3: tenant scope enforced via helper (replaces the prior
     // get-only check that audited the task's own tenant without auth).
+    // `task` is retained for the audit record below; the adapter
+    // derives the session binding during the mutation.
     let task = match load_task_visible_to_tenant(state.as_ref(), &tenant_scope, &task_id).await {
         Ok(t) => t,
         Err(response) => return response,
     };
-    let session_id = match resolve_session_for_task_record(state.as_ref(), &task).await {
-        Ok(sid) => sid,
-        Err(response) => return response,
-    };
 
     let before = current_event_head(&state).await;
-    match state
-        .runtime
-        .tasks
-        .cancel(session_id.as_ref(), &task_id)
-        .await
-    {
+    match state.runtime.tasks.cancel(None, &task_id).await {
         Ok(record) => {
             let _ = state
                 .runtime
@@ -642,12 +616,16 @@ pub(crate) async fn complete_task_handler(
             Ok(t) => t,
             Err(response) => return response,
         };
-    // Fetch the parent run once: we need its session_id to drive task
-    // completion and, if the run becomes eligible, to complete it below.
-    // Propagate store errors and surface a 404 when the task references a
-    // parent run that is not in the projection — silently minting a solo
-    // ExecutionId in that case would violate RFC-011 co-location and produce
-    // an unexplained NotFound from the Fabric layer.
+    // Fetch the parent run once: needed below for `runs.complete` when the
+    // task completion cascades into run completion. `runs.complete` takes
+    // `&SessionId` (non-Option), so this fetch is load-bearing for that
+    // downstream call.
+    //
+    // `parent_run` is load-bearing: when task completion cascades into
+    // run completion below, `runs.complete` takes `&SessionId` (non-
+    // Option) so the session binding must be carried forward. The task
+    // mutations (`tasks.start` / `tasks.complete`) don't need it —
+    // adapter resolves from projection.
     let parent_run = match current_task.parent_run_id.as_ref() {
         Some(rid) => match state.runtime.runs.get(rid).await {
             Ok(Some(run)) => Some(run),
@@ -663,25 +641,14 @@ pub(crate) async fn complete_task_handler(
         },
         None => None,
     };
-    let session_id = parent_run.as_ref().map(|r| r.session_id.clone());
 
     if current_task.state == TaskState::Leased {
-        if let Err(err) = state
-            .runtime
-            .tasks
-            .start(session_id.as_ref(), &task_id)
-            .await
-        {
+        if let Err(err) = state.runtime.tasks.start(None, &task_id).await {
             return runtime_error_response(err);
         }
     }
 
-    match state
-        .runtime
-        .tasks
-        .complete(session_id.as_ref(), &task_id)
-        .await
-    {
+    match state.runtime.tasks.complete(None, &task_id).await {
         Ok(task) => {
             // Auto-checkpoint on task_complete is handled inside
             // TaskServiceImpl::complete() to avoid double-checkpoint races.
