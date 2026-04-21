@@ -18,15 +18,45 @@ use crate::error::RuntimeError;
 /// - tasks are the only leased execution entity in v1
 /// - expired leases are recovered by the runtime
 /// - retryable_failed is non-terminal and may return to queued
+///
+/// ## Session binding and RFC-011 co-location
+///
+/// Every method accepts `session_id: Option<&SessionId>` rather than a
+/// required `&SessionId` because the A2A protocol submits session-less
+/// tasks (see `/v1/a2a/tasks`). For all session-bound tasks, **callers
+/// may pass `None`** and rely on the fabric adapter's
+/// `resolve_task_project_and_session` to derive the session from the
+/// projection on every mutation:
+///
+/// 1. `TaskRecord.session_id`, if present on the projection row, OR
+/// 2. `TaskRecord.parent_run_id → RunRecord.session_id`, OR
+/// 3. `None` (solo-mint path, A2A tasks).
+///
+/// The adapter is the single source of truth for partition placement.
+/// HTTP handlers do **not** need to pre-resolve session — the
+/// redundancy was removed in RFC-011 Phase 2 closure.
+///
+/// One caller-side exception survives in `cairn-app`'s
+/// `create_task_handler`: when submitting with `parent_task_id` but no
+/// `parent_run_id`, the handler walks `parent_task_id →
+/// RunRecord.session_id` because neither the adapter's `submit` nor
+/// the `TaskCreated` projection writer follows that edge. The caller
+/// therefore passes `Some(sid)` on that one submit path to preserve
+/// co-location for sub-sub-tasks.
+///
+/// Session-less (bare / A2A) tasks route through the solo-mint path
+/// and land on the same `PartitionFamily::Flow` keyspace but without
+/// the session co-location guarantee. See
+/// `docs/design/rfcs/RFC-011-flow-partitioning.md` for the full contract.
 #[async_trait]
 pub trait TaskService: Send + Sync {
     /// Submit a new task.
     ///
     /// `session_id` scopes the mint path: `Some(sid)` co-locates the task
-    /// on the session's FlowId partition; `None` mints via the solo path
-    /// for bare tasks (e.g. A2A). The choice at submit time MUST match
-    /// every downstream mutation's `session_id` argument; a mismatch
-    /// targets a non-existent FF execution.
+    /// on the session's FlowId partition; `None` delegates resolution to
+    /// the fabric adapter (see trait-level rustdoc for the derivation
+    /// chain). A2A bare tasks submitted with neither `parent_run_id` nor
+    /// `session_id` land on the solo partition.
     async fn submit(
         &self,
         project: &ProjectKey,
