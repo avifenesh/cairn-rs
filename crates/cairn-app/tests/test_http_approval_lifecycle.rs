@@ -103,10 +103,9 @@ async fn approval_request_appears_pending_then_resolves_approved() {
         .or_else(|| body.get("items").and_then(|v| v.as_array()).cloned())
         .expect("list body shape");
     assert!(
-        items.iter().any(|a| a
-            .get("approval_id")
-            .and_then(|v| v.as_str())
-            == Some(approval_id.as_str())),
+        items
+            .iter()
+            .any(|a| a.get("approval_id").and_then(|v| v.as_str()) == Some(approval_id.as_str())),
         "pending list missing approval: {}",
         body,
     );
@@ -158,8 +157,5 @@ async fn approval_request_appears_pending_then_resolves_approved() {
         status,
         r.text().await.unwrap_or_default(),
     );
-    assert!(
-        status < 500,
-        "double-approve must not 5xx",
-    );
+    assert!(status < 500, "double-approve must not 5xx",);
 }

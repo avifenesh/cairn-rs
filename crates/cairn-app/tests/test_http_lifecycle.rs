@@ -20,7 +20,11 @@ async fn harness_boots_and_rotates_admin() {
         .send()
         .await
         .expect("health request reaches server");
-    assert!(res.status().is_success(), "health returned {}", res.status());
+    assert!(
+        res.status().is_success(),
+        "health returned {}",
+        res.status()
+    );
 }
 
 #[tokio::test]

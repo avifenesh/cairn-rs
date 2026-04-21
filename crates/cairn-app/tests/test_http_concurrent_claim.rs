@@ -89,12 +89,7 @@ async fn only_one_worker_wins_a_concurrent_claim() {
     assert_eq!(winners.len(), 1, "only one winner payload");
 }
 
-async fn seed_session_run_task(
-    h: &LiveHarness,
-    session_id: &str,
-    run_id: &str,
-    task_id: &str,
-) {
+async fn seed_session_run_task(h: &LiveHarness, session_id: &str, run_id: &str, task_id: &str) {
     let body = |extra: serde_json::Value| {
         let mut obj = json!({
             "tenant_id": h.tenant,
@@ -121,9 +116,7 @@ async fn seed_session_run_task(
         .client()
         .post(format!("{}/v1/runs", h.base_url))
         .bearer_auth(&h.admin_token)
-        .json(&body(
-            json!({ "session_id": session_id, "run_id": run_id }),
-        ))
+        .json(&body(json!({ "session_id": session_id, "run_id": run_id })))
         .send()
         .await
         .expect("run create reaches server");

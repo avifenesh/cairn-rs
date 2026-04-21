@@ -217,10 +217,7 @@ async fn provider_connection_routes_orchestration_then_503_after_delete() {
     // 5. Orchestrate run 1 — must route through the mock.
     let r = h
         .client()
-        .post(format!(
-            "{}/v1/runs/{}/orchestrate",
-            h.base_url, run_id_1,
-        ))
+        .post(format!("{}/v1/runs/{}/orchestrate", h.base_url, run_id_1,))
         .bearer_auth(&h.admin_token)
         .json(&json!({
             "goal": "finish immediately",
@@ -279,10 +276,7 @@ async fn provider_connection_routes_orchestration_then_503_after_delete() {
     let hits_before = hits.load(Ordering::SeqCst);
     let r = h
         .client()
-        .post(format!(
-            "{}/v1/runs/{}/orchestrate",
-            h.base_url, run_id_2,
-        ))
+        .post(format!("{}/v1/runs/{}/orchestrate", h.base_url, run_id_2,))
         .bearer_auth(&h.admin_token)
         .json(&json!({
             "goal": "try again",
