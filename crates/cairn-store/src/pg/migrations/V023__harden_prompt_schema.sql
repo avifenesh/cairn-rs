@@ -12,10 +12,11 @@
 --   2. prompt_versions.version_number NOT NULL
 --   3. prompt_assets.updated_at NOT NULL
 --
--- Backfill strategy runs first for every constraint, then the constraint
--- is applied. Backfill is defensive: production data is not expected to
--- violate these invariants (the projection code writes every field), but
--- we refuse to apply a constraint that would fail on live data.
+-- Backfill runs first for every constraint; the constraint is applied
+-- only after the data is known to satisfy it. Backfill is defensive:
+-- production data is not expected to violate these invariants (the
+-- projection code writes every field), but we refuse to apply a
+-- constraint that would fail on live data.
 
 -- ── (1) prompt_assets.updated_at NOT NULL ────────────────────────────
 
@@ -30,32 +31,46 @@ UPDATE prompt_assets
 ALTER TABLE prompt_assets
     ALTER COLUMN updated_at SET NOT NULL;
 
--- ── (2) prompt_versions.version_number NOT NULL ──────────────────────
+-- ── (2) + (3) prompt_versions: NOT NULL + UNIQUE in one re-sequence ───
 
--- The projection allocates version_number via COALESCE(MAX+1) at insert
--- time, so NULL rows are not expected. Attempt a conservative backfill
--- by re-deriving sequence numbers ordered by created_at within each
--- asset. If any remain NULL afterwards (e.g. ties on created_at with
--- gaps in the existing numbering) we raise loudly rather than paper
--- over the anomaly.
-WITH ranked AS (
+-- Re-sequence version_number across *all* rows per asset ordered by
+-- (created_at, prompt_version_id). This is a single, idempotent
+-- operation that:
+--   - backfills any NULL version_number, and
+--   - resolves any pre-existing duplicate (prompt_asset_id,
+--     version_number) pair
+-- without deleting any rows.
+--
+-- This is safe because version_number is a display field: relations
+-- from prompt_releases (and anywhere else) use prompt_version_id (the
+-- primary key), never the (asset, version_number) pair. The ordering
+-- key (created_at, prompt_version_id) is stable and independent of the
+-- current version_number, so running this migration on already-clean
+-- data is a no-op.
+--
+-- Credit: this replaces an earlier NULL-only backfill that could have
+-- collided with existing numbers and triggered silent row deletion in
+-- the subsequent dedup step (gemini-code-assist review on PR #103).
+UPDATE prompt_versions pv
+   SET version_number = ranked.new_vn
+  FROM (
     SELECT prompt_version_id,
            ROW_NUMBER() OVER (
                PARTITION BY prompt_asset_id
                ORDER BY created_at, prompt_version_id
-           ) AS rn
+           ) AS new_vn
       FROM prompt_versions
-     WHERE version_number IS NULL
-)
-UPDATE prompt_versions pv
-   SET version_number = ranked.rn
-  FROM ranked
+  ) ranked
  WHERE pv.prompt_version_id = ranked.prompt_version_id
-   AND pv.version_number IS NULL;
+   AND pv.version_number IS DISTINCT FROM ranked.new_vn;
 
+-- Belt-and-braces: after re-sequencing, no NULLs and no duplicates
+-- should remain. Raise loudly if either invariant is still violated
+-- (impossible given the UPDATE above, but cheap to check).
 DO $$
 DECLARE
     null_count BIGINT;
+    dup_count BIGINT;
 BEGIN
     SELECT COUNT(*) INTO null_count
       FROM prompt_versions
@@ -65,22 +80,7 @@ BEGIN
             'V023 backfill incomplete: % prompt_versions rows still have NULL version_number',
             null_count;
     END IF;
-END $$;
 
-ALTER TABLE prompt_versions
-    ALTER COLUMN version_number SET NOT NULL;
-
--- ── (3) prompt_versions UNIQUE(prompt_asset_id, version_number) ──────
-
--- Dedup defensively: if duplicate (asset, version_number) pairs exist
--- (they should not — the projection serializes allocation), keep the
--- oldest row by created_at (ties broken by prompt_version_id) and
--- delete the rest. We raise loudly first so the operator sees what
--- was cleaned up in the migration log.
-DO $$
-DECLARE
-    dup_count BIGINT;
-BEGIN
     SELECT COUNT(*) INTO dup_count FROM (
         SELECT 1
           FROM prompt_versions
@@ -88,23 +88,14 @@ BEGIN
         HAVING COUNT(*) > 1
     ) d;
     IF dup_count > 0 THEN
-        RAISE NOTICE
-            'V023 dedup: found % duplicate (prompt_asset_id, version_number) groups; keeping oldest row per group',
+        RAISE EXCEPTION
+            'V023 re-sequence incomplete: % duplicate (prompt_asset_id, version_number) groups remain',
             dup_count;
     END IF;
 END $$;
 
-DELETE FROM prompt_versions pv
- USING (
-    SELECT prompt_version_id,
-           ROW_NUMBER() OVER (
-               PARTITION BY prompt_asset_id, version_number
-               ORDER BY created_at, prompt_version_id
-           ) AS rn
-      FROM prompt_versions
- ) ranked
- WHERE pv.prompt_version_id = ranked.prompt_version_id
-   AND ranked.rn > 1;
+ALTER TABLE prompt_versions
+    ALTER COLUMN version_number SET NOT NULL;
 
 ALTER TABLE prompt_versions
     ADD CONSTRAINT prompt_versions_asset_version_unique

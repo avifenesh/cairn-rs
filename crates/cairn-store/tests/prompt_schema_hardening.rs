@@ -65,7 +65,7 @@ mod postgres {
         // Constraint application must come *after* the backfill,
         // otherwise the migration would fail on any row that currently
         // violates the invariant. This is a structural check that the
-        // UPDATE / DELETE dedup statements appear before the ALTER /
+        // UPDATE / re-sequence statements appear before the ALTER /
         // ADD CONSTRAINT statements in the migration body.
         let sql = v023_sql();
         let lowered = sql.to_ascii_lowercase();
@@ -81,15 +81,59 @@ mod postgres {
             "prompt_assets backfill must precede the ALTER TABLE"
         );
 
-        let dedup = lowered
-            .find("delete from prompt_versions")
-            .expect("V023 must dedup prompt_versions before UNIQUE");
+        // prompt_versions: re-sequence (UPDATE) must precede the
+        // UNIQUE constraint, otherwise any pre-existing duplicate
+        // pairs would fail the ADD CONSTRAINT.
+        let resequence = lowered
+            .find("update prompt_versions")
+            .expect("V023 must re-sequence prompt_versions before UNIQUE");
         let add_unique = lowered
             .find("prompt_versions_asset_version_unique")
             .expect("V023 must ADD CONSTRAINT prompt_versions_asset_version_unique");
         assert!(
-            dedup < add_unique,
-            "prompt_versions dedup must precede the UNIQUE constraint"
+            resequence < add_unique,
+            "prompt_versions re-sequence must precede the UNIQUE constraint"
+        );
+    }
+
+    #[test]
+    fn v023_resequences_all_rows_not_only_nulls() {
+        // Regression guard on the gemini-code-assist finding in PR #103:
+        // a NULL-only backfill can collide with existing non-null
+        // version numbers (e.g. [1, 2, NULL] → [1, 2, 1]) and cause a
+        // subsequent dedup step to silently delete valid rows. The
+        // correct approach is to re-sequence *all* rows per asset.
+        let sql = v023_sql();
+        let lowered = sql.to_ascii_lowercase();
+
+        // The UPDATE's inner SELECT (source of ROW_NUMBER) must scan
+        // the whole prompt_versions table, not a filtered subset. We
+        // assert that no `where version_number is null` filter sits
+        // inside the row_number-producing CTE/subquery.
+        //
+        // Be precise: the final sanity `DO $$` block legitimately
+        // counts NULLs post-backfill ("where version_number is null"
+        // against COUNT(*)), and that's fine. What matters is that
+        // the UPDATE's row_number source is unfiltered. We check by
+        // locating the ROW_NUMBER() window and confirming the
+        // enclosing SELECT has no WHERE clause filtering on
+        // version_number before the closing `)` of that subquery.
+        let rn_pos = lowered
+            .find("row_number()")
+            .expect("V023 must use ROW_NUMBER() to re-sequence");
+        // Scan forward from row_number() to the matching `) ranked` or
+        // `) as ranked` (the alias we use in the migration).
+        let tail = &lowered[rn_pos..];
+        let alias_pos = tail
+            .find(") ranked")
+            .or_else(|| tail.find(") as ranked"))
+            .expect("ROW_NUMBER() source must be aliased `ranked`");
+        let window = &tail[..alias_pos];
+        assert!(
+            !window.contains("where version_number is null"),
+            "ROW_NUMBER() source must not filter on `version_number IS NULL` \
+             — re-sequence must cover all rows to avoid collisions with \
+             existing non-null numbers"
         );
     }
 }
