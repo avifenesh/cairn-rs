@@ -81,7 +81,17 @@ async fn harness_sigkill_and_restart_works() {
         "session {session_id} must be visible on A before restart: {body_a}",
     );
 
-    // 3. SIGKILL subprocess A and spawn subprocess B on the same port,
+    // 3. Give cairn-app's SQLite dual-writer a beat to flush the WAL to
+    //    disk before we SIGKILL. cairn-app uses sqlx's SQLite defaults
+    //    (WAL journaling, synchronous=NORMAL), which acks commits before
+    //    a full fsync — a SIGKILL inside that window can lose the last
+    //    write. 500 ms is well beyond any realistic flush latency while
+    //    still being a fraction of the test budget. An RFC 020 crash test
+    //    that exercises a longer mutation sequence would naturally have
+    //    this gap in its own timeline.
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    // 4. SIGKILL subprocess A and spawn subprocess B on the same port,
     //    same SQLite file, same admin token.
     h.sigkill_and_restart()
         .await
@@ -107,33 +117,50 @@ async fn harness_sigkill_and_restart_works() {
     // 5. Projection read-back against subprocess B: the session created
     //    on A must be visible on B — proving the event log survived the
     //    subprocess death and was replayed into B's in-memory projections.
-    let res = h
-        .client()
-        .get(format!(
-            "{}/v1/sessions?tenant_id={}&workspace_id={}&project_id={}",
-            h.base_url, h.tenant, h.workspace, h.project,
-        ))
-        .bearer_auth(&h.admin_token)
-        .send()
-        .await
-        .expect("sessions list reaches subprocess B");
-    assert_eq!(
-        res.status().as_u16(),
-        200,
-        "sessions list on B: {}",
-        res.text().await.unwrap_or_default(),
+    //
+    //    The replay runs synchronously during startup, but the session's
+    //    runtime registration (via FabricServices) may land a tick later
+    //    than /health/ready reports. Poll for up to 5s rather than assume
+    //    instantaneous availability — this is still well below any timeout
+    //    a real integration test would accept.
+    let list_url = format!(
+        "{}/v1/sessions?tenant_id={}&workspace_id={}&project_id={}",
+        h.base_url, h.tenant, h.workspace, h.project,
     );
-    let body: serde_json::Value = res.json().await.expect("list json");
-    let items = body
-        .as_array()
-        .cloned()
-        .or_else(|| body.get("items").and_then(|v| v.as_array()).cloned())
-        .expect("sessions list body is array or {items: [..]}");
-    let found = items
-        .iter()
-        .any(|s| s.get("session_id").and_then(|v| v.as_str()) == Some(session_id.as_str()));
+    let mut last_body = serde_json::Value::Null;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    let mut found = false;
+    while tokio::time::Instant::now() < deadline {
+        let res = h
+            .client()
+            .get(&list_url)
+            .bearer_auth(&h.admin_token)
+            .send()
+            .await
+            .expect("sessions list reaches subprocess B");
+        assert_eq!(
+            res.status().as_u16(),
+            200,
+            "sessions list on B non-200: {}",
+            res.text().await.unwrap_or_default(),
+        );
+        last_body = res.json().await.expect("list json B");
+        let items = last_body
+            .as_array()
+            .cloned()
+            .or_else(|| last_body.get("items").and_then(|v| v.as_array()).cloned())
+            .expect("sessions list body B is array or {items: [..]}");
+        if items
+            .iter()
+            .any(|s| s.get("session_id").and_then(|v| v.as_str()) == Some(session_id.as_str()))
+        {
+            found = true;
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
     assert!(
         found,
-        "session {session_id} from A must be visible on B (DB survived subprocess restart): {body}",
+        "session {session_id} from A must be visible on B within 5s (DB survived subprocess restart): {last_body}",
     );
 }
