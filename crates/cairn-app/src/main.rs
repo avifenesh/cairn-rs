@@ -101,8 +101,27 @@ use sqlx::sqlite::SqlitePoolOptions;
 // Ollama, provider discovery, generate, embed, stream, model mgmt → bin_providers.rs
 // ── Arg parsing ───────────────────────────────────────────────────────────────
 
-fn parse_args_from(args: &[String]) -> BootstrapConfig {
+fn parse_args_from(args: &[String]) -> (BootstrapConfig, bool) {
+    // Shared helpers with the library-side parser in
+    // `cairn_app::bootstrap`: `parse_mode_value`, `parse_db_value`,
+    // `apply_env_fallback`, and `CliProvided`. Keeping them in one
+    // place prevents the library and binary parsers from drifting
+    // (gemini-code-assist PR #113 medium-priority finding).
+    //
+    // Returns `(config, storage_was_explicit)` so the caller can
+    // decide whether `DATABASE_URL` should fire as a *secondary*
+    // env fallback. `storage_was_explicit` is true when either the
+    // `--db` flag OR `CAIRN_DB` env var was set — covers the
+    // cursor-bugbot PR #113 finding that `CAIRN_DB=memory` used to
+    // be silently overridden by `DATABASE_URL` because the original
+    // `!matches!(storage, InMemory)` predicate couldn't distinguish
+    // "operator chose in-memory" from "parser left the default".
+    use cairn_app::bootstrap::{
+        apply_env_fallback, fatal_cli, parse_db_value, parse_mode_value, CliProvided,
+    };
+
     let mut config = BootstrapConfig::default();
+    let mut provided = CliProvided::default();
 
     let mut i = 1;
     while i < args.len() {
@@ -110,18 +129,21 @@ fn parse_args_from(args: &[String]) -> BootstrapConfig {
             "--mode" => {
                 i += 1;
                 if i < args.len() {
-                    config.mode = match args[i].as_str() {
-                        "team" | "self-hosted" => DeploymentMode::SelfHostedTeam,
-                        _ => DeploymentMode::Local,
-                    };
+                    config.mode = parse_mode_value(args[i].as_str(), "--mode");
+                    provided.mode = true;
                 }
             }
             "--port" => {
                 i += 1;
                 if i < args.len() {
-                    if let Ok(port) = args[i].parse::<u16>() {
-                        config.listen_port = port;
-                    }
+                    // Fail loud on an invalid port (gemini-code-assist
+                    // PR #113 high-priority finding): silently keeping
+                    // the default 3000 when the operator explicitly
+                    // passed `--port foo` hides a misconfiguration.
+                    config.listen_port = args[i]
+                        .parse::<u16>()
+                        .unwrap_or_else(|_| fatal_cli(format!("Invalid port: {}", args[i])));
+                    provided.port = true;
                 }
             }
             "--addr" => {
@@ -133,16 +155,8 @@ fn parse_args_from(args: &[String]) -> BootstrapConfig {
             "--db" => {
                 i += 1;
                 if i < args.len() {
-                    let val = &args[i];
-                    if val == "memory" {
-                        config.storage = StorageBackend::InMemory;
-                    } else if val.starts_with("postgres://") || val.starts_with("postgresql://") {
-                        config.storage = StorageBackend::Postgres {
-                            connection_url: val.clone(),
-                        };
-                    } else {
-                        config.storage = StorageBackend::Sqlite { path: val.clone() };
-                    }
+                    config.storage = parse_db_value(args[i].as_str());
+                    provided.db = true;
                 }
             }
             "--role" => {
@@ -165,6 +179,13 @@ fn parse_args_from(args: &[String]) -> BootstrapConfig {
         i += 1;
     }
 
+    let db_before_env = provided.db;
+    apply_env_fallback(&mut config, &provided, |k| std::env::var(k));
+    // `CAIRN_DB` sets storage via apply_env_fallback; treat that as an
+    // explicit operator choice so `DATABASE_URL` doesn't override it.
+    let storage_explicit =
+        db_before_env || std::env::var("CAIRN_DB").is_ok_and(|v| !v.trim().is_empty());
+
     if config.mode == DeploymentMode::SelfHostedTeam {
         if config.listen_addr == "127.0.0.1" {
             config.listen_addr = "0.0.0.0".to_owned();
@@ -178,16 +199,25 @@ fn parse_args_from(args: &[String]) -> BootstrapConfig {
         // the invariant can't be silently bypassed by choosing env vars.
     }
 
-    config
+    (config, storage_explicit)
 }
 
-/// Resolve the storage backend from environment when no `--db` flag was given.
+/// Resolve the storage backend from `DATABASE_URL` when the operator
+/// did NOT explicitly choose a backend via `--db` or `CAIRN_DB`.
 ///
-/// Priority: `DATABASE_URL` env var → InMemory fallback.
-/// This runs after CLI parsing so `--db` always wins.
-fn resolve_storage_from_env(config: &mut BootstrapConfig) {
+/// `storage_explicit` is threaded in from the parser so we can
+/// distinguish "operator chose `--db memory` / `CAIRN_DB=memory`"
+/// (respect their choice, skip this fallback) from "parser left the
+/// in-memory default untouched" (honor `DATABASE_URL`). Previously
+/// the function used `!matches!(storage, InMemory)` as a proxy,
+/// which silently overrode an explicit in-memory request — flagged
+/// by cursor-bugbot on PR #113.
+fn resolve_storage_from_env(config: &mut BootstrapConfig, storage_explicit: bool) {
+    if storage_explicit {
+        return; // operator already chose via --db or CAIRN_DB
+    }
     if !matches!(config.storage, StorageBackend::InMemory) {
-        return; // --db flag was given, don't override
+        return; // defensive: parser set a non-default backend without flagging it
     }
     if let Ok(url) = std::env::var("DATABASE_URL") {
         let url = url.trim().to_owned();
@@ -205,8 +235,8 @@ fn resolve_storage_from_env(config: &mut BootstrapConfig) {
 
 fn parse_args() -> BootstrapConfig {
     let args: Vec<String> = std::env::args().collect();
-    let mut config = parse_args_from(&args);
-    resolve_storage_from_env(&mut config);
+    let (mut config, storage_explicit) = parse_args_from(&args);
+    resolve_storage_from_env(&mut config, storage_explicit);
     // Enforce the RFC 020 team-mode storage invariant AFTER env-var
     // resolution so a `DATABASE_URL=sqlite:/path/prod.db` footgun is
     // caught the same as a `--db /path/prod.db` one. This was gemini-
