@@ -270,11 +270,7 @@ impl ControlPlaneBackend for ValkeyEngine {
 
         let raw: ferriskey::Value = self
             .runtime()
-            .fcall(
-                fcall::names::FF_CREATE_QUOTA_POLICY,
-                &key_refs,
-                &arg_refs,
-            )
+            .fcall(fcall::names::FF_CREATE_QUOTA_POLICY, &key_refs, &arg_refs)
             .await?;
         check_fcall_success(&raw, fcall::names::FF_CREATE_QUOTA_POLICY)?;
 
@@ -547,7 +543,10 @@ mod tests {
         let raw = ferriskey::Value::Array(vec![Ok(ferriskey::Value::SimpleString(
             "ADMITTED".to_owned(),
         ))]);
-        assert_eq!(parse_admission_result(&raw).unwrap(), QuotaAdmission::Admitted);
+        assert_eq!(
+            parse_admission_result(&raw).unwrap(),
+            QuotaAdmission::Admitted
+        );
     }
 
     #[test]
@@ -569,7 +568,9 @@ mod tests {
         ]);
         assert_eq!(
             parse_admission_result(&raw).unwrap(),
-            QuotaAdmission::RateExceeded { retry_after_ms: 5000 }
+            QuotaAdmission::RateExceeded {
+                retry_after_ms: 5000
+            }
         );
     }
 
