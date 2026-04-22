@@ -1219,6 +1219,23 @@ async fn main() {
         b.tool_result_cache = BranchStatus::complete(cache_populated as u64);
     });
 
+    // RFC 020 §"Decision Cache Survival": rebuild the in-process decision
+    // cache from persisted `DecisionRecorded` events. Expired entries are
+    // dropped; a `DecisionCacheWarmup` audit event is emitted with the
+    // restored/expired counts so operators can observe the replay.
+    let decision_replay = cairn_runtime::decisions::replay_decision_cache(
+        lib_state.runtime.store.as_ref(),
+        lib_state.runtime.decisions.as_ref(),
+    )
+    .await
+    .unwrap_or_else(|e| {
+        tracing::warn!(error = %e, "decision_cache replay failed");
+        cairn_runtime::decisions::DecisionCacheReplayReport::default()
+    });
+    lib_state.readiness.update_branch("5", |b| {
+        b.decision_cache = BranchStatus::complete(decision_replay.restored as u64);
+    });
+
     lib_state.runtime.store.reset_usage_counters();
 
     // Flip the remaining RFC 020 readiness branches. Each represents a
@@ -1237,7 +1254,8 @@ async fn main() {
         // already set it above with the real `cache_populated` count from
         // `replay_tool_result_cache`. Overwriting it with 0 here would
         // mask the count operators need to see on `/health/ready`.
-        b.decision_cache = BranchStatus::complete(0);
+        // `decision_cache` similarly holds the live `restored` count from
+        // `replay_decision_cache` above; do NOT overwrite it.
         b.webhook_dedup = BranchStatus::complete(0);
         b.triggers = BranchStatus::complete(0);
         b.runs = BranchStatus::complete(0);

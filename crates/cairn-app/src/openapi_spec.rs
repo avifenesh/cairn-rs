@@ -1254,6 +1254,38 @@ pub const OPENAPI_JSON: &str = r##"{
         "responses": { "200": { "description": "Invalidation count" } }
       }
     },
+    "/v1/decisions/evaluate": {
+      "post": {
+        "tags": ["Decisions"],
+        "summary": "Evaluate a decision request (RFC 019 8-step pipeline)",
+        "description": "Drives a DecisionRequest through scope, visibility, guardrail, budget, cache, approval, cache-write, and return steps. Cached decisions are persisted to the event log so they survive restart (RFC 020 §'Decision Cache Survival').",
+        "operationId": "evaluateDecision",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["kind"],
+                "properties": {
+                  "kind": { "type": "object" },
+                  "principal": { "type": "object" },
+                  "subject": { "type": "object" },
+                  "tenant_id": { "type": "string" },
+                  "workspace_id": { "type": "string" },
+                  "project_id": { "type": "string" },
+                  "correlation_id": { "type": "string" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Decision evaluated; body carries decision_id, outcome, source, cached, cache_hit." },
+          "400": { "description": "Malformed request." }
+        }
+      }
+    },
     "/v1/decisions/invalidate-by-rule": {
       "post": {
         "tags": ["Decisions"],

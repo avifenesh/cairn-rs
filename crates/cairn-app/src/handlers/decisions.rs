@@ -58,6 +58,201 @@ pub(crate) fn default_project_scope(params: &HashMap<String, String>) -> cairn_d
 
 // ── Handlers ────────────────────────────────────────────────────────────────
 
+/// POST /v1/decisions/evaluate — evaluate a decision request through the
+/// full RFC 019 8-step pipeline.
+///
+/// Wrapper over `DecisionService::evaluate` that exposes the decision
+/// layer to operators and integration tests without requiring an
+/// in-process orchestrator run. Decisions that end up cached are
+/// persisted to the event log so they survive restart (RFC 020
+/// §"Decision Cache Survival").
+///
+/// The request body accepts:
+/// ```json
+/// {
+///   "kind": { "ToolInvocation": { "tool_name": "grep_search",
+///                                  "effect": "Observational" } },
+///   "principal": { "type": "system" },   // optional, defaults to system
+///   "subject": { ... },                  // optional, derived from kind when absent
+///   "tenant_id": "default",              // optional scope fields
+///   "workspace_id": "default",
+///   "project_id": "default",
+///   "correlation_id": "..."              // optional, generated when absent
+/// }
+/// ```
+/// The response is `{ "decision_id": ..., "outcome": ..., "source": ..., "cached": bool }`.
+pub(crate) async fn evaluate_decision_handler(
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<serde_json::Value>,
+) -> impl IntoResponse {
+    use cairn_domain::decisions::{
+        DecisionKind, DecisionRequest, DecisionSource, DecisionSubject, Principal, ToolEffect,
+    };
+    use cairn_domain::ids::CorrelationId;
+
+    // ── kind (required) ──────────────────────────────────────────────────
+    // Accept either the serde-tagged shape (`{ "kind": "...", "data": {...} }`)
+    // passed through verbatim, or a flat shape where the caller puts the
+    // discriminator and payload fields at the top level (easier for operators
+    // and integration tests). We try the strict shape first.
+    let kind_val = match body.get("kind") {
+        Some(k) => k.clone(),
+        None => return bad_request_response("missing 'kind' field"),
+    };
+    let kind: DecisionKind = match &kind_val {
+        serde_json::Value::String(disc) => {
+            // Flat shape: `{ "kind": "tool_invocation", "tool_name": ..., "effect": ... }`.
+            let data = serde_json::Value::Object(
+                body.as_object()
+                    .map(|o| {
+                        o.iter()
+                            .filter(|(k, _)| {
+                                !matches!(
+                                    k.as_str(),
+                                    "kind"
+                                        | "principal"
+                                        | "subject"
+                                        | "tenant_id"
+                                        | "workspace_id"
+                                        | "project_id"
+                                        | "correlation_id"
+                                )
+                            })
+                            .map(|(k, v)| (k.clone(), v.clone()))
+                            .collect()
+                    })
+                    .unwrap_or_default(),
+            );
+            let tagged = serde_json::json!({ "kind": disc, "data": data });
+            match serde_json::from_value(tagged) {
+                Ok(k) => k,
+                Err(e) => return bad_request_response(format!("invalid 'kind' payload: {e}")),
+            }
+        }
+        serde_json::Value::Object(_) => match serde_json::from_value(kind_val) {
+            Ok(k) => k,
+            Err(e) => return bad_request_response(format!("invalid 'kind': {e}")),
+        },
+        _ => return bad_request_response("'kind' must be a string or object"),
+    };
+
+    // ── principal (optional, default System) ─────────────────────────────
+    let principal: Principal = match body.get("principal") {
+        Some(p) => match serde_json::from_value(p.clone()) {
+            Ok(p) => p,
+            Err(e) => return bad_request_response(format!("invalid 'principal': {e}")),
+        },
+        None => Principal::System,
+    };
+
+    // ── subject (optional, derive from kind when absent) ─────────────────
+    let subject: DecisionSubject = match body.get("subject") {
+        Some(s) => match serde_json::from_value(s.clone()) {
+            Ok(s) => s,
+            Err(e) => return bad_request_response(format!("invalid 'subject': {e}")),
+        },
+        None => match &kind {
+            DecisionKind::ToolInvocation { tool_name, .. } => DecisionSubject::ToolCall {
+                tool_name: tool_name.clone(),
+                args: serde_json::json!({}),
+            },
+            DecisionKind::ProviderCall { model_id, .. } => DecisionSubject::ProviderCall {
+                model_id: model_id.clone(),
+            },
+            _ => DecisionSubject::Resource {
+                resource_type: "unknown".to_owned(),
+                resource_id: "unknown".to_owned(),
+            },
+        },
+    };
+
+    // ── scope ────────────────────────────────────────────────────────────
+    let params: HashMap<String, String> = body
+        .as_object()
+        .map(|o| {
+            o.iter()
+                .filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_owned())))
+                .collect()
+        })
+        .unwrap_or_default();
+    let scope = default_project_scope(&params);
+
+    // ── correlation_id ───────────────────────────────────────────────────
+    let correlation_id = body
+        .get("correlation_id")
+        .and_then(|v| v.as_str())
+        .map(|s| CorrelationId::new(s.to_owned()))
+        .unwrap_or_else(|| {
+            CorrelationId::new(format!(
+                "cor_{}",
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_millis())
+                    .unwrap_or(0)
+            ))
+        });
+
+    // Default sensible tool_name for observational tool calls so policy
+    // lookup hits `tool_invocation:observational` (AlwaysCache).
+    let _ = ToolEffect::Observational;
+
+    let request = DecisionRequest {
+        kind,
+        principal,
+        subject,
+        scope,
+        cost_estimate: None,
+        requested_at: std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as u64)
+            .unwrap_or(0),
+        correlation_id,
+    };
+
+    match state.runtime.decisions.evaluate(request).await {
+        Ok(result) => {
+            let cached = matches!(
+                result.event,
+                cairn_domain::decisions::DecisionEvent::DecisionRecorded {
+                    cached_for: Some(_),
+                    ..
+                }
+            );
+            let source = match &result.event {
+                cairn_domain::decisions::DecisionEvent::DecisionRecorded { source, .. } => {
+                    serde_json::to_value(source).unwrap_or(serde_json::Value::Null)
+                }
+                _ => serde_json::Value::Null,
+            };
+            let cache_hit = source
+                .get("source")
+                .and_then(|v| v.as_str())
+                .map(|s| s == "cache_hit")
+                .unwrap_or(false);
+            let original_decision_id = source
+                .get("original_decision_id")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_owned());
+            (
+                StatusCode::OK,
+                Json(serde_json::json!({
+                    "decision_id": result.decision_id,
+                    "outcome": result.outcome,
+                    "source": source,
+                    "cached": cached,
+                    "cache_hit": cache_hit,
+                    "original_decision_id": original_decision_id,
+                })),
+            )
+                .into_response()
+        }
+        Err(e) => {
+            let _ = DecisionSource::FreshEvaluation;
+            decision_error_response(e)
+        }
+    }
+}
+
 /// GET /v1/decisions — list recent decisions.
 pub(crate) async fn list_decisions_handler(
     State(state): State<Arc<AppState>>,

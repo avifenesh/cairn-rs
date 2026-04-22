@@ -12,8 +12,9 @@ use cairn_domain::decisions::{
     DecisionKind, DecisionOutcome, DecisionPolicy, DecisionRequest, DecisionScopeRef,
     DecisionSource, StepResult, ToolEffect,
 };
+use cairn_domain::events::{DecisionCacheWarmup, DecisionRecorded as DecisionRecordedEvt};
 use cairn_domain::ids::{DecisionId, PolicyId};
-use cairn_domain::ProjectKey;
+use cairn_domain::{ProjectKey, RuntimeEvent};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
@@ -567,6 +568,15 @@ pub struct DecisionServiceImpl {
     approval_resolver: Arc<dyn ApprovalResolver>,
     cache: DecisionCache,
     policies: HashMap<String, DecisionPolicy>,
+    /// Optional durable event log.
+    ///
+    /// When set, every `evaluate()` that ends with `cached == true` (step 7
+    /// cache write) also appends a `RuntimeEvent::DecisionRecorded` so the
+    /// in-memory cache can be rebuilt on startup (RFC 020 §"Decision Cache
+    /// Survival"). When unset the service behaves exactly as before — unit
+    /// tests and call sites that never persist (e.g. the `Stub*` chain in
+    /// `cairn-runtime` integration tests) don't need to supply one.
+    event_log: Option<Arc<dyn cairn_store::EventLog>>,
 }
 
 impl DecisionServiceImpl {
@@ -595,6 +605,54 @@ impl DecisionServiceImpl {
             approval_resolver,
             cache: DecisionCache::new(60_000),
             policies: Self::default_policies(),
+            event_log: None,
+        }
+    }
+
+    /// Attach a durable event log so `evaluate()` persists
+    /// `DecisionRecorded` events for cached decisions (RFC 020).
+    pub fn set_event_log(&mut self, log: Arc<dyn cairn_store::EventLog>) {
+        self.event_log = Some(log);
+    }
+
+    /// Builder variant of `set_event_log` for inline wiring.
+    pub fn with_event_log(mut self, log: Arc<dyn cairn_store::EventLog>) -> Self {
+        self.event_log = Some(log);
+        self
+    }
+
+    /// Seed a cache entry directly, bypassing the 8-step pipeline.
+    ///
+    /// Used by startup replay to rebuild the decision cache from
+    /// persisted `DecisionRecorded` events. The entry is installed
+    /// in the `Resolved` state with the supplied `expires_at`; the
+    /// caller is responsible for filtering out events whose TTL has
+    /// already elapsed (pre-filter keeps the warmup count honest).
+    pub fn seed_cache_entry(
+        &self,
+        decision_id: DecisionId,
+        decision_key: DecisionKey,
+        outcome: DecisionOutcome,
+        expires_at: u64,
+        decided_at: u64,
+        event: Option<DecisionEvent>,
+    ) {
+        let ck = DecisionCache::cache_key_string(&decision_key);
+        let entry = CacheEntry {
+            decision_id: decision_id.clone(),
+            outcome: Some(outcome),
+            expires_at,
+            created_at: decided_at,
+            hit_count: 0,
+            is_pending: false,
+        };
+        self.cache
+            .entries
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(ck, entry);
+        if let Some(ev) = event {
+            self.cache.store_event(&decision_id, &ev);
         }
     }
 
@@ -725,14 +783,24 @@ impl DecisionServiceImpl {
     }
 
     fn derive_semantic_hash(&self, request: &DecisionRequest) -> String {
-        // Simplified: hash the kind tag + key fields.
+        // Deterministic hash over the kind JSON. A prior version used
+        // `DefaultHasher` (SipHash with a per-process random seed), which
+        // meant the same `DecisionRequest` produced a different cache key
+        // after a restart — silently defeating the RFC 020 decision-cache
+        // survival contract. SHA-256 is stable across processes and
+        // platforms; truncating to 16 hex chars keeps the key compact
+        // while preserving uniqueness at the cardinalities the cache
+        // operates at (tens of millions of distinct kinds is fine).
         // Full implementation will use cache_on_fields from tool descriptors.
-        use std::collections::hash_map::DefaultHasher;
-        use std::hash::{Hash, Hasher};
-        let mut hasher = DefaultHasher::new();
+        use sha2::{Digest, Sha256};
         let kind_json = serde_json::to_string(&request.kind).unwrap_or_default();
-        kind_json.hash(&mut hasher);
-        format!("{:016x}", hasher.finish())
+        let digest = Sha256::digest(kind_json.as_bytes());
+        let mut out = String::with_capacity(16);
+        for byte in &digest[..8] {
+            use std::fmt::Write;
+            let _ = write!(&mut out, "{byte:02x}");
+        }
+        out
     }
 
     fn should_cache(&self, policy: &DecisionPolicy, outcome: &DecisionOutcome) -> bool {
@@ -1090,6 +1158,8 @@ impl DecisionService for DecisionServiceImpl {
             rule_ids: vec![],
         });
 
+        let decided_at = DecisionCache::now_ms();
+        let project = request.scope.clone();
         let event = DecisionEvent::DecisionRecorded {
             decision_id: decision_id.clone(),
             request: Box::new(request),
@@ -1097,10 +1167,36 @@ impl DecisionService for DecisionServiceImpl {
             reasoning_chain: chain,
             source,
             resolved_by: None,
-            cached_for,
-            decided_at: DecisionCache::now_ms(),
+            cached_for: cached_for.clone(),
+            decided_at,
         };
         self.cache.store_event(&decision_id, &event);
+
+        // RFC 020 §"Decision Cache Survival": persist every cached decision
+        // so startup replay can rebuild the in-memory cache. We skip
+        // uncached decisions (never-cache policies, denies that skipped
+        // step 7) — they have no cache state to restore and persisting
+        // them would inflate the event log for no survival benefit.
+        if let (Some(log), Some(cached_ref)) = (self.event_log.as_ref(), cached_for.as_ref()) {
+            let event_json = serde_json::to_string(&event).unwrap_or_else(|_| "{}".to_owned());
+            let persisted = RuntimeEvent::DecisionRecorded(DecisionRecordedEvt {
+                project,
+                decision_id: decision_id.clone(),
+                decision_key: decision_key.clone(),
+                outcome: outcome.clone(),
+                cached: true,
+                expires_at: cached_ref.expires_at,
+                decided_at,
+                event_json,
+            });
+            let envelope = crate::services::event_helpers::make_envelope(persisted);
+            if let Err(e) = log.append(&[envelope]).await {
+                eprintln!(
+                    "warn: failed to persist DecisionRecorded event for {decision_id}: {e}; \
+                     in-memory cache still valid but entry will not survive restart"
+                );
+            }
+        }
 
         Ok(DecisionResult {
             decision_id,
@@ -1315,6 +1411,97 @@ impl DecisionService for StubDecisionService {
     async fn get_decision(&self, _: &DecisionId) -> Result<Option<DecisionEvent>, DecisionError> {
         Ok(None)
     }
+}
+
+/// Outcome of a startup replay pass over the event log.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct DecisionCacheReplayReport {
+    /// Cache entries restored to the in-memory cache.
+    pub restored: u32,
+    /// Persisted `DecisionRecorded` events whose TTL had already elapsed.
+    /// Skipped — startup cannot usefully rehydrate them.
+    pub expired: u32,
+}
+
+/// Rebuild the decision cache from persisted `DecisionRecorded` events.
+///
+/// Walks the global event log in order, installing each `DecisionRecorded`
+/// entry whose `expires_at` is still in the future. Expired entries are
+/// counted (for the `DecisionCacheWarmup` audit line) and dropped.
+///
+/// Emits a `RuntimeEvent::DecisionCacheWarmup` audit event on completion.
+/// The warmup event is appended even when `restored == 0` so operators
+/// can observe the replay ran (RFC 020 §"Decision Cache Survival"
+/// compliance evidence).
+///
+/// The log is both the source and the sink; both reads and the final
+/// append go through the same `EventLog` trait, which keeps this
+/// portable across InMemory/SQLite/Postgres backends.
+pub async fn replay_decision_cache<L: cairn_store::EventLog + ?Sized>(
+    log: &L,
+    service: &DecisionServiceImpl,
+) -> Result<DecisionCacheReplayReport, cairn_store::StoreError> {
+    use cairn_store::EventPosition;
+
+    let now = DecisionCache::now_ms();
+    let mut report = DecisionCacheReplayReport::default();
+    let mut cursor: Option<EventPosition> = None;
+    const PAGE: usize = 500;
+
+    loop {
+        let page = log.read_stream(cursor, PAGE).await?;
+        if page.is_empty() {
+            break;
+        }
+        let last = page.last().map(|e| e.position);
+        for stored in &page {
+            if let RuntimeEvent::DecisionRecorded(rec) = &stored.envelope.payload {
+                if !rec.cached {
+                    continue;
+                }
+                if rec.expires_at <= now {
+                    report.expired = report.expired.saturating_add(1);
+                    continue;
+                }
+                // The full `DecisionEvent` reasoning chain lives in
+                // `event_json`. Deserialise on best-effort: if the blob
+                // is corrupt we still seed the cache entry so cache hits
+                // work post-restart — the operator just loses the
+                // reasoning chain in `GET /v1/decisions/{id}`.
+                let full_event: Option<DecisionEvent> = serde_json::from_str(&rec.event_json).ok();
+                service.seed_cache_entry(
+                    rec.decision_id.clone(),
+                    rec.decision_key.clone(),
+                    rec.outcome.clone(),
+                    rec.expires_at,
+                    rec.decided_at,
+                    full_event,
+                );
+                report.restored = report.restored.saturating_add(1);
+            }
+        }
+        match last {
+            Some(pos) => cursor = Some(pos),
+            None => break,
+        }
+        if page.len() < PAGE {
+            break;
+        }
+    }
+
+    let warmup = RuntimeEvent::DecisionCacheWarmup(DecisionCacheWarmup {
+        cached: report.restored,
+        expired_and_dropped: report.expired,
+        warmed_at: now,
+    });
+    let envelope = crate::services::event_helpers::make_envelope(warmup);
+    // A warmup emit failure is not fatal — the in-memory cache is
+    // already rehydrated. Log and continue so the service starts.
+    if let Err(e) = log.append(&[envelope]).await {
+        eprintln!("warn: failed to persist DecisionCacheWarmup audit event: {e}");
+    }
+
+    Ok(report)
 }
 
 /// Derive the `kind_tag` string from a `DecisionKind`.

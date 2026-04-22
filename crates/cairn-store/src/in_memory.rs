@@ -1718,6 +1718,10 @@ impl InMemoryStore {
                     baseline.locked = true;
                 }
             }
+            // RFC 020 decision-cache survival: no dedicated projection —
+            // cairn-app rebuilds the in-memory decision cache from the
+            // event log at startup.
+            RuntimeEvent::DecisionRecorded(_) | RuntimeEvent::DecisionCacheWarmup(_) => {}
         }
     }
 }

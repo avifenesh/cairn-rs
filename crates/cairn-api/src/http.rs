@@ -194,6 +194,11 @@ pub fn preserved_route_catalog() -> Vec<RouteEntry> {
             path: "/v1/decisions/:id/invalidate".into(),
             classification: Preserve,
         },
+        RouteEntry {
+            method: Post,
+            path: "/v1/decisions/evaluate".into(),
+            classification: Preserve,
+        },
         // ── SQ/EQ Protocol (RFC 021) ────────────────────────────────────────
         RouteEntry {
             method: Post,

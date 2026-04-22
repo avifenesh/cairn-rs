@@ -236,6 +236,15 @@ pub enum RuntimeEvent {
     PlanRejected(PlanRejected),
     /// An operator requested a revision; a new Plan-mode run was created.
     PlanRevisionRequested(PlanRevisionRequested),
+    // ── Decision layer persistence (RFC 019 + RFC 020) ────────────────────
+    /// A decision was evaluated and (optionally) cached. Durable audit
+    /// record that lets the decision cache projection be rebuilt on
+    /// startup — closes the RFC 020 §"Decision Cache Survival" gap.
+    DecisionRecorded(DecisionRecorded),
+    /// Startup replay completed for the decision cache. Counts how many
+    /// entries were restored and how many were dropped because their TTL
+    /// had already expired at replay time.
+    DecisionCacheWarmup(DecisionCacheWarmup),
 }
 
 impl RuntimeEvent {
@@ -293,6 +302,7 @@ impl RuntimeEvent {
             RuntimeEvent::PlanApproved(event) => &event.project,
             RuntimeEvent::PlanRejected(event) => &event.project,
             RuntimeEvent::PlanRevisionRequested(event) => &event.project,
+            RuntimeEvent::DecisionRecorded(event) => &event.project,
             RuntimeEvent::TriggerCreated(event) => &event.project,
             RuntimeEvent::TriggerEnabled(event) => &event.project,
             RuntimeEvent::TriggerDisabled(event) => &event.project,
@@ -372,7 +382,8 @@ impl RuntimeEvent {
             | RuntimeEvent::TaskLeaseExpired(_)
             | RuntimeEvent::TaskPriorityChanged(_)
             | RuntimeEvent::ToolInvocationProgressUpdated(_)
-            | RuntimeEvent::ScheduledTaskCreated(_) => {
+            | RuntimeEvent::ScheduledTaskCreated(_)
+            | RuntimeEvent::DecisionCacheWarmup(_) => {
                 // These events are tenant-scoped rather than project-scoped.
                 // Return a static placeholder key.
                 static SYSTEM_KEY: std::sync::OnceLock<crate::tenancy::ProjectKey> =
@@ -615,7 +626,9 @@ impl RuntimeEvent {
             | RuntimeEvent::TaskLeaseExpired(_)
             | RuntimeEvent::TaskPriorityChanged(_)
             | RuntimeEvent::ToolInvocationProgressUpdated(_)
-            | RuntimeEvent::ScheduledTaskCreated(_) => None,
+            | RuntimeEvent::ScheduledTaskCreated(_)
+            | RuntimeEvent::DecisionRecorded(_)
+            | RuntimeEvent::DecisionCacheWarmup(_) => None,
         }
     }
 }
@@ -2163,6 +2176,50 @@ pub struct ToolInvocationProgressUpdated {
     pub progress_pct: u8,
     pub message: Option<String>,
     pub updated_at_ms: u64,
+}
+
+/// Durable record of a single decision evaluation.
+///
+/// Persisting this event lets cairn-app rebuild the RFC 019 decision cache
+/// on startup (RFC 020 §"Decision Cache Survival"). The payload carries
+/// only the fields needed to reconstruct a cache entry plus an opaque
+/// `event_json` blob with the full `cairn_domain::decisions::DecisionEvent`
+/// so `GET /v1/decisions/{id}` can serve the reasoning chain post-replay.
+///
+/// `event_json` is stored as a JSON string rather than a typed structure
+/// so the event log stays portable (SQLite TEXT / Postgres TEXT, no JSONB
+/// operators) and to sidestep the fact that the richer `DecisionEvent`
+/// enum does not implement `Eq` (its `CostEstimate` carries `f64`).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DecisionRecorded {
+    pub project: ProjectKey,
+    pub decision_id: DecisionId,
+    pub decision_key: crate::decisions::DecisionKey,
+    pub outcome: crate::decisions::DecisionOutcome,
+    /// `true` when the decision was written to the cache at step 7. Replay
+    /// skips events where `cached == false` (never-cache policies,
+    /// `cache_write: skip`).
+    pub cached: bool,
+    /// Cache TTL expiry in epoch-ms. `0` when `cached == false`.
+    pub expires_at: u64,
+    pub decided_at: u64,
+    /// Full `DecisionEvent::DecisionRecorded` serialized via `serde_json`.
+    /// Used by `get_decision` after replay so the reasoning chain is
+    /// preserved across restarts.
+    pub event_json: String,
+}
+
+/// Emitted once at the end of startup replay for the decision cache.
+///
+/// Counts how many cached decisions survived the restart and how many
+/// were dropped because their TTL had already elapsed. RFC 020
+/// §"Decision Cache Survival" requires this as audit-trail evidence
+/// that the cache rebuild ran.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DecisionCacheWarmup {
+    pub cached: u32,
+    pub expired_and_dropped: u32,
+    pub warmed_at: u64,
 }
 
 #[cfg(test)]

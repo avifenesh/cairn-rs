@@ -460,6 +460,11 @@ impl SqliteSyncProjection {
             // RFC 020 Track 3: audit-only events; no projection update needed.
             RuntimeEvent::ToolInvocationCacheHit(_) => log_stub("ToolInvocationCacheHit"),
             RuntimeEvent::ToolRecoveryPaused(_) => log_stub("ToolRecoveryPaused"),
+            // RFC 020 decision-cache survival: see pg/projections.rs for
+            // rationale — no projection table; cairn-app rebuilds the
+            // in-memory cache from the event log on startup.
+            RuntimeEvent::DecisionRecorded(_) => log_stub("DecisionRecorded"),
+            RuntimeEvent::DecisionCacheWarmup(_) => log_stub("DecisionCacheWarmup"),
         }
 
         Ok(())

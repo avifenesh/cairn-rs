@@ -157,7 +157,14 @@ impl InMemoryServices {
         tasks: Arc<dyn TaskService>,
         sessions: Arc<dyn SessionService>,
     ) -> Self {
-        let decisions = Arc::new(crate::decisions::DecisionServiceImpl::new());
+        // RFC 020 §"Decision Cache Survival": wire the shared event log
+        // into the decision service so cached decisions are persisted
+        // and can be replayed at startup. The log clone uses the store
+        // itself as an `EventLog` — same trait impl as every other
+        // service uses for audit/projection writes.
+        let decision_log: Arc<dyn cairn_store::EventLog> = store.clone();
+        let decisions =
+            Arc::new(crate::decisions::DecisionServiceImpl::new().with_event_log(decision_log));
         let decision_service: Arc<dyn crate::decisions::DecisionService> = decisions.clone();
 
         Self {

@@ -717,7 +717,12 @@ impl PgSyncProjection {
             // RFC 005 approval policies — no durable table yet
             | RuntimeEvent::ApprovalPolicyCreated(_)
             // RFC 001 gradual rollout — state tracked via prompt_releases table
-            | RuntimeEvent::PromptRolloutStarted(_) => {}
+            | RuntimeEvent::PromptRolloutStarted(_)
+            // RFC 020 decision-cache survival: the event log itself is the
+            // durable record; the in-memory cache is rebuilt by cairn-app
+            // at startup via `read_stream`. No dedicated projection table.
+            | RuntimeEvent::DecisionRecorded(_)
+            | RuntimeEvent::DecisionCacheWarmup(_) => {}
         }
 
         Ok(())
