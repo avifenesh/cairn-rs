@@ -315,6 +315,21 @@ impl InMemoryStore {
         let now = event.stored_at;
         match &event.envelope.payload {
             RuntimeEvent::SessionCreated(e) => {
+                // Idempotent projection: multiple `SessionCreated` events
+                // for the same `session_id` can legitimately arrive on
+                // event-log replay or when the fabric layer's
+                // `FabricSessionService::create` retries after a crash
+                // between FF `ff_create_flow` committing and the bridge
+                // emit landing (see `cairn-fabric::services::session_service`
+                // for the retry-safety rationale). The `HashMap::insert`
+                // below is naturally idempotent, but the quota counter
+                // must only advance on a *fresh* session — otherwise
+                // retries silently inflate `sessions_this_hour` and
+                // eventually reject legitimate new sessions with
+                // `QuotaExceeded`. Gate the counter bump on "first time
+                // we see this session_id" using the pre-insert absence
+                // probe.
+                let is_fresh = !state.sessions.contains_key(e.session_id.as_str());
                 state.sessions.insert(
                     e.session_id.as_str().to_owned(),
                     SessionRecord {
@@ -326,9 +341,10 @@ impl InMemoryStore {
                         updated_at: now,
                     },
                 );
-                // Update session quota counter
-                if let Some(quota) = state.quotas.get_mut(e.project.tenant_id.as_str()) {
-                    quota.sessions_this_hour = quota.sessions_this_hour.saturating_add(1);
+                if is_fresh {
+                    if let Some(quota) = state.quotas.get_mut(e.project.tenant_id.as_str()) {
+                        quota.sessions_this_hour = quota.sessions_this_hour.saturating_add(1);
+                    }
                 }
             }
             RuntimeEvent::SessionStateChanged(e) => {
