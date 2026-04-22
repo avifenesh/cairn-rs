@@ -378,10 +378,11 @@ impl SqliteSyncProjection {
                 // compute MAX+1 and insert the same version_number. In
                 // local-mode there is a single append path serialized
                 // by `SqliteEventLog`, which makes this safe in
-                // practice. A defensive `UNIQUE(prompt_asset_id,
-                // version_number)` constraint belongs in a dedicated
-                // hardening PR that applies symmetrically to Postgres
-                // V016 — tracked for follow-up.
+                // practice. The defensive `UNIQUE(prompt_asset_id,
+                // version_number)` constraint in schema.rs (and
+                // Postgres V023) converts any future concurrent
+                // allocation bug into a hard error instead of silent
+                // duplicate rows.
                 let version_number: i64 = sqlx::query_scalar(
                     "SELECT COALESCE(MAX(version_number), 0) + 1
                      FROM prompt_versions

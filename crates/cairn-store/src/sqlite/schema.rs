@@ -253,7 +253,11 @@ CREATE TABLE IF NOT EXISTS prompt_assets (
     scope           TEXT,
     status          TEXT,
     created_at      INTEGER NOT NULL,
-    updated_at      INTEGER
+    -- NOT NULL: mirrors Postgres V023 hardening. The projection writes
+    -- updated_at on every insert (see sqlite/projections.rs
+    -- PromptAssetCreated), so this constraint formalizes an invariant
+    -- the code already satisfies.
+    updated_at      INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_prompt_assets_project
     ON prompt_assets (tenant_id, workspace_id, project_id);
@@ -264,12 +268,16 @@ CREATE TABLE IF NOT EXISTS prompt_versions (
     tenant_id         TEXT NOT NULL,
     workspace_id      TEXT NOT NULL,
     project_id        TEXT NOT NULL,
-    version_number    INTEGER,
+    -- NOT NULL + UNIQUE(asset, version_number): mirrors Postgres V023
+    -- hardening. The projection allocates via COALESCE(MAX+1); these
+    -- constraints defend against a future concurrent-append path.
+    version_number    INTEGER NOT NULL,
     content_hash      TEXT NOT NULL,
     content           TEXT,
     format            TEXT,
     created_by        TEXT,
-    created_at        INTEGER NOT NULL
+    created_at        INTEGER NOT NULL,
+    UNIQUE(prompt_asset_id, version_number)
 );
 CREATE INDEX IF NOT EXISTS idx_prompt_versions_asset
     ON prompt_versions (prompt_asset_id, created_at, prompt_version_id);

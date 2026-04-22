@@ -125,6 +125,11 @@ const MIGRATIONS: &[(u32, &str, &str)] = &[
         "create_ff_lease_history_cursors",
         include_str!("migrations/V022__create_ff_lease_history_cursors.sql"),
     ),
+    (
+        23,
+        "harden_prompt_schema",
+        include_str!("migrations/V023__harden_prompt_schema.sql"),
+    ),
 ];
 
 /// Return the compile-time migration registry as (version, name, sql) triples.
