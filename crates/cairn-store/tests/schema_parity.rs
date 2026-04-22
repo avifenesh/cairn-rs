@@ -8,11 +8,11 @@
 //! Recommended by the portability audit — see the project memory note
 //! `project_pg_specific_audit.md` §7 "Pattern Analysis".
 //!
-//! The test is `#[ignore]` by default: we want the check to exist in the
-//! tree so `cargo test -- --ignored` can be wired into CI later, but
-//! turning it on today would block unrelated work on known drift that
-//! the user has not yet scoped a fix for. Un-ignore once parity is
-//! restored.
+//! The test is un-ignored as of the 9-table parity port (Option B). A
+//! single known-exception (`route_policies`) is allow-listed via the
+//! `KNOWN_POSTGRES_ONLY` constant while the JSONB→TEXT design is
+//! discussed — see `project_sqlite_parity_route_policies_pending.md`
+//! in the project memory. Any additional drift fails CI.
 
 use std::collections::BTreeSet;
 use std::fs;
@@ -253,8 +253,20 @@ fn infra_tables() -> BTreeSet<String> {
         .collect()
 }
 
+/// Tables intentionally Postgres-only, excluded from the parity check
+/// pending design discussion. Each entry MUST be justified with a
+/// pointer to project memory so future maintainers know when it can be
+/// removed.
+///
+/// - `route_policies` (V018): uses `JSONB NOT NULL DEFAULT '[]'` for
+///   the `rules` column. Porting to SQLite requires either (a) TEXT +
+///   app-side JSON parse on every read/write, or (b) a feature-gated
+///   Postgres-only API surface. Decision pending — see
+///   `project_sqlite_parity_route_policies_pending.md` in the agent
+///   memory index.
+const KNOWN_POSTGRES_ONLY: &[&str] = &["route_policies"];
+
 #[test]
-#[ignore = "known schema drift; un-ignore when SQLite reaches parity with Postgres (see project_pg_specific_audit.md §V018, V019 and V016/V017 tables)"]
 fn postgres_and_sqlite_define_the_same_tables() {
     let root = crate_root();
 
@@ -278,6 +290,16 @@ fn postgres_and_sqlite_define_the_same_tables() {
     for t in &infra {
         pg_tables.remove(t);
         sqlite_tables.remove(t);
+    }
+
+    // Remove the known-Postgres-only allow-list from both sides so the
+    // parity check treats them as intentionally absent from SQLite. A
+    // stray SQLite-side definition of an allow-listed table would also
+    // stop triggering "only in SQLite" — acceptable, because the list
+    // is narrow and reviewed.
+    for t in KNOWN_POSTGRES_ONLY {
+        pg_tables.remove(*t);
+        sqlite_tables.remove(*t);
     }
 
     let only_in_postgres: BTreeSet<String> =
