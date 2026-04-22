@@ -121,6 +121,17 @@ pub struct SandboxRecoverySummary {
     /// `allowlist_revoked_runs.len()`.
     pub preserved_allowlist_revoked: u32,
     pub allowlist_revoked_runs: Vec<(RunId, ProjectKey, RepoId)>,
+    /// RFC 020 §"Run recovery matrix": registry entries whose on-disk
+    /// root survived the crash and whose repo binding (if any) is still
+    /// allowlisted. `reattached_runs` carries `(run_id, project)` pairs
+    /// so the run-level `RecoveryService` can emit
+    /// `RecoveryAttempted { reason: "sandbox_reattached" }` for the
+    /// audit trail. No state transition happens — the run stays in its
+    /// existing non-terminal state and the orchestrator resumes it on
+    /// the next tick. `reattached` is always equal to
+    /// `reattached_runs.len()`.
+    pub reattached: u32,
+    pub reattached_runs: Vec<(RunId, ProjectKey)>,
 }
 
 /// Directory name (relative to `base_dir`) holding the recovery registry —
@@ -981,6 +992,46 @@ impl SandboxService {
             }
             summary.preserved_allowlist_revoked = summary.allowlist_revoked_runs.len() as u32;
         }
+
+        // RFC 020 §"Run recovery matrix" — healthy-reattach row. Any
+        // registry entry that survived the lost-sweep (path exists) AND
+        // the allowlist-revoked sweep (repo still allowlisted, or no
+        // bound repo) represents a sandbox that cleanly survived the
+        // crash. Emit `SandboxReattached` so the run-level recovery
+        // service can record an audit trail entry
+        // (`RecoveryAttempted{reason:"sandbox_reattached"}` +
+        // `RecoveryCompleted{recovered:true}`) without transitioning
+        // state — the run stays in its existing non-terminal state and
+        // the orchestrator resumes it on its next tick.
+        //
+        // Entries already surfaced by a provider via `list()` are
+        // already counted under `reconnected`/`preserved`/`failed` and
+        // must not be double-reported here. Entries whose
+        // `allowlist_revoked_handled` flag is set are allowlist-
+        // revoked and owned by that sweep. Everything else that has a
+        // present path is healthy.
+        let reattach_entries = self.list_registry_entries()?;
+        for entry in reattach_entries {
+            if observed.contains(entry.sandbox_id.as_str()) {
+                continue;
+            }
+            if !entry.path.exists() {
+                continue;
+            }
+            if entry.allowlist_revoked_handled {
+                continue;
+            }
+            let reattached_at = self.clock.now_millis();
+            self.event_sink.publish(SandboxEvent::SandboxReattached {
+                sandbox_id: entry.sandbox_id.clone(),
+                run_id: entry.run_id.clone(),
+                project: entry.project.clone(),
+                sandbox_path: entry.path.clone(),
+                reattached_at,
+            });
+            summary.reattached_runs.push((entry.run_id, entry.project));
+        }
+        summary.reattached = summary.reattached_runs.len() as u32;
 
         Ok(summary)
     }
@@ -2106,6 +2157,9 @@ mod tests {
         let second = service.recover_all().await.unwrap();
         assert_eq!(second.preserved_allowlist_revoked, 0);
         assert!(second.allowlist_revoked_runs.is_empty());
+        // The registry entry has `allowlist_revoked_handled=true` after
+        // boot 1, so the reattach sweep also skips it on boot 2. Sink
+        // stays empty.
         assert!(sink.drain().is_empty());
     }
 
@@ -2154,7 +2208,17 @@ mod tests {
             "empty allowlist must be treated as not-yet-authoritative, not as all-revoked",
         );
         assert!(summary.allowlist_revoked_runs.is_empty());
-        assert!(sink.drain().is_empty());
+        // The entry has a present path and no allowlist-revoke decision
+        // this boot, so the healthy-reattach sweep fires and surfaces it.
+        assert_eq!(summary.reattached, 1);
+        assert_eq!(summary.reattached_runs[0].0, run);
+        let events = sink.drain();
+        assert_eq!(
+            events.len(),
+            1,
+            "expected exactly one SandboxReattached event"
+        );
+        assert!(matches!(&events[0], SandboxEvent::SandboxReattached { .. }));
     }
 
     #[tokio::test]
@@ -2206,7 +2270,12 @@ mod tests {
         let summary = service.recover_all().await.unwrap();
         assert_eq!(summary.preserved_allowlist_revoked, 0);
         assert!(summary.allowlist_revoked_runs.is_empty());
-        assert!(sink.drain().is_empty());
+        // Repo still allowlisted + path present → healthy reattach.
+        assert_eq!(summary.reattached, 1);
+        assert_eq!(summary.reattached_runs[0].0, run);
+        let events = sink.drain();
+        assert_eq!(events.len(), 1);
+        assert!(matches!(&events[0], SandboxEvent::SandboxReattached { .. }));
     }
 
     #[tokio::test]
@@ -2252,5 +2321,59 @@ mod tests {
                 ..
             } if expected == "abc123" && actual == "def456"
         ));
+    }
+
+    #[tokio::test]
+    async fn recover_all_emits_sandbox_reattached_for_healthy_entry() {
+        // RFC 020 §"Run recovery matrix" — healthy-reattach row. A
+        // registry entry whose on-disk root exists and whose repo
+        // binding (if any) is still allowlisted — or which carries no
+        // repo binding at all — must surface as `SandboxReattached`
+        // with the `(run, project)` pair on
+        // `summary.reattached_runs` so the run-level recovery service
+        // can emit the audit-trail triple.
+        let run = RunId::new("run-reattach-healthy");
+        let provider = RecoveryProvider::new(SandboxStrategy::Overlay, Vec::new(), HashMap::new());
+        let (service, sink) =
+            service_with_providers(vec![(SandboxStrategy::Overlay, Box::new(provider))]);
+
+        let sandbox_path = service.base_dir().join("sbx-run-reattach-healthy");
+        fs::create_dir_all(&sandbox_path).expect("create stub sandbox dir");
+        service
+            .seed_registry_entry_for_test(
+                crate::sandbox::SandboxId::new("sbx-run-reattach-healthy"),
+                run.clone(),
+                project(),
+                SandboxStrategy::Overlay,
+                sandbox_path,
+            )
+            .expect("seed registry entry");
+
+        let summary = service.recover_all().await.unwrap();
+        assert_eq!(summary.reattached, 1);
+        assert_eq!(summary.reattached_runs.len(), 1);
+        assert_eq!(summary.reattached_runs[0].0, run);
+        assert_eq!(summary.reattached_runs[0].1, project());
+        assert_eq!(summary.lost, 0);
+        assert_eq!(summary.preserved_allowlist_revoked, 0);
+
+        let events = sink.drain();
+        assert_eq!(events.len(), 1);
+        match &events[0] {
+            SandboxEvent::SandboxReattached {
+                run_id, project: p, ..
+            } => {
+                assert_eq!(run_id, &run);
+                assert_eq!(p, &project());
+            }
+            other => panic!("expected SandboxReattached, got {other:?}"),
+        }
+
+        // Idempotency: the second sweep re-emits because the registry
+        // entry is stable across boots — recovery is advisory only.
+        // The run-level service de-duplicates on the consuming side
+        // via `RecoveryAttempted/Completed` events keyed by boot_id.
+        let second = service.recover_all().await.unwrap();
+        assert_eq!(second.reattached, 1);
     }
 }

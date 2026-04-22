@@ -182,72 +182,121 @@ async fn sandbox_recovery_branch_completes_on_clean_boot() {
 ///
 /// The exact contract: create a run with an overlay sandbox (Linux) or
 /// reflink sandbox (macOS), SIGKILL cairn-app, restart; confirm
-/// `SandboxService::recover_all()` finds the sandbox, the run resumes.
+/// `SandboxService::recover_all()` finds the sandbox, `RecoveryService`
+/// reattaches it, the run resumes.
 ///
-/// `#[ignore]`d as of this commit because cairn-app has no lightweight
-/// HTTP path to provision a real sandbox: `working_dir_for_run`
-/// (`helpers.rs:91`) is the only sandbox-provisioning entry point
-/// reachable from HTTP, and it is called only from
-/// `POST /v1/runs/:id/orchestrate`, which also performs full LLM-driven
-/// model generation. CI cannot run an LLM turn.
+/// Seeded via `CAIRN_TEST_SEED_SANDBOX` — the same env-hook pattern as
+/// `CAIRN_TEST_SEED_LOST_SANDBOX` / `CAIRN_TEST_SEED_ALLOWLIST_REVOKED`
+/// (PR #83 / PR #86). Production HTTP sandbox provisioning is out of
+/// scope for RFC 020 compliance — LLM-driven orchestrate is the
+/// production provisioning path, and a parallel debug-only HTTP surface
+/// would be dead code in release builds.
 ///
-/// Un-ignore this test when EITHER of the following lands:
-///
-///   (a) A dedicated HTTP surface for "provision a sandbox for run X
-///       against repo Y" without requiring orchestrate (e.g.
-///       `POST /v1/runs/:id/sandbox` wiring to
-///       `SandboxService::provision_or_reconnect`). At that point the
-///       test body below switches the `probe` call from asserting 404
-///       to seeding the sandbox, SIGKILLing, and reading back
-///       `/health/ready` showing `4a.sandboxes.count >= 1` after
-///       recovery.
-///   (b) A test-only subprocess feature flag that drives the internal
-///       `SandboxService` surface directly (e.g. `CAIRN_TEST_SEED_SANDBOX`
-///       env var read at boot). Reference: the readiness test's
-///       `CAIRN_TEST_STARTUP_DELAY_MS` precedent.
-///
-/// The assertion below asserts the endpoint is NOT present so that the
-/// moment (a) lands, this test starts failing here and forces un-ignore.
+/// Platform note: exercises the overlay code path (Linux CI). Reflink
+/// sandbox reattach goes through the same `SandboxService::recover_all`
+/// → `RecoveryService::recover_all` pipeline and is covered by the same
+/// assertions; the reflink-specific filesystem semantics (macOS
+/// clonefile) are not exercised here because the CI image is Linux.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "no HTTP path to provision a sandbox without a full LLM \
-            orchestrate cycle; see tripwire in doc-comment. As-of \
-            commit 6d2fb44 sandbox provisioning only happens via \
-            POST /v1/runs/:id/orchestrate (LLM-driven)."]
+#[allow(clippy::await_holding_lock)] // See `ENV_SEED_GUARD` doc-comment.
 async fn sandbox_reattach_overlay_or_reflink() {
+    // Seed a healthy sandbox before the subprocess spawns so boot 1
+    // sees the registry entry during recovery. The `tenant/workspace/
+    // project` segments match the harness defaults so the run is
+    // observable via `GET /v1/runs/:id` without cross-tenant plumbing.
+    let run_id = format!("run-sbx-reattach-{}", uuid::Uuid::new_v4().simple());
+    let project_id = format!("p_sbxreattach_{}", uuid::Uuid::new_v4().simple());
+    let tenant_id = "t_sbxreattach";
+    let workspace_id = "w_sbxreattach";
+    let spec = format!("{run_id}:{tenant_id}:{workspace_id}:{project_id}");
+    let _env_guard = ENV_SEED_GUARD.lock().expect("env seed guard poisoned");
+    std::env::set_var("CAIRN_TEST_SEED_SANDBOX", &spec);
+
     let mut h = LiveHarness::setup_with_sqlite().await;
+    std::env::remove_var("CAIRN_TEST_SEED_SANDBOX");
+    drop(_env_guard);
 
-    // When the lightweight sandbox-provision endpoint lands, replace this
-    // probe with the actual sandbox-seeding call, then the block below
-    // becomes the real assertion.
-    let probe = h
-        .client()
-        .post(format!("{}/v1/runs/placeholder-run/sandbox", h.base_url))
-        .bearer_auth(&h.admin_token)
-        .json(&serde_json::json!({
-            "project": { "tenant": h.tenant, "workspace": h.workspace, "project": h.project },
-            "strategy": "overlay",
-        }))
-        .send()
-        .await
-        .expect("probe reaches server");
-    let status = probe.status().as_u16();
-    assert!(
-        matches!(status, 404 | 405),
-        "POST /v1/runs/:id/sandbox unexpectedly returned {status} — the \
-         endpoint appears to exist. Un-ignore this test and finish \
-         wiring sandbox seeding + post-restart reattach assertion."
-    );
-
-    // ── Restart ─────────────────────────────────────────────────────────
+    // SIGKILL + restart exercises the "SIGKILL, restart, confirm"
+    // phrasing in RFC 020 §"Run recovery matrix". Boot 2 re-runs
+    // recovery: the registry sidecar survives, the sandbox dir
+    // survives, so `recover_all` surfaces the entry on
+    // `reattached_runs` again. The run stays `Running` across both
+    // boots — no `WaitingApproval`, no `Failed` transition.
     h.sigkill_and_restart().await.expect("sigkill + restart");
 
-    // ── Post-restart: sandbox branch reports reconnection ───────────────
-    // Once the above probe actually seeds a sandbox, this must assert
-    // `readiness.branches.sandboxes.count >= 1` and, ideally, that the
-    // events log contains a `SandboxProvisioned` event from boot 1 and a
-    // no-new-provisioning / SandboxActivated-via-reconnect from boot 2.
+    // Assert the sandboxes readiness branch reaches `complete` with a
+    // non-zero count reflecting the reattach.
     let readiness = fetch_readiness(&h).await;
-    let _ = sandboxes_branch(&readiness); // shape-only probe until un-ignore
+    let branch = sandboxes_branch(&readiness);
+    let state = branch
+        .get("state")
+        .and_then(Value::as_str)
+        .unwrap_or_else(|| panic!("sandboxes branch missing state: {branch:#?}"));
+    assert_eq!(
+        state, "complete",
+        "sandbox recovery must complete for the reattach run; branch={branch:#?}",
+    );
+    let count = branch
+        .get("count")
+        .and_then(Value::as_u64)
+        .unwrap_or_else(|| panic!("sandboxes branch missing count: {branch:#?}"));
+    assert!(
+        count >= 1,
+        "expected at least one sandbox counted on reattach; got count={count}, branch={branch:#?}",
+    );
+
+    // Poll `GET /v1/runs/:id` and assert the run stays `running`.
+    // Unlike sandbox_lost (→ failed) or allowlist_revoked
+    // (→ waiting_approval), reattach is a pure no-op on the run's
+    // state — recovery only records an audit-trail triple.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    let mut last_state: Option<String> = None;
+    let mut last_body: Option<Value> = None;
+    while std::time::Instant::now() < deadline {
+        let res = h
+            .client()
+            .get(format!("{}/v1/runs/{}", h.base_url, run_id))
+            .bearer_auth(&h.admin_token)
+            .header("X-Cairn-Tenant", tenant_id)
+            .header("X-Cairn-Workspace", workspace_id)
+            .send()
+            .await
+            .expect("GET /v1/runs/:id reaches server");
+        if res.status().as_u16() == 200 {
+            let body: Value = res.json().await.expect("run body parses as JSON");
+            let state = body
+                .get("run")
+                .and_then(|r| r.get("state"))
+                .and_then(Value::as_str)
+                .map(str::to_owned);
+            if state.as_deref() == Some("running") {
+                // Assert the run did NOT transition to WaitingApproval
+                // or Failed during recovery — the reattach path is
+                // audit-only.
+                return;
+            }
+            // Any *terminal* or WaitingApproval state means recovery
+            // incorrectly transitioned the run. Fail fast with the
+            // observed state so the regression surfaces immediately
+            // rather than waiting for the full 5-second poll.
+            if matches!(
+                state.as_deref(),
+                Some("failed") | Some("waiting_approval") | Some("cancelled") | Some("succeeded")
+            ) {
+                panic!(
+                    "reattach run {run_id} unexpectedly transitioned to {state:?}; \
+                     recovery must leave healthy sandboxes untouched. body={body:?}",
+                );
+            }
+            last_state = state;
+            last_body = Some(body);
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+    panic!(
+        "run {run_id} did not read as `running` within 5s after reattach recovery. \
+         last_state={last_state:?}, body={last_body:?}",
+    );
 }
 
 // ── Test #3a: sandbox preserved: allowlist revoked ──────────────────────────

@@ -87,7 +87,7 @@ pub use provider_model_impl::ProviderModelServiceImpl;
 pub use provider_pool_impl::ProviderConnectionPoolServiceImpl;
 pub use quota_impl::QuotaServiceImpl;
 pub use recovery_impl::{
-    AllowlistRevokedRun, RecoveryService, RecoveryServiceImpl, SandboxLostRun,
+    AllowlistRevokedRun, RecoveryService, RecoveryServiceImpl, SandboxLostRun, SandboxReattachedRun,
 };
 pub use research_impl::{InMemoryDigestService, InMemoryResearchService};
 pub use retention_impl::RetentionServiceImpl;
