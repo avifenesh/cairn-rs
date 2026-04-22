@@ -674,7 +674,34 @@ impl SqliteSyncProjection {
             RuntimeEvent::RecoveryEscalated(_) => log_stub("RecoveryEscalated"),
             RuntimeEvent::ResourceShareRevoked(_) => log_stub("ResourceShareRevoked"),
             RuntimeEvent::ResourceShared(_) => log_stub("ResourceShared"),
-            RuntimeEvent::RoutePolicyCreated(_) => log_stub("RoutePolicyCreated"),
+            RuntimeEvent::RoutePolicyCreated(e) => {
+                // `rules` is a JSON string (SQLite has no JSONB); serialised
+                // on write and parsed wholesale on read by the service layer.
+                // `enabled` mirrors PG by hardcoding TRUE — the event carries
+                // an `enabled` field but the PG projection ignores it, and
+                // this backend must project identically. Fixing the field
+                // plumbing is tracked for a symmetric PG+SQLite follow-up.
+                let rules = serde_json::to_string(&e.rules)
+                    .map_err(|err| StoreError::Serialization(err.to_string()))?;
+                sqlx::query(
+                    "INSERT INTO route_policies (policy_id, tenant_id, name, rules, enabled, created_at, updated_at)
+                     VALUES (?, ?, ?, ?, 1, ?, ?)
+                     ON CONFLICT(policy_id) DO UPDATE
+                     SET name = excluded.name, rules = excluded.rules, updated_at = excluded.updated_at",
+                )
+                .bind(&e.policy_id)
+                .bind(e.tenant_id.as_str())
+                .bind(&e.name)
+                .bind(rules)
+                .bind(now)
+                .bind(now)
+                .execute(&mut **tx)
+                .await
+                .map_err(|err| StoreError::Internal(err.to_string()))?;
+            }
+            // PG's projection does not consume RoutePolicyUpdated — the event
+            // is kept for audit, and the rules set is advanced by the next
+            // RoutePolicyCreated upsert. SQLite mirrors that shape.
             RuntimeEvent::RoutePolicyUpdated(_) => log_stub("RoutePolicyUpdated"),
             RuntimeEvent::RunSlaBreached(_) => log_stub("RunSlaBreached"),
             RuntimeEvent::RunSlaSet(_) => log_stub("RunSlaSet"),

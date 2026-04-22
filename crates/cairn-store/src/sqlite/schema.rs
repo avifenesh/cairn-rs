@@ -352,4 +352,25 @@ CREATE TABLE IF NOT EXISTS provider_calls (
 );
 CREATE INDEX IF NOT EXISTS idx_provider_calls_decision
     ON provider_calls (route_decision_id, created_at, provider_call_id);
+
+-- ── Route policies (mirrors V018 Postgres migration) ────────────────────
+-- RFC 007 provider routing. `rules` is a serialised JSON array of
+-- RoutePolicyRule; the column is written and read wholesale (no JSONB
+-- operators server-side), so TEXT is a portable substitution for Postgres
+-- JSONB. See `project_sqlite_parity_route_policies_pending.md` for the
+-- design call (Path 1 — app-side JSON).
+
+CREATE TABLE IF NOT EXISTS route_policies (
+    policy_id   TEXT PRIMARY KEY,
+    tenant_id   TEXT NOT NULL,
+    name        TEXT NOT NULL,
+    rules       TEXT NOT NULL DEFAULT '[]',
+    enabled     INTEGER NOT NULL DEFAULT 1,
+    created_at  INTEGER NOT NULL,
+    updated_at  INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_route_policies_tenant
+    ON route_policies (tenant_id, created_at, policy_id);
+CREATE INDEX IF NOT EXISTS idx_route_policies_tenant_enabled
+    ON route_policies (tenant_id, enabled, created_at);
 "#;
