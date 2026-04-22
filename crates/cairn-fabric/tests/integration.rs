@@ -29,6 +29,7 @@
 mod integration {
     pub mod test_budget;
     pub mod test_checkpoint;
+    pub mod test_control_plane;
     pub mod test_engine;
     pub mod test_event_emission;
     pub mod test_instance_tag_filter;

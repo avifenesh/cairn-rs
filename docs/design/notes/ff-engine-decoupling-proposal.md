@@ -67,12 +67,65 @@ escape hatches, neither of which is a win. The module-docs in
 lint is tracked as a follow-up in
 `~/.claude/projects/-home-ubuntu/memory/project_ff_decoupling_followups.md`.
 
-## Phase D — FCALL ARGV pre-reads (not started)
+## Phase D — control-plane FCALLs + FCALL ARGV pre-reads (split)
 
-~12 `hget ctx.core(), "current_attempt_id"` sites in cairn's FCALL
-build paths. Moves to `engine.read_current_attempt(&ExecutionId)` so
-the Valkey layout isn't leaked into FCALL arg construction. Blocked
-on nothing; ship when the Phase C dust settles.
+The dispatch grew once Phase C shipped: control-plane FCALLs (budget,
+quota, rotation, worker) plus run/task/session lifecycle FCALLs plus
+the ~12 `hget ctx.core()` ARGV pre-reads combined to ~5-8k LOC in a
+single PR — unreviewable, and at odds with cairn's "merge before next
+PR" rule. Split along the natural fault line:
+
+### Phase D PR 1 — FCALL control plane + worker registry (shipped, this PR)
+
+A new `ControlPlaneBackend` trait absorbs the FCALL-shaped,
+self-contained ops: budget create / spend / release / status, quota
+create / admission check, waitpoint HMAC rotation. One
+`Arc<ValkeyEngine>` implements both `Engine` and
+`ControlPlaneBackend`, with the control-plane impl living in
+`engine/valkey_control_plane_impl.rs`. Worker registry (register /
+heartbeat / mark-dead) folds into the existing `Engine` trait instead
+of `ControlPlaneBackend` — the ops are HSET / SADD / PEXPIRE-shaped,
+same flavour as Phase C's tag writes, and the fold avoids a spurious
+third trait.
+
+Cairn-native mirror types on the trait boundary
+(`BudgetSpendOutcome`, `QuotaAdmission`, `BudgetStatusSnapshot`,
+`RotationOutcome`, `RotationFailure`, `WorkerRegistration`) replace
+the FF wire enums (`ff_core::contracts::ReportUsageResult`, etc.) in
+service signatures. Service-level type aliases preserved so
+downstream imports keep working.
+
+Scheduler deferred: `ff_core::contracts::ClaimGrant` is a wire type
+that flows cairn → `ff-sdk::FlowFabricWorker::claim_from_grant`;
+mirroring it cairn-side adds a conversion hop without actually
+decoupling anything. Worker-SDK adjacency also places it with the
+lifecycle-tangled PR 2 group.
+
+Closes 12 `ff_core::{keys,partition,contracts}` + `ff_sdk::task`
+leak lines in:
+  - `services/budget_service.rs`
+  - `services/quota_service.rs`
+  - `services/rotation_service.rs`
+  - `services/worker_service.rs`
+
+### Phase D PR 2 — run/task/session lifecycle + FCALL ARGV pre-reads (not started)
+
+Run, task, and session services share a pool of FCALL helpers in
+`services/claim_common.rs` that the PR 1 split can't fold cleanly.
+PR 2 extends `ControlPlaneBackend` (or introduces a sibling
+`ExecutionLifecycleBackend` — judgment call at implementation time)
+with the lifecycle FCALLs, migrates the services, and absorbs the
+remaining ~12 `hget ctx.core(), "current_attempt_id"`-style ARGV
+pre-reads into a read-side trait method
+(`engine.read_current_attempt(&ExecutionId)` or similar). Scheduler
+`claim_for_worker` + `ClaimGrant` plumbing lands here too.
+
+Services deferred to PR 2:
+  - `services/run_service.rs`
+  - `services/task_service.rs`
+  - `services/session_service.rs`
+  - `services/claim_common.rs` (shared helpers)
+  - `services/scheduler_service.rs` (`ClaimGrant` plumbing)
 
 ## Phase E — typed error model (not started)
 

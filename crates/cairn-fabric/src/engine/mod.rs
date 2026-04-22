@@ -50,16 +50,24 @@
 //! `clippy.toml` disallowed-methods lint on `ferriskey::Client::hset`
 //! outside `engine/valkey_impl.rs`.
 
+pub mod control_plane;
+pub mod control_plane_types;
 pub mod snapshots;
+pub mod valkey_control_plane_impl;
 pub mod valkey_impl;
 
 use std::collections::BTreeMap;
 
 use async_trait::async_trait;
-use ff_core::types::{EdgeId, ExecutionId, FlowId};
+use ff_core::types::{EdgeId, ExecutionId, FlowId, WorkerId, WorkerInstanceId};
 
 use crate::error::FabricError;
 
+pub use control_plane::ControlPlaneBackend;
+pub use control_plane_types::{
+    BudgetSpendOutcome, BudgetStatusSnapshot, QuotaAdmission, RotationFailure, RotationOutcome,
+    WorkerRegistration,
+};
 pub use snapshots::{
     AttemptSummary, EdgeSnapshot, EdgeState, ExecutionSnapshot, FlowSnapshot, LeaseSummary,
 };
@@ -176,4 +184,27 @@ pub trait Engine: Send + Sync {
         id: &FlowId,
         tags: &BTreeMap<String, String>,
     ) -> Result<(), FabricError>;
+
+    // ── Worker registry (Phase D PR 1) ──────────────────────────────────
+
+    /// Register a worker instance. Writes the worker hash, stamps the
+    /// initial heartbeat timestamp, adds the instance to the global
+    /// workers index, and registers each `key=value` capability on
+    /// the capability index. TTL = `3 × lease_ttl_ms` — dead workers
+    /// auto-expire if heartbeats stop.
+    async fn register_worker(
+        &self,
+        worker_id: &WorkerId,
+        instance_id: &WorkerInstanceId,
+        capabilities: &[String],
+    ) -> Result<WorkerRegistration, FabricError>;
+
+    /// Update the worker's `last_heartbeat_ms` field and extend its
+    /// TTL. Called on every worker tick.
+    async fn heartbeat_worker(&self, instance_id: &WorkerInstanceId) -> Result<(), FabricError>;
+
+    /// Explicitly mark a worker dead (`is_alive = false`). The TTL
+    /// path covers the implicit case; this is the opt-out for graceful
+    /// shutdown.
+    async fn mark_worker_dead(&self, instance_id: &WorkerInstanceId) -> Result<(), FabricError>;
 }

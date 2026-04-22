@@ -1,16 +1,37 @@
-use std::collections::HashMap;
+//! Budget service — thin shim over [`ControlPlaneBackend`].
+//!
+//! As of Phase D PR 1, all FF-shaped logic (key builders, FCALL
+//! dispatch, envelope parsing) lives in the backend impl (see
+//! `engine/valkey_control_plane_impl.rs`). This service keeps only:
+//!
+//!   * SEC-008 scope-field validation (control-char + length guard)
+//!     that runs BEFORE the backend call — the backend's FCALL never
+//!     sees a hostile `scope_type` / `scope_id`.
+//!   * Idempotency-key derivation (`compute_spend_idempotency_key`) —
+//!     pure, deterministic, lives caller-side so test + production
+//!     paths share exactly one implementation.
+//!   * Convenience constructors (`create_run_budget`, …) that pin the
+//!     standard `(tokens, cost_microdollars, api_calls)` dimensions.
+//!
+//! **Lean-bridge silence (intentional).** None of this service's
+//! methods emit `BridgeEvent`s — budget state is FF-owned operational
+//! state with no `BudgetReadModel` projection on the cairn-store side.
+//! `record_spend` is additionally volume-sensitive — it fires on every
+//! tool call / LLM token charge. See `docs/design/bridge-event-audit.md`
+//! §2.6 for the full rationale.
 use std::sync::Arc;
 
-use crate::error::FabricError;
-use crate::helpers::check_fcall_success;
-use ff_core::contracts::ReportUsageResult;
-use ff_core::keys::{budget_policies_index, budget_resets_key, usage_dedup_key, BudgetKeyContext};
-use ff_core::partition::budget_partition;
-use ff_core::types::{BudgetId, ExecutionId, TimestampMs};
-use ff_sdk::task::parse_report_usage_result;
+use ff_core::types::{BudgetId, ExecutionId};
 use uuid::Uuid;
 
-use crate::boot::FabricRuntime;
+use crate::engine::control_plane::ControlPlaneBackend;
+use crate::engine::control_plane_types::{BudgetSpendOutcome, BudgetStatusSnapshot};
+use crate::error::FabricError;
+
+/// Re-export of the snapshot type as the historical service-level
+/// name. Keeps downstream code that imported
+/// `crate::services::budget_service::BudgetStatus` working.
+pub type BudgetStatus = BudgetStatusSnapshot;
 
 // Stable namespace UUID for spend-dedup keys. Mirrors the UUID v5 +
 // null-byte-delimited scheme from id_map.rs. Changing these bytes orphans any
@@ -81,45 +102,14 @@ pub(crate) fn compute_spend_idempotency_key(
     Uuid::new_v5(&SPEND_NAMESPACE, input.as_bytes()).to_string()
 }
 
-#[derive(Clone, Debug)]
-pub struct BudgetStatus {
-    pub budget_id: String,
-    pub scope_type: String,
-    pub scope_id: String,
-    pub enforcement_mode: String,
-    pub usage: HashMap<String, u64>,
-    pub hard_limits: HashMap<String, u64>,
-    pub soft_limits: HashMap<String, u64>,
-    pub breach_count: u64,
-    pub soft_breach_count: u64,
-}
-
-/// Budget service.
-///
-/// **Lean-bridge silence (intentional).** None of this service's methods emit
-/// `BridgeEvent`s — budget state is FF-owned operational state with no
-/// `BudgetReadModel` projection on the cairn-store side. `create_budget`,
-/// `release_budget`, `record_spend`, and `get_budget_status` all route
-/// through FF directly; admin reads go via `get_budget_status` (HGETALL on
-/// FF's definition + usage hashes), not via a cairn projection.
-///
-/// `record_spend` is additionally volume-sensitive — it fires on every tool
-/// call / LLM token charge. Even if a `BudgetSpendRecorded` projection
-/// existed, the bridge-event channel would saturate first. Spend outcomes
-/// are returned inline in `ReportUsageResult` for the caller.
-///
-/// If a future cairn surface projects budgets (e.g. history timeline, breach
-/// replay), introduce BridgeEvent variants and revisit. Until then:
-/// additions here must not emit.
-///
-/// See `docs/design/bridge-event-audit.md` §2.6 for the full rationale.
+/// Budget service — public surface for cairn-app / cairn-runtime.
 pub struct FabricBudgetService {
-    runtime: Arc<FabricRuntime>,
+    backend: Arc<dyn ControlPlaneBackend>,
 }
 
 impl FabricBudgetService {
-    pub fn new(runtime: Arc<FabricRuntime>) -> Self {
-        Self { runtime }
+    pub fn new(backend: Arc<dyn ControlPlaneBackend>) -> Self {
+        Self { backend }
     }
 
     pub async fn create_budget(
@@ -132,49 +122,22 @@ impl FabricBudgetService {
         reset_interval_ms: u64,
         enforcement_mode: &str,
     ) -> Result<BudgetId, FabricError> {
-        if dimensions.len() != hard_limits.len() || dimensions.len() != soft_limits.len() {
-            return Err(FabricError::Validation {
-                reason: "dimensions, hard_limits, soft_limits must have equal length".to_owned(),
-            });
-        }
         // SEC-008: reject control characters / empty / oversized scope
         // inputs before they flow into FF key builders.
         validate_scope_field(scope_type, "scope_type")?;
         validate_scope_field(scope_id, "scope_id")?;
 
-        let budget_id = BudgetId::new();
-        let partition = budget_partition(&budget_id, &self.runtime.partition_config);
-        let ctx = BudgetKeyContext::new(&partition, &budget_id);
-        let resets_zset = budget_resets_key(&partition.hash_tag());
-        let policies_index = budget_policies_index(&partition.hash_tag());
-        let now = TimestampMs::now();
-
-        let (keys, argv) = crate::fcall::budget::build_create_budget(
-            &ctx,
-            &resets_zset,
-            &policies_index,
-            &budget_id,
-            scope_type,
-            scope_id,
-            enforcement_mode,
-            "block",
-            "log",
-            reset_interval_ms,
-            now,
-            dimensions,
-            hard_limits,
-            soft_limits,
-        );
-        let key_refs: Vec<&str> = keys.iter().map(|s| s.as_str()).collect();
-        let argv_refs: Vec<&str> = argv.iter().map(|s| s.as_str()).collect();
-
-        let raw: ferriskey::Value = self
-            .runtime
-            .fcall(crate::fcall::names::FF_CREATE_BUDGET, &key_refs, &argv_refs)
-            .await?;
-        check_fcall_success(&raw, crate::fcall::names::FF_CREATE_BUDGET)?;
-
-        Ok(budget_id)
+        self.backend
+            .create_budget(
+                scope_type,
+                scope_id,
+                dimensions,
+                hard_limits,
+                soft_limits,
+                reset_interval_ms,
+                enforcement_mode,
+            )
+            .await
     }
 
     pub async fn create_run_budget(
@@ -225,173 +188,42 @@ impl FabricBudgetService {
     }
 
     pub async fn release_budget(&self, budget_id: &BudgetId) -> Result<(), FabricError> {
-        let partition = budget_partition(budget_id, &self.runtime.partition_config);
-        let ctx = BudgetKeyContext::new(&partition, budget_id);
-        let resets_zset = budget_resets_key(&partition.hash_tag());
-        let now = TimestampMs::now();
-
-        let keys: Vec<String> = vec![ctx.definition(), ctx.usage(), resets_zset];
-        let argv: Vec<String> = vec![budget_id.to_string(), now.to_string()];
-
-        let key_refs: Vec<&str> = keys.iter().map(|s| s.as_str()).collect();
-        let argv_refs: Vec<&str> = argv.iter().map(|s| s.as_str()).collect();
-
-        let raw: ferriskey::Value = self
-            .runtime
-            .fcall(crate::fcall::names::FF_RESET_BUDGET, &key_refs, &argv_refs)
-            .await?;
-        check_fcall_success(&raw, crate::fcall::names::FF_RESET_BUDGET)?;
-
-        Ok(())
+        self.backend.release_budget(budget_id).await
     }
 
-    /// Record spend against a budget.
+    /// Record spend against a budget. Returns the cairn-native
+    /// [`BudgetSpendOutcome`] — callers match on the variants directly.
     ///
-    /// Pass-through to `ff_report_usage_and_check`. The result is FF's
-    /// [`ReportUsageResult`] — callers match on the variants directly; cairn
-    /// does not re-derive or unify the wire shape.
-    ///
-    /// `execution_id` is REQUIRED. Two calls that share an idempotency key
-    /// are treated by FF as the same spend (the second returns
-    /// [`ReportUsageResult::AlreadyApplied`] and the budget is not
-    /// double-decremented). The key's caller-identity component comes from
-    /// the ExecutionId, so every distinct logical spend MUST present a
-    /// distinct ExecutionId. Tests without a real execution must mint a
-    /// throwaway via [`ExecutionId::deterministic_solo`] with a fresh
-    /// UUID; silently falling back to a
-    /// sentinel (`Uuid::nil`) would make two unrelated process-level
-    /// retries collide into a single FF dedup slot and suppress a
-    /// legitimate spend.
+    /// `execution_id` is REQUIRED. Two calls that share an idempotency
+    /// key are treated by FF as the same spend (the second returns
+    /// [`BudgetSpendOutcome::AlreadyApplied`] and the budget is not
+    /// double-decremented). The key's caller-identity component comes
+    /// from the ExecutionId, so every distinct logical spend MUST
+    /// present a distinct ExecutionId.
     pub async fn record_spend(
         &self,
         budget_id: &BudgetId,
         execution_id: &ExecutionId,
         dimension_deltas: &[(&str, u64)],
-    ) -> Result<ReportUsageResult, FabricError> {
-        if dimension_deltas.is_empty() {
-            return Err(FabricError::Validation {
-                reason: "record_spend: at least one dimension_delta is required".to_owned(),
-            });
-        }
-
-        let partition = budget_partition(budget_id, &self.runtime.partition_config);
-        let ctx = BudgetKeyContext::new(&partition, budget_id);
-        let now = TimestampMs::now();
-
+    ) -> Result<BudgetSpendOutcome, FabricError> {
         let idempotency_key =
             compute_spend_idempotency_key(budget_id, execution_id, dimension_deltas);
-
-        // Prefix with the budget's `{b:M}` hash tag so FF's SET lands on the
-        // same slot as the budget itself — matches ff-sdk task.rs:699-702.
-        let dedup_key = usage_dedup_key(ctx.hash_tag(), &idempotency_key);
-
-        let (keys, argv) =
-            crate::fcall::budget::build_report_usage(&ctx, dimension_deltas, now, &dedup_key);
-
-        let key_refs: Vec<&str> = keys.iter().map(|s| s.as_str()).collect();
-        let argv_refs: Vec<&str> = argv.iter().map(|s| s.as_str()).collect();
-
-        let raw: ferriskey::Value = self
-            .runtime
-            .fcall(
-                crate::fcall::names::FF_REPORT_USAGE_AND_CHECK,
-                &key_refs,
-                &argv_refs,
-            )
-            .await?;
-
-        // FF owns the wire format for ff_report_usage_and_check; cairn just
-        // surfaces the result. `parse_report_usage_result` is strict —
-        // malformed u64 fields fail loudly instead of silently coercing to 0,
-        // which matches the semantics we want (drift = error, not fake
-        // zero-usage breach).
-        parse_report_usage_result(&raw).map_err(|e| FabricError::Internal(e.to_string()))
+        self.backend
+            .record_spend(budget_id, execution_id, dimension_deltas, &idempotency_key)
+            .await
     }
 
     pub async fn get_budget_status(
         &self,
         budget_id: &BudgetId,
     ) -> Result<BudgetStatus, FabricError> {
-        let partition = budget_partition(budget_id, &self.runtime.partition_config);
-        let ctx = BudgetKeyContext::new(&partition, budget_id);
-
-        let def_fields: HashMap<String, String> = self
-            .runtime
-            .client
-            .hgetall(&ctx.definition())
-            .await
-            .map_err(|e| FabricError::Internal(format!("HGETALL budget def: {e}")))?;
-
-        if def_fields.is_empty() {
-            return Err(FabricError::NotFound {
+        match self.backend.get_budget_status(budget_id).await? {
+            Some(status) => Ok(status),
+            None => Err(FabricError::NotFound {
                 entity: "budget",
                 id: budget_id.to_string(),
-            });
+            }),
         }
-
-        let usage_fields: HashMap<String, String> = self
-            .runtime
-            .client
-            .hgetall(&ctx.usage())
-            .await
-            .unwrap_or_default();
-
-        let limits_fields: HashMap<String, String> = self
-            .runtime
-            .client
-            .hgetall(&ctx.limits())
-            .await
-            .unwrap_or_default();
-
-        let mut usage = HashMap::new();
-        let mut hard_limits = HashMap::new();
-        let mut soft_limits = HashMap::new();
-
-        for (k, v) in &usage_fields {
-            if let Ok(val) = v.parse::<u64>() {
-                usage.insert(k.clone(), val);
-            }
-        }
-
-        // FF writes budget_limits fields as "hard:<dim>" / "soft:<dim>"
-        // (prefix), see FlowFabric lua/budget.lua:61. Earlier versions of
-        // this code used "<dim>:hard" (suffix) and silently returned empty
-        // limits — caught by test_budget_status_reflects_spend.
-        for (k, v) in &limits_fields {
-            if let Some(dim) = k.strip_prefix("hard:") {
-                if let Ok(val) = v.parse::<u64>() {
-                    hard_limits.insert(dim.to_owned(), val);
-                }
-            } else if let Some(dim) = k.strip_prefix("soft:") {
-                if let Ok(val) = v.parse::<u64>() {
-                    soft_limits.insert(dim.to_owned(), val);
-                }
-            }
-        }
-
-        let breach_count = def_fields
-            .get("breach_count")
-            .and_then(|v| v.parse().ok())
-            .unwrap_or(0);
-        let soft_breach_count = def_fields
-            .get("soft_breach_count")
-            .and_then(|v| v.parse().ok())
-            .unwrap_or(0);
-
-        Ok(BudgetStatus {
-            budget_id: budget_id.to_string(),
-            scope_type: def_fields.get("scope_type").cloned().unwrap_or_default(),
-            scope_id: def_fields.get("scope_id").cloned().unwrap_or_default(),
-            enforcement_mode: def_fields
-                .get("enforcement_mode")
-                .cloned()
-                .unwrap_or_default(),
-            usage,
-            hard_limits,
-            soft_limits,
-            breach_count,
-            soft_breach_count,
-        })
     }
 }
 
@@ -407,7 +239,6 @@ mod tests {
         let k1 = compute_spend_idempotency_key(&bid, &eid, &[("tokens", 50)]);
         let k2 = compute_spend_idempotency_key(&bid, &eid, &[("tokens", 50)]);
         assert_eq!(k1, k2);
-        // UUID v5 is 36 chars with hyphens.
         assert_eq!(k1.len(), 36);
     }
 
@@ -453,30 +284,11 @@ mod tests {
 
     #[test]
     fn idempotency_key_no_delimiter_collision() {
-        // Null-byte delimiters prevent "a:b"+"c" vs "a"+"b:c" style collisions,
-        // same pattern id_map.rs guards against.
         let bid = BudgetId::new();
         let eid = test_eid("delim");
         let k1 = compute_spend_idempotency_key(&bid, &eid, &[("a:b", 1), ("c", 2)]);
         let k2 = compute_spend_idempotency_key(&bid, &eid, &[("a", 1), ("b:c", 2)]);
         assert_ne!(k1, k2);
-    }
-
-    #[test]
-    fn budget_status_default_values() {
-        let status = BudgetStatus {
-            budget_id: "test".to_owned(),
-            scope_type: "run".to_owned(),
-            scope_id: "run_1".to_owned(),
-            enforcement_mode: "enforce".to_owned(),
-            usage: HashMap::new(),
-            hard_limits: HashMap::new(),
-            soft_limits: HashMap::new(),
-            breach_count: 0,
-            soft_breach_count: 0,
-        };
-        assert_eq!(status.scope_type, "run");
-        assert!(status.usage.is_empty());
     }
 
     // ── SEC-008 validate_scope_field ───────────────────────────────────
@@ -497,8 +309,6 @@ mod tests {
             FabricError::Validation { reason } => assert!(reason.contains("control characters")),
             other => panic!("expected Validation, got {other:?}"),
         }
-        // Null byte is the most dangerous control char because FF keys use
-        // it as a delimiter under RFC-011 — must be rejected.
         let err = validate_scope_field("run\x00id", "scope_id").unwrap_err();
         assert!(matches!(err, FabricError::Validation { .. }));
     }
@@ -523,50 +333,7 @@ mod tests {
     fn validate_scope_field_accepts_normal_id() {
         assert!(validate_scope_field("run_abc_123", "scope_id").is_ok());
         assert!(validate_scope_field("run", "scope_type").is_ok());
-        // Embedded colons / slashes are fine — they are not control chars
-        // and cairn callers use them inside scope ids (e.g. "tenant:ws").
         assert!(validate_scope_field("a:b/c", "scope_id").is_ok());
-    }
-
-    // ── TC#5 parse_report_usage_result error propagation ──────────────
-
-    /// Passing a non-`Array` ferriskey Value to
-    /// `ff_sdk::task::parse_report_usage_result` MUST return `Err`, and the
-    /// `record_spend` mapping MUST surface it as `FabricError::Internal`
-    /// (not silently coerce to `ReportUsageResult::Ok`).
-    ///
-    /// We can't unit-test `record_spend` itself without Valkey, but we
-    /// CAN prove the two parts that compose inside it:
-    ///   1. `parse_report_usage_result(malformed)` is Err, and
-    ///   2. `.map_err(|e| FabricError::Internal(e.to_string()))` produces
-    ///      the Internal variant.
-    ///      If FF ever changes the parser to silently accept unexpected shapes,
-    ///      this test fires.
-    #[test]
-    fn parse_report_usage_result_err_maps_to_fabric_internal() {
-        // SimpleString is the shape FF's parser rejects first (it expects
-        // Array). No FF-side Array variant produces Err deterministically
-        // in a test without Valkey, so we target the outer shape guard.
-        let malformed = ferriskey::Value::SimpleString("not_an_array".into());
-
-        let parse_result = parse_report_usage_result(&malformed);
-        assert!(
-            parse_result.is_err(),
-            "parser must reject non-Array values; got {parse_result:?}"
-        );
-
-        let mapped: Result<ReportUsageResult, FabricError> =
-            parse_result.map_err(|e| FabricError::Internal(e.to_string()));
-        let err = mapped.expect_err("mapping err-ok branch flipped");
-        match err {
-            FabricError::Internal(msg) => assert!(
-                !msg.is_empty(),
-                "Internal variant must carry the parser's detail, got empty"
-            ),
-            other => panic!(
-                "parse_report_usage_result Err must map to FabricError::Internal, got {other:?}"
-            ),
-        }
     }
 
     #[test]
