@@ -326,6 +326,27 @@ mod tests {
         assert!(config.valkey_client_builder().build_lazy().is_ok());
     }
 
+    #[test]
+    fn client_builder_build_lazy_rejects_empty_addresses() {
+        // Confirms the synchronous validation path we rely on actually
+        // catches misconfiguration — otherwise the positive tests above
+        // would pass even if `build_lazy()` silently accepted garbage.
+        // `valkey_client_builder()` always pushes a host, so we build a
+        // bare `ClientBuilder` directly to exercise the empty-address
+        // rejection branch (see ferriskey ClientBuilder::build_lazy).
+        // `LazyClient` does not implement `Debug`, so we can't use
+        // `.expect_err(..)`. Match on the result directly.
+        match ferriskey::ClientBuilder::new().build_lazy() {
+            Ok(_) => panic!("empty-address builder must fail"),
+            Err(e) => {
+                assert!(
+                    e.to_string().to_lowercase().contains("address"),
+                    "expected empty-address error, got {e}"
+                );
+            }
+        }
+    }
+
     fn test_config(
         port: u16,
         lease_ttl_ms: u64,
