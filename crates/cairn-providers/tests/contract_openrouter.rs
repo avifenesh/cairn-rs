@@ -55,7 +55,7 @@ use httpmock::prelude::*;
 /// deprecated by OpenRouter, pick another `:free` model from
 /// <https://openrouter.ai/models?q=free> and update this constant plus
 /// the `model` field in the fixture.
-const REFRESH_MODEL: &str = "meta-llama/llama-3.2-3b-instruct:free";
+const REFRESH_MODEL: &str = "minimax/minimax-m2.5:free";
 
 /// Canonical user prompt for refresh requests.  Short to minimize
 /// response size (and cost, though free-tier is $0).
