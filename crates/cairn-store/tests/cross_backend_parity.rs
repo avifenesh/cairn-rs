@@ -1243,7 +1243,11 @@ mod sqlite_parity {
 
         assert_eq!(row.0, "Round-trip Policy");
         assert_eq!(row.1, "tenant_rt");
-        assert_eq!(row.3, 1, "enabled should round-trip as 1");
+        // Mirrors PG: the projection hardcodes enabled = TRUE at insert
+        // regardless of the event's `enabled` field. Asserting against
+        // the backend-observable value rather than the event value keeps
+        // this test faithful to the PG projection shape.
+        assert_eq!(row.3, 1, "enabled is hardcoded to 1 (PG parity)");
 
         let parsed: Vec<RoutePolicyRule> = serde_json::from_str(&row.2).unwrap();
         assert_eq!(parsed, rules, "rules must round-trip verbatim");
