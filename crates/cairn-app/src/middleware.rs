@@ -257,9 +257,22 @@ fn readiness_exempt(path: &str, method: &axum::http::Method) -> bool {
     let normalized = path.to_ascii_lowercase();
     let normalized = normalized.as_str();
 
+    // Mirrors the documentation / infra endpoints in `auth_exempt_path_method`
+    // that don't depend on event-sourced state. These stay reachable during
+    // recovery so operators can inspect the API spec or onboarding template
+    // catalog while waiting for readiness to flip.
     if matches!(
         normalized,
-        "/health" | "/healthz" | "/health/ready" | "/ready" | "/metrics" | "/version"
+        "/health"
+            | "/healthz"
+            | "/health/ready"
+            | "/ready"
+            | "/metrics"
+            | "/version"
+            | "/openapi.json"
+            | "/docs"
+            | "/v1/docs"
+            | "/v1/onboarding/templates"
     ) {
         return true;
     }

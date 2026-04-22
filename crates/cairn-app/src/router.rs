@@ -1667,19 +1667,21 @@ impl AppBootstrap {
         let cors = cors_layer(&state.config);
         router
             .layer(from_fn_with_state(state.clone(), auth_middleware))
+            // RFC 020 readiness gate. Positioned between auth (innermost)
+            // and the CORS / request-id / observability layers so gated
+            // 503 responses still pick up CORS headers (browsers need
+            // them to render the "recovering" status in the SPA), an
+            // `x-request-id` trace header, and Prometheus/log metrics.
+            // On the request path Tower runs layers outside-in, so this
+            // fires BEFORE auth: an unauthenticated probe of a
+            // non-health route gets a 503 during recovery (the
+            // operator-visible state) rather than a 401 (auth boundary).
+            .layer(from_fn_with_state(state.clone(), readiness_middleware))
             .layer(cors)
             .layer(from_fn(request_id_middleware))
             .layer(DefaultBodyLimit::max(10 * 1024 * 1024))
             .layer(from_fn_with_state(state.clone(), rate_limit_middleware))
-            .layer(from_fn_with_state(state.clone(), observability_middleware))
-            // RFC 020 readiness gate. Outermost layer — Tower runs layers
-            // outside-in on the request path, so this fires FIRST on every
-            // request. Non-exempt routes short-circuit with 503 during
-            // recovery before touching auth, rate-limit, or any handler
-            // state that might still be warming. Exempt paths
-            // (`/health`, `/health/ready`, SPA assets) continue through
-            // the stack so operators and probes stay observable.
-            .layer(from_fn_with_state(state, readiness_middleware))
+            .layer(from_fn_with_state(state, observability_middleware))
     }
 
     /// Build the complete router: catalog routes + fallback + state + middleware.
