@@ -1082,27 +1082,59 @@ async fn main() {
         b.event_log = BranchStatus::complete(0);
     });
 
-    // Step 4a: sandbox reconciliation.
-    match lib_state.sandbox_service.recover_all().await {
-        Ok(summary) => {
-            if summary.reconnected > 0 || summary.preserved > 0 || summary.failed > 0 {
-                eprintln!(
-                    "sandbox recovery: reconnected={} preserved={} failed={}",
-                    summary.reconnected, summary.preserved, summary.failed
-                );
-            }
-            let count = (summary.reconnected as u64).saturating_add(summary.preserved as u64);
-            lib_state.readiness.update_branch("4a", |b| {
-                b.sandboxes = BranchStatus::complete(count);
-            });
-        }
-        Err(error) => {
-            eprintln!("sandbox recovery failed: {error}");
-            lib_state.readiness.update_branch("4a", |b| {
-                b.sandboxes = BranchStatus::failed(error.to_string());
-            });
+    // Test-only: seed a lost-sandbox scenario so the RFC 020
+    // `sandbox_lost` integration test can exercise the emission path end
+    // to end without wiring a full sandbox-provision HTTP surface first.
+    //
+    // Format: `CAIRN_TEST_SEED_LOST_SANDBOX=<run_id>:<tenant>:<workspace>:<project>`.
+    // When set, writes a recovery-registry sidecar for a sandbox whose
+    // on-disk root deliberately does not exist AND appends the minimum
+    // store events (`SessionCreated`, `RunCreated`, `RunStateChanged`
+    // → `Running`) so that `RecoveryService::recover_all` sees a
+    // Running run bound to the lost sandbox. Idempotent: a second
+    // invocation with the same run_id is a no-op once the run is
+    // terminal, so sigkill+restart does not double-seed.
+    if let Ok(spec) = std::env::var("CAIRN_TEST_SEED_LOST_SANDBOX") {
+        if let Err(error) =
+            seed_lost_sandbox_for_test(&lib_state, lib_state.sandbox_service.base_dir(), &spec)
+                .await
+        {
+            eprintln!("CAIRN_TEST_SEED_LOST_SANDBOX seed failed: {error}");
         }
     }
+
+    // Step 4a: sandbox reconciliation.
+    //
+    // `lost_runs` is threaded into Track 1 run recovery below so the
+    // run-level service can transition the bound runs to `failed` with
+    // `reason: sandbox_lost` per RFC 020 §"Run recovery matrix".
+    let sandbox_lost_runs: Vec<cairn_runtime::SandboxLostRun> =
+        match lib_state.sandbox_service.recover_all().await {
+            Ok(summary) => {
+                if summary.reconnected > 0
+                    || summary.preserved > 0
+                    || summary.failed > 0
+                    || summary.lost > 0
+                {
+                    eprintln!(
+                        "sandbox recovery: reconnected={} preserved={} failed={} lost={}",
+                        summary.reconnected, summary.preserved, summary.failed, summary.lost
+                    );
+                }
+                let count = (summary.reconnected as u64).saturating_add(summary.preserved as u64);
+                lib_state.readiness.update_branch("4a", |b| {
+                    b.sandboxes = BranchStatus::complete(count);
+                });
+                summary.lost_runs
+            }
+            Err(error) => {
+                eprintln!("sandbox recovery failed: {error}");
+                lib_state.readiness.update_branch("4a", |b| {
+                    b.sandboxes = BranchStatus::failed(error.to_string());
+                });
+                Vec::new()
+            }
+        };
 
     // ── RFC 020 Track 1: run-level recovery ──────────────────────────────
     //
@@ -1126,7 +1158,13 @@ async fn main() {
         eprintln!("cairn-app boot_id={boot_id}");
         let recovery_service =
             cairn_runtime::RecoveryServiceImpl::new(lib_state.runtime.store.clone());
-        match cairn_runtime::RecoveryService::recover_all(&recovery_service, &boot_id).await {
+        match cairn_runtime::RecoveryService::recover_all(
+            &recovery_service,
+            &boot_id,
+            &sandbox_lost_runs,
+        )
+        .await
+        {
             Ok(summary) => {
                 if summary.scanned_runs > 0 {
                     eprintln!(
@@ -1306,6 +1344,127 @@ async fn main() {
 
         eprintln!("shutdown: worker complete");
     }
+}
+
+/// Test-only scaffolding for the RFC 020 `sandbox_lost` integration test.
+///
+/// Seeds the recovery registry sidecar + the store events required for
+/// `SandboxService::recover_all` to detect a missing sandbox and for
+/// `RecoveryService::recover_all` to transition the bound run to `failed`
+/// with `reason: sandbox_lost`. Called only when
+/// `CAIRN_TEST_SEED_LOST_SANDBOX` is set — production cairn-app never
+/// runs this path.
+///
+/// Spec format: `<run_id>:<tenant>:<workspace>:<project>`.
+async fn seed_lost_sandbox_for_test(
+    lib_state: &cairn_app::AppState,
+    sandbox_base_dir: &std::path::Path,
+    spec: &str,
+) -> Result<(), String> {
+    use cairn_domain::{
+        EventEnvelope, EventSource, ProjectKey, RunCreated, RunId, RunState, RunStateChanged,
+        RuntimeEvent, SessionCreated, SessionId, StateTransition,
+    };
+
+    let parts: Vec<&str> = spec.splitn(4, ':').collect();
+    if parts.len() != 4 {
+        return Err(format!(
+            "expected <run_id>:<tenant>:<workspace>:<project>, got {spec}"
+        ));
+    }
+    let run_id = RunId::new(parts[0]);
+    let project = ProjectKey::new(parts[1], parts[2], parts[3]);
+    let session_id = SessionId::new(format!("sess-{}", parts[0]));
+    let sandbox_id = format!("sbx-{}", parts[0]);
+
+    // Skip if the run is already terminal — sigkill+restart must be a
+    // no-op so we don't re-seed a Failed run into Running and break the
+    // state machine.
+    use cairn_store::projections::RunReadModel;
+    if let Ok(Some(existing)) = lib_state.runtime.store.get(&run_id).await {
+        if existing.state.is_terminal() {
+            return Ok(());
+        }
+    }
+
+    // 1. Registry sidecar — writes `<base_dir>/.registry/<sandbox_id>/registry.json`
+    //    pointing to a non-existent sandbox root. This triggers the
+    //    "registry says exists, filesystem says no" branch in
+    //    `SandboxService::recover_all`. The sandbox base dir is picked up
+    //    from the live `SandboxService`, not the seed arg, to guarantee
+    //    schema alignment with whatever format the service persists.
+    let _ = sandbox_base_dir; // base_dir carried through from caller for logging only
+    let fake_path = lib_state.sandbox_service.base_dir().join(&sandbox_id);
+    // Remove any previous sandbox root so the path genuinely doesn't
+    // exist at recover-time. `remove_dir_all` on a nonexistent path is
+    // an error — tolerate NotFound.
+    match std::fs::remove_dir_all(&fake_path) {
+        Ok(()) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => return Err(format!("remove stale sandbox root: {e}")),
+    }
+    lib_state
+        .sandbox_service
+        .seed_registry_entry_for_test(
+            cairn_workspace::SandboxId::new(sandbox_id.clone()),
+            run_id.clone(),
+            project.clone(),
+            cairn_workspace::SandboxStrategy::Overlay,
+            fake_path,
+        )
+        .map_err(|e| format!("seed registry entry: {e}"))?;
+
+    // 2. Store events: seed a SessionCreated + RunCreated + Pending→Running
+    //    transition so recovery sees a Running run bound to the lost sandbox.
+    //    Idempotent — if the run already exists, the store's projection
+    //    upsert behaviour keeps the later state; if the run is terminal we
+    //    returned early above.
+    let mut envelopes: Vec<EventEnvelope<RuntimeEvent>> = Vec::new();
+    let mut event_id = cairn_domain::EventId::new(format!("seed-lost-session-{}", parts[0]));
+    envelopes.push(EventEnvelope::for_runtime_event(
+        event_id.clone(),
+        EventSource::Runtime,
+        RuntimeEvent::SessionCreated(SessionCreated {
+            project: project.clone(),
+            session_id: session_id.clone(),
+        }),
+    ));
+    event_id = cairn_domain::EventId::new(format!("seed-lost-run-created-{}", parts[0]));
+    envelopes.push(EventEnvelope::for_runtime_event(
+        event_id.clone(),
+        EventSource::Runtime,
+        RuntimeEvent::RunCreated(RunCreated {
+            project: project.clone(),
+            session_id: session_id.clone(),
+            run_id: run_id.clone(),
+            parent_run_id: None,
+            prompt_release_id: None,
+            agent_role_id: None,
+        }),
+    ));
+    event_id = cairn_domain::EventId::new(format!("seed-lost-run-running-{}", parts[0]));
+    envelopes.push(EventEnvelope::for_runtime_event(
+        event_id,
+        EventSource::Runtime,
+        RuntimeEvent::RunStateChanged(RunStateChanged {
+            project: project.clone(),
+            run_id: run_id.clone(),
+            transition: StateTransition {
+                from: Some(RunState::Pending),
+                to: RunState::Running,
+            },
+            failure_class: None,
+            pause_reason: None,
+            resume_trigger: None,
+        }),
+    ));
+    lib_state
+        .runtime
+        .store
+        .append(&envelopes)
+        .await
+        .map_err(|e| format!("append seed events: {e}"))?;
+    Ok(())
 }
 
 // LLM trace handlers → bin_handlers.rs

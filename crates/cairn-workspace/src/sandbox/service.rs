@@ -101,6 +101,47 @@ pub struct SandboxRecoverySummary {
     pub reconnected: u32,
     pub preserved: u32,
     pub failed: u32,
+    /// RFC 020 §"Run recovery matrix": sandboxes listed in the recovery
+    /// registry whose on-disk root has gone missing between boots.
+    /// `lost_runs` carries the `(run_id, project)` pairs so the run-level
+    /// `RecoveryService` can transition each bound run to `failed` with
+    /// `reason: sandbox_lost`. `lost` is the count for summary logging /
+    /// readiness reporting and is always equal to `lost_runs.len()`.
+    pub lost: u32,
+    pub lost_runs: Vec<(RunId, ProjectKey)>,
+}
+
+/// Directory name (relative to `base_dir`) holding the recovery registry —
+/// one sidecar JSON per provisioned sandbox that survives the sandbox
+/// directory being deleted. Without this sidecar, a sandbox whose root
+/// has been removed is indistinguishable from "never provisioned", and
+/// `recover_all` cannot attribute a `sandbox_lost` failure to a run.
+///
+/// Leading dot keeps the registry out of provider `list()` sweeps — all
+/// providers skip entries without a `meta.json` (registry entries have
+/// a `registry.json` instead), and the leading dot is an additional
+/// belt-and-braces filter against any future provider that enumerates
+/// by prefix.
+const RECOVERY_REGISTRY_DIRNAME: &str = ".registry";
+
+/// Sidecar filename for a single registry entry.
+const REGISTRY_ENTRY_FILENAME: &str = "registry.json";
+
+/// One registry entry — the minimum information needed to attribute a
+/// missing sandbox directory back to the run that owned it.
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+struct RegistryEntry {
+    sandbox_id: crate::sandbox::SandboxId,
+    run_id: RunId,
+    project: ProjectKey,
+    strategy: SandboxStrategy,
+    /// Expected on-disk root. At recovery time we check `path.exists()`
+    /// — a missing path with a present registry entry means
+    /// `SandboxLost`.
+    path: PathBuf,
+    /// Unix-ms timestamp for operator forensics. Not consumed by the
+    /// recovery matrix.
+    registered_at: u64,
 }
 
 pub struct SandboxService {
@@ -129,6 +170,31 @@ impl SandboxService {
 
     pub fn base_dir(&self) -> &PathBuf {
         &self.base_dir
+    }
+
+    /// Register a lost-sandbox entry directly without going through
+    /// provisioning. Exposed for integration tests that need to simulate
+    /// "operator deleted the sandbox root between boots" without wiring a
+    /// full HTTP provisioning surface. `path` should be a path that does
+    /// NOT exist on disk — the recovery sweep keys `SandboxLost` off
+    /// `path.exists() == false`.
+    pub fn seed_registry_entry_for_test(
+        &self,
+        sandbox_id: crate::sandbox::SandboxId,
+        run_id: RunId,
+        project: ProjectKey,
+        strategy: SandboxStrategy,
+        path: PathBuf,
+    ) -> Result<(), WorkspaceError> {
+        let entry = RegistryEntry {
+            sandbox_id,
+            run_id,
+            project,
+            strategy,
+            path,
+            registered_at: self.clock.now_millis(),
+        };
+        self.write_registry_entry(&entry)
     }
 
     pub fn state_for(&self, run_id: &RunId) -> Option<SandboxState> {
@@ -230,6 +296,43 @@ impl SandboxService {
                     session.sandbox = Some(sandbox.clone());
                     session.metadata = Some(metadata.clone());
                 }
+                // Write the recovery registry sidecar *before* persisting
+                // the full metadata. If persisting fails and we never reach
+                // the metadata write, the registry entry still attributes
+                // the half-provisioned sandbox to its run — better than
+                // silently losing track of it. On the happy path both
+                // succeed and recover_all sees the sandbox via the
+                // provider's meta.json anyway.
+                let registry_entry = RegistryEntry {
+                    sandbox_id: sandbox.sandbox_id.clone(),
+                    run_id: run_id.clone(),
+                    project: project.clone(),
+                    strategy: sandbox.strategy,
+                    path: sandbox.path.clone(),
+                    registered_at: provisioned_at,
+                };
+                if let Err(error) = self.write_registry_entry(&registry_entry) {
+                    let failed_at = self.clock.now_millis();
+                    {
+                        let mut sessions = self
+                            .sessions
+                            .write()
+                            .expect("sandbox session lock poisoned");
+                        if let Some(session) = sessions.get_mut(run_id) {
+                            session.state = SandboxState::Failed;
+                        }
+                    }
+                    self.event_sink
+                        .publish(SandboxEvent::SandboxProvisioningFailed {
+                            sandbox_id: sandbox.sandbox_id.clone(),
+                            run_id: run_id.clone(),
+                            error_kind: SandboxErrorKind::Filesystem,
+                            error: error.to_string(),
+                            failed_at,
+                        });
+                    return Err(error);
+                }
+
                 if let Err(error) = self.persist_metadata(&metadata) {
                     let failed_at = self.clock.now_millis();
                     {
@@ -487,6 +590,14 @@ impl SandboxService {
         let result = self.provider(strategy)?.destroy(run_id, preserve).await?;
         let destroyed_at = self.clock.now_millis();
 
+        // Drop the recovery registry entry on a full (non-preserve) destroy.
+        // Preserved sandboxes still exist on disk and must stay attributable
+        // at the next boot; destroyed ones intentionally must not look
+        // `sandbox_lost` when they are picked up again by recovery.
+        if !preserve {
+            self.remove_registry_entry(&result.sandbox_id)?;
+        }
+
         {
             let mut sessions = self
                 .sessions
@@ -584,6 +695,15 @@ impl SandboxService {
                 .cmp(right.metadata.sandbox_id.as_str())
         });
 
+        // Track every sandbox_id that the providers surfaced so we can
+        // diff against the recovery registry below. Anything in the
+        // registry that the providers did NOT list is a candidate for
+        // `sandbox_lost`.
+        let mut observed: std::collections::HashSet<String> = std::collections::HashSet::new();
+        for handle in &handles {
+            observed.insert(handle.metadata.sandbox_id.as_str().to_owned());
+        }
+
         let mut summary = SandboxRecoverySummary::default();
         for handle in handles {
             let mut metadata = handle.metadata;
@@ -667,6 +787,40 @@ impl SandboxService {
                 }
             }
         }
+
+        // RFC 020 §"Run recovery matrix": for every registry entry whose
+        // provider did not surface a live handle, check the filesystem.
+        // Absent root → emit `SandboxLost` and record the (run, project)
+        // pair for the run-level recovery service to transition to `failed`
+        // with `reason: sandbox_lost`. Present root with no provider handle
+        // means the provider's own metadata is corrupt — leave it alone;
+        // the provider's list() path is responsible for that case and we
+        // would double-report otherwise.
+        let mut registry = self.list_registry_entries()?;
+        registry.sort_by(|a, b| a.sandbox_id.as_str().cmp(b.sandbox_id.as_str()));
+        for entry in registry {
+            if observed.contains(entry.sandbox_id.as_str()) {
+                continue;
+            }
+            if entry.path.exists() {
+                continue;
+            }
+            let detected_at = self.clock.now_millis();
+            self.event_sink.publish(SandboxEvent::SandboxLost {
+                sandbox_id: entry.sandbox_id.clone(),
+                run_id: entry.run_id.clone(),
+                project: entry.project.clone(),
+                sandbox_path: entry.path.clone(),
+                detected_at,
+            });
+            // Drop the registry entry so subsequent boots don't re-emit
+            // the same `SandboxLost` event for a run that has already
+            // been transitioned to terminal state by the run-recovery
+            // service.
+            self.remove_registry_entry(&entry.sandbox_id)?;
+            summary.lost_runs.push((entry.run_id, entry.project));
+        }
+        summary.lost = summary.lost_runs.len() as u32;
 
         Ok(summary)
     }
@@ -804,6 +958,87 @@ impl SandboxService {
         }
         session.state = next;
         Ok(())
+    }
+
+    /// Directory where recovery registry sidecars are kept. Lives under
+    /// `base_dir/.registry/<sandbox_id>/registry.json` — deliberately
+    /// separate from the sandbox root so that `rm -rf <sandbox_root>`
+    /// does not take the registry entry with it.
+    fn registry_dir(&self) -> PathBuf {
+        self.base_dir.join(RECOVERY_REGISTRY_DIRNAME)
+    }
+
+    fn registry_entry_path(&self, sandbox_id: &crate::sandbox::SandboxId) -> PathBuf {
+        self.registry_dir()
+            .join(sandbox_id.as_str())
+            .join(REGISTRY_ENTRY_FILENAME)
+    }
+
+    fn write_registry_entry(&self, entry: &RegistryEntry) -> Result<(), WorkspaceError> {
+        let path = self.registry_entry_path(&entry.sandbox_id);
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).map_err(|error| {
+                WorkspaceError::sandbox_op(&entry.run_id, "create_registry_dir", error)
+            })?;
+        }
+        let encoded = serde_json::to_vec_pretty(entry).map_err(|error| {
+            WorkspaceError::sandbox_op(&entry.run_id, "serialize_registry_entry", error)
+        })?;
+        fs::write(&path, encoded)
+            .map_err(|error| WorkspaceError::sandbox_op(&entry.run_id, "write_registry", error))
+    }
+
+    fn remove_registry_entry(
+        &self,
+        sandbox_id: &crate::sandbox::SandboxId,
+    ) -> Result<(), WorkspaceError> {
+        let entry_dir = self.registry_dir().join(sandbox_id.as_str());
+        match fs::remove_dir_all(&entry_dir) {
+            Ok(()) => Ok(()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(error) => Err(WorkspaceError::sandbox_op(
+                &RunId::new(sandbox_id.as_str()),
+                "remove_registry_entry",
+                error,
+            )),
+        }
+    }
+
+    fn list_registry_entries(&self) -> Result<Vec<RegistryEntry>, WorkspaceError> {
+        let dir = self.registry_dir();
+        let entries = match fs::read_dir(&dir) {
+            Ok(entries) => entries,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+            Err(error) => {
+                return Err(WorkspaceError::sandbox_op(
+                    &RunId::new("_registry"),
+                    "read_registry_dir",
+                    error,
+                ))
+            }
+        };
+        let mut out = Vec::new();
+        for entry in entries {
+            let entry = entry.map_err(|error| {
+                WorkspaceError::sandbox_op(&RunId::new("_registry"), "read_registry_entry", error)
+            })?;
+            let path = entry.path().join(REGISTRY_ENTRY_FILENAME);
+            if !path.is_file() {
+                continue;
+            }
+            let bytes = fs::read(&path).map_err(|error| {
+                WorkspaceError::sandbox_op(&RunId::new("_registry"), "read_registry_body", error)
+            })?;
+            match serde_json::from_slice::<RegistryEntry>(&bytes) {
+                Ok(parsed) => out.push(parsed),
+                // A corrupt sidecar must not break recovery — it just means
+                // we cannot attribute a lost sandbox to a run. Skip and
+                // continue so the rest of the sweep proceeds; operators see
+                // the broken file in the base dir.
+                Err(_) => continue,
+            }
+        }
+        Ok(out)
     }
 
     fn persist_metadata(&self, metadata: &SandboxMetadata) -> Result<(), WorkspaceError> {
@@ -1565,6 +1800,62 @@ mod tests {
         assert_eq!(recovered.pid, None);
         assert_eq!(recovered.base_rev.as_deref(), Some("abc123"));
         assert_eq!(recovered.path, PathBuf::from("/tmp/run-recover-ok/merged"));
+    }
+
+    #[tokio::test]
+    async fn recover_all_emits_sandbox_lost_when_registry_entry_has_no_directory() {
+        // RFC 020 §"Run recovery matrix": a registry sidecar whose
+        // sandbox directory is missing at recovery must surface as
+        // `SandboxLost` + `summary.lost_runs` so the run-level service
+        // can transition the bound run to `failed` with
+        // `reason: sandbox_lost`.
+        let run = RunId::new("run-lost");
+        let provider = RecoveryProvider::new(SandboxStrategy::Overlay, Vec::new(), HashMap::new());
+        let (service, sink) =
+            service_with_providers(vec![(SandboxStrategy::Overlay, Box::new(provider))]);
+
+        // Seed a registry entry pointing at a path that deliberately
+        // doesn't exist. `base_dir()` is the live service base dir so
+        // the registry sidecar writer picks it up.
+        let entry = super::RegistryEntry {
+            sandbox_id: crate::sandbox::SandboxId::new(format!("sbx-{}", run.as_str())),
+            run_id: run.clone(),
+            project: project(),
+            strategy: SandboxStrategy::Overlay,
+            path: service.base_dir().join("sbx-run-lost-missing-root"),
+            registered_at: 1_000,
+        };
+        service
+            .write_registry_entry(&entry)
+            .expect("write registry entry");
+
+        let summary = service.recover_all().await.unwrap();
+
+        assert_eq!(summary.reconnected, 0);
+        assert_eq!(summary.preserved, 0);
+        assert_eq!(summary.failed, 0);
+        assert_eq!(summary.lost, 1);
+        assert_eq!(summary.lost_runs.len(), 1);
+        assert_eq!(summary.lost_runs[0].0, run);
+        assert_eq!(summary.lost_runs[0].1, project());
+
+        let events = sink.drain();
+        assert_eq!(events.len(), 1, "expected exactly one SandboxLost event");
+        match &events[0] {
+            SandboxEvent::SandboxLost {
+                run_id, project: p, ..
+            } => {
+                assert_eq!(run_id, &run);
+                assert_eq!(p, &project());
+            }
+            other => panic!("expected SandboxLost, got {other:?}"),
+        }
+
+        // Idempotency: a second recovery sweep must not re-emit the
+        // event — the entry was cleared after the first detection.
+        let second = service.recover_all().await.unwrap();
+        assert_eq!(second.lost, 0);
+        assert!(second.lost_runs.is_empty());
     }
 
     #[tokio::test]

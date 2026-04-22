@@ -105,4 +105,18 @@ pub enum SandboxEvent {
         revoked_at: u64,
         detected_at: u64,
     },
+    /// RFC 020 §"Run recovery matrix": a sandbox that the registry says
+    /// should exist is missing from the filesystem at recovery time.
+    /// Emitted by `SandboxService::recover_all` when the recovery registry
+    /// lists a sandbox whose directory has been deleted (operator cleanup,
+    /// disk failure, …). The run bound to the sandbox is transitioned to
+    /// `failed` with `reason: sandbox_lost` by the run-level recovery
+    /// service that consumes the list of lost runs.
+    SandboxLost {
+        sandbox_id: SandboxId,
+        run_id: RunId,
+        project: ProjectKey,
+        sandbox_path: PathBuf,
+        detected_at: u64,
+    },
 }

@@ -115,8 +115,8 @@ pub use services::{
     ExternalWorkerService, ExternalWorkerServiceImpl, IngestJobServiceImpl,
     LlmObservabilityServiceImpl, MailboxServiceImpl, ProjectServiceImpl, PromptAssetServiceImpl,
     PromptReleaseServiceImpl, PromptVersionServiceImpl, RecoveryService, RecoveryServiceImpl,
-    SignalServiceImpl, SimpleRouteResolver, TenantServiceImpl, ToolInvocationService,
-    ToolInvocationServiceImpl, WorkspaceServiceImpl,
+    SandboxLostRun, SignalServiceImpl, SimpleRouteResolver, TenantServiceImpl,
+    ToolInvocationService, ToolInvocationServiceImpl, WorkspaceServiceImpl,
 };
 pub use sessions::SessionService;
 pub use signals::SignalService;
