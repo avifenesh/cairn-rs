@@ -1,10 +1,18 @@
 # RFC 020: Durable Recovery and Tool-Call Idempotency
 
-Status: draft (rev 2 — adds liveness/readiness probe split, parallel-where-independent startup, three-tier retry safety, dual checkpoint per iteration)
+Status: draft (rev 3 — recovery ownership split post-`5fefc76`, 15 gap resolutions, open-question resolutions, invariant #12)
 Owner: runtime/durability lead
 Depends on: [RFC 002](./002-runtime-event-model.md), [RFC 005](./005-task-session-checkpoint-lifecycle.md), [RFC 011](./011-deployment-shape.md), [RFC 016](./016-sandbox-workspace-primitive.md), [RFC 019](./019-unified-decision-layer.md)
 
-## Resolved Decisions (this revision)
+## Resolved Decisions (rev 3)
+
+- **Recovery ownership split.** Post commit `5fefc76` ("cairn-fabric finalization: wire adapter, delete obsolete recovery") the deleted `RecoveryServiceImpl` is rebuilt under a narrower scope: cairn-app owns run-level state recovery (runs, checkpoints, tool-invocation lifecycle, cache, approvals, sandbox↔run binding); FF's 14 background scanners own operational state (leases, timeouts, dependencies, budget/quota). Both contribute to "cairn recovery" as seen by operators, but they run independently across the two process boundaries. See §"Recovery ownership split (rev 3)" below for the ownership matrix.
+- **Resume semantics per checkpoint kind.** Explicit table for what the orchestrator does on resume depending on whether the latest checkpoint is Intent, Result, or absent. See §"Resume semantics (rev 3)".
+- **Invariant #12 added: storage-transparent durability.** Cairn's durability guarantees are defined against its own DB (Postgres canonical / SQLite dev-test-edge), independent of the engine's backing store. If the engine loses its state, FF's scanners rebuild it; cairn's RecoveryService rebuilds cairn state from the event log. No invariant above requires the engine's storage to survive.
+- **Open-question resolutions.** Q1 checkpoint body — full snapshot for v1, diff optimization deferred. Q3 tool normalization — mandatory `normalize_for_cache` trait method with JSON-sorted-keys default + per-tool override + property-test harness. Q5 recovery timeout — wait indefinitely; liveness stays 200, readiness stays 503 with progress. Q7 Postgres unreachable at startup — refuse to start (no degraded mode). Multi-instance (Gap 2) deferred entirely to a future multi-node RFC; v1 is single-instance, no locking code.
+- **Storage portability constraint.** Postgres is the v1 production target and SQLite is supported for dev/tests/edge, but the service layer must not lock in Postgres-specific features (no `pg_advisory_lock`, `JSONB` operators, `LISTEN/NOTIFY`, array columns, `tsvector`, etc.). Per-backend DDL in migration directories is the escape hatch; runtime queries stay portable.
+
+## Resolved Decisions (rev 2)
 
 - **Checkpoint timing**: **two checkpoints per orchestrator iteration** — an `intent` checkpoint after the decide phase (before any tool dispatch) and a `result` checkpoint after the execute phase (after tool calls complete). Max durability, max recovery granularity. Body size is mitigated by diff-based serialization (each checkpoint can be a diff against the prior intent checkpoint).
 - **Tool retry safety classification**: every tool declares `RetrySafety` in its descriptor with three variants: `IdempotentSafe` (orchestrator retries silently), `DangerousPause` (recovered run pauses in `WaitingApproval` and asks the operator whether the side effect occurred), `AuthorResponsible` (orchestrator retries; tool author handles deduplication via external idempotency keys, upserts, etc.).
@@ -566,3 +574,99 @@ Proceed assuming:
 13c. **Batched append coherence**: kill cairn-app between a `memory_store` invoke and ToolInvocationCompleted; on restart, verify either (a) both the memory chunk AND the cache entry exist (batch was durable) OR (b) neither exists (batch was not durable and the tool re-executes cleanly). NEVER: chunk exists but cache entry does not.
 14. **Dual checkpoint**: verify both Intent and Result checkpoints are written per iteration; a crash during execute recovers from the Intent checkpoint; a crash during gather recovers from the Result checkpoint
 15. **Checkpoint compression**: a 100-step run has checkpoints whose total body size is substantially less than 100 full snapshots (validates diff-based compression if adopted)
+
+---
+
+# Rev 3 Addendum
+
+This addendum was added in revision 3 (2026-04-21). It preserves the rev 2 body above unchanged and documents decisions + gaps that surfaced while auditing the current implementation state against the draft.
+
+## Why rev 3 exists
+
+Audit of cairn-rs on `origin/main` (commit `ed0acee`) found that most RFC 020 types exist (`ReadinessState`, `ToolCallId`, `ToolCallResultCache`, `RecoveryDispatchDecision`, `CheckpointKind`, `RecoveryEvent` variants, `RecoverySummary`), but the runtime integration is minimal — at audit time, 1 of 15 compliance tests was live (test #9 readiness, shipped as PR #73). Six of the 11 durability invariants were outright broken; three partial.
+
+Separately, commit `5fefc76` deleted `crates/cairn-runtime/src/services/recovery_impl.rs` with the rustdoc "recovery now lives unconditionally in FlowFabric's background scanners." This is correct for FF operational state and incorrect for cairn run-level state. The deletion left a gap this RFC now addresses explicitly.
+
+Four implementation tracks carry rev 3 to compliance. Track 2 (readiness gate) shipped as PR #73; Track 1 (RecoveryService resurrection), Track 3 (tool-call idempotency end-to-end), Track 4 (dual checkpoint + audit events) follow in sequence.
+
+## Recovery ownership split (rev 3)
+
+Rev 2's "Recovery Contract" described a unified `RecoveryService::recover_all()`. Rev 3 refines: cairn's recovery surface is split across two process boundaries. FF process owns operational state and recovers it continuously via background scanners (not just on cairn-app boot). Cairn-app process owns run-level state and recovers it on startup via its own `RecoveryService`.
+
+| Layer | State it owns | Recovery mechanism | Who runs it |
+|---|---|---|---|
+| **FF operational** | Execution lease liveness, attempt timeouts, execution deadlines, suspension timeouts, pending waitpoint expiry, budget resets, budget reconciliation, quota reconciliation, dependency reconciliation, flow projection, index reconciliation, retention trimming, unblock propagation, delayed promotion | 14 background scanners inside FF (`LeaseExpiryScanner`, `AttemptTimeoutScanner`, `ExecutionDeadlineScanner`, `SuspensionTimeoutScanner`, `PendingWaitpointExpiryScanner`, `BudgetResetScanner`, `BudgetReconciler`, `QuotaReconciler`, `DependencyReconciler`, `FlowProjector`, `IndexReconciler`, `RetentionTrimmer`, `UnblockScanner`, `DelayedPromoter`) | FF process |
+| **Cairn run-level** | Run `public_state`, run message history, checkpoint contents, tool invocation lifecycle, tool call result cache, decision cache, approval state, sandbox↔run binding, session↔run binding | `cairn-runtime::RecoveryService` (rebuilt in Track 1 under the narrowed scope) | cairn-app on startup |
+| **Bridge (FF→cairn)** | Lease-history stream position per partition, bridge event correlation | `FfLeaseHistoryCursor` projection + `lease_history_subscriber` | cairn-app subscriber |
+| **Cairn peripheral** | Sandbox filesystem reconciliation (RFC 016), plugin host reconnection (RFC 015 — lazy-spawn except SignalSource), provider pool warmup, repo clone cache | `SandboxService::recover_all`, `PluginHost::reconnect`, `ProviderPool::warmup`, `RepoCloneCache::ensure_all_cloned` | cairn-app on startup |
+| **Infrastructure** | Event log integrity, projection replay, migration state | cairn-store Postgres/SQLite adapters, `ProjectionRebuilder` | cairn-store on startup |
+
+The rebuilt cairn-runtime `RecoveryService` does NOT expire leases, re-time attempts, reconcile dependencies, or reconcile budgets/quotas — those are FF's lane. It DOES enumerate non-terminal runs, apply the §"Run recovery matrix" rules, read latest checkpoint per run, verify sandbox↔run binding, emit `RunRecovered`/`RunRecoveryFailed`, and emit `RecoverySummary` at end.
+
+## Resume semantics (rev 3)
+
+Rev 2's §"Checkpoint recovery rules" is correct but leaves the per-case orchestrator action implicit. Rev 3 tightens:
+
+| Latest checkpoint on resume | Orchestrator action |
+|---|---|
+| None (crash before first checkpoint) | Rebuild message history from `RunMessageAppended` events. Start next iteration's decide phase from scratch. |
+| `Intent` (crash during execute) | Load message history + planned `ToolCallId`s from checkpoint. For each planned call: if cache hit, mark done; if cache miss, apply `recovery_dispatch_decision(is_recovery=true, tool.retry_safety())`. Once all planned calls are resolved, proceed to gather. |
+| `Result` (crash during gather or between iterations) | Load message history + completed results from checkpoint. Proceed to next iteration's gather. No tool re-dispatch. |
+
+Track 3 and Track 4 integration tests assert against this table directly.
+
+## Invariant #12 — storage-transparent durability
+
+Cairn's durability guarantees are defined against cairn's own DB (Postgres canonical for team mode; SQLite acceptable for dev/tests/edge single-instance). They are independent of the engine's backing store (FF's choice — Valkey today, potentially others). If Valkey goes down hard and comes back empty, FF's scanners rebuild FF state; cairn's RecoveryService rebuilds cairn state from Postgres; the bridge subscriber resumes from `FfLeaseHistoryCursor`. No previously-stated invariant requires the engine's storage to survive.
+
+This is the consumer-side corollary of FF's "transparent engine over Valkey OR Postgres" direction. Cairn is written as if the engine backend is unknown; it ships with Valkey today but must not assume Valkey is available.
+
+## Storage portability (rev 3)
+
+Postgres is the v1 production target. SQLite is supported for development, tests, and edge single-instance deployments. **The service layer must use only SQL features common to most common SQL databases.** Any Postgres-specific feature requires an explicit design-level decision before use. This prevents shipping a product that only works for Postgres operators.
+
+- Allowed (standard SQL, portable across Postgres/MySQL/SQLite/MSSQL): CRUD, transactions, standard types, `PRIMARY KEY`/`FOREIGN KEY`/`UNIQUE`/`CHECK`, btree indexes, `SELECT ... FOR UPDATE`, JSON stored as `TEXT`.
+- Requires explicit decision: `pg_advisory_lock`, `LISTEN`/`NOTIFY`, `JSONB` type and operators (`->>`, `->`, `@>`), array columns, `tsvector`/`tsquery`, `SKIP LOCKED`, `MERGE`, `CREATE EXTENSION`, `WITH RECURSIVE`, generated columns, range types.
+- Per-backend DDL in `crates/cairn-store/src/pg/migrations/*.sql` and `crates/cairn-store/src/sqlite/*.sql` is the escape hatch for backend-specific schema choices. Runtime query code must stay portable.
+
+At rev 3 time, a schema-parity check (shipped as PR #76, `#[ignore]`d by default) surfaces known SQLite gaps: ten tables currently exist only on Postgres (`route_policies`, `workspace_members`, `tenants`, `workspaces`, `projects`, `prompt_assets`, `prompt_releases`, `prompt_versions`, `provider_calls`, `route_decisions`). This is acceptable while SQLite is dev-only; becomes a bug if SQLite targets production parity.
+
+## Gap resolutions (rev 3)
+
+Rev 2's §"Open Questions" listed five items marked NEEDS DISCUSSION. Rev 3 resolves four; one remains deferred.
+
+| Open question | Rev 3 resolution |
+|---|---|
+| Q1 — Checkpoint body size (full vs diff) | Full snapshot per checkpoint for v1. `CheckpointSaved.message_history_size` records serialized length so operators observe cost. Diff optimization reconsidered only if observed cost exceeds a threshold (follow-up Track 4b). |
+| Q3 — Tool normalization trait method | Accept proposal. `normalize_for_cache(&self, args: &ToolArgs) -> String` mandatory on `ToolHandler` with a default (JSON keys sorted lexicographically, UTF-8 encoded) and per-tool override. Property test harness at trait level: `normalize(args) == normalize(args)` (idempotent) and parse-round-trip semantic equivalence for a corpus per tool. |
+| Q5 — Recovery timeout | Wait indefinitely. Liveness (`/health`) stays 200; readiness (`/health/ready`) stays 503 with progress JSON. No degraded mode. |
+| Q7 — Postgres unreachable at startup | Refuse to start with nonzero exit code. systemd/Kubernetes restarts the process; no in-memory fallback. |
+| Q8 — Event log compaction | Deferred to a future RFC (rev 2 position unchanged). |
+
+Rev 3 adds the following previously-unenumerated gaps with resolutions:
+
+- **Gap A — Process-boundary event ordering during recovery.** FF scanners and cairn's RecoveryService run independently at startup. A run may appear `Running` to cairn's projection snapshot at the instant FF emits a lease-expiry event that requeues its task. Resolution: `RunRecovered` is advisory. The orchestrator, when it actually picks up the run on next tick, re-reads current state and acts on it. Invariant #8 already permits this ("projections are eventually consistent with the log"). The event name stays `RunRecovered` — documented as advisory in its rustdoc rather than renamed.
+- **Gap B — Multi-process cairn-app.** Two instances against the same DB would both try to recover the same runs. Resolution: defer multi-instance entirely to a future multi-node RFC. v1 is single-instance. No locking code in Track 1. This supersedes an earlier draft suggestion to use `pg_advisory_lock`, which would violate the portability rule.
+- **Gap C — Tool buffered events ownership.** Invariant #11 requires tool-buffered side-effect events and `ToolInvocationCompleted` to land in one `EventLog::append` call. Today `record_completed` appends `ToolInvocationCompleted` alone, and no caller drains `ctx.buffer_event`. Resolution (Track 3): `record_completed` accepts `additional_events: &[EventEnvelope]`; orchestrator drains buffered events after each `tool.invoke()` and passes them through. Tools currently appending directly during `invoke()` (e.g. `memory_store`, `cairn.registerRepo`) convert to use `ctx.buffer_event()`.
+- **Gap D — SIGKILL integration test harness.** Rev 2's 15 compliance tests all require restarting a real cairn-app subprocess against durable state. `LiveHarness` at `crates/cairn-app/tests/support/live_fabric.rs` spawned subprocesses but had no kill/restart. Resolution: shipped in PR #74 — `sigkill()`, `restart()`, `sigkill_and_restart()`, `poll_readiness_until_ready()` helpers, with SQLite-backed variant for DB-survival tests.
+- **Gap E — Boot ID.** `RecoverySummary` has a `boot_id` field but rev 2 didn't say how to mint it. Resolution: `BootId(String)` (UUID v7) minted once per process boot, plumbed through `AppState` and every `RecoveryEvent` variant for audit correlation. Visible in readiness progress JSON.
+- **Gap F — Runs stuck in `Running` with no progress.** Edge case: a run marked `Running` via `RunStarted` event, then cairn-app crashed before any checkpoint or message append. Resolution: new recovery matrix row — a `Running` run with zero messages and zero checkpoints for more than `RUN_WEDGE_THRESHOLD_MS` (5 min default, tuneable) transitions to `failed` with `reason: crashed_before_first_progress` and emits `RunRecoveryFailed`.
+- **Gap G — Approvals submitted during crash.** A run in `WaitingApproval` has the approval resolved in the event log between crash and recovery. Rev 2 invariant #8 ("WaitingApproval unchanged on recovery") needs nuance. Resolution: RecoveryService, for runs in `WaitingApproval`, checks the latest approval-resolution event and processes it if present. This is consistent with invariant #4 (recovery is idempotent) — the resolution already happened in the log.
+- **Gap H — In-flight subagent work.** No new work. RFC 005 recovery rules + dependency projection handle this via `WaitingDependency` state. Track 1 integration test verifies it still works.
+- **Gap I — Plugin state across recovery.** No new work. RFC 015 specifies descriptors are re-validated + enablement re-read from event log before plugin processes are spawned. Track 3 integration test for an `AuthorResponsible` tool using a plugin verifies.
+- **Gap J — Observability during recovery.** Resolution: per-branch tracing spans in the startup graph, per-branch duration metrics, log progress every 5 seconds during recovery. `RecoverySummary` logged at INFO level at end.
+
+## Implementation status at rev 3
+
+- **PR #73** `83abf86` — readiness gate wired (`/health/ready` 503→200 with progress JSON; middleware gates non-health routes). Compliance test #9 live.
+- **PR #74** `48e63f6` — `LiveHarness` SIGKILL+restart.
+- **PR #76** `688f850` — CI schema-parity check (ignored; concrete SQLite-gap list surfaced).
+- **Track 1** — `RecoveryService` resurrection (run-level scope). In flight. Delivers compliance test #1.
+- **Track 3** — tool-call idempotency end-to-end (ToolCallId mint, cache consultation, is_recovery plumb-through, batched append, `normalize_for_cache`). Planned. Delivers compliance tests #2, #8, #13a, #13b, #13c.
+- **Track 4** — dual checkpoint emission + `RecoverySummary`/`DecisionCacheWarmup`. Planned. Delivers compliance tests #11, #14.
+
+Final target: 14 of 15 compliance tests live (test #15 checkpoint compression skipped by design — rev 3 ships full snapshots, not diffs).
+
+## Non-goals for rev 3
+
+Unchanged from rev 2: multi-node cairn-app deployments, exactly-once external side effects, disaster recovery of lost Postgres, cross-region replication, undo of side effects already reached the external world. Rev 3 adds: multi-instance single-DB correctness (separate future RFC), and event log compaction (deferred). Rev 3 explicitly does NOT target SQLite production parity — that remains a dev-only configuration at v1.
