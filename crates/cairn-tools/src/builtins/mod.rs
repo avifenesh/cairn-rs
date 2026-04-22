@@ -5,7 +5,7 @@
 //! | Tier          | In prompt?         | Example tools                         |
 //! |---------------|--------------------|---------------------------------------|
 //! | `Core`        | Always             | memory_search, tool_search, complete  |
-//! | `Registered`  | If total ≤ budget  | web_fetch, shell_exec, graph_query    |
+//! | `Registered`  | If total ≤ budget  | web_fetch, bash, graph_query          |
 //! | `Deferred`    | Never (discovered) | MCP server tools, plugin tools        |
 //!
 //! The orchestrator's `PromptBuilder` calls `registry.prompt_tools()` which
@@ -13,6 +13,7 @@
 //! the result is a list of Deferred descriptors that get injected into the
 //! *next* iteration's prompt.
 
+pub mod bash;
 pub mod calculate;
 pub mod cancel_task;
 pub mod create_task;
@@ -36,7 +37,6 @@ pub mod resolve_approval;
 pub mod schedule_task;
 pub mod scratch_pad;
 pub mod search_events;
-pub mod shell_exec;
 pub mod summarize_text;
 pub mod tool_search;
 pub mod update_memory;
@@ -53,6 +53,7 @@ use cairn_domain::{policy::ExecutionClass, ProjectKey, RuntimeEvent};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+pub use bash::BashTool;
 pub use calculate::CalculateTool;
 pub use cancel_task::CancelTaskTool;
 pub use create_task::CreateTaskTool;
@@ -79,7 +80,6 @@ pub use resolve_approval::ResolveApprovalTool;
 pub use schedule_task::ScheduleTaskTool;
 pub use scratch_pad::ScratchPadTool;
 pub use search_events::SearchEventsTool;
-pub use shell_exec::ShellExecTool;
 pub use summarize_text::SummarizeTextTool;
 pub use tool_search::ToolSearchTool;
 pub use update_memory::{DeleteFn, DeleteMemoryTool, ReingestFn, UpdateMemoryTool};

@@ -1529,14 +1529,14 @@ mod tests {
     fn sample_request() -> DecisionRequest {
         DecisionRequest {
             kind: DecisionKind::ToolInvocation {
-                tool_name: "shell_exec".into(),
+                tool_name: "bash".into(),
                 effect: ToolEffect::External,
             },
             principal: Principal::Run {
                 run_id: RunId::new("run_1"),
             },
             subject: DecisionSubject::ToolCall {
-                tool_name: "shell_exec".into(),
+                tool_name: "bash".into(),
                 args: serde_json::json!({"command": "ls"}),
             },
             scope: ProjectKey::new("t", "w", "p"),

@@ -1430,7 +1430,7 @@ mod tests {
             cairn_tools::builtins::BuiltinToolRegistry::new()
                 .register(std::sync::Arc::new(cairn_tools::GrepSearchTool)) // Observational
                 .register(std::sync::Arc::new(cairn_tools::CalculateTool)) // Observational
-                .register(std::sync::Arc::new(cairn_tools::ShellExecTool)), // External
+                .register(std::sync::Arc::new(cairn_tools::BashTool)), // External
         );
 
         let phase = LlmDecidePhase::new(
@@ -1460,7 +1460,7 @@ mod tests {
         );
         // External tools should not have descriptor lines in Plan mode.
         assert!(
-            !prompt.contains("  - shell_exec("),
+            !prompt.contains("  - bash("),
             "External tool descriptor must NOT be in Plan mode prompt"
         );
     }
@@ -1645,12 +1645,12 @@ mod tests {
             "id": "call_xyz",
             "type": "function",
             "function": {
-                "name": "shell_exec",
+                "name": "bash",
                 "arguments": "{\"command\": \"rm -rf /\"}"
             }
         })];
         let descs = vec![BuiltinToolDescriptor {
-            name: "shell_exec".to_owned(),
+            name: "bash".to_owned(),
             tier: ToolTier::Core,
             description: "Execute a shell command.".to_owned(),
             parameters_schema: serde_json::json!({}),

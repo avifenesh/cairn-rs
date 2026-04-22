@@ -658,7 +658,7 @@ pub(crate) fn agent_template_catalog() -> Vec<AgentTemplate> {
             default_tools: vec![
                 "file_read".to_owned(),
                 "grep_search".to_owned(),
-                "shell_exec".to_owned(),
+                "bash".to_owned(),
                 "eval_score".to_owned(),
             ],
             approval_policy: "sensitive".to_owned(),

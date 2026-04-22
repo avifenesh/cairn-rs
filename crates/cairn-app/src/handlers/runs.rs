@@ -1631,12 +1631,12 @@ pub(crate) async fn orchestrate_run_handler(
         ApprovalServiceImpl, CheckpointServiceImpl, MailboxServiceImpl, ToolInvocationServiceImpl,
     };
     use cairn_tools::{
-        BuiltinToolRegistry, CalculateTool, CancelTaskTool, CreateTaskTool, FileReadTool,
+        BashTool, BuiltinToolRegistry, CalculateTool, CancelTaskTool, CreateTaskTool, FileReadTool,
         FileWriteTool, GetApprovalsTool, GetRunTool, GetTaskTool, GlobFindTool, GraphQueryTool,
         GrepSearchTool, HttpRequestTool, JsonExtractTool, ListRunsTool, MemorySearchTool,
         MemoryStoreTool, NotificationSink, NotifyOperatorTool, ResolveApprovalTool,
-        ScheduleTaskTool, ScratchPadTool, SearchEventsTool, ShellExecTool, SummarizeTextTool,
-        ToolSearchTool, WaitForTaskTool, WebFetchTool,
+        ScheduleTaskTool, ScratchPadTool, SearchEventsTool, SummarizeTextTool, ToolSearchTool,
+        WaitForTaskTool, WebFetchTool,
     };
 
     let run_id = RunId::new(run_id_str);
@@ -1910,11 +1910,10 @@ pub(crate) async fn orchestrate_run_handler(
             std::sync::Arc::new(SummarizeTextTool::new(brain.clone(), model_id.clone()));
 
         // ── External tools ──────────────────────────────────────────────────
-        let shell_exec: std::sync::Arc<dyn cairn_tools::ToolHandler> =
-            std::sync::Arc::new(ShellExecTool);
+        let bash: std::sync::Arc<dyn cairn_tools::ToolHandler> = std::sync::Arc::new(BashTool);
         let http_request: std::sync::Arc<dyn cairn_tools::ToolHandler> =
             std::sync::Arc::new(HttpRequestTool);
-        // git / gh CLI access goes through `shell_exec` — no dedicated wrappers.
+        // git / gh CLI access goes through `bash` — no dedicated wrappers.
         let resolve_approval: std::sync::Arc<dyn cairn_tools::ToolHandler> =
             std::sync::Arc::new(ResolveApprovalTool::new(approval_svc));
         let schedule_task: std::sync::Arc<dyn cairn_tools::ToolHandler> =
@@ -1948,7 +1947,7 @@ pub(crate) async fn orchestrate_run_handler(
                 .register(cancel_task.clone())
                 .register(summarize_text.clone())
                 // External
-                .register(shell_exec.clone())
+                .register(bash.clone())
                 .register(std::sync::Arc::new(NotifyOperatorTool::new(
                     Some(mailbox_svc.clone()),
                     sse_sink.clone(),

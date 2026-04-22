@@ -1,6 +1,6 @@
 # RFC 018: Agent Loop Enhancements
 
-Status: draft (rev 2 — incorporates Plan/Execute generic framing, exploration budget, shell_exec always-External, per-project Guardian inheritance)
+Status: draft (rev 2 — incorporates Plan/Execute generic framing, exploration budget, bash always-External, per-project Guardian inheritance)
 Owner: orchestrator/runtime lead
 Depends on: [RFC 002](./002-runtime-event-model.md), [RFC 005](./005-task-session-checkpoint-lifecycle.md), [RFC 009](./009-provider-abstraction.md), [RFC 015](./015-plugin-marketplace-and-scoping.md), [RFC 016](./016-sandbox-workspace-primitive.md), [RFC 019](./019-unified-decision-layer.md), [RFC 022](./022-triggers.md)
 
@@ -10,7 +10,7 @@ The following were resolved during the question-by-question pass and are baked i
 
 - **Plan run budget**: Plan-mode runs draw from a **separate "exploration" budget**, distinct from the project's execute-run budget. The exploration budget defaults to 10% of the project's execute-run budget unless explicitly overridden. Configurable per project. Plan budgets are typically generous (planning is cheap; you want operators to use it freely) without coupling to production execution spend.
 - **Guardian model configuration**: per-project with tenant-level default inheritance. Tenant admin sets a default Guardian model; projects can override or inherit. If neither is set, the Guardian resolver is not in the chain and approvals fall through to the human resolver. **No hardcoded default model** — cairn does not lock in on any provider.
-- **`shell_exec` classification**: `shell_exec` is **always `External`** in v1. Even inside a sandbox, a shell command can escape it via network access, interaction with mounted paths, or long-running subprocesses. A team that needs read-only access to file content or search results should use dedicated Observational tools (`grep_search`, `file_read`, `glob_find`, etc.) which are always available in Plan mode. Dynamic per-invocation classification via an execpolicy rule engine (inspired by Codex CLI) is deferred to future work; it requires a per-invocation evaluation path that the v1 `ToolEffect` enum (which is per-tool, not per-invocation) does not support.
+- **`bash` classification**: `bash` is **always `External`** in v1. Even inside a sandbox, a shell command can escape it via network access, interaction with mounted paths, or long-running subprocesses. A team that needs read-only access to file content or search results should use dedicated Observational tools (`grep_search`, `file_read`, `glob_find`, etc.) which are always available in Plan mode. Dynamic per-invocation classification via an execpolicy rule engine (inspired by Codex CLI) is deferred to future work; it requires a per-invocation evaluation path that the v1 `ToolEffect` enum (which is per-tool, not per-invocation) does not support.
 - **Tool effect classification**: every tool declares its `ToolEffect` (`Observational` / `Internal` / `External`). Plan mode shows only Observational + Internal tools to the agent. Examples are team-diverse (research, support, ops, content, security, code) — not coding-specific.
 
 ## Summary
@@ -113,7 +113,7 @@ pub enum ToolEffect {
     /// call that creates or changes state, any notification delivered to a
     /// human, any subprocess that can escape the sandbox, any write to a
     /// shared resource.
-    /// Examples: shell_exec, http_request (POST/PUT/DELETE),
+    /// Examples: bash, http_request (POST/PUT/DELETE),
     /// github.create_pull_request, github.comment_on_issue, notify_operator,
     /// slack.send_message, any plugin tool that is not explicitly observational.
     External,
@@ -141,15 +141,15 @@ The `Observational / Internal / External` split is not a coding abstraction. It 
 
 **Marketing / content**: Observational = `memory_search`, `web_fetch`, `get_brand_guide`. Internal = `scratch_pad` (draft copy), `memory_store` (save style notes). External = `publish_to_cms`, `schedule_social_post`. Plan mode drafts. Execute mode publishes.
 
-**Code**: Observational = `grep_search`, `file_read`, `github.get_issue`. Internal = `file_write` into sandbox, `scratch_pad`. External = `github.create_pull_request`, `shell_exec` against anything that leaves the sandbox. Plan mode reads code and writes design notes. Execute mode opens the PR.
+**Code**: Observational = `grep_search`, `file_read`, `github.get_issue`. Internal = `file_write` into sandbox, `scratch_pad`. External = `github.create_pull_request`, `bash` against anything that leaves the sandbox. Plan mode reads code and writes design notes. Execute mode opens the PR.
 
 The last example is the odd one: `file_write` counts as Internal because it writes to the run's sandbox, which is cairn-owned state. The sandbox is ephemeral, scoped to the run, and tied to RFC 016's lifecycle. The moment the agent pushes a branch or opens a PR, it leaves the sandbox boundary and becomes External.
 
 This is the correct line. A research agent writing a draft into the scratch pad, a support agent drafting a reply, and a code agent editing files in its sandbox are all doing the same thing: **working privately inside cairn's boundary**. A plan run should allow all of it. An execute run is what takes the private work and pushes it outward.
 
-### `shell_exec` classification
+### `bash` classification
 
-`shell_exec` is always `External`. Even inside a sandbox, a shell command can escape it (network access, interaction with mounted paths, long-running processes). A team that needs read-only shell access should use dedicated observational tools (`grep_search`, `file_read`, `glob_find`, `json_extract`, etc.) which are always available in Plan mode. If an operator genuinely wants an unattended research run that can spawn arbitrary shells, they use Direct mode and accept the risk.
+`bash` is always `External`. Even inside a sandbox, a shell command can escape it (network access, interaction with mounted paths, long-running processes). A team that needs read-only shell access should use dedicated observational tools (`grep_search`, `file_read`, `glob_find`, `json_extract`, etc.) which are always available in Plan mode. If an operator genuinely wants an unattended research run that can spawn arbitrary shells, they use Direct mode and accept the risk.
 
 Similarly, `http_request` is classified as `External` because it supports POST/PUT/DELETE. Agents in Plan mode that need to read web content use `web_fetch`, which is `Observational` and restricted to GET.
 
@@ -396,7 +396,7 @@ The orchestrator builds a `VisibilityContext` at the start of every run (or when
 4. Construct `VisibilityContext { project, enabled_plugins, allowlisted_tools }`
 5. Cache for the run's duration (invalidated on plugin enable/disable events)
 
-Built-in cairn tools (file_read, grep_search, shell_exec, memory_search, etc.) are **always visible** regardless of plugin enablement — they are product-core, not plugin-provided. Only tools that originate from a plugin capability are subject to this filter.
+Built-in cairn tools (file_read, grep_search, bash, memory_search, etc.) are **always visible** regardless of plugin enablement — they are product-core, not plugin-provided. Only tools that originate from a plugin capability are subject to this filter.
 
 ### `tool_search` also respects visibility
 
@@ -410,7 +410,7 @@ For a project with only the GitHub plugin enabled, a Direct/Execute-mode run see
 
 ### The gap
 
-A single `shell_exec` or `github.get_pull_request_diff` call can produce tens of thousands of tokens of output. Appending that to the message history without bound eats the context window.
+A single `bash` or `github.get_pull_request_diff` call can produce tens of thousands of tokens of output. Appending that to the message history without bound eats the context window.
 
 ### The shape
 
@@ -439,7 +439,7 @@ The full untruncated output is still persisted in the tool invocation record (fo
 
 ## v1 Tool Registration Pre-requisite
 
-**Critical implementation dependency**: the running orchestrate registry at `crates/cairn-app/src/lib.rs` currently wires only **6 tools** into the prompt: `memory_search`, `memory_store`, `web_fetch`, `shell_exec`, `notify_operator`, `tool_search`. Approximately 25 additional tool handler files exist in `crates/cairn-tools/src/builtins/` but are **not registered** in the orchestrate registry. Plan mode's value depends on a rich set of `Observational` and `Internal` tools being available; Execute/Direct mode benefits from the full set.
+**Critical implementation dependency**: the running orchestrate registry at `crates/cairn-app/src/lib.rs` currently wires only **6 tools** into the prompt: `memory_search`, `memory_store`, `web_fetch`, `bash`, `notify_operator`, `tool_search`. Approximately 25 additional tool handler files exist in `crates/cairn-tools/src/builtins/` but are **not registered** in the orchestrate registry. Plan mode's value depends on a rich set of `Observational` and `Internal` tools being available; Execute/Direct mode benefits from the full set.
 
 Before Plan mode ships, the following tools **must** be wired into the orchestrate registry, classified by `ToolEffect`:
 
@@ -480,7 +480,7 @@ Before Plan mode ships, the following tools **must** be wired into the orchestra
 
 | Tool | Source file |
 |---|---|
-| `shell_exec` | builtins/shell_exec.rs (already wired) |
+| `bash` | builtins/bash.rs (already wired) |
 | `notify_operator` | builtins/notify_operator.rs (already wired) |
 | `http_request` | builtins/http_request.rs |
 | `resolve_approval` | builtins/resolve_approval.rs |
@@ -531,7 +531,7 @@ The following were considered and dropped:
 
 - **Cross-session memory pipeline auto-ingestion**: `cairn-memory` provides the retrieval pipeline exposed via `memory_search` and `memory_store`. **Automatic ingestion of agent-generated artifacts** (run summaries, plan artifacts, compacted history, sandbox diffs) into cairn-memory is **out of scope for v1**. Operators who want run knowledge to accumulate in cairn-memory must either (a) have the agent call `memory_store` explicitly during the run, or (b) invoke `POST /v1/memory/ingest` on selected run artifacts after the run completes. A future `PostRunIngestHook` (triggered on `RunCompleted` events, configurable per project, default off) is a small engineering task once the run artifact format stabilizes, but v1 does not commit to it.
 - **Compacted-away message retrieval**: compacted messages remain in the event log for operator inspection, but the **agent** cannot retrieve them. If the agent compacted away detail it later needs, there is no tool to recover it within the run — `memory_search` queries cairn-memory (which the compacted content was never ingested into), not the run's own event history. Future enhancements may add (a) auto-ingestion of compacted content into cairn-memory, or (b) a `search_run_history` Observational tool that queries the run's event log. V1 ships neither — the compaction config (`threshold_pct`, `keep_last`, `summary_token_budget`) should be tuned to retain enough recent context that compaction rarely drops critical detail.
-- **Dynamic per-invocation `shell_exec` classification (execpolicy)**: an execpolicy rule engine that evaluates `shell_exec` per-invocation against allow/deny prefix rules (inspired by Codex CLI's pattern) was explored but deferred. The v1 `ToolEffect` enum is per-tool, not per-invocation, so `shell_exec` is always `External`. Execpolicy requires a per-invocation evaluation path and is future work.
+- **Dynamic per-invocation `bash` classification (execpolicy)**: an execpolicy rule engine that evaluates `bash` per-invocation against allow/deny prefix rules (inspired by Codex CLI's pattern) was explored but deferred. The v1 `ToolEffect` enum is per-tool, not per-invocation, so `bash` is always `External`. Execpolicy requires a per-invocation evaluation path and is future work.
 - **`apply_patch` tool**: coding-specific; out of scope for a control plane for teams using AI
 - **LSP diagnostic feedback loop**: coding-specific
 - **ACI-style `file_read` pagination**: useful but marginal; `file_read` already has tier controls and can be enhanced in a minor version without an RFC
@@ -614,7 +614,7 @@ pub enum OrchestratorEvent {
 
 ## Open Questions
 
-1. **Resolved**: `shell_exec` classification. `shell_exec` is **always `External`** in v1. Even inside a sandbox, a shell command can escape via network or long-running subprocesses. Teams that need read-only access should use dedicated `Observational` tools (`grep_search`, `file_read`, `glob_find`). Dynamic per-invocation classification via execpolicy is deferred to future work (see §"Dropped From Scope"). (No further discussion needed.)
+1. **Resolved**: `bash` classification. `bash` is **always `External`** in v1. Even inside a sandbox, a shell command can escape via network or long-running subprocesses. Teams that need read-only access should use dedicated `Observational` tools (`grep_search`, `file_read`, `glob_find`). Dynamic per-invocation classification via execpolicy is deferred to future work (see §"Dropped From Scope"). (No further discussion needed.)
 
 2. **Resolved**: Plan-mode run billing. Plan-mode runs draw from a **separate exploration budget**, distinct from the project's execute-run budget. The exploration budget defaults to **10% of the project's execute-run budget** unless explicitly overridden. This is a default, not a hard cap — operators can configure the ratio per project. (No further discussion needed; baked into the Resolved Decisions at the top of this RFC.)
 
@@ -641,7 +641,7 @@ Proceed assuming:
 - the orchestrator's prompt builder consumes `VisibilityContext` from RFC 015 so agents see only tools from enabled plugins
 - `tool_output_token_limit` caps the tokens appended to context per tool call; full outputs remain in the tool invocation record for operator inspection
 - `cairn-memory` is unchanged; no new memory pipeline is built. Automatic ingestion of run artifacts and compacted content is out of scope for v1 (see §"Dropped From Scope"). Agents accumulate knowledge in cairn-memory only through explicit `memory_store` calls.
-- `shell_exec` is always `External` in v1; dynamic per-invocation classification via execpolicy is deferred to future work (see §"Dropped From Scope")
+- `bash` is always `External` in v1; dynamic per-invocation classification via execpolicy is deferred to future work (see §"Dropped From Scope")
 - the ~30 built-in tool handlers in `cairn-tools/src/builtins/` must be fully wired into the orchestrate registry before Plan mode ships (see §"v1 Tool Registration Pre-requisite" — this is a blocking implementation dependency, not a design change)
 - open questions listed above must be resolved before implementation begins
 

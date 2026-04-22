@@ -79,7 +79,7 @@ api POST /v1/memory/ingest \
 
 # ── Tool invocations ─────────────────────────────────────────────────────────
 echo -e "\n${BLD}Tool invocations:${RST}"
-for tool in memory_search web_fetch shell_exec; do
+for tool in memory_search web_fetch bash; do
   api POST /v1/events/append \
     "[{\"event_id\":\"evt_tool_${tool}_${SUFFIX}\",\"source\":${SRC},\"ownership\":${OWN},\"causation_id\":null,\"correlation_id\":null,\"payload\":{\"event\":\"tool_invocation_started\",\"project\":${PROJECT},\"invocation_id\":\"inv_${tool}_${SUFFIX}\",\"tool_name\":\"${tool}\",\"run_id\":\"${RUN1}\",\"task_id\":\"task_1_${SUFFIX}\",\"started_at_ms\":$(date +%s000)}}]"
 done

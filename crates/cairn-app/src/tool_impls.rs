@@ -447,8 +447,8 @@ pub fn build_tool_registry(
 /// Build the full tool registry with all Core tier tools for a specific run.
 ///
 /// Core tools are always in the system prompt — the agent doesn't need to
-/// call tool_search to discover file_read, shell_exec, etc. Agents run `git`
-/// and `gh` CLI directly through `shell_exec` — there are no dedicated
+/// call tool_search to discover file_read, bash, etc. Agents run `git`
+/// and `gh` CLI directly through `bash` — there are no dedicated
 /// git/gh wrapper tools. Integration-specific tools (github_api.*) are
 /// added separately by the integration plugin's `prepare_tool_registry()`.
 pub fn build_full_tool_registry(
@@ -456,7 +456,7 @@ pub fn build_full_tool_registry(
     working_dir: std::path::PathBuf,
 ) -> BuiltinToolRegistry {
     use cairn_tools::builtins::{
-        FileReadTool, FileWriteTool, GlobFindTool, GrepSearchTool, ScratchPadTool, ShellExecTool,
+        BashTool, FileReadTool, FileWriteTool, GlobFindTool, GrepSearchTool, ScratchPadTool,
         ToolSearchTool, WebFetchTool,
     };
 
@@ -468,8 +468,8 @@ pub fn build_full_tool_registry(
             .register(Arc::new(FileWriteTool::new(working_dir)))
             .register(Arc::new(GlobFindTool))
             .register(Arc::new(GrepSearchTool))
-            // Shell — agents invoke git/gh CLI through shell_exec
-            .register(Arc::new(ShellExecTool))
+            // Shell — agents invoke git/gh CLI through bash
+            .register(Arc::new(BashTool))
             // Utilities
             .register(Arc::new(WebFetchTool::default()))
             .register(Arc::new(ScratchPadTool::new())),
