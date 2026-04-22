@@ -1,24 +1,53 @@
 {
-  "id": "gen-1713657600-abcdef1234567890",
-  "provider": "Meta",
-  "model": "meta-llama/llama-3.2-3b-instruct:free",
-  "object": "chat.completion",
-  "created": 1713657600,
   "choices": [
     {
-      "index": 0,
       "finish_reason": "stop",
-      "native_finish_reason": "stop",
+      "index": 0,
+      "logprobs": null,
       "message": {
-        "role": "assistant",
-        "content": "Hello!",
-        "refusal": null
-      }
+        "content": "Hi!",
+        "reasoning": "The user wants me to say hello in one word. I should give a simple, friendly greeting in a single word.\n",
+        "reasoning_details": [
+          {
+            "format": "unknown",
+            "index": 0,
+            "text": "The user wants me to say hello in one word. I should give a simple, friendly greeting in a single word.\n",
+            "type": "reasoning.text"
+          }
+        ],
+        "refusal": null,
+        "role": "assistant"
+      },
+      "native_finish_reason": "stop"
     }
   ],
+  "created": 1776834341,
+  "id": "gen-1776834341-gWhPzwyA9gBqP3fGXzqC",
+  "model": "minimax/minimax-m2.5-20260211:free",
+  "object": "chat.completion",
+  "provider": "OpenInference",
+  "system_fingerprint": null,
   "usage": {
-    "prompt_tokens": 14,
-    "completion_tokens": 2,
-    "total_tokens": 16
+    "completion_tokens": 29,
+    "completion_tokens_details": {
+      "audio_tokens": 0,
+      "image_tokens": 0,
+      "reasoning_tokens": 27
+    },
+    "cost": 0,
+    "cost_details": {
+      "upstream_inference_completions_cost": 0,
+      "upstream_inference_cost": 0,
+      "upstream_inference_prompt_cost": 0
+    },
+    "is_byok": false,
+    "prompt_tokens": 44,
+    "prompt_tokens_details": {
+      "audio_tokens": 0,
+      "cache_write_tokens": 0,
+      "cached_tokens": 0,
+      "video_tokens": 0
+    },
+    "total_tokens": 73
   }
 }
