@@ -32,6 +32,7 @@ mod integration {
     pub mod test_engine;
     pub mod test_event_emission;
     pub mod test_instance_tag_filter;
+    pub mod test_scanner_filter_upstream;
     pub mod test_lease_history_subscriber;
     pub mod test_orchestrator_stream;
     pub mod test_run_lifecycle;

@@ -21,20 +21,25 @@ test-harness = ["dep:testcontainers", "dep:url"]
 # semver break is `ScriptError` gaining `#[non_exhaustive]`, which cairn
 # never matches exhaustively. Edition bumped to 2024 in FF; cairn
 # builds under edition 2021 unaffected.
-# Pinned to FF rev 81e08dc (RFC-012 Stage 1a: EngineBackend trait + EngineError
+# Pinned to FF rev 68c1b5b (RFC-012 Stage 1a: EngineBackend trait + EngineError
 # crate-move). Using git deps because FF#129 blocks the full 0.3.0 family
 # publish — only ff-core and ff-script are on crates.io at 0.3.0 today. When
 # FF#129 resolves, each `git = ..., rev = ...` line flips back to
 # `version = "0.3"`. Do NOT merge this prep branch before that happens.
-ff-core = { git = "https://github.com/avifenesh/FlowFabric.git", rev = "81e08dc" }
-ff-sdk = { git = "https://github.com/avifenesh/FlowFabric.git", rev = "81e08dc" }
-ff-engine = { git = "https://github.com/avifenesh/FlowFabric.git", rev = "81e08dc" }
-ff-scheduler = { git = "https://github.com/avifenesh/FlowFabric.git", rev = "81e08dc" }
-ff-script = { git = "https://github.com/avifenesh/FlowFabric.git", rev = "81e08dc" }
-ff-backend-valkey = { git = "https://github.com/avifenesh/FlowFabric.git", rev = "81e08dc" }
-# ferriskey 0.3 ships inside FF at rev 81e08dc. Must share a single
+ff-core = { git = "https://github.com/avifenesh/FlowFabric.git", rev = "68c1b5b" }
+ff-sdk = { git = "https://github.com/avifenesh/FlowFabric.git", rev = "68c1b5b" }
+ff-engine = { git = "https://github.com/avifenesh/FlowFabric.git", rev = "68c1b5b" }
+ff-scheduler = { git = "https://github.com/avifenesh/FlowFabric.git", rev = "68c1b5b" }
+ff-script = { git = "https://github.com/avifenesh/FlowFabric.git", rev = "68c1b5b" }
+ff-backend-valkey = { git = "https://github.com/avifenesh/FlowFabric.git", rev = "68c1b5b" }
+# Needed for `Engine::start_with_completions` which takes an
+# `Arc<ff_observability::Metrics>`. ff-engine does NOT re-export the
+# type; pulled in at the same rev to stay lock-step with FF's internal
+# minor-version churn.
+ff-observability = { git = "https://github.com/avifenesh/FlowFabric.git", rev = "68c1b5b" }
+# ferriskey 0.3 ships inside FF at rev 68c1b5b. Must share a single
 # version with FF crates to avoid duplicate-crate type mismatches.
-ferriskey = { git = "https://github.com/avifenesh/FlowFabric.git", rev = "81e08dc" }
+ferriskey = { git = "https://github.com/avifenesh/FlowFabric.git", rev = "68c1b5b" }
 
 # Cairn crates
 cairn-domain = { path = "../cairn-domain" }
@@ -68,3 +73,8 @@ uuid = { version = "1", features = ["v4"] }
 # the real blanket impl (not a mock). Dev-only — library code in
 # cairn-fabric does not depend on cairn-orchestrator.
 cairn-orchestrator = { path = "../cairn-orchestrator" }
+# Needed by `test_scanner_filter_upstream` to `.next()` on FF's
+# `CompletionStream`. Dev-only — production cairn-fabric consumes the
+# stream via `ff_engine::Engine::start_with_completions`, which does
+# its own hand-rolled `poll_next` loop and doesn't pull `futures` in.
+futures = "0.3"

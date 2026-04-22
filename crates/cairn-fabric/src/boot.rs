@@ -1,9 +1,12 @@
 use std::sync::Arc;
 
 use ferriskey::Client;
+use ff_backend_valkey::ValkeyBackend;
+use ff_core::backend::{ScannerFilter, ValkeyConnection};
+use ff_core::completion_backend::CompletionBackend;
 use ff_core::keys::IndexKeys;
 use ff_core::partition::{Partition, PartitionConfig, PartitionFamily};
-use ff_engine::{CompletionListenerConfig, Engine, EngineConfig};
+use ff_engine::{Engine, EngineConfig};
 
 use crate::config::FabricConfig;
 use crate::error::FabricError;
@@ -115,31 +118,93 @@ impl FabricRuntime {
         // CROSSSLOT risk under cluster.
         seed_waitpoint_hmac_secret_if_configured(&client, &config, &partition_config).await?;
 
-        // Enable the push-based DAG completion listener. FF subscribes
-        // to `ff:dag:completions` on a dedicated RESP3 connection and
-        // dispatches `ff_resolve_dependency` FCALLs synchronously with
-        // each terminal transition — DAG latency drops from
-        // `reconciler_interval × levels` (15s × depth) to
-        // `~RTT × levels` (sub-ms × depth). The reconciler keeps
-        // running as a safety net for listener reconnects and any
-        // completion that missed the publish path.
+        // Build the per-consumer `ScannerFilter` (FF PR #127 / issue #122).
         //
-        // This adds a third Valkey connection per FabricRuntime (main
-        // + lease-history tap + completion listener). Trivial cost.
-        let completion_listener = CompletionListenerConfig {
-            addresses: vec![(config.valkey_host.clone(), config.valkey_port)],
-            tls: config.tls,
-            cluster: config.cluster,
-        };
+        // Scope choice — **instance_tag only, namespace is `None`**.
+        //
+        // FF's `ScannerFilter` has two axes: `namespace` (matched against
+        // `exec_core.namespace`) and `instance_tag` (matched against the
+        // `cairn.instance_id` entry on the execution's tags hash).
+        //
+        // Cairn's `exec_core.namespace` is written per-*tenant*
+        // (`id_map::tenant_to_namespace(project.tenant_id)`, see
+        // `services/run_service.rs::namespace` and the session-service
+        // sibling). A single cairn-fabric process serves many tenants,
+        // so wiring `ScannerFilter.namespace` to any one of them would
+        // collapse scanner scope to just that tenant's executions.
+        // Tenant scoping is enforced at the cairn-store projection
+        // layer, not via FF scanners — so we leave this axis unset.
+        //
+        // `instance_tag`, by contrast, is written per-*cairn-app
+        // instance* (task_service + run_service `HSET cairn.instance_id
+        // <worker_instance_id>`). It's the exact axis the cross-instance
+        // isolation invariant needs — two cairn-apps sharing a Valkey
+        // must each see only their own executions' scanner cycles and
+        // completion frames.
+        //
+        // Supersedes cairn's PR #106 client-side filter in
+        // `LeaseHistorySubscriber::fetch_entity_context` — the upstream
+        // backend filter now drops foreign frames before they hit the
+        // cairn subscriber, and the matching predicate on the
+        // subscribe_completions_filtered stream keeps this engine's
+        // DAG dispatch loop blind to foreign completions.
+        // `ScannerFilter` is `#[non_exhaustive]` on the FF side
+        // (future dimensions like `lane_id` / `worker_instance` can
+        // land additively), so we can't use a bare struct literal or
+        // struct-update syntax. Mutate after `default()` instead.
+        let mut scanner_filter = ScannerFilter::default();
+        scanner_filter.instance_tag = Some((
+            "cairn.instance_id".to_owned(),
+            config.worker_instance_id.as_str().to_owned(),
+        ));
+
+        // Construct a ValkeyBackend around the already-dialed client so
+        // the completion subscriber can reuse a single connection
+        // topology and open its dedicated RESP3 subscriber from the
+        // retained `ValkeyConnection`. This replaces FF 0.3.0's
+        // `CompletionListenerConfig` — PR #127 removed the implicit
+        // listener field on EngineConfig in favour of an explicit
+        // stream handed to `Engine::start_with_completions`.
+        let mut valkey_conn = ValkeyConnection::new(config.valkey_host.clone(), config.valkey_port);
+        valkey_conn.tls = config.tls;
+        valkey_conn.cluster = config.cluster;
+        let backend = ValkeyBackend::from_client_partitions_and_connection(
+            client.clone(),
+            partition_config,
+            valkey_conn,
+        );
+
+        // Open the filtered completion stream. The backend applies the
+        // filter at push time (one HGET on the exec's tags hash per
+        // frame when `instance_tag` is set), so foreign completions
+        // never reach the dispatch loop. This closes the
+        // cross-instance leak that cairn's PR #106 addressed
+        // client-side and the FF#122 data-plane audit flagged in the
+        // DAG dispatch path.
+        let completion_stream = backend
+            .subscribe_completions_filtered(&scanner_filter)
+            .await
+            .map_err(|e| FabricError::Valkey(format!("subscribe_completions_filtered: {e}")))?;
 
         let engine_config = EngineConfig {
             partition_config,
             lanes: vec![config.lane_id.clone()],
-            completion_listener: Some(completion_listener),
+            scanner_filter: scanner_filter.clone(),
             ..EngineConfig::default()
         };
 
-        let engine = Engine::start(engine_config, client.clone());
+        // `Engine::start_with_completions` is the PR #127 replacement
+        // for the old `completion_listener: Some(_)` field. Supplying
+        // the stream here wires push-based DAG dispatch; scanners also
+        // honour `scanner_filter` so every execution-shaped scan
+        // (lease_expiry, attempt_timeout, etc.) skips foreign
+        // candidates before the scanner FCALL hot path.
+        let engine = Engine::start_with_completions(
+            engine_config,
+            client.clone(),
+            std::sync::Arc::new(ff_observability::Metrics::new()),
+            completion_stream,
+        );
         tracing::info!("fabric runtime started");
 
         Ok(Self {
