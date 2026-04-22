@@ -331,7 +331,8 @@ crates/
 ui/                React + TypeScript operator dashboard
 docs/
   design/rfcs/     RFC specifications (001–023)
-  api-reference.md Full endpoint reference
+  api/             Per-subject HTTP API reference (start here)
+  api-reference.md Redirect stub → docs/api/
   deployment.md    Docker, Postgres, TLS, production hardening
   operations/
     rfc020-recovery.md  Readiness endpoints and crash-recovery behaviour

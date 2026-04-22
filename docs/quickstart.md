@@ -198,7 +198,7 @@ Exercises the full lifecycle: session, run, task, approval, eval, cancel, observ
 
 ## Next steps
 
-- Browse the [API reference](./api-quick-reference.md) for the full route catalog
+- Browse the [API reference](./api/README.md) for the full route catalog (grouped by subject)
 - Read `CLAUDE.md` at the repo root for architecture details
 - Run `cargo test --workspace` for the full test suite (~2700 tests)
 - Switch to team mode: `cargo run -p cairn-app -- --mode team --db postgres://user:pass@host/db`
