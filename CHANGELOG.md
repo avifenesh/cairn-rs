@@ -24,6 +24,23 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- **Engine trait decoupling — Phase C (tag writes).** Cairn services
+  no longer call `ferriskey::Client::hset` on FF-owned hashes
+  directly. Three new trait methods own the `cairn.*` namespace on
+  the flow-core and execution-tags hashes:
+  [`Engine::set_flow_tag`], [`Engine::set_flow_tags`] (bulk, single
+  round-trip, all-or-nothing validation), and
+  [`Engine::set_execution_tag`]. Keys are guarded against collision
+  with FF's own hash fields via a `^[a-z][a-z0-9_]*\.` namespace
+  rule (rejected as `FabricError::Validation`). `FabricSessionService`
+  is the only caller migrated in this phase — its three direct
+  `HSET cairn.project|session_id|archived` sites now route through
+  the trait. No caller-facing API change; tag writes produce
+  identical Valkey state. The `instance_tag_backfill` one-shot
+  scanner keeps its direct `HSET` because it operates on raw scan
+  keys rather than typed `ExecutionId`s (documented in
+  `engine/mod.rs` scope notes as an accepted exception with a
+  finite lifetime).
 - **FlowFabric bumped to 0.3.2.** Closes #129 (FlowFabric family publish).
   Adopts RFC-012 Stage 1a: `EngineBackend` trait + `EngineError` crate-move
   from `ff-sdk` to `ff-core`. All seven FF crates consumed from crates.io at

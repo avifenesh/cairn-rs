@@ -28,8 +28,6 @@
 //! `SessionRecord` construction.
 //!
 //! **Not in scope (yet)**:
-//! - Tag writes (Phase C). Today cairn uses direct `HSET cairn.*` in
-//!   `session_service`; that becomes `engine.set_flow_tag(...)` later.
 //! - FCALL ARGV pre-reads (Phase D). The ~12 `hget ctx.core(),
 //!   "current_attempt_id"` sites before FCALLs stay for now.
 //! - Typed error model (Phase E). FCALL errors continue arriving as
@@ -37,9 +35,25 @@
 //!   [`EngineError`](crate::error::FabricError) absorbs them later.
 //! - Cairn-owned state (worker/quota/budget keyspaces). Those
 //!   `HSET`s are cairn's own data, not a layering violation.
+//! - `instance_tag_backfill` one-shot scanner. It operates on raw
+//!   `ff:exec:*:tags` scan keys, not typed [`ExecutionId`]s;
+//!   routing it through the trait would require a raw-key
+//!   escape-hatch that re-exposes the Valkey layout. The backfill
+//!   is a migration utility with a finite lifetime — it keeps its
+//!   direct `HSET` until its sunset.
+//!
+//! **Phase C (shipped)**: Tag writes. Cairn services no longer call
+//! `client.hset(&fctx.core(), "cairn.*", …)` directly —
+//! [`Engine::set_flow_tag`] and [`Engine::set_flow_tags`] own the
+//! flow-core namespace writes, and [`Engine::set_execution_tag`]
+//! owns the execution-tags-hash writes. Enforced by the workspace
+//! `clippy.toml` disallowed-methods lint on `ferriskey::Client::hset`
+//! outside `engine/valkey_impl.rs`.
 
 pub mod snapshots;
 pub mod valkey_impl;
+
+use std::collections::BTreeMap;
 
 use async_trait::async_trait;
 use ff_core::types::{EdgeId, ExecutionId, FlowId};
@@ -119,4 +133,47 @@ pub trait Engine: Send + Sync {
         id: &ExecutionId,
         key: &str,
     ) -> Result<Option<String>, FabricError>;
+
+    /// Set a single tag on an execution's tag hash.
+    ///
+    /// Namespace-guarded: `key` must match `^[a-z][a-z0-9_]*\.` —
+    /// one lowercase alpha-underscore prefix, then a `.`, then
+    /// anything. Cairn owns the `cairn.*` namespace; FF's own hash
+    /// fields have no `.`, so the rule is a mechanical guard
+    /// against accidental collision with FF-managed fields. Keys
+    /// that fail the rule return [`FabricError::Validation`].
+    ///
+    /// Callers never see the Valkey hash layout — the impl
+    /// constructs the execution's tag key internally from the
+    /// `ExecutionId` + partition config.
+    async fn set_execution_tag(
+        &self,
+        id: &ExecutionId,
+        key: &str,
+        value: &str,
+    ) -> Result<(), FabricError>;
+
+    /// Set a single tag on a flow's core hash.
+    ///
+    /// Namespace-guarded: see [`Self::set_execution_tag`] for the
+    /// rule. Callers never see the Valkey hash layout — the impl
+    /// constructs the flow's core key internally.
+    async fn set_flow_tag(&self, id: &FlowId, key: &str, value: &str) -> Result<(), FabricError>;
+
+    /// Bulk-set flow tags in a single round-trip.
+    ///
+    /// Validation is **all-or-nothing**: if any key in `tags`
+    /// fails the namespace rule ([`Self::set_execution_tag`]) the
+    /// entire batch is rejected with [`FabricError::Validation`]
+    /// and no write is issued. This preserves the "no partial
+    /// writes" guarantee cairn's session creation path relies on
+    /// (both `cairn.project` and `cairn.session_id` must be
+    /// present before the bridge event fires).
+    ///
+    /// An empty map is a no-op that returns `Ok(())`.
+    async fn set_flow_tags(
+        &self,
+        id: &FlowId,
+        tags: &BTreeMap<String, String>,
+    ) -> Result<(), FabricError>;
 }
