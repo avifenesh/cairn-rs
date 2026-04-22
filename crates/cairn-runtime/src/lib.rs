@@ -111,8 +111,8 @@ pub use runtime_config::{
     KEY_WORKER_URL,
 };
 pub use services::{
-    ApprovalPolicyServiceImpl, ApprovalServiceImpl, CheckpointServiceImpl, EvalRunServiceImpl,
-    ExternalWorkerService, ExternalWorkerServiceImpl, IngestJobServiceImpl,
+    AllowlistRevokedRun, ApprovalPolicyServiceImpl, ApprovalServiceImpl, CheckpointServiceImpl,
+    EvalRunServiceImpl, ExternalWorkerService, ExternalWorkerServiceImpl, IngestJobServiceImpl,
     LlmObservabilityServiceImpl, MailboxServiceImpl, ProjectServiceImpl, PromptAssetServiceImpl,
     PromptReleaseServiceImpl, PromptVersionServiceImpl, RecoveryService, RecoveryServiceImpl,
     SandboxLostRun, SignalServiceImpl, SimpleRouteResolver, TenantServiceImpl,

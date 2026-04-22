@@ -64,6 +64,20 @@ mod support;
 use serde_json::Value;
 use support::live_fabric::LiveHarness;
 
+/// Serialise env-var-driven test-only seed hooks so two parallel tests
+/// do not contaminate each other's cairn-app subprocess via inherited
+/// environment. Both `CAIRN_TEST_SEED_LOST_SANDBOX` and
+/// `CAIRN_TEST_SEED_ALLOWLIST_REVOKED` are read at subprocess startup
+/// and `std::env::set_var` is process-global; tests must hold this
+/// mutex across `set_var` + harness spawn (which `fork`s the child and
+/// therefore inherits the env snapshot at that instant) + `remove_var`.
+///
+/// Holding the guard across an `.await` is exactly the point — a
+/// non-awaiting critical section would release before the subprocess
+/// spawn. `#[allow(clippy::await_holding_lock)]` on the call sites keeps
+/// the deliberate semantics obvious.
+static ENV_SEED_GUARD: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 // ── Shared helpers ──────────────────────────────────────────────────────────
 
 /// Fetch `/health/ready` and return the parsed JSON body. The endpoint
@@ -274,42 +288,104 @@ async fn sandbox_reattach_overlay_or_reflink() {
 /// is reachable (so the revoke step will work) but cannot verify the
 /// full contract.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "SandboxService::recover_all does not check repo allowlist; \
-            no sandbox_lost / AllowlistRevoked recovery wiring yet. See \
-            main.rs:1086 and workspace/src/sandbox/service.rs:575."]
+#[allow(clippy::await_holding_lock)] // See `ENV_SEED_GUARD` doc-comment.
 async fn sandbox_preserved_allowlist_revoked() {
+    // Same shape as test #4 (`sandbox_lost_transitions_run_to_failed`):
+    // seed via `CAIRN_TEST_SEED_ALLOWLIST_REVOKED` before spawning the
+    // cairn-app subprocess so the child inherits the env var. The
+    // subprocess writes a registry sidecar for a `SandboxBase::Repo`
+    // sandbox whose bound repo is NOT on the project allowlist.
+    // `SandboxService::recover_all` emits `SandboxAllowlistRevoked`;
+    // `RecoveryService::recover_all` synthesises an approval and
+    // transitions the run to `WaitingApproval`.
+    let run_id = format!("run-sbx-revoke-{}", uuid::Uuid::new_v4().simple());
+    let project_id = format!("p_sbxrevoke_{}", uuid::Uuid::new_v4().simple());
+    let tenant_id = "t_sbxrevoke";
+    let workspace_id = "w_sbxrevoke";
+    let repo_id = "octocat/hello";
+    let spec = format!("{run_id}:{tenant_id}:{workspace_id}:{project_id}:{repo_id}");
+    let _env_guard = ENV_SEED_GUARD.lock().expect("env seed guard poisoned");
+    std::env::set_var("CAIRN_TEST_SEED_ALLOWLIST_REVOKED", &spec);
+
     let mut h = LiveHarness::setup_with_sqlite().await;
+    std::env::remove_var("CAIRN_TEST_SEED_ALLOWLIST_REVOKED");
+    drop(_env_guard);
 
-    // Precondition probe: the DELETE endpoint must exist when we un-ignore.
-    // We use a harmless 404 path (no such repo) and accept any
-    // 4xx — the point is that the router recognises the method+path.
-    let probe = h
-        .client()
-        .delete(format!(
-            "{}/v1/projects/{}/repos/nonexistent/repo",
-            h.base_url, h.project
-        ))
-        .bearer_auth(&h.admin_token)
-        .header("X-Cairn-Tenant", &h.tenant)
-        .header("X-Cairn-Workspace", &h.workspace)
-        .header("X-Cairn-Project", &h.project)
-        .send()
-        .await
-        .expect("DELETE /v1/projects/:project/repos/... reaches server");
-    let status = probe.status().as_u16();
-    assert!(
-        status < 500,
-        "DELETE endpoint unreachable (got {status}) — RFC 016 surface \
-         has regressed; fix before un-ignoring this test."
-    );
-
-    // Placeholder restart so un-ignoring has the scaffolding in place.
+    // SIGKILL + restart exercises the "SIGKILL, restart, confirm"
+    // phrasing in RFC 020 §"Run recovery matrix". The seeder is
+    // idempotent — on boot 2 the run is `WaitingApproval` (not
+    // Pending), so the seed events are skipped and the registry
+    // entry's `allowlist_revoked_handled` flag blocks re-emission.
     h.sigkill_and_restart().await.expect("sigkill + restart");
 
-    // When un-ignored, assert the event log contains a
-    // `sandbox_allowlist_revoked` event emitted during boot-2 recovery,
-    // and that the run moved to `waiting_approval`.
-    let _ = fetch_readiness(&h).await;
+    // Poll `GET /v1/runs/:id` until the run surfaces as
+    // `waiting_approval`. The projection upsert on boot 1 appends
+    // events; the restart replays them, so the read is consistent
+    // post-restart.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    let mut last_state: Option<String> = None;
+    let mut last_body: Option<Value> = None;
+    while std::time::Instant::now() < deadline {
+        let res = h
+            .client()
+            .get(format!("{}/v1/runs/{}", h.base_url, run_id))
+            .bearer_auth(&h.admin_token)
+            .header("X-Cairn-Tenant", tenant_id)
+            .header("X-Cairn-Workspace", workspace_id)
+            .send()
+            .await
+            .expect("GET /v1/runs/:id reaches server");
+        if res.status().as_u16() == 200 {
+            let body: Value = res.json().await.expect("run body parses as JSON");
+            let state = body
+                .get("run")
+                .and_then(|r| r.get("state"))
+                .and_then(Value::as_str)
+                .map(str::to_owned);
+            if state.as_deref() == Some("waiting_approval") {
+                // Additional assertion: the synthesised approval exists
+                // under the project and points at this run.
+                let approvals_res = h
+                    .client()
+                    .get(format!(
+                        "{}/v1/approvals?tenant_id={tenant_id}&workspace_id={workspace_id}&project_id={project_id}",
+                        h.base_url,
+                    ))
+                    .bearer_auth(&h.admin_token)
+                    .send()
+                    .await
+                    .expect("GET approvals reaches server");
+                if approvals_res.status().as_u16() == 200 {
+                    let approvals: Value = approvals_res
+                        .json()
+                        .await
+                        .expect("approvals body parses as JSON");
+                    let items = approvals
+                        .get("items")
+                        .and_then(Value::as_array)
+                        .or_else(|| approvals.as_array())
+                        .cloned()
+                        .unwrap_or_default();
+                    let matched = items
+                        .iter()
+                        .any(|a| a.get("run_id").and_then(Value::as_str) == Some(run_id.as_str()));
+                    assert!(
+                        matched,
+                        "expected synthesised approval for run {run_id}; got approvals={items:?}",
+                    );
+                }
+                return;
+            }
+            last_state = state;
+            last_body = Some(body);
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+    panic!(
+        "run {run_id} did not transition to `waiting_approval` within 5s after \
+         sandbox_allowlist_revoked recovery. last_state={last_state:?}, body={:?}",
+        last_body
+    );
 }
 
 // ── Test #3b: sandbox preserved: base-revision drift ────────────────────────
@@ -427,6 +503,7 @@ async fn sandbox_preserved_base_revision_drift_overlay_only() {
 /// seeder is idempotent — on the second boot the run is already
 /// terminal and the seed is a no-op, so recovery re-runs cleanly.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[allow(clippy::await_holding_lock)] // See `ENV_SEED_GUARD` doc-comment.
 async fn sandbox_lost_transitions_run_to_failed() {
     // Seed the env var BEFORE spawning the subprocess. The run_id is
     // harness-scoped so concurrent test runs don't collide in the
@@ -438,13 +515,18 @@ async fn sandbox_lost_transitions_run_to_failed() {
     );
     // Safety: tests share a process, but the env var is only read at
     // cairn-app subprocess startup. `set_var` before `setup_with_sqlite`
-    // guarantees the child inherits it.
+    // guarantees the child inherits it. Hold `ENV_SEED_GUARD` across
+    // the set/spawn/remove window so the parallel `sandbox_preserved_
+    // allowlist_revoked` test does not race with this one via its own
+    // `CAIRN_TEST_SEED_*` env var.
+    let _env_guard = ENV_SEED_GUARD.lock().expect("env seed guard poisoned");
     std::env::set_var("CAIRN_TEST_SEED_LOST_SANDBOX", &spec);
 
     let mut h = LiveHarness::setup_with_sqlite().await;
     // Clean up the env var so later tests in the same process don't
     // inherit the seed spec into their own subprocess spawns.
     std::env::remove_var("CAIRN_TEST_SEED_LOST_SANDBOX");
+    drop(_env_guard);
 
     // Boot 1 ran recovery and (on success) transitioned the seeded
     // Running run to Failed. The SIGKILL+restart below proves the

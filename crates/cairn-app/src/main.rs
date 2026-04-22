@@ -1109,38 +1109,77 @@ async fn main() {
         }
     }
 
+    // Test-only: seed an allowlist-revoked sandbox scenario so the RFC
+    // 020 `sandbox_preserved_allowlist_revoked` integration test can
+    // exercise the emission + approval-synthesis path without a real
+    // sandbox provisioning HTTP surface. Same release-stripping
+    // discipline as `CAIRN_TEST_SEED_LOST_SANDBOX` above.
+    //
+    // Format: `CAIRN_TEST_SEED_ALLOWLIST_REVOKED=<run_id>:<tenant>:<workspace>:<project>:<repo_id>`.
+    // `<repo_id>` is the canonical `owner/repo` string. The seeder
+    // deliberately does NOT add the repo to the project allowlist —
+    // that's the whole point of the test — so the recovery sweep reads
+    // `is_allowed == false` and emits `SandboxAllowlistRevoked`.
+    #[cfg(debug_assertions)]
+    if let Ok(spec) = std::env::var("CAIRN_TEST_SEED_ALLOWLIST_REVOKED") {
+        if let Err(error) = seed_allowlist_revoked_sandbox_for_test(
+            &lib_state,
+            lib_state.sandbox_service.base_dir(),
+            &spec,
+        )
+        .await
+        {
+            eprintln!("CAIRN_TEST_SEED_ALLOWLIST_REVOKED seed failed: {error}");
+        }
+    }
+
     // Step 4a: sandbox reconciliation.
     //
     // `lost_runs` is threaded into Track 1 run recovery below so the
     // run-level service can transition the bound runs to `failed` with
     // `reason: sandbox_lost` per RFC 020 §"Run recovery matrix".
-    let sandbox_lost_runs: Vec<cairn_runtime::SandboxLostRun> =
-        match lib_state.sandbox_service.recover_all().await {
-            Ok(summary) => {
-                if summary.reconnected > 0
-                    || summary.preserved > 0
-                    || summary.failed > 0
-                    || summary.lost > 0
-                {
-                    eprintln!(
-                        "sandbox recovery: reconnected={} preserved={} failed={} lost={}",
-                        summary.reconnected, summary.preserved, summary.failed, summary.lost
-                    );
-                }
-                let count = (summary.reconnected as u64).saturating_add(summary.preserved as u64);
-                lib_state.readiness.update_branch("4a", |b| {
-                    b.sandboxes = BranchStatus::complete(count);
-                });
-                summary.lost_runs
+    let (sandbox_lost_runs, allowlist_revoked_runs): (
+        Vec<cairn_runtime::SandboxLostRun>,
+        Vec<cairn_runtime::AllowlistRevokedRun>,
+    ) = match lib_state.sandbox_service.recover_all().await {
+        Ok(summary) => {
+            if summary.reconnected > 0
+                || summary.preserved > 0
+                || summary.failed > 0
+                || summary.lost > 0
+                || summary.preserved_allowlist_revoked > 0
+            {
+                eprintln!(
+                    "sandbox recovery: reconnected={} preserved={} failed={} lost={} \
+                     allowlist_revoked={}",
+                    summary.reconnected,
+                    summary.preserved,
+                    summary.failed,
+                    summary.lost,
+                    summary.preserved_allowlist_revoked,
+                );
             }
-            Err(error) => {
-                eprintln!("sandbox recovery failed: {error}");
-                lib_state.readiness.update_branch("4a", |b| {
-                    b.sandboxes = BranchStatus::failed(error.to_string());
-                });
-                Vec::new()
-            }
-        };
+            let count = (summary.reconnected as u64)
+                .saturating_add(summary.preserved as u64)
+                .saturating_add(summary.preserved_allowlist_revoked as u64);
+            lib_state.readiness.update_branch("4a", |b| {
+                b.sandboxes = BranchStatus::complete(count);
+            });
+            let revoked: Vec<cairn_runtime::AllowlistRevokedRun> = summary
+                .allowlist_revoked_runs
+                .into_iter()
+                .map(|(run, project, repo)| (run, project, repo.as_str().to_owned()))
+                .collect();
+            (summary.lost_runs, revoked)
+        }
+        Err(error) => {
+            eprintln!("sandbox recovery failed: {error}");
+            lib_state.readiness.update_branch("4a", |b| {
+                b.sandboxes = BranchStatus::failed(error.to_string());
+            });
+            (Vec::new(), Vec::new())
+        }
+    };
 
     // ── RFC 020 Track 1: run-level recovery ──────────────────────────────
     //
@@ -1168,6 +1207,7 @@ async fn main() {
             &recovery_service,
             &boot_id,
             &sandbox_lost_runs,
+            &allowlist_revoked_runs,
         )
         .await
         {
@@ -1473,6 +1513,152 @@ async fn seed_lost_sandbox_for_test(
     event_id = cairn_domain::EventId::new(format!("seed-lost-run-running-{}", parts[0]));
     envelopes.push(EventEnvelope::for_runtime_event(
         event_id,
+        EventSource::Runtime,
+        RuntimeEvent::RunStateChanged(RunStateChanged {
+            project: project.clone(),
+            run_id: run_id.clone(),
+            transition: StateTransition {
+                from: Some(RunState::Pending),
+                to: RunState::Running,
+            },
+            failure_class: None,
+            pause_reason: None,
+            resume_trigger: None,
+        }),
+    ));
+    lib_state
+        .runtime
+        .store
+        .append(&envelopes)
+        .await
+        .map_err(|e| format!("append seed events: {e}"))?;
+    Ok(())
+}
+
+/// Test-only scaffolding for the RFC 020
+/// `sandbox_preserved_allowlist_revoked` integration test (3a).
+///
+/// Seeds a recovery registry sidecar for a `SandboxBase::Repo` sandbox
+/// whose bound repo is deliberately NOT added to the project allowlist.
+/// The recovery sweep reads `ProjectRepoAccessService::is_allowed`,
+/// which returns `false`, and emits `SandboxAllowlistRevoked`. The
+/// run-level recovery service then synthesises an approval and
+/// transitions the seeded Running run to `WaitingApproval`.
+///
+/// Also writes a stub directory at the sandbox path so the entry is NOT
+/// classified as `SandboxLost` (which keys off `path.exists() ==
+/// false`). The stub is empty — real provisioning creates an overlay
+/// layout here, but the allowlist-revoked sweep never reads it.
+///
+/// `#[cfg(debug_assertions)]` strips this symbol from release builds so
+/// a production cairn-app cannot be coerced into injecting fake sandbox
+/// state into its store or allowlist.
+///
+/// Spec format: `<run_id>:<tenant>:<workspace>:<project>:<repo_id>`.
+#[cfg(debug_assertions)]
+async fn seed_allowlist_revoked_sandbox_for_test(
+    lib_state: &cairn_app::AppState,
+    sandbox_base_dir: &std::path::Path,
+    spec: &str,
+) -> Result<(), String> {
+    use cairn_domain::{
+        EventEnvelope, EventSource, ProjectKey, RunCreated, RunId, RunState, RunStateChanged,
+        RuntimeEvent, SessionCreated, SessionId, StateTransition,
+    };
+
+    let parts: Vec<&str> = spec.splitn(5, ':').collect();
+    if parts.len() != 5 {
+        return Err(format!(
+            "expected <run_id>:<tenant>:<workspace>:<project>:<repo_id>, got {spec}"
+        ));
+    }
+    let run_id = RunId::new(parts[0]);
+    let project = ProjectKey::new(parts[1], parts[2], parts[3]);
+    let repo_id = cairn_workspace::RepoId::new(parts[4]);
+    let session_id = SessionId::new(format!("sess-{}", parts[0]));
+    let sandbox_id = format!("sbx-{}", parts[0]);
+
+    // Seed an *unrelated* repo into the allowlist so the project is
+    // "authoritative" under the Bugbot high-1 gate in
+    // `SandboxService::recover_all`. The bound repo (`parts[4]`) is
+    // deliberately NOT added; `is_allowed(bound_repo) == false` is
+    // what makes recovery emit `SandboxAllowlistRevoked`.
+    {
+        use cairn_domain::{ActorRef, OperatorId, RepoAccessContext};
+        let ctx = RepoAccessContext {
+            project: project.clone(),
+        };
+        let sentinel = cairn_workspace::RepoId::new("cairn-test/allowlist-sentinel");
+        lib_state
+            .project_repo_access
+            .allow(
+                &ctx,
+                &sentinel,
+                ActorRef::Operator {
+                    operator_id: OperatorId::new("test-seed"),
+                },
+            )
+            .await
+            .map_err(|e| format!("seed allowlist sentinel: {e}"))?;
+    }
+
+    // Idempotency: on sigkill+restart the run is no longer Running and
+    // re-seeding must be a no-op. The registry entry's
+    // `allowlist_revoked_handled` flag survives the restart via the
+    // sidecar file, so a second sweep is already a no-op on the
+    // workspace side — here we just skip event seeding.
+    use cairn_store::projections::RunReadModel;
+    if let Ok(Some(existing)) = lib_state.runtime.store.get(&run_id).await {
+        if !matches!(existing.state, RunState::Pending) {
+            return Ok(());
+        }
+    }
+
+    // Write a stub sandbox directory at the expected path so the
+    // lost-sweep skips this entry (path.exists() == true).
+    let _ = sandbox_base_dir;
+    let sandbox_path = lib_state.sandbox_service.base_dir().join(&sandbox_id);
+    std::fs::create_dir_all(&sandbox_path).map_err(|e| format!("create stub sandbox dir: {e}"))?;
+
+    lib_state
+        .sandbox_service
+        .seed_registry_entry_for_test_with_repo(
+            cairn_workspace::SandboxId::new(sandbox_id.clone()),
+            run_id.clone(),
+            project.clone(),
+            cairn_workspace::SandboxStrategy::Overlay,
+            sandbox_path,
+            Some(repo_id),
+        )
+        .map_err(|e| format!("seed registry entry: {e}"))?;
+
+    // Seed the store events so recovery sees a Running run bound to
+    // the seeded sandbox. NOTE: the repo is deliberately NOT added to
+    // `lib_state.project_repo_access`; that's what makes the recovery
+    // sweep emit `SandboxAllowlistRevoked`.
+    let mut envelopes: Vec<EventEnvelope<RuntimeEvent>> = Vec::new();
+    envelopes.push(EventEnvelope::for_runtime_event(
+        cairn_domain::EventId::new(format!("seed-revoked-session-{}", parts[0])),
+        EventSource::Runtime,
+        RuntimeEvent::SessionCreated(SessionCreated {
+            project: project.clone(),
+            session_id: session_id.clone(),
+        }),
+    ));
+    envelopes.push(EventEnvelope::for_runtime_event(
+        cairn_domain::EventId::new(format!("seed-revoked-run-created-{}", parts[0])),
+        EventSource::Runtime,
+        RuntimeEvent::RunCreated(RunCreated {
+            project: project.clone(),
+            session_id: session_id.clone(),
+            run_id: run_id.clone(),
+            parent_run_id: None,
+            prompt_release_id: None,
+            agent_role_id: None,
+        }),
+    ));
+    envelopes.push(EventEnvelope::for_runtime_event(
+        cairn_domain::EventId::new(format!("seed-revoked-run-running-{}", parts[0])),
         EventSource::Runtime,
         RuntimeEvent::RunStateChanged(RunStateChanged {
             project: project.clone(),
