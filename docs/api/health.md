@@ -1,6 +1,6 @@
 # Health, Metrics, and Service Metadata
 
-Liveness, readiness, Prometheus scrape targets, OpenAPI/Swagger JSON, version, system info, and other unauthenticated or meta-surface endpoints. These routes are the minimum operator-facing surface for ops tooling.
+Liveness, readiness, Prometheus scrape targets, OpenAPI/Swagger JSON, version, system info, costs, and other unauthenticated or meta-surface endpoints. These routes are the minimum operator-facing surface for ops tooling.
 
 Source of truth: [`tests/compat/http_routes.tsv`](../../tests/compat/http_routes.tsv). Drift from this table against the live router is enforced by `cargo test -p cairn-api --test compat_catalog_sync`.
 

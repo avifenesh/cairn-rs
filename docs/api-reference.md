@@ -1,6 +1,6 @@
 # API Reference (moved)
 
-The per-endpoint HTTP reference has moved to [`docs/api/`](./api/README.md), split by subject. The canonical route inventory is [`tests/compat/http_routes.tsv`](../tests/compat/http_routes.tsv) — 443 routes, kept in sync with the live router by `cargo test -p cairn-api --test compat_catalog_sync`.
+The per-endpoint HTTP reference has moved to [`docs/api/`](./api/README.md), split by subject. The canonical route inventory is [`tests/compat/http_routes.tsv`](../tests/compat/http_routes.tsv) — 436 routes, kept in sync with the live router by `cargo test -p cairn-api --test compat_catalog_sync`.
 
 See [`docs/api/README.md`](./api/README.md) for the full index of subject-area files:
 

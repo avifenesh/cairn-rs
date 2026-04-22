@@ -1,6 +1,6 @@
 # Platform (Settings, Config, Assistant, Bundles, Onboarding, Misc)
 
-Deployment-wide settings, operator configuration, assistant/chat, bundles (import/export/apply/plan/validate), import/export, onboarding, dashboards, overview, skills, templates, agent-templates, soul, fleet, checkpoints, poll, test, and costs. Catch-all for surfaces that don't fit a single domain bucket.
+Deployment-wide settings, operator configuration, assistant/chat, bundles (import/export/apply/plan/validate), import/export, onboarding, dashboards, overview, skills, templates, agent-templates, soul, fleet, checkpoints, poll, and test. Catch-all for surfaces that don't fit a single domain bucket.
 
 Source of truth: [`tests/compat/http_routes.tsv`](../../tests/compat/http_routes.tsv). Drift from this table against the live router is enforced by `cargo test -p cairn-api --test compat_catalog_sync`.
 
