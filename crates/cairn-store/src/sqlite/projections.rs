@@ -372,10 +372,16 @@ impl SqliteSyncProjection {
                 .map_err(|err| StoreError::Internal(err.to_string()))?;
             }
             RuntimeEvent::PromptVersionCreated(e) => {
-                // SQLite has no SELECT ... FOR UPDATE; it serializes
-                // writers via its BEGIN IMMEDIATE / exclusive-lock model,
-                // so the MAX(version_number)+1 read is already race-free
-                // within the append transaction.
+                // SQLite has no `SELECT ... FOR UPDATE`. sqlx opens
+                // transactions as DEFERRED by default, so concurrent
+                // appenders to the same asset could in principle both
+                // compute MAX+1 and insert the same version_number. In
+                // local-mode there is a single append path serialized
+                // by `SqliteEventLog`, which makes this safe in
+                // practice. A defensive `UNIQUE(prompt_asset_id,
+                // version_number)` constraint belongs in a dedicated
+                // hardening PR that applies symmetrically to Postgres
+                // V016 — tracked for follow-up.
                 let version_number: i64 = sqlx::query_scalar(
                     "SELECT COALESCE(MAX(version_number), 0) + 1
                      FROM prompt_versions
