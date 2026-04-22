@@ -84,7 +84,7 @@ cargo run -p cairn-app
 
 # Health check
 curl http://localhost:3000/health
-# {"ok":true}
+# {"status":"healthy","version":"...","uptime_secs":3,"store_ok":true,"plugin_registry_count":0,"checks":[...]}
 
 # With Ollama for local LLM support
 OLLAMA_HOST=http://localhost:11434 cargo run -p cairn-app
@@ -122,7 +122,7 @@ All model names are hot-reloadable via `PUT /v1/settings/defaults/system/<key>` 
 ### Docker
 
 ```bash
-# One command — starts cairn-app + Postgres + Ollama
+# One command — starts cairn-app + Postgres
 docker compose up --build
 
 # Background
@@ -133,13 +133,10 @@ echo 'CAIRN_ADMIN_TOKEN=my-secret-token' > .env
 docker compose up -d
 ```
 
-Schema migrations run automatically on first boot. Ollama models are cached in
-a Docker volume; pull additional models with:
-
-```bash
-docker compose exec ollama ollama pull qwen3.5:9b        # worker/everyday generation
-docker compose exec ollama ollama pull nomic-embed-text  # embeddings
-```
+Schema migrations run automatically on first boot. Connect an LLM provider
+by setting `CAIRN_BRAIN_URL` + `OPENAI_COMPAT_API_KEY`, `OPENROUTER_API_KEY`,
+or `OLLAMA_HOST` in a `.env` file, or register at runtime via
+`POST /v1/providers/connections`.
 
 ### After startup
 
@@ -218,6 +215,13 @@ State is always derived from the log. Postgres stores events for durability and 
 | `OPENAI_COMPAT_BASE_URL` | _(unset)_ | Legacy: maps to both BRAIN and WORKER when set. Superseded by the split vars above. |
 | `OPENAI_COMPAT_API_KEY` | _(unset)_ | Legacy: API key for the legacy single-endpoint provider. |
 | `OPENROUTER_API_KEY` | _(unset)_ | API key for [OpenRouter](https://openrouter.ai). When set, `CAIRN_BRAIN_URL` can be pointed at `https://openrouter.ai/api/v1`. Free-tier models (e.g. `qwen/qwen3-coder:free`) work without a paid account. |
+| `CAIRN_FABRIC_WAITPOINT_HMAC_SECRET` | _(required when Fabric enabled)_ | 32-byte hex secret seeded into every FlowFabric execution partition at boot. Rotate at runtime via `POST /v1/admin/rotate-waitpoint-hmac`. See [SECURITY.md](./SECURITY.md). |
+| `CAIRN_FABRIC_INSTANCE_ID` | _(auto UUID)_ | Per-process instance id used to filter lease-history frames when multiple cairn-app instances share a Valkey. See [docs/operations/cross-instance-isolation.md](./docs/operations/cross-instance-isolation.md). |
+
+> **FlowFabric / Valkey.** Cairn's execution engine (`cairn-fabric`) persists
+> lease, lifecycle, and eligibility state in Valkey 7.0+. A Valkey instance is
+> required unless you are running purely against the in-memory store
+> (`--db memory`, dev only).
 
 ### CLI flags
 
@@ -349,6 +353,15 @@ Cairn's behaviour is specified by RFCs in `docs/design/rfcs/`. Each RFC has a co
 | 009 | Provider routing and cost tracking |
 | 013 | Bundle import/export, eval rubrics |
 | 014 | Commercial tiers and feature gating |
+| 015 | Plugin marketplace and per-project scoping |
+| 016 | Sandbox workspace primitive (OverlayFS / reflink) |
+| 017 | GitHub reference plugin |
+| 018 | Agent loop enhancements (plan mode, guardian, compaction) |
+| 019 | Unified decision layer |
+| 020 | Durable recovery (readiness gate, dual checkpoint, tool-call idempotency) |
+| 021 | Control-plane protocols (SQ/EQ, A2A) |
+| 022 | Triggers and signal routing |
+| 023 | Business model and cloud architecture |
 
 ---
 

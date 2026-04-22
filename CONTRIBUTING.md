@@ -110,7 +110,7 @@ cargo build -p cairn-app # rust-embed picks up ui/dist/
 ## Testing
 
 ```bash
-# Full workspace — 2 700+ tests (recommended before opening a PR)
+# Full workspace — 3 300+ tests (recommended before opening a PR)
 cargo test --workspace
 
 # A single crate
@@ -132,6 +132,12 @@ bundle import/export, prompt lifecycle, eval runs, operator setup, tool
 invocations). The smoke test validates the real HTTP server binary across 20
 sections including health, sessions, runs, tasks, approvals, events, memory,
 SSE, admin, LLM generation, and more.
+
+> **Adding integration tests?** CI runs `cargo test` with an explicit `-p`
+> allow-list for crates that have non-empty `tests/` directories (see the
+> `test` job in `.github/workflows/ci.yml`). If you add integration tests in
+> a new crate, extend the allow-list in the same PR — otherwise your tests
+> will never execute in CI.
 
 ---
 
@@ -201,4 +207,4 @@ changes benefit from a brief design note in the PR description.
 ## License
 
 By contributing you agree that your contributions will be licensed under the
-[MIT License](./LICENSE).
+[Business Source License 1.1](./LICENSE) that governs this repository.
