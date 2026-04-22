@@ -1253,8 +1253,8 @@ mod sqlite_parity {
     }
 
     /// `RoutePolicyCreated { enabled: false }` must persist as `enabled = 0`
-    /// in the SQLite projection. Regression test for the previously
-    /// hardcoded `1` literal (Bugbot finding on PR #104).
+    /// in the SQLite projection — the event's `enabled` field is the sole
+    /// source of truth for the column, not a hardcoded literal.
     #[tokio::test]
     async fn route_policy_disabled_round_trips_through_sqlite() {
         use cairn_domain::events::RoutePolicyCreated;
@@ -1273,12 +1273,11 @@ mod sqlite_parity {
 
         event_log.append(&[event]).await.unwrap();
 
-        let row: (i64,) =
-            sqlx::query_as("SELECT enabled FROM route_policies WHERE policy_id = ?")
-                .bind("pol_off")
-                .fetch_one(adapter.pool())
-                .await
-                .unwrap();
+        let row: (i64,) = sqlx::query_as("SELECT enabled FROM route_policies WHERE policy_id = ?")
+            .bind("pol_off")
+            .fetch_one(adapter.pool())
+            .await
+            .unwrap();
 
         assert_eq!(row.0, 0, "disabled policy must persist as enabled = 0");
     }
