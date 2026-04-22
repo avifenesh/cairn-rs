@@ -106,6 +106,19 @@ jobs:
         env:
           CARGO_BUILD_JOBS: "2"
           RUSTFLAGS: "-C debuginfo=0"
+      - name: integration tests (store + api + memory + tools + graph + agent + workspace + integrations)
+        # Closes a silent CI gap: these crates ship integration tests
+        # under `tests/` that `--workspace --lib` never executes. The
+        # compat-catalog drift fixed in #105 (originally found in #192)
+        # rotted undetected because cairn-api wasn't gated. All crates
+        # listed here run in-process with no external services
+        # (no Postgres/Valkey/network), so they belong in the plain
+        # `test` job rather than `fabric-integration`.
+        run: cargo test --tests -p cairn-store -p cairn-api -p cairn-memory -p cairn-tools -p cairn-graph -p cairn-agent -p cairn-workspace -p cairn-integrations
+        timeout-minutes: 15
+        env:
+          CARGO_BUILD_JOBS: "2"
+          RUSTFLAGS: "-C debuginfo=0"
 
   # ── 5. Fabric integration (testcontainers) ──────────────────────────────────
   # Stands up a disposable Valkey 8 container via testcontainers-rs and runs
