@@ -1162,16 +1162,51 @@ async fn main() {
         }
     }
 
+    // Test-only: seed a base-revision-drift scenario so the RFC 020
+    // `sandbox_preserved_base_revision_drift_overlay_only` integration
+    // test can exercise the emission + approval-synthesis path without
+    // a full sandbox-provision HTTP surface OR a `RepoCloneCache::refresh`
+    // HTTP hook. Same release-stripping discipline as the two seed hooks
+    // above — `#[cfg(debug_assertions)]` from the start so release builds
+    // strip the symbol and a production cairn-app cannot be coerced into
+    // fabricating drift events.
+    //
+    // Format:
+    //   `CAIRN_TEST_SEED_BASE_REVISION_DRIFT=<overlay_run_id>:<tenant>:<workspace>:<project>:<repo_id>[:<reflink_run_id>]`
+    //
+    // `<reflink_run_id>`, when present, seeds a second registry entry on
+    // the same project + repo but with `SandboxStrategy::Reflink`. The
+    // recovery sweep MUST skip it (physically independent per RFC 016);
+    // the integration test asserts zero drift events for that run.
+    #[cfg(debug_assertions)]
+    if let Ok(spec) = std::env::var("CAIRN_TEST_SEED_BASE_REVISION_DRIFT") {
+        if let Err(error) = seed_base_revision_drift_sandbox_for_test(
+            &lib_state,
+            lib_state.sandbox_service.base_dir(),
+            &spec,
+        )
+        .await
+        {
+            eprintln!("CAIRN_TEST_SEED_BASE_REVISION_DRIFT seed failed: {error}");
+        }
+    }
+
     // Step 4a: sandbox reconciliation.
     //
-    // `lost_runs` / `allowlist_revoked_runs` / `reattached_runs` are
-    // threaded into Track 1 run recovery below so the run-level
-    // service can emit the matching matrix-row events per RFC 020
-    // §"Run recovery matrix".
-    let (sandbox_lost_runs, allowlist_revoked_runs, sandbox_reattached_runs): (
+    // `lost_runs` / `allowlist_revoked_runs` / `reattached_runs` /
+    // `base_revision_drift_runs` are threaded into Track 1 run
+    // recovery below so the run-level service can emit the matching
+    // matrix-row events per RFC 020 §"Run recovery matrix".
+    let (
+        sandbox_lost_runs,
+        allowlist_revoked_runs,
+        sandbox_reattached_runs,
+        base_revision_drift_runs,
+    ): (
         Vec<cairn_runtime::SandboxLostRun>,
         Vec<cairn_runtime::AllowlistRevokedRun>,
         Vec<cairn_runtime::SandboxReattachedRun>,
+        Vec<cairn_runtime::BaseRevisionDriftRun>,
     ) = match lib_state.sandbox_service.recover_all().await {
         Ok(summary) => {
             if summary.reconnected > 0
@@ -1180,22 +1215,25 @@ async fn main() {
                 || summary.lost > 0
                 || summary.preserved_allowlist_revoked > 0
                 || summary.reattached > 0
+                || summary.preserved_base_revision_drift > 0
             {
                 eprintln!(
                     "sandbox recovery: reconnected={} preserved={} failed={} lost={} \
-                     allowlist_revoked={} reattached={}",
+                     allowlist_revoked={} reattached={} base_revision_drift={}",
                     summary.reconnected,
                     summary.preserved,
                     summary.failed,
                     summary.lost,
                     summary.preserved_allowlist_revoked,
                     summary.reattached,
+                    summary.preserved_base_revision_drift,
                 );
             }
             let count = (summary.reconnected as u64)
                 .saturating_add(summary.preserved as u64)
                 .saturating_add(summary.preserved_allowlist_revoked as u64)
-                .saturating_add(summary.reattached as u64);
+                .saturating_add(summary.reattached as u64)
+                .saturating_add(summary.preserved_base_revision_drift as u64);
             lib_state.readiness.update_branch("4a", |b| {
                 b.sandboxes = BranchStatus::complete(count);
             });
@@ -1204,14 +1242,19 @@ async fn main() {
                 .into_iter()
                 .map(|(run, project, repo)| (run, project, repo.as_str().to_owned()))
                 .collect();
-            (summary.lost_runs, revoked, summary.reattached_runs)
+            let drifted: Vec<cairn_runtime::BaseRevisionDriftRun> = summary
+                .base_revision_drift_runs
+                .into_iter()
+                .map(|(run, project, repo)| (run, project, repo.as_str().to_owned()))
+                .collect();
+            (summary.lost_runs, revoked, summary.reattached_runs, drifted)
         }
         Err(error) => {
             eprintln!("sandbox recovery failed: {error}");
             lib_state.readiness.update_branch("4a", |b| {
                 b.sandboxes = BranchStatus::failed(error.to_string());
             });
-            (Vec::new(), Vec::new(), Vec::new())
+            (Vec::new(), Vec::new(), Vec::new(), Vec::new())
         }
     };
 
@@ -1243,6 +1286,7 @@ async fn main() {
             &sandbox_lost_runs,
             &allowlist_revoked_runs,
             &sandbox_reattached_runs,
+            &base_revision_drift_runs,
         )
         .await
         {
@@ -1719,7 +1763,6 @@ async fn seed_allowlist_revoked_sandbox_for_test(
     Ok(())
 }
 
-/// Test-only scaffolding for the RFC 020
 /// `sandbox_reattach_overlay_or_reflink` integration test (#3).
 ///
 /// Seeds a recovery registry sidecar for a healthy overlay sandbox
@@ -1844,6 +1887,221 @@ async fn seed_reattachable_sandbox_for_test(
         .await
         .map_err(|e| format!("append seed events: {e}"))?;
     eprintln!("[TEST SEED] CAIRN_TEST_SEED_SANDBOX: seeded healthy sandbox for run {run_id}");
+    Ok(())
+}
+
+/// Test-only scaffolding for the RFC 020
+/// `sandbox_preserved_base_revision_drift_overlay_only` integration
+/// test (3b).
+///
+/// Seeds:
+///   1. A `RepoCloneCache::ensure_cloned` call so the clone exists on
+///      disk at the `(tenant, repo)` path — `current_head()` returns
+///      `Some(head)` against an `init-*` HEAD.
+///   2. A recovery-registry sidecar for a `SandboxBase::Repo` **overlay**
+///      sandbox with a deliberately-mismatched stored `base_revision`
+///      ("seed-fake-drift-rev"). The recovery sweep compares the stored
+///      value against the live clone HEAD, sees the mismatch, emits
+///      `SandboxBaseRevisionDrift` + `SandboxPreserved{reason:BaseRevisionDrift}`,
+///      and records the `(run, project, repo)` triple on
+///      `summary.base_revision_drift_runs`.
+///   3. Optionally (when `<reflink_run_id>` is present) a second
+///      registry entry on the same clone but with
+///      `SandboxStrategy::Reflink`. The sweep MUST skip it — reflink
+///      sandboxes are physically independent per RFC 016 — which the
+///      integration test asserts by checking the drift-runs list
+///      contains exactly the overlay run, never the reflink run.
+///
+/// `#[cfg(debug_assertions)]` strips this symbol from release builds.
+///
+/// Spec format:
+///   `<overlay_run_id>:<tenant>:<workspace>:<project>:<repo_id>[:<reflink_run_id>]`
+#[cfg(debug_assertions)]
+async fn seed_base_revision_drift_sandbox_for_test(
+    lib_state: &cairn_app::AppState,
+    sandbox_base_dir: &std::path::Path,
+    spec: &str,
+) -> Result<(), String> {
+    use cairn_domain::{
+        EventEnvelope, EventSource, ProjectKey, RunCreated, RunId, RunState, RunStateChanged,
+        RuntimeEvent, SessionCreated, SessionId, StateTransition, TenantId,
+    };
+
+    // 5 required parts; optional 6th = reflink run id.
+    let parts: Vec<&str> = spec.splitn(6, ':').collect();
+    if parts.len() < 5 {
+        return Err(format!(
+            "expected <overlay_run_id>:<tenant>:<workspace>:<project>:<repo_id>[:<reflink_run_id>], \
+             got {spec}"
+        ));
+    }
+    let overlay_run_id = RunId::new(parts[0]);
+    let project = ProjectKey::new(parts[1], parts[2], parts[3]);
+    let tenant = TenantId::new(parts[1]);
+    let repo_id = cairn_workspace::RepoId::new(parts[4]);
+    let reflink_run_id = parts.get(5).map(|s| RunId::new(*s));
+
+    // 1. Ensure the clone exists so `current_head()` returns `Some(head)`.
+    //    `ensure_cloned` is idempotent so a second boot after sigkill is a
+    //    no-op — HEAD survives from boot 1.
+    lib_state
+        .repo_clone_cache
+        .ensure_cloned(&tenant, &repo_id)
+        .await
+        .map_err(|e| format!("ensure clone: {e}"))?;
+
+    // 2. Write a stub sandbox directory for the overlay so the lost-sweep
+    //    skips the entry (path.exists() == true).
+    let _ = sandbox_base_dir;
+    let overlay_sandbox_id = format!("sbx-{}", parts[0]);
+    let overlay_sandbox_path = lib_state
+        .sandbox_service
+        .base_dir()
+        .join(&overlay_sandbox_id);
+    std::fs::create_dir_all(&overlay_sandbox_path)
+        .map_err(|e| format!("create stub overlay sandbox dir: {e}"))?;
+
+    // 3. Seed an overlay registry entry whose stored `base_revision` is
+    //    deliberately a sentinel that does NOT match the clone's real
+    //    HEAD (`init-<repo>-<now_ms>`). That's what makes the drift sweep
+    //    fire. `base_revision_drift_handled` starts `false`; the sweep
+    //    flips it to `true` after emission so boot 2 is a no-op.
+    lib_state
+        .sandbox_service
+        .seed_registry_entry_for_test_full(
+            cairn_workspace::SandboxId::new(overlay_sandbox_id),
+            overlay_run_id.clone(),
+            project.clone(),
+            cairn_workspace::SandboxStrategy::Overlay,
+            overlay_sandbox_path,
+            Some(repo_id.clone()),
+            Some("seed-fake-drift-rev".to_owned()),
+        )
+        .map_err(|e| format!("seed overlay registry entry: {e}"))?;
+
+    // 4. Optional reflink sibling to prove the exemption. Same repo,
+    //    same stored revision → if the sweep didn't key off strategy,
+    //    it would also emit drift for this entry. The assertion in the
+    //    integration test is that it does not.
+    if let Some(reflink_run_id) = reflink_run_id.clone() {
+        let reflink_sandbox_id = format!("sbx-{}", reflink_run_id.as_str());
+        let reflink_sandbox_path = lib_state
+            .sandbox_service
+            .base_dir()
+            .join(&reflink_sandbox_id);
+        std::fs::create_dir_all(&reflink_sandbox_path)
+            .map_err(|e| format!("create stub reflink sandbox dir: {e}"))?;
+        lib_state
+            .sandbox_service
+            .seed_registry_entry_for_test_full(
+                cairn_workspace::SandboxId::new(reflink_sandbox_id),
+                reflink_run_id.clone(),
+                project.clone(),
+                cairn_workspace::SandboxStrategy::Reflink,
+                reflink_sandbox_path,
+                Some(repo_id.clone()),
+                Some("seed-fake-drift-rev".to_owned()),
+            )
+            .map_err(|e| format!("seed reflink registry entry: {e}"))?;
+    }
+
+    // Idempotency: if the overlay run is already non-Pending (boot 2),
+    // the registry's tombstone flag already suppresses re-emission and
+    // we skip event seeding so we don't replay Pending→Running against
+    // a terminal or WaitingApproval run.
+    use cairn_store::projections::RunReadModel;
+    if let Ok(Some(existing)) = lib_state.runtime.store.get(&overlay_run_id).await {
+        if !matches!(existing.state, RunState::Pending) {
+            return Ok(());
+        }
+    }
+
+    // 5. Seed the store events so recovery sees a Running run bound to
+    //    the seeded sandbox. Same shape as the other seed hooks.
+    let mut envelopes: Vec<EventEnvelope<RuntimeEvent>> = Vec::new();
+    let session_id = SessionId::new(format!("sess-{}", parts[0]));
+    envelopes.push(EventEnvelope::for_runtime_event(
+        cairn_domain::EventId::new(format!("seed-drift-session-{}", parts[0])),
+        EventSource::Runtime,
+        RuntimeEvent::SessionCreated(SessionCreated {
+            project: project.clone(),
+            session_id: session_id.clone(),
+        }),
+    ));
+    envelopes.push(EventEnvelope::for_runtime_event(
+        cairn_domain::EventId::new(format!("seed-drift-run-created-{}", parts[0])),
+        EventSource::Runtime,
+        RuntimeEvent::RunCreated(RunCreated {
+            project: project.clone(),
+            session_id: session_id.clone(),
+            run_id: overlay_run_id.clone(),
+            parent_run_id: None,
+            prompt_release_id: None,
+            agent_role_id: None,
+        }),
+    ));
+    envelopes.push(EventEnvelope::for_runtime_event(
+        cairn_domain::EventId::new(format!("seed-drift-run-running-{}", parts[0])),
+        EventSource::Runtime,
+        RuntimeEvent::RunStateChanged(RunStateChanged {
+            project: project.clone(),
+            run_id: overlay_run_id.clone(),
+            transition: StateTransition {
+                from: Some(RunState::Pending),
+                to: RunState::Running,
+            },
+            failure_class: None,
+            pause_reason: None,
+            resume_trigger: None,
+        }),
+    ));
+    // Reflink sibling, if present, also needs a Running run so the
+    // integration test can prove recovery leaves it alone (no drift
+    // emission, no WaitingApproval transition).
+    if let Some(reflink_run_id) = reflink_run_id {
+        let reflink_session_id = SessionId::new(format!("sess-reflink-{}", parts[0]));
+        envelopes.push(EventEnvelope::for_runtime_event(
+            cairn_domain::EventId::new(format!("seed-drift-reflink-session-{}", parts[0])),
+            EventSource::Runtime,
+            RuntimeEvent::SessionCreated(SessionCreated {
+                project: project.clone(),
+                session_id: reflink_session_id.clone(),
+            }),
+        ));
+        envelopes.push(EventEnvelope::for_runtime_event(
+            cairn_domain::EventId::new(format!("seed-drift-reflink-run-created-{}", parts[0])),
+            EventSource::Runtime,
+            RuntimeEvent::RunCreated(RunCreated {
+                project: project.clone(),
+                session_id: reflink_session_id,
+                run_id: reflink_run_id.clone(),
+                parent_run_id: None,
+                prompt_release_id: None,
+                agent_role_id: None,
+            }),
+        ));
+        envelopes.push(EventEnvelope::for_runtime_event(
+            cairn_domain::EventId::new(format!("seed-drift-reflink-run-running-{}", parts[0])),
+            EventSource::Runtime,
+            RuntimeEvent::RunStateChanged(RunStateChanged {
+                project: project.clone(),
+                run_id: reflink_run_id,
+                transition: StateTransition {
+                    from: Some(RunState::Pending),
+                    to: RunState::Running,
+                },
+                failure_class: None,
+                pause_reason: None,
+                resume_trigger: None,
+            }),
+        ));
+    }
+    lib_state
+        .runtime
+        .store
+        .append(&envelopes)
+        .await
+        .map_err(|e| format!("append seed events: {e}"))?;
     Ok(())
 }
 

@@ -13,6 +13,7 @@ use cairn_domain::{
 use crate::error::WorkspaceError;
 use crate::providers::SandboxProvider;
 use crate::repo_store::access_service::ProjectRepoAccessService;
+use crate::repo_store::clone_cache::RepoCloneCache;
 use crate::sandbox::{
     DestroyResult, ProvisionedSandbox, RepoId, SandboxCheckpoint, SandboxErrorKind, SandboxEvent,
     SandboxMetadata, SandboxPolicy, SandboxState, SandboxStrategy, SandboxStrategyRequest,
@@ -132,6 +133,22 @@ pub struct SandboxRecoverySummary {
     /// `reattached_runs.len()`.
     pub reattached: u32,
     pub reattached_runs: Vec<(RunId, ProjectKey)>,
+    /// RFC 020 §"Run recovery matrix": registry entries for
+    /// `SandboxBase::Repo` overlay sandboxes whose stored `base_revision`
+    /// no longer matches the locked clone's HEAD at recovery time — the
+    /// operator called `RepoCloneCache::refresh()` (or equivalent) and
+    /// moved the clone out from under the overlay's upper layer.
+    /// `base_revision_drift_runs` carries `(run_id, project, repo_id)` so
+    /// the run-level `RecoveryService` can transition each bound run to
+    /// `WaitingApproval` with a synthesized approval asking the operator
+    /// to re-provision against the new base or cancel the run (per the
+    /// `BaseRevisionDrift` matrix row). Reflink sandboxes are exempt per
+    /// RFC 016 — they are physically independent post-provision, so the
+    /// upstream clone moving cannot corrupt their contents.
+    /// `preserved_base_revision_drift` is always equal to
+    /// `base_revision_drift_runs.len()`.
+    pub preserved_base_revision_drift: u32,
+    pub base_revision_drift_runs: Vec<(RunId, ProjectKey, RepoId)>,
 }
 
 /// Directory name (relative to `base_dir`) holding the recovery registry —
@@ -185,6 +202,27 @@ struct RegistryEntry {
     /// registry) or delete the sandbox (which removes the registry entry).
     #[serde(default)]
     allowlist_revoked_handled: bool,
+    /// Stored base revision for overlay-on-repo sandboxes. At recovery
+    /// time the `base_revision_drift` sweep reads this, asks the
+    /// `RepoCloneCache` for the current HEAD of the bound clone, and
+    /// emits `SandboxBaseRevisionDrift` if they differ. `None` for bases
+    /// with no upstream notion of HEAD (`SandboxBase::Empty`,
+    /// `SandboxBase::Directory`) and for reflink sandboxes (physically
+    /// independent per RFC 016 — the sweep skips them regardless).
+    ///
+    /// Backward-compat: sidecars written before the drift sweep existed
+    /// deserialize to `None`, which disables the check for them — the
+    /// drift sweep keys off `Some(stored) != Some(current)`, so a `None`
+    /// stored value is indistinguishable from "no tracked revision".
+    #[serde(default)]
+    base_revision: Option<String>,
+    /// Tombstone flag: `true` once the base-revision-drift sweep has
+    /// emitted `SandboxBaseRevisionDrift` for this entry. Same rationale
+    /// as `allowlist_revoked_handled` — the sandbox is `Preserved` and
+    /// the operator-facing approval has been synthesized; a repeat sweep
+    /// on the next boot would duplicate the approval.
+    #[serde(default)]
+    base_revision_drift_handled: bool,
 }
 
 pub struct SandboxService {
@@ -201,6 +239,13 @@ pub struct SandboxService {
     /// with seeded entries and would otherwise need to stand up the full
     /// access service.
     allowlist: Option<Arc<ProjectRepoAccessService>>,
+    /// Source of truth for the locked clone's HEAD, consulted during
+    /// `recover_all` to diff the registry entry's stored `base_revision`
+    /// against the current upstream HEAD. `None` disables the
+    /// base-revision-drift sweep entirely (useful for workspace-layer
+    /// unit tests that exercise the sweep directly with seeded entries
+    /// and would otherwise need to stand up the full clone cache).
+    clone_cache: Option<Arc<RepoCloneCache>>,
 }
 
 impl SandboxService {
@@ -217,6 +262,7 @@ impl SandboxService {
             clock,
             sessions: RwLock::new(HashMap::new()),
             allowlist: None,
+            clone_cache: None,
         }
     }
 
@@ -226,6 +272,16 @@ impl SandboxService {
     /// Without this, the allowlist-revoked sweep is a no-op.
     pub fn with_allowlist(mut self, allowlist: Arc<ProjectRepoAccessService>) -> Self {
         self.allowlist = Some(allowlist);
+        self
+    }
+
+    /// Wire in the repo clone cache. When set, `recover_all` will emit
+    /// `SandboxBaseRevisionDrift` for any overlay registry entry whose
+    /// stored `base_revision` no longer matches the locked clone's HEAD.
+    /// Reflink sandboxes are skipped (physically independent per RFC 016).
+    /// Without this, the base-revision-drift sweep is a no-op.
+    pub fn with_clone_cache(mut self, clone_cache: Arc<RepoCloneCache>) -> Self {
+        self.clone_cache = Some(clone_cache);
         self
     }
 
@@ -265,6 +321,25 @@ impl SandboxService {
         path: PathBuf,
         repo_id: Option<RepoId>,
     ) -> Result<(), WorkspaceError> {
+        self.seed_registry_entry_for_test_full(
+            sandbox_id, run_id, project, strategy, path, repo_id, None,
+        )
+    }
+
+    /// Extended seed helper that also captures the entry's stored
+    /// `base_revision`. Used by the RFC 020 `base_revision_drift`
+    /// integration test so the recovery sweep can compare the seeded
+    /// value against the clone cache's current HEAD and emit drift.
+    pub fn seed_registry_entry_for_test_full(
+        &self,
+        sandbox_id: crate::sandbox::SandboxId,
+        run_id: RunId,
+        project: ProjectKey,
+        strategy: SandboxStrategy,
+        path: PathBuf,
+        repo_id: Option<RepoId>,
+        base_revision: Option<String>,
+    ) -> Result<(), WorkspaceError> {
         let entry = RegistryEntry {
             sandbox_id,
             run_id,
@@ -274,6 +349,8 @@ impl SandboxService {
             registered_at: self.clock.now_millis(),
             repo_id,
             allowlist_revoked_handled: false,
+            base_revision,
+            base_revision_drift_handled: false,
         };
         self.write_registry_entry(&entry)
     }
@@ -393,6 +470,8 @@ impl SandboxService {
                     registered_at: provisioned_at,
                     repo_id: repo_id_for(&policy),
                     allowlist_revoked_handled: false,
+                    base_revision: sandbox.base_revision.clone(),
+                    base_revision_drift_handled: false,
                 };
                 if let Err(error) = self.write_registry_entry(&registry_entry) {
                     let failed_at = self.clock.now_millis();
@@ -993,23 +1072,128 @@ impl SandboxService {
             summary.preserved_allowlist_revoked = summary.allowlist_revoked_runs.len() as u32;
         }
 
+        // RFC 020 §"Run recovery matrix" — `BaseRevisionDrift` row. For
+        // every surviving overlay-on-repo registry entry, compare the
+        // stored `base_revision` against the locked clone's current
+        // HEAD. Mismatch → emit `SandboxBaseRevisionDrift` + record the
+        // `(run, project, repo)` triple so the run-level recovery
+        // service can transition the bound run to `WaitingApproval`
+        // with a synthesized re-provision approval.
+        //
+        // Reflink sandboxes are exempt (RFC 016 §"Sandbox provider
+        // selection"): a reflink copy is physically independent of the
+        // upstream clone, so the clone's HEAD moving cannot corrupt
+        // the sandbox's contents. Only overlay sandboxes compose their
+        // upper layer against a live lower layer and therefore depend
+        // on the clone's HEAD remaining pinned between provisioning
+        // and recovery.
+        //
+        // `clone_cache == None` → no-op, mirroring the allowlist sweep's
+        // `None` behaviour. Entries lacking a stored `base_revision` or
+        // `repo_id` are skipped (nothing to diff against).
+        //
+        // Idempotency: `base_revision_drift_handled` is set after the
+        // first emission and persisted back to the sidecar so a second
+        // boot does not re-fire the approval. The tombstone is cleared
+        // only when the operator destroys the sandbox (which removes
+        // the registry entry) — a manual re-provision is expected to
+        // write a fresh entry with the new revision.
+        if let Some(clone_cache) = self.clone_cache.clone() {
+            let entries = self.list_registry_entries()?;
+            // Cache `(tenant, repo)` → current HEAD lookups so a project
+            // with N runs against the same repo makes one filesystem read
+            // instead of N.
+            let mut head_cache: HashMap<(cairn_domain::TenantId, RepoId), Option<String>> =
+                HashMap::new();
+            for mut entry in entries {
+                if entry.base_revision_drift_handled {
+                    continue;
+                }
+                // Reflink: physically independent, skip.
+                if matches!(entry.strategy, SandboxStrategy::Reflink) {
+                    continue;
+                }
+                let Some(repo_id) = entry.repo_id.clone() else {
+                    continue;
+                };
+                let Some(stored) = entry.base_revision.clone() else {
+                    continue;
+                };
+                let tenant = entry.project.tenant_id.clone();
+                let key = (tenant.clone(), repo_id.clone());
+                let current = match head_cache.get(&key).cloned() {
+                    Some(v) => v,
+                    None => {
+                        let v = clone_cache
+                            .current_head(&tenant, &repo_id)
+                            .await
+                            .map_err(|e| {
+                                WorkspaceError::sandbox_op(&entry.run_id, "read_clone_head", e)
+                            })?;
+                        head_cache.insert(key, v.clone());
+                        v
+                    }
+                };
+                let Some(current) = current else {
+                    // Clone missing — distinct failure mode from drift.
+                    // SandboxLost-style remediation is the wrong fit here
+                    // (the sandbox root still exists), but there's also no
+                    // drift to report. Leave the entry untouched; if the
+                    // operator re-creates the clone with the original
+                    // revision the next sweep sees no drift, and if they
+                    // re-clone at a new HEAD the next sweep fires.
+                    continue;
+                };
+                if current == stored {
+                    continue;
+                }
+                let detected_at = self.clock.now_millis();
+                self.event_sink
+                    .publish(SandboxEvent::SandboxBaseRevisionDrift {
+                        sandbox_id: entry.sandbox_id.clone(),
+                        run_id: entry.run_id.clone(),
+                        project: entry.project.clone(),
+                        repo_id: repo_id.clone(),
+                        expected: stored.clone(),
+                        actual: current.clone(),
+                        detected_at,
+                    });
+                self.event_sink.publish(SandboxEvent::SandboxPreserved {
+                    sandbox_id: entry.sandbox_id.clone(),
+                    run_id: entry.run_id.clone(),
+                    reason: PreservationReason::BaseRevisionDrift {
+                        expected: stored,
+                        actual: current,
+                    },
+                    preserved_at: detected_at,
+                });
+                entry.base_revision_drift_handled = true;
+                self.write_registry_entry(&entry)?;
+                summary
+                    .base_revision_drift_runs
+                    .push((entry.run_id, entry.project, repo_id));
+            }
+            summary.preserved_base_revision_drift = summary.base_revision_drift_runs.len() as u32;
+        }
+
         // RFC 020 §"Run recovery matrix" — healthy-reattach row. Any
-        // registry entry that survived the lost-sweep (path exists) AND
-        // the allowlist-revoked sweep (repo still allowlisted, or no
-        // bound repo) represents a sandbox that cleanly survived the
+        // registry entry that survived the lost-sweep (path exists), the
+        // allowlist-revoked sweep (repo still allowlisted, or no bound
+        // repo), AND the base-revision-drift sweep (overlay clone HEAD
+        // still pinned) represents a sandbox that cleanly survived the
         // crash. Emit `SandboxReattached` so the run-level recovery
         // service can record an audit trail entry
-        // (`RecoveryAttempted{reason:"sandbox_reattached"}` +
-        // `RecoveryCompleted{recovered:true}`) without transitioning
-        // state — the run stays in its existing non-terminal state and
-        // the orchestrator resumes it on its next tick.
+        // (`RecoveryAttempted{reason:"sandbox_reattached"}`) without
+        // transitioning state — the run stays in its existing
+        // non-terminal state and the orchestrator resumes it on its
+        // next tick.
         //
         // Entries already surfaced by a provider via `list()` are
         // already counted under `reconnected`/`preserved`/`failed` and
         // must not be double-reported here. Entries whose
-        // `allowlist_revoked_handled` flag is set are allowlist-
-        // revoked and owned by that sweep. Everything else that has a
-        // present path is healthy.
+        // `allowlist_revoked_handled` or `base_revision_drift_handled`
+        // flag is set are owned by those sweeps. Everything else that
+        // has a present path is healthy.
         let reattach_entries = self.list_registry_entries()?;
         for entry in reattach_entries {
             if observed.contains(entry.sandbox_id.as_str()) {
@@ -1018,7 +1202,7 @@ impl SandboxService {
             if !entry.path.exists() {
                 continue;
             }
-            if entry.allowlist_revoked_handled {
+            if entry.allowlist_revoked_handled || entry.base_revision_drift_handled {
                 continue;
             }
             let reattached_at = self.clock.now_millis();
@@ -2037,6 +2221,8 @@ mod tests {
             registered_at: 1_000,
             repo_id: None,
             allowlist_revoked_handled: false,
+            base_revision: None,
+            base_revision_drift_handled: false,
         };
         service
             .write_registry_entry(&entry)
@@ -2375,5 +2561,203 @@ mod tests {
         // via `RecoveryAttempted/Completed` events keyed by boot_id.
         let second = service.recover_all().await.unwrap();
         assert_eq!(second.reattached, 1);
+    }
+
+    #[tokio::test]
+    async fn recover_all_emits_base_revision_drift_on_clone_head_mismatch() {
+        // RFC 020 §"Run recovery matrix" — BaseRevisionDrift row.
+        // Seed an overlay registry entry whose path exists on disk (lost-
+        // sweep skips it) and whose stored `base_revision` differs from
+        // the clone cache's live HEAD. Recovery must emit
+        // `SandboxBaseRevisionDrift` + `SandboxPreserved{BaseRevisionDrift}`
+        // and surface the triple on `summary.base_revision_drift_runs`.
+        use cairn_domain::TenantId;
+
+        use crate::repo_store::clone_cache::RepoCloneCache;
+
+        let run = RunId::new("run-clone-drift");
+        let repo_id = crate::sandbox::RepoId::new("octocat/hello");
+        let provider = RecoveryProvider::new(SandboxStrategy::Overlay, Vec::new(), HashMap::new());
+        let sink = Arc::new(BufferedSandboxEventSink::default());
+        let base_dir = unique_test_dir("drift-sweep");
+        let clone_dir = unique_test_dir("drift-sweep-clones");
+        let clone_cache = Arc::new(RepoCloneCache::new(clone_dir.clone()));
+        // Create the clone so `current_head()` returns `Some(init-*-<now>)`.
+        clone_cache
+            .ensure_cloned(&TenantId::new("tenant-a"), &repo_id)
+            .await
+            .expect("ensure clone");
+
+        let service = SandboxService::new(
+            HashMap::from([(
+                SandboxStrategy::Overlay,
+                Box::new(provider) as Box<dyn crate::providers::SandboxProvider>,
+            )]),
+            sink.clone(),
+            base_dir.clone(),
+            Arc::new(FixedClock::new(1_000)),
+        )
+        .with_clone_cache(clone_cache);
+
+        // Path exists → lost-sweep skips. Stored base_revision differs
+        // from clone HEAD → drift sweep fires.
+        let sandbox_path = base_dir.join("sbx-run-clone-drift");
+        fs::create_dir_all(&sandbox_path).expect("create stub sandbox dir");
+        service
+            .seed_registry_entry_for_test_full(
+                crate::sandbox::SandboxId::new("sbx-run-clone-drift"),
+                run.clone(),
+                project(),
+                SandboxStrategy::Overlay,
+                sandbox_path,
+                Some(repo_id.clone()),
+                Some("seed-fake-rev".to_owned()),
+            )
+            .expect("seed registry entry");
+
+        let summary = service.recover_all().await.unwrap();
+
+        assert_eq!(summary.lost, 0);
+        assert_eq!(summary.preserved_base_revision_drift, 1);
+        assert_eq!(summary.base_revision_drift_runs.len(), 1);
+        assert_eq!(summary.base_revision_drift_runs[0].0, run);
+        assert_eq!(summary.base_revision_drift_runs[0].1, project());
+        assert_eq!(summary.base_revision_drift_runs[0].2, repo_id);
+
+        let events = sink.drain();
+        assert_eq!(events.len(), 2, "expected drift + preserved pair");
+        assert!(matches!(
+            &events[0],
+            SandboxEvent::SandboxBaseRevisionDrift {
+                run_id,
+                project: p,
+                repo_id: r,
+                expected,
+                ..
+            } if run_id == &run
+                && p == &project()
+                && r == &repo_id
+                && expected == "seed-fake-rev"
+        ));
+        assert!(matches!(
+            &events[1],
+            SandboxEvent::SandboxPreserved {
+                reason: PreservationReason::BaseRevisionDrift { expected, .. },
+                ..
+            } if expected == "seed-fake-rev"
+        ));
+
+        // Idempotency: second sweep must not re-emit.
+        let second = service.recover_all().await.unwrap();
+        assert_eq!(second.preserved_base_revision_drift, 0);
+        assert!(second.base_revision_drift_runs.is_empty());
+        assert!(sink.drain().is_empty());
+    }
+
+    #[tokio::test]
+    async fn recover_all_skips_base_revision_drift_for_reflink_sandbox() {
+        // RFC 016 §"Sandbox provider selection": reflink sandboxes are
+        // physically independent post-provision. The drift sweep MUST
+        // skip them even when the clone HEAD has moved.
+        use cairn_domain::TenantId;
+
+        use crate::repo_store::clone_cache::RepoCloneCache;
+
+        let run = RunId::new("run-reflink-drift");
+        let repo_id = crate::sandbox::RepoId::new("octocat/hello");
+        let provider = RecoveryProvider::new(SandboxStrategy::Reflink, Vec::new(), HashMap::new());
+        let sink = Arc::new(BufferedSandboxEventSink::default());
+        let base_dir = unique_test_dir("reflink-drift-sweep");
+        let clone_dir = unique_test_dir("reflink-drift-sweep-clones");
+        let clone_cache = Arc::new(RepoCloneCache::new(clone_dir.clone()));
+        clone_cache
+            .ensure_cloned(&TenantId::new("tenant-a"), &repo_id)
+            .await
+            .expect("ensure clone");
+
+        let service = SandboxService::new(
+            HashMap::from([(
+                SandboxStrategy::Reflink,
+                Box::new(provider) as Box<dyn crate::providers::SandboxProvider>,
+            )]),
+            sink.clone(),
+            base_dir.clone(),
+            Arc::new(FixedClock::new(1_000)),
+        )
+        .with_clone_cache(clone_cache);
+
+        let sandbox_path = base_dir.join("sbx-run-reflink-drift");
+        fs::create_dir_all(&sandbox_path).expect("create stub sandbox dir");
+        service
+            .seed_registry_entry_for_test_full(
+                crate::sandbox::SandboxId::new("sbx-run-reflink-drift"),
+                run.clone(),
+                project(),
+                SandboxStrategy::Reflink,
+                sandbox_path,
+                Some(repo_id.clone()),
+                // Sentinel that would cause drift if the sweep ran —
+                // the assertion below is that it does not.
+                Some("seed-fake-rev".to_owned()),
+            )
+            .expect("seed registry entry");
+
+        let summary = service.recover_all().await.unwrap();
+        assert_eq!(
+            summary.preserved_base_revision_drift, 0,
+            "reflink sandboxes are physically independent per RFC 016 \
+             and MUST NOT emit BaseRevisionDrift",
+        );
+        assert!(summary.base_revision_drift_runs.is_empty());
+        assert!(sink.drain().is_empty());
+    }
+
+    #[tokio::test]
+    async fn recover_all_skips_base_revision_drift_when_clone_missing() {
+        // Clone never created → `current_head` returns `Ok(None)` →
+        // the drift sweep skips silently. This is a distinct failure
+        // mode from drift (operator cleanup of the clone directory);
+        // firing drift against a missing clone would ask the operator
+        // to approve a re-provision against a nonexistent base.
+        use crate::repo_store::clone_cache::RepoCloneCache;
+
+        let run = RunId::new("run-clone-missing");
+        let repo_id = crate::sandbox::RepoId::new("octocat/hello");
+        let provider = RecoveryProvider::new(SandboxStrategy::Overlay, Vec::new(), HashMap::new());
+        let sink = Arc::new(BufferedSandboxEventSink::default());
+        let base_dir = unique_test_dir("clone-missing-drift");
+        let clone_dir = unique_test_dir("clone-missing-drift-clones");
+        let clone_cache = Arc::new(RepoCloneCache::new(clone_dir));
+        // Deliberately do NOT call `ensure_cloned`.
+
+        let service = SandboxService::new(
+            HashMap::from([(
+                SandboxStrategy::Overlay,
+                Box::new(provider) as Box<dyn crate::providers::SandboxProvider>,
+            )]),
+            sink.clone(),
+            base_dir.clone(),
+            Arc::new(FixedClock::new(1_000)),
+        )
+        .with_clone_cache(clone_cache);
+
+        let sandbox_path = base_dir.join("sbx-run-clone-missing");
+        fs::create_dir_all(&sandbox_path).expect("create stub sandbox dir");
+        service
+            .seed_registry_entry_for_test_full(
+                crate::sandbox::SandboxId::new("sbx-run-clone-missing"),
+                run,
+                project(),
+                SandboxStrategy::Overlay,
+                sandbox_path,
+                Some(repo_id),
+                Some("seed-fake-rev".to_owned()),
+            )
+            .expect("seed registry entry");
+
+        let summary = service.recover_all().await.unwrap();
+        assert_eq!(summary.preserved_base_revision_drift, 0);
+        assert!(summary.base_revision_drift_runs.is_empty());
+        assert!(sink.drain().is_empty());
     }
 }

@@ -88,6 +88,34 @@ impl RepoCloneCache {
         Self::is_clone_layout_present(&self.path(tenant, repo_id))
     }
 
+    /// Current HEAD of the locked clone, if one exists.
+    ///
+    /// Returns `Ok(Some(head))` when the clone is present and its `.git/HEAD`
+    /// is readable, `Ok(None)` when the clone layout is absent (never cloned
+    /// or deleted), and `Err(_)` only for IO errors on a present clone.
+    ///
+    /// Used by `SandboxService::recover_all` to diff a registry entry's
+    /// `base_revision` against the live clone HEAD and emit
+    /// `SandboxBaseRevisionDrift` when they differ (RFC 020 §"Run recovery
+    /// matrix", BaseRevisionDrift row).
+    pub async fn current_head(
+        &self,
+        tenant: &TenantId,
+        repo_id: &RepoId,
+    ) -> Result<Option<String>, crate::error::RepoStoreError> {
+        Self::validate_tenant_segment(tenant)?;
+        repo_id.validate()?;
+        let path = self.path(tenant, repo_id);
+        if !Self::is_clone_layout_present(&path) {
+            return Ok(None);
+        }
+        let head_path = Self::head_path(&path);
+        let contents = fs::read_to_string(&head_path).map_err(|error| {
+            crate::error::RepoStoreError::io("read clone head", head_path.clone(), error)
+        })?;
+        Ok(Some(contents.trim().to_owned()))
+    }
+
     pub async fn refresh(
         &self,
         tenant: &TenantId,
