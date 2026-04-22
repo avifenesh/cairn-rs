@@ -233,6 +233,76 @@ async fn team_mode_refuses_sqlite() {
     );
 }
 
+// ── Test #12 (env var path) ──────────────────────────────────────────────────
+
+/// Companion to `team_mode_refuses_sqlite` covering the `DATABASE_URL`
+/// environment variable path. Per gemini-code-assist's high-priority
+/// finding on PR #77, the original refusal only covered `--db` (CLI
+/// parse time); a user specifying a SQLite DB via `DATABASE_URL`
+/// would bypass the invariant entirely. The refusal is now enforced
+/// after `resolve_storage_from_env`, so both paths are covered. This
+/// test pins that behaviour.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn team_mode_refuses_sqlite_via_database_url_env() {
+    let mut sqlite_path = std::env::temp_dir();
+    sqlite_path.push(format!(
+        "cairn-rfc020-team-refuse-env-{}.db",
+        uuid::Uuid::new_v4().simple()
+    ));
+    let _cleanup = RemoveOnDrop {
+        path: sqlite_path.clone(),
+    };
+
+    let bin = env!("CARGO_BIN_EXE_cairn-app");
+    let mut cmd = Command::new(bin);
+    cmd.arg("--mode")
+        .arg("team")
+        .arg("--port")
+        .arg("0")
+        .arg("--addr")
+        .arg("127.0.0.1")
+        // No `--db` flag — force the env-var resolution path.
+        .env(
+            "DATABASE_URL",
+            sqlite_path.to_str().expect("temp path is valid utf-8"),
+        )
+        .env("CAIRN_ADMIN_TOKEN", "seed-admin-team-refuse-sqlite-env")
+        .env("RUST_LOG", "warn")
+        .env_remove("CAIRN_LOG_DIR")
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .kill_on_drop(true);
+
+    let output = timeout(Duration::from_secs(10), cmd.output())
+        .await
+        .expect(
+            "cairn-app did not exit within 10s with a SQLite DATABASE_URL \
+             in team mode — the env-var footgun should be refused exactly \
+             like --db",
+        )
+        .expect("failed to spawn cairn-app binary — did cargo build it?");
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let combined = format!("stderr={stderr}\nstdout={stdout}");
+
+    assert_eq!(
+        output.status.code(),
+        Some(1),
+        "team mode + SQLite via DATABASE_URL must exit with code 1; got \
+         {:?}\n{combined}",
+        output.status.code(),
+    );
+
+    let lc = combined.to_lowercase();
+    assert!(lc.contains("sqlite"), "must cite SQLite; got:\n{combined}");
+    assert!(lc.contains("team"), "must cite team mode; got:\n{combined}");
+    assert!(
+        lc.contains("postgres"),
+        "must cite Postgres as the remedy; got:\n{combined}"
+    );
+}
+
 // ── helpers ──────────────────────────────────────────────────────────────────
 
 /// Schedule deletion of `path` when the guard drops. We don't depend on the

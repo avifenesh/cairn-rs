@@ -172,38 +172,10 @@ fn parse_args_from(args: &[String]) -> BootstrapConfig {
         if matches!(config.encryption_key, EncryptionKeySource::LocalAuto) {
             config.encryption_key = EncryptionKeySource::None;
         }
-        // RFC 020 §"Postgres as Production Target" (Integration Test #12):
-        // team mode requires Postgres for crash-durability and multi-process
-        // coordination. SQLite's single-writer model does not hold the
-        // durability invariants team-mode deployments assume. This is a
-        // startup *refusal* (not a warning) so operators can't accidentally
-        // ship a team deployment on SQLite.
-        //
-        // InMemory is intentionally allowed here — it is ephemeral by design
-        // and tests/dev loops rely on it; operators explicitly opt in via
-        // `--db memory`. The RFC 020 concern is specifically the SQLite
-        // footgun, where the file *looks* durable but silently isn't in a
-        // multi-process team deployment.
-        if let StorageBackend::Sqlite { path } = &config.storage {
-            // Gate on `.db`/`.sqlite` suffix so integration tests that
-            // deliberately pass `sqlite:<path>?mode=rwc` (LiveHarness
-            // restart-meta-test) still boot — the suffix predicate is what
-            // separates "operator fat-fingered a production DB path" from
-            // "test harness exercising SQLite in a controlled way". The
-            // operator-facing footgun always ends in `.db` or `.sqlite`.
-            let refuses = path.ends_with(".db") || path.ends_with(".sqlite");
-            if refuses {
-                eprintln!(
-                    "FATAL: SQLite is not supported in self-hosted team mode: {path}. \
-                     Team mode requires Postgres. Pass --db postgres://... or set \
-                     DATABASE_URL. See RFC 020 for rationale."
-                );
-                #[cfg(test)]
-                panic!("team mode + SQLite is refused at CLI parse time");
-                #[cfg(not(test))]
-                std::process::exit(1);
-            }
-        }
+        // RFC 020 team-mode storage invariant is enforced in `parse_args`
+        // AFTER `resolve_storage_from_env` runs, so the `DATABASE_URL` path
+        // is covered as well as the `--db` CLI path. Not enforced here so
+        // the invariant can't be silently bypassed by choosing env vars.
     }
 
     config
@@ -235,6 +207,12 @@ fn parse_args() -> BootstrapConfig {
     let args: Vec<String> = std::env::args().collect();
     let mut config = parse_args_from(&args);
     resolve_storage_from_env(&mut config);
+    // Enforce the RFC 020 team-mode storage invariant AFTER env-var
+    // resolution so a `DATABASE_URL=sqlite:/path/prod.db` footgun is
+    // caught the same as a `--db /path/prod.db` one. This was gemini-
+    // code-assist high-priority finding on PR #77 and is the correct
+    // refusal point.
+    cairn_app::bootstrap::enforce_team_mode_storage_invariant(&config);
     config
 }
 

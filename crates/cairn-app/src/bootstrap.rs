@@ -29,13 +29,40 @@ pub(crate) async fn shutdown_signal() {
     }
 }
 
-fn fatal_cli(message: impl Into<String>) -> ! {
+pub fn fatal_cli(message: impl Into<String>) -> ! {
     let message = message.into();
     eprintln!("{message}");
     #[cfg(test)]
     panic!("{message}");
     #[cfg(not(test))]
     std::process::exit(1);
+}
+
+/// Enforce RFC 020 §"Postgres as Production Target" (Integration Test #12):
+/// team mode must refuse to start on SQLite. Called after *all* storage
+/// configuration sources (CLI `--db`, `DATABASE_URL` env var) have been
+/// merged so the invariant cannot be bypassed by choosing the env-var path
+/// rather than the CLI flag.
+///
+/// Gated on `.db` / `.sqlite` suffix so integration test harnesses that
+/// deliberately pass `sqlite:<path>?mode=rwc` (LiveHarness restart meta-
+/// test) still boot — the suffix predicate is what separates "operator
+/// fat-fingered a production DB path" from "test harness exercising
+/// SQLite in a controlled way". The operator-facing footgun always ends
+/// in `.db` or `.sqlite`.
+pub fn enforce_team_mode_storage_invariant(config: &BootstrapConfig) {
+    if config.mode != DeploymentMode::SelfHostedTeam {
+        return;
+    }
+    if let StorageBackend::Sqlite { path } = &config.storage {
+        if path.ends_with(".db") || path.ends_with(".sqlite") {
+            fatal_cli(format!(
+                "FATAL: SQLite is not supported in self-hosted team mode: {path}. \
+                 Team mode requires Postgres. Pass --db postgres://... or set \
+                 DATABASE_URL. See RFC 020 for rationale."
+            ));
+        }
+    }
 }
 
 pub fn parse_args_from(args: &[String]) -> BootstrapConfig {
@@ -114,21 +141,9 @@ pub fn parse_args_from(args: &[String]) -> BootstrapConfig {
         if config.listen_addr == "127.0.0.1" {
             config.listen_addr = "0.0.0.0".to_owned();
         }
-        if let StorageBackend::Sqlite { path } = &config.storage {
-            if path.ends_with(".sqlite") || path.ends_with(".db") {
-                // RFC 020 §"Postgres as Production Target": team mode requires
-                // Postgres for crash-durability and multi-process coordination.
-                // SQLite's single-writer model does not hold the durability
-                // invariants team-mode deployments assume. This is a startup
-                // refusal (not a warning) so operators can't accidentally ship
-                // a team deployment on SQLite.
-                fatal_cli(format!(
-                    "SQLite is not supported in self-hosted team mode: {path}. \
-                     Team mode requires Postgres. Pass --db postgres://... or \
-                     set DATABASE_URL. See RFC 020 for rationale."
-                ));
-            }
-        }
+        // RFC 020 team-mode storage invariant. Shared with main.rs::parse_args
+        // so CLI-only and env-var paths are covered by the same refusal.
+        enforce_team_mode_storage_invariant(&config);
         if matches!(config.encryption_key, EncryptionKeySource::LocalAuto) {
             config.encryption_key = EncryptionKeySource::None;
         }
@@ -338,6 +353,92 @@ mod tests {
         assert!(matches!(config.storage, StorageBackend::InMemory));
         assert_eq!(config.encryption_key, EncryptionKeySource::LocalAuto);
         assert!(!config.tls_enabled);
+    }
+
+    // ── RFC 020 team-mode storage invariant ────────────────────────────
+
+    #[test]
+    #[should_panic(expected = "SQLite is not supported in self-hosted team mode")]
+    fn enforce_refuses_team_mode_with_sqlite_db_suffix() {
+        let config = BootstrapConfig {
+            mode: DeploymentMode::SelfHostedTeam,
+            storage: StorageBackend::Sqlite {
+                path: "/var/lib/cairn/prod.db".to_owned(),
+            },
+            ..BootstrapConfig::default()
+        };
+        enforce_team_mode_storage_invariant(&config);
+    }
+
+    #[test]
+    #[should_panic(expected = "SQLite is not supported in self-hosted team mode")]
+    fn enforce_refuses_team_mode_with_sqlite_suffix() {
+        let config = BootstrapConfig {
+            mode: DeploymentMode::SelfHostedTeam,
+            storage: StorageBackend::Sqlite {
+                path: "/var/lib/cairn/prod.sqlite".to_owned(),
+            },
+            ..BootstrapConfig::default()
+        };
+        enforce_team_mode_storage_invariant(&config);
+    }
+
+    #[test]
+    fn enforce_accepts_team_mode_with_postgres() {
+        let config = BootstrapConfig {
+            mode: DeploymentMode::SelfHostedTeam,
+            storage: StorageBackend::Postgres {
+                connection_url: "postgres://localhost/cairn".to_owned(),
+            },
+            ..BootstrapConfig::default()
+        };
+        // Must not panic.
+        enforce_team_mode_storage_invariant(&config);
+    }
+
+    #[test]
+    fn enforce_accepts_team_mode_with_inmemory() {
+        // InMemory is intentionally permitted even in team mode — it is
+        // ephemeral by design and operators must explicitly opt in via
+        // `--db memory`. The RFC 020 footgun is specifically SQLite
+        // "looking durable while silently not being so in a multi-
+        // process deployment".
+        let config = BootstrapConfig {
+            mode: DeploymentMode::SelfHostedTeam,
+            storage: StorageBackend::InMemory,
+            ..BootstrapConfig::default()
+        };
+        enforce_team_mode_storage_invariant(&config);
+    }
+
+    #[test]
+    fn enforce_allows_sqlite_harness_rwc_path_in_team_mode() {
+        // LiveHarness::setup_with_sqlite passes `sqlite:<path>?mode=rwc`
+        // which does not end with `.db`/`.sqlite`. The refusal must NOT
+        // trip on it — tightening the suffix gate would break the live
+        // integration test harness.
+        let config = BootstrapConfig {
+            mode: DeploymentMode::SelfHostedTeam,
+            storage: StorageBackend::Sqlite {
+                path: "sqlite:/tmp/cairn-test-abcd1234.db?mode=rwc".to_owned(),
+            },
+            ..BootstrapConfig::default()
+        };
+        // Must not panic — path ends with `?mode=rwc`, not `.db`.
+        enforce_team_mode_storage_invariant(&config);
+    }
+
+    #[test]
+    fn enforce_allows_sqlite_in_local_mode() {
+        let config = BootstrapConfig {
+            mode: DeploymentMode::Local,
+            storage: StorageBackend::Sqlite {
+                path: "/home/user/.cairn/local.db".to_owned(),
+            },
+            ..BootstrapConfig::default()
+        };
+        // Local mode: SQLite is a supported, first-class backend.
+        enforce_team_mode_storage_invariant(&config);
     }
 
     // ── combined flags ─────────────────────────────────────────────────
