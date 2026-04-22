@@ -23,17 +23,19 @@ impl FabricRuntime {
     // ferriskey's internal connection pool — it re-establishes transparently
     // on the next command. This retry loop only covers initial startup.
     pub async fn start(config: FabricConfig) -> Result<Self, FabricError> {
-        let url = config.valkey_url();
-        tracing::info!(url = %url, "connecting to valkey");
+        tracing::info!(
+            host = %config.valkey_host,
+            port = config.valkey_port,
+            tls = config.tls,
+            cluster = config.cluster,
+            "connecting to valkey"
+        );
 
         let mut last_err = String::new();
         let mut client = None;
         for attempt in 0..CONNECT_MAX_ATTEMPTS {
-            let result = if config.cluster {
-                Client::connect_cluster(&[url.as_str()]).await
-            } else {
-                Client::connect(&url).await
-            };
+            // Rebuild each attempt: `ClientBuilder::build` consumes self.
+            let result = config.valkey_client_builder().build().await;
             match result {
                 Ok(c) => {
                     client = Some(c);
