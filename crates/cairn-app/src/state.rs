@@ -847,7 +847,14 @@ impl AppState {
             // detect repo bindings that are no longer authorised and emit
             // `SandboxAllowlistRevoked` for the run-level recovery service
             // to synthesize an operator approval against.
-            .with_allowlist(project_repo_access.clone()),
+            .with_allowlist(project_repo_access.clone())
+            // RFC 020 §"Run recovery matrix" — `BaseRevisionDrift` row.
+            // Wire the repo clone cache so the recovery sweep can diff a
+            // sandbox's stored `base_revision` against the live clone HEAD
+            // and emit `SandboxBaseRevisionDrift` when the clone moved
+            // between provisioning and recovery. Overlay-only; reflink
+            // sandboxes are exempt per RFC 016 (physically independent).
+            .with_clone_cache(repo_clone_cache.clone()),
         );
         // RFC 015: marketplace service wrapping the plugin host.
         let marketplace = {

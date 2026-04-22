@@ -111,12 +111,13 @@ pub use runtime_config::{
     KEY_WORKER_URL,
 };
 pub use services::{
-    AllowlistRevokedRun, ApprovalPolicyServiceImpl, ApprovalServiceImpl, CheckpointServiceImpl,
-    EvalRunServiceImpl, ExternalWorkerService, ExternalWorkerServiceImpl, IngestJobServiceImpl,
-    LlmObservabilityServiceImpl, MailboxServiceImpl, ProjectServiceImpl, PromptAssetServiceImpl,
-    PromptReleaseServiceImpl, PromptVersionServiceImpl, RecoveryService, RecoveryServiceImpl,
-    SandboxLostRun, SandboxReattachedRun, SignalServiceImpl, SimpleRouteResolver,
-    TenantServiceImpl, ToolInvocationService, ToolInvocationServiceImpl, WorkspaceServiceImpl,
+    AllowlistRevokedRun, ApprovalPolicyServiceImpl, ApprovalServiceImpl, BaseRevisionDriftRun,
+    CheckpointServiceImpl, EvalRunServiceImpl, ExternalWorkerService, ExternalWorkerServiceImpl,
+    IngestJobServiceImpl, LlmObservabilityServiceImpl, MailboxServiceImpl, ProjectServiceImpl,
+    PromptAssetServiceImpl, PromptReleaseServiceImpl, PromptVersionServiceImpl, RecoveryService,
+    RecoveryServiceImpl, SandboxLostRun, SandboxReattachedRun, SignalServiceImpl,
+    SimpleRouteResolver, TenantServiceImpl, ToolInvocationService, ToolInvocationServiceImpl,
+    WorkspaceServiceImpl,
 };
 pub use sessions::SessionService;
 pub use signals::SignalService;

@@ -66,8 +66,9 @@ use support::live_fabric::LiveHarness;
 
 /// Serialise env-var-driven test-only seed hooks so two parallel tests
 /// do not contaminate each other's cairn-app subprocess via inherited
-/// environment. Both `CAIRN_TEST_SEED_LOST_SANDBOX` and
-/// `CAIRN_TEST_SEED_ALLOWLIST_REVOKED` are read at subprocess startup
+/// environment. `CAIRN_TEST_SEED_LOST_SANDBOX`,
+/// `CAIRN_TEST_SEED_ALLOWLIST_REVOKED`, and
+/// `CAIRN_TEST_SEED_BASE_REVISION_DRIFT` are read at subprocess startup
 /// and `std::env::set_var` is process-global; tests must hold this
 /// mutex across `set_var` + harness spawn (which `fork`s the child and
 /// therefore inherits the env snapshot at that instant) + `remove_var`.
@@ -478,48 +479,168 @@ async fn sandbox_preserved_allowlist_revoked() {
 ///      post-provision).
 ///   3. Overlay sandbox moved to `Preserved`, reflink to `Ready`.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "emission path live at workspace/src/sandbox/service.rs:614 \
-            but unreachable without (a) lightweight sandbox-provision \
-            HTTP and (b) RepoCloneCache::refresh HTTP surface."]
+#[allow(clippy::await_holding_lock)] // See `ENV_SEED_GUARD` doc-comment.
 async fn sandbox_preserved_base_revision_drift_overlay_only() {
-    let mut h = LiveHarness::setup_with_sqlite().await;
-
-    // Probe: the refresh endpoint does not exist yet; confirm that so
-    // the moment it's added this assertion fails and forces un-ignore.
-    let probe = h
-        .client()
-        .post(format!(
-            "{}/v1/projects/{}/repos/org/foo/refresh",
-            h.base_url, h.project
-        ))
-        .bearer_auth(&h.admin_token)
-        .header("X-Cairn-Tenant", &h.tenant)
-        .header("X-Cairn-Workspace", &h.workspace)
-        .header("X-Cairn-Project", &h.project)
-        .send()
-        .await
-        .expect("probe reaches server");
-    let status = probe.status().as_u16();
-    assert!(
-        matches!(status, 404 | 405),
-        "POST /v1/projects/:project/repos/:owner/:repo/refresh \
-         unexpectedly returned {status} — un-ignore this test and \
-         wire the full overlay-vs-reflink drift assertion."
+    // Same shape as tests #3a (`sandbox_preserved_allowlist_revoked`)
+    // and #4 (`sandbox_lost_transitions_run_to_failed`): seed via an
+    // env var before spawning the cairn-app subprocess so the child
+    // inherits it.
+    //
+    // The seed hook ensures the clone exists (so `current_head()`
+    // returns `Some(init-*-<now>)`), writes an overlay registry entry
+    // with a sentinel `base_revision` that deliberately does not match
+    // the clone HEAD, and optionally writes a reflink sibling on the
+    // same repo. `SandboxService::recover_all` compares stored vs live
+    // and emits `SandboxBaseRevisionDrift` for the overlay only;
+    // `RecoveryService::recover_all` synthesises an approval and
+    // transitions the overlay run to `WaitingApproval`. The reflink
+    // run stays `Running` (physically independent, RFC 016).
+    let overlay_run_id = format!("run-sbx-drift-{}", uuid::Uuid::new_v4().simple());
+    let reflink_run_id = format!("run-sbx-drift-reflink-{}", uuid::Uuid::new_v4().simple());
+    let project_id = format!("p_sbxdrift_{}", uuid::Uuid::new_v4().simple());
+    let tenant_id = "t_sbxdrift";
+    let workspace_id = "w_sbxdrift";
+    let repo_id = "octocat/hello";
+    let spec = format!(
+        "{overlay_run_id}:{tenant_id}:{workspace_id}:{project_id}:{repo_id}:{reflink_run_id}",
     );
+    let _env_guard = ENV_SEED_GUARD.lock().expect("env seed guard poisoned");
+    std::env::set_var("CAIRN_TEST_SEED_BASE_REVISION_DRIFT", &spec);
 
+    let mut h = LiveHarness::setup_with_sqlite().await;
+    std::env::remove_var("CAIRN_TEST_SEED_BASE_REVISION_DRIFT");
+    drop(_env_guard);
+
+    // SIGKILL + restart exercises the "SIGKILL, restart, confirm"
+    // phrasing in RFC 020 §"Run recovery matrix". On boot 2 the
+    // registry's `base_revision_drift_handled` tombstone suppresses
+    // re-emission and the run is already `WaitingApproval` (not
+    // Pending), so the seed is idempotent.
     h.sigkill_and_restart().await.expect("sigkill + restart");
 
-    // When un-ignored, assert the event log diff between boot-1 and
-    // boot-2 contains exactly one `sandbox_base_revision_drift` +
-    // `sandbox_preserved` pair (for the overlay) and zero drift events
-    // for the reflink.
-    //
-    // `sigkill_and_restart` already polls `/health/ready` to 200 via
-    // `poll_readiness_until_ready`, so the readiness snapshot below
-    // is guaranteed to reflect the post-recovery state — no sleeps or
-    // secondary polling needed. At un-ignore time, this is the hook
-    // where event-log diff + branch-count assertions slot in.
-    let _ = fetch_readiness(&h).await;
+    // Poll `GET /v1/runs/<overlay_run_id>` until it reads as
+    // `waiting_approval`. The projection upserts on boot 1 and the
+    // restart replays the events, so the read is consistent post-
+    // restart.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    let mut overlay_state: Option<String> = None;
+    let mut overlay_body: Option<Value> = None;
+    while std::time::Instant::now() < deadline {
+        let res = h
+            .client()
+            .get(format!("{}/v1/runs/{}", h.base_url, overlay_run_id))
+            .bearer_auth(&h.admin_token)
+            .header("X-Cairn-Tenant", tenant_id)
+            .header("X-Cairn-Workspace", workspace_id)
+            .send()
+            .await
+            .expect("GET /v1/runs/:overlay reaches server");
+        if res.status().as_u16() == 200 {
+            let body: Value = res.json().await.expect("run body parses as JSON");
+            let state = body
+                .get("run")
+                .and_then(|r| r.get("state"))
+                .and_then(Value::as_str)
+                .map(str::to_owned);
+            if state.as_deref() == Some("waiting_approval") {
+                overlay_state = state;
+                overlay_body = Some(body);
+                break;
+            }
+            overlay_state = state;
+            overlay_body = Some(body);
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+    assert_eq!(
+        overlay_state.as_deref(),
+        Some("waiting_approval"),
+        "overlay run {overlay_run_id} did not transition to \
+         `waiting_approval` within 5s after sandbox_base_revision_drift \
+         recovery. last_body={overlay_body:?}",
+    );
+
+    // Assert the synthesised approval exists under the project and
+    // points at the overlay run. Same contract as test #3a.
+    let approvals_res = h
+        .client()
+        .get(format!(
+            "{}/v1/approvals?tenant_id={tenant_id}&workspace_id={workspace_id}&project_id={project_id}",
+            h.base_url,
+        ))
+        .bearer_auth(&h.admin_token)
+        .send()
+        .await
+        .expect("GET approvals reaches server");
+    assert_eq!(
+        approvals_res.status().as_u16(),
+        200,
+        "GET /v1/approvals must return 200 after drift recovery",
+    );
+    let approvals: Value = approvals_res
+        .json()
+        .await
+        .expect("approvals body parses as JSON");
+    let items = approvals
+        .get("items")
+        .and_then(Value::as_array)
+        .or_else(|| approvals.as_array())
+        .cloned()
+        .unwrap_or_default();
+    let matched = items
+        .iter()
+        .any(|a| a.get("run_id").and_then(Value::as_str) == Some(overlay_run_id.as_str()));
+    assert!(
+        matched,
+        "expected synthesised approval for overlay run {overlay_run_id}; \
+         got approvals={items:?}",
+    );
+
+    // Reflink-exemption assertion: the reflink sibling on the same
+    // repo MUST NOT be advanced to `waiting_approval`. RFC 016 states
+    // reflink sandboxes are physically independent post-provision, so
+    // the clone's HEAD moving cannot corrupt their contents — drift is
+    // structurally impossible. The sweep skips `SandboxStrategy::Reflink`
+    // at the workspace layer; this test locks the contract in at the
+    // integration level.
+    let reflink_res = h
+        .client()
+        .get(format!("{}/v1/runs/{}", h.base_url, reflink_run_id))
+        .bearer_auth(&h.admin_token)
+        .header("X-Cairn-Tenant", tenant_id)
+        .header("X-Cairn-Workspace", workspace_id)
+        .send()
+        .await
+        .expect("GET /v1/runs/:reflink reaches server");
+    assert_eq!(
+        reflink_res.status().as_u16(),
+        200,
+        "reflink run must be readable after drift recovery",
+    );
+    let reflink_body: Value = reflink_res.json().await.expect("reflink body parses");
+    let reflink_state = reflink_body
+        .get("run")
+        .and_then(|r| r.get("state"))
+        .and_then(Value::as_str)
+        .map(str::to_owned);
+    assert_eq!(
+        reflink_state.as_deref(),
+        Some("running"),
+        "reflink run {reflink_run_id} unexpectedly transitioned to \
+         {reflink_state:?}; RFC 016 guarantees reflink sandboxes are \
+         physically independent and MUST NOT be flagged as \
+         base-revision-drifted. full body: {reflink_body:?}",
+    );
+
+    // And: no drift approval was synthesised for the reflink run.
+    let reflink_matched = items
+        .iter()
+        .any(|a| a.get("run_id").and_then(Value::as_str) == Some(reflink_run_id.as_str()));
+    assert!(
+        !reflink_matched,
+        "reflink run {reflink_run_id} must not receive a drift approval; \
+         approvals={items:?}",
+    );
 }
 
 // ── Test #4: sandbox lost ───────────────────────────────────────────────────

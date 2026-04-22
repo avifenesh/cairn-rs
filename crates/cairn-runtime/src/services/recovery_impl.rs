@@ -120,6 +120,25 @@ pub type AllowlistRevokedRun = (
 /// `provision_or_reconnect`.
 pub type SandboxReattachedRun = (cairn_domain::RunId, cairn_domain::ProjectKey);
 
+/// Runs whose bound overlay sandbox is preserved because the locked
+/// clone's HEAD moved between provisioning and recovery.
+///
+/// Produced by `SandboxService::recover_all` (the workspace layer owns
+/// the diff between stored `base_revision` and live clone HEAD),
+/// consumed by [`RecoveryService::recover_all`] (the runtime layer
+/// synthesises the operator re-provision approval). Each entry MUST
+/// cause the run-recovery sweep to transition the bound run to
+/// `WaitingApproval` with a fresh `ApprovalRequested{requirement:Required}`
+/// asking the operator to re-provision against the new base or cancel,
+/// per RFC 020 §"Run recovery matrix" row "Running / Sandbox preserved:
+/// BaseRevisionDrift". Reflink sandboxes are exempt at the workspace
+/// layer so they never reach this list (RFC 016 — physically independent).
+pub type BaseRevisionDriftRun = (
+    cairn_domain::RunId,
+    cairn_domain::ProjectKey,
+    /* repo_id = */ String,
+);
+
 #[async_trait]
 pub trait RecoveryService: Send + Sync {
     /// Sweep every non-terminal run and emit the appropriate recovery events.
@@ -141,12 +160,21 @@ pub trait RecoveryService: Send + Sync {
     /// implementations MUST transition each such run to `WaitingApproval`
     /// with a synthesized `ApprovalRequested{requirement:Required}`
     /// asking the operator to re-grant or cancel.
+    ///
+    /// `base_revision_drift_runs` carries `(run_id, project, repo_id)`
+    /// triples whose bound overlay sandboxes are preserved because the
+    /// locked clone's HEAD drifted from the sandbox's stored
+    /// `base_revision`. Default implementations MUST transition each
+    /// such run to `WaitingApproval` with a synthesized
+    /// `ApprovalRequested{requirement:Required}` asking the operator to
+    /// re-provision against the new base or cancel.
     async fn recover_all(
         &self,
         boot_id: &BootId,
         sandbox_lost_runs: &[SandboxLostRun],
         allowlist_revoked_runs: &[AllowlistRevokedRun],
         sandbox_reattached_runs: &[SandboxReattachedRun],
+        base_revision_drift_runs: &[BaseRevisionDriftRun],
     ) -> Result<RunRecoverySummary, RuntimeError>;
 }
 
@@ -176,6 +204,7 @@ where
         sandbox_lost_runs: &[SandboxLostRun],
         allowlist_revoked_runs: &[AllowlistRevokedRun],
         sandbox_reattached_runs: &[SandboxReattachedRun],
+        base_revision_drift_runs: &[BaseRevisionDriftRun],
     ) -> Result<RunRecoverySummary, RuntimeError> {
         // RFC 020 Track 4 — timer for the per-boot RecoverySummary audit event.
         let sweep_started_ms = current_unix_ms();
@@ -376,10 +405,11 @@ where
         //
         // Guard against a badly-seeded workspace sweep that lists the
         // same run under both `sandbox_lost_runs` / `allowlist_
-        // revoked_runs` and `sandbox_reattached_runs` — those rows
-        // mutate state, and emitting a reattach breadcrumb after the
-        // Running → Failed / Running → WaitingApproval transition
-        // would falsely imply the run is still healthy.
+        // revoked_runs` / `base_revision_drift_runs` and
+        // `sandbox_reattached_runs` — those rows mutate state, and
+        // emitting a reattach breadcrumb after the Running → Failed /
+        // Running → WaitingApproval transition would falsely imply
+        // the run is still healthy.
         let mut sandbox_reattached_handled: std::collections::HashSet<cairn_domain::RunId> =
             std::collections::HashSet::new();
         for (run_id, project) in sandbox_reattached_runs {
@@ -395,6 +425,97 @@ where
                     run_id: Some(run_id.clone()),
                     task_id: None,
                     reason: "sandbox_reattached".to_owned(),
+                    boot_id: Some(boot_id.as_str().to_owned()),
+                },
+            )));
+        }
+
+        // RFC 020 §"Run recovery matrix" — `BaseRevisionDrift` row. Same
+        // shape as `AllowlistRevoked` above: synthesise an approval
+        // asking the operator to re-provision (or cancel), transition
+        // the bound Running run to `WaitingApproval`, and emit the
+        // symmetric `RecoveryAttempted` / `RecoveryCompleted` audit
+        // pair. The approval_id is derived deterministically from
+        // `run_id` so re-running recovery does not duplicate it (the
+        // approval projection upserts on `approval_id`).
+        let mut base_revision_drift_handled: std::collections::HashSet<cairn_domain::RunId> =
+            std::collections::HashSet::new();
+        for (run_id, project, repo_id) in base_revision_drift_runs {
+            if !base_revision_drift_handled.insert(run_id.clone()) {
+                continue;
+            }
+            // Defend against the same run appearing in an earlier list —
+            // a badly-seeded test, or a registry entry that raced a
+            // handler change between boots. First-writer-wins: the
+            // earlier transition already picked the semantically
+            // correct state, so skip this one.
+            if sandbox_lost_handled.contains(run_id) || allowlist_revoked_handled.contains(run_id) {
+                continue;
+            }
+            let current = RunReadModel::get(self.store.as_ref(), run_id).await?;
+            let from_state = current.as_ref().map(|r| r.state);
+            sandbox_lost_events.push(make_envelope(RuntimeEvent::RecoveryAttempted(
+                RecoveryAttempted {
+                    project: project.clone(),
+                    run_id: Some(run_id.clone()),
+                    task_id: None,
+                    reason: format!(
+                        "sandbox_base_revision_drift: repo {repo_id} locked clone HEAD moved; \
+                         synthesizing approval for operator re-provision",
+                    ),
+                    boot_id: Some(boot_id.as_str().to_owned()),
+                },
+            )));
+            let approval_id =
+                ApprovalId::new(format!("approval-base-revision-drift-{}", run_id.as_str()));
+            sandbox_lost_events.push(make_envelope(RuntimeEvent::ApprovalRequested(
+                ApprovalRequested {
+                    project: project.clone(),
+                    approval_id,
+                    run_id: Some(run_id.clone()),
+                    task_id: None,
+                    requirement: ApprovalRequirement::Required,
+                    title: Some(format!("Re-provision sandbox: {repo_id}")),
+                    description: Some(format!(
+                        "Run `{}` was paused at boot because its overlay sandbox is bound \
+                         to repo `{}`, whose locked clone HEAD moved after the sandbox was \
+                         provisioned. The upper layer now composes over a moved base. \
+                         Approve to re-provision against the new HEAD, or reject to cancel \
+                         the run.",
+                        run_id.as_str(),
+                        repo_id,
+                    )),
+                },
+            )));
+            if let Some(from) = from_state {
+                if !from.is_terminal()
+                    && cairn_domain::can_transition_run_state(from, RunState::WaitingApproval)
+                {
+                    sandbox_lost_events.push(make_envelope(RuntimeEvent::RunStateChanged(
+                        RunStateChanged {
+                            project: project.clone(),
+                            run_id: run_id.clone(),
+                            transition: StateTransition {
+                                from: Some(from),
+                                to: RunState::WaitingApproval,
+                            },
+                            failure_class: None,
+                            pause_reason: None,
+                            resume_trigger: None,
+                        },
+                    )));
+                    summary.advanced_runs += 1;
+                    summary.outcomes.push(RunRecoveryOutcome::Advanced {
+                        run_id: run_id.clone(),
+                    });
+                }
+            }
+            sandbox_lost_events.push(make_envelope(RuntimeEvent::RecoveryCompleted(
+                RecoveryCompleted {
+                    project: project.clone(),
+                    run_id: Some(run_id.clone()),
+                    task_id: None,
+                    recovered: true,
                     boot_id: Some(boot_id.as_str().to_owned()),
                 },
             )));
@@ -454,18 +575,25 @@ where
             .filter(|r| {
                 !sandbox_lost_handled.contains(&r.run_id)
                     && !allowlist_revoked_handled.contains(&r.run_id)
+                    && !base_revision_drift_handled.contains(&r.run_id)
             })
             .collect();
         // `scanned_runs` must reflect everything recovery touched this
-        // boot — the non-terminal runs about to be planned, plus the
-        // sandbox-lost runs we already transitioned to Failed, plus the
-        // allowlist-revoked runs we already transitioned to
-        // WaitingApproval. Undercounting these in the `scanned=` log
-        // line would understate recovery work for operators.
-        // (Cursor Bugbot low-1.)
+        // boot — the non-terminal runs about to be planned, plus every
+        // run in any of the pre-handled sets (sandbox_lost,
+        // allowlist_revoked, base_revision_drift). Using the handled-set
+        // sizes directly instead of `summary.failed_runs + advanced_runs`
+        // means a pre-handled run that was already terminal (and therefore
+        // did NOT advance state) still contributes to the scanned count.
+        // Undercounting these in the `scanned=` log line understates
+        // recovery work for operators. (Cursor Bugbot low-1 on this PR
+        // and PR #86.) `sandbox_reattached_handled` is deliberately NOT
+        // included because those runs still flow through `runs` above
+        // and are counted in `runs.len()`.
         summary.scanned_runs = (runs.len() as u32)
-            .saturating_add(summary.failed_runs)
-            .saturating_add(summary.advanced_runs);
+            .saturating_add(sandbox_lost_handled.len() as u32)
+            .saturating_add(allowlist_revoked_handled.len() as u32)
+            .saturating_add(base_revision_drift_handled.len() as u32);
         for run in runs {
             let plan = self
                 .plan_for_run(&run, boot_id, now_ms, &mut resolved_approvals_by_project)
