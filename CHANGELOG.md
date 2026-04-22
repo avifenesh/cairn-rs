@@ -68,6 +68,25 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **FF#122 `ScannerFilter` data-plane benchmark.** New
+  `crates/cairn-fabric/tests/integration/test_scanner_filter_perf.rs`
+  measures the wall-time cost of FF's per-candidate `HGET` against a
+  live Valkey at candidate counts N ∈ {100, 1 000, 10 000}. Honest
+  finding: per-candidate filter-ON p50 ≈ 40–55 µs (Valkey loopback
+  RTT-dominated) with p95 up to ~400 µs under shared-instance
+  contention; the filter-ON vs filter-OFF delta is noise-dominated
+  (±15 % across three full-matrix runs) because `HGET` and `HEXISTS`
+  share the same single-round-trip cost profile. Cairn continues to
+  run filter-ON in production — the cross-instance isolation the
+  filter buys (FF#122) dwarfs any measurable data-plane tax at
+  cairn's scale. Reproduce: `CAIRN_TEST_VALKEY_URL=redis://127.0.0.1:6379/ cargo test -p cairn-fabric --test integration --release -- integration::test_scanner_filter_perf --nocapture`.
+
+  | N | filter-OFF median | filter-ON median | per-cand p50 | per-cand p95 | delta vs OFF |
+  |-----:|-----------:|-----------:|---------:|---------:|---------:|
+  |   100 |  ~6–10 ms |  ~5–10 ms |  ~40–55 µs |   ~90–280 µs | noise (±21 %) |
+  | 1 000 |  ~49–94 ms |  ~56–103 ms |  ~48–68 µs |  ~165–400 µs | noise (±16 %) |
+  | 10 000 |  ~0.59–1.55 s |  ~0.51–1.51 s |  ~43–55 µs |  ~100–245 µs | noise (±12 %) |
+
 - **9-table SQLite port (option B parity).** Ports `tenants`,
   `workspaces`, `projects`, `workspace_members`, `prompt_assets`,
   `prompt_versions`, `prompt_releases`, `route_decisions`, and

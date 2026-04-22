@@ -35,6 +35,7 @@ mod integration {
     pub mod test_lease_history_subscriber;
     pub mod test_orchestrator_stream;
     pub mod test_run_lifecycle;
+    pub mod test_scanner_filter_perf;
     pub mod test_scanner_filter_upstream;
     pub mod test_session;
     pub mod test_suspension;
