@@ -449,7 +449,7 @@ impl SqliteSyncProjection {
                 .map_err(|err| StoreError::Internal(err.to_string()))?;
             }
             // RFC 001 gradual rollout — state tracked via prompt_releases;
-            // mirrors PG which treats this as a no-op projection event.
+            // no dedicated projection table.
             RuntimeEvent::PromptRolloutStarted(_) => {}
             RuntimeEvent::TenantCreated(e) => {
                 sqlx::query(
