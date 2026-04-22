@@ -9,8 +9,8 @@ This document defines the concrete repo-scaffolding tasks that should happen bef
 
 It complements:
 
-- [`EIGHT_WORKER_EXECUTION_PLAN.md`](./EIGHT_WORKER_EXECUTION_PLAN.md)
-- [`MILESTONE_BOARD_WEEKS_1_4.md`](./MILESTONE_BOARD_WEEKS_1_4.md)
+- [`EIGHT_WORKER_EXECUTION_PLAN.md`](./8-worker-plan/EIGHT_WORKER_EXECUTION_PLAN.md)
+- [`MILESTONE_BOARD_WEEKS_1_4.md`](./8-worker-plan/MILESTONE_BOARD_WEEKS_1_4.md)
 
 ## Target Workspace Shape
 
