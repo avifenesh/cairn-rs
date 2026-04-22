@@ -3,24 +3,42 @@
 //! # Footgun
 //!
 //! Tests in this file exercise `cairn_runtime::startup` types
-//! (`ToolCallId`, `ToolCallResultCache`, `CheckpointMeta`,
-//! `ReadinessState`, `RecoverySummary`) and the pure
+//! (`ToolCallId`, `CheckpointMeta`, `ReadinessState`) and the pure
 //! `recovery_dispatch_decision()` function **in isolation**. They never
 //! boot `cairn-app`, never crash it, and never replay an event log.
 //!
 //! Do NOT cite a passing test from this file as evidence that an RFC
 //! 020 durability invariant holds. That claim requires a real
-//! `SIGKILL` + respawn against a persistent event log — see
-//! `crates/cairn-app/tests/test_rfc020_recovery.rs` for the integration
-//! counterpart.
+//! integration test against a persistent event log — see the
+//! end-to-end compliance suite.
 //!
 //! These unit tests exist only as fast type-level regression guards
 //! (seconds to run; catch obvious breakage before the multi-minute
 //! LiveHarness suite is worth spinning up).
+//!
+//! # History — Track-3-dependent mocks migrated
+//!
+//! PR #82 (RFC 020 Track 3) shipped end-to-end integration tests that
+//! exercise `RuntimeExecutePhase::execute` against a real `InMemoryStore`,
+//! `ToolInvocationServiceImpl`, and `ToolCallResultCache`. Those real
+//! tests supersede four mock-based tests that previously lived here:
+//!
+//! | Deleted mock                                           | Superseded by (in `crates/cairn-app/tests/test_rfc020_tool_idempotency.rs`) |
+//! |--------------------------------------------------------|-----------------------------------------------------------------------------|
+//! | `rfc020_invariant6_tool_result_cache_hit_on_resume`    | `cache_hit_on_resume_skips_invocation`                                      |
+//! | `rfc020_dangerous_pause_requires_operator_confirmation`| `dangerous_pause_pauses_recovery`                                           |
+//! | `rfc020_author_responsible_redispatches_with_same_id`  | `author_responsible_redispatches_with_same_id`                              |
+//! | `rfc020_batched_append_all_or_nothing`                 | `batched_append_is_atomic_all_or_none`                                      |
+//!
+//! The Track 3 integration tests drive the real dispatch path without
+//! mocks on the hot path, so they are the authoritative compliance
+//! evidence for RFC 020 invariants #6 and #11. Keeping duplicate mock
+//! copies here would risk them drifting and falsely signalling green
+//! while the real path regresses.
 
 use cairn_domain::recovery::{CheckpointKind, RetrySafety};
 use cairn_runtime::startup::{
-    recovery_dispatch_decision, BranchState, CachedToolResult, CheckpointMeta, ReadinessState,
+    recovery_dispatch_decision, BranchState, CheckpointMeta, ReadinessState,
     RecoveryDispatchDecision, ToolCallId, ToolCallResultCache,
 };
 
@@ -44,31 +62,7 @@ fn rfc020_invariant5_dual_checkpoint_per_iteration() {
     assert!(result.message_history_size > intent.message_history_size);
 }
 
-// ── RFC 020 Invariant 6: Tool-call results are cached ───────────────────────
-
-#[test]
-fn rfc020_invariant6_tool_result_cache_hit_on_resume() {
-    let mut cache = ToolCallResultCache::new();
-    let tcid = ToolCallId::derive("run-200", 1, 0, "shell_exec", r#"{"cmd":"make test"}"#);
-
-    // Simulate a completed tool call from before the crash
-    cache.insert(CachedToolResult {
-        tool_call_id: tcid.clone(),
-        tool_name: "shell_exec".into(),
-        result_json: serde_json::json!({"exit_code": 0, "stdout": "all tests passed"}),
-        completed_at: 1000,
-    });
-
-    // On recovery, the cache returns the result without re-dispatch
-    let decision = recovery_dispatch_decision(
-        &cache,
-        &tcid,
-        "shell_exec",
-        RetrySafety::DangerousPause, // would pause if not cached!
-        true,
-    );
-    assert_eq!(decision, RecoveryDispatchDecision::CacheHit);
-}
+// ── RFC 020 Invariant 6: ToolCallId determinism on resume ───────────────────
 
 #[test]
 fn rfc020_invariant6_same_tool_call_id_on_resume() {
@@ -78,7 +72,7 @@ fn rfc020_invariant6_same_tool_call_id_on_resume() {
     assert_eq!(original, resumed, "resumed run gets same ToolCallId");
 }
 
-// ── RFC 020: RetrySafety classification enforcement ─────────────────────────
+// ── RFC 020: RetrySafety classification (pure decision function) ────────────
 
 #[test]
 fn rfc020_idempotent_safe_retries_silently() {
@@ -90,49 +84,6 @@ fn rfc020_idempotent_safe_retries_silently() {
         &tcid,
         "memory_search",
         RetrySafety::IdempotentSafe,
-        true,
-    );
-    assert_eq!(decision, RecoveryDispatchDecision::Dispatch);
-}
-
-#[test]
-fn rfc020_dangerous_pause_requires_operator_confirmation() {
-    let cache = ToolCallResultCache::new();
-    let tcid = ToolCallId::derive(
-        "run-300",
-        0,
-        0,
-        "shell_exec",
-        r#"{"cmd":"rm -rf /tmp/build"}"#,
-    );
-
-    let decision = recovery_dispatch_decision(
-        &cache,
-        &tcid,
-        "shell_exec",
-        RetrySafety::DangerousPause,
-        true,
-    );
-    match decision {
-        RecoveryDispatchDecision::Pause { tool_name, reason } => {
-            assert_eq!(tool_name, "shell_exec");
-            assert!(reason.contains("DangerousPause"));
-        }
-        other => panic!("expected Pause, got {other:?}"),
-    }
-}
-
-#[test]
-fn rfc020_author_responsible_redispatches_with_same_id() {
-    let cache = ToolCallResultCache::new();
-    let tcid = ToolCallId::derive("run-300", 0, 0, "memory_store", r#"{"doc_id":"d1"}"#);
-
-    // AuthorResponsible re-dispatches — tool uses tool_call_id as external key
-    let decision = recovery_dispatch_decision(
-        &cache,
-        &tcid,
-        "memory_store",
-        RetrySafety::AuthorResponsible,
         true,
     );
     assert_eq!(decision, RecoveryDispatchDecision::Dispatch);
@@ -205,56 +156,6 @@ fn rfc020_readiness_flips_after_all_branches_complete() {
 
     let progress = state.progress();
     assert_eq!(progress.status, "ready");
-}
-
-// ── RFC 020 Test: Batched append coherence ──────────────────────────────────
-//
-// KEEP_AS_UNIT: this test documents the batch-atomicity invariant as a
-// contract sanity check. Hitting a real crash between the in-memory buffer
-// and the event-log commit is not reliably reproducible from LiveHarness,
-// and production durability here ultimately rests on the store's ACID
-// guarantees rather than on any cairn-level code path. A LiveHarness
-// variant is deferred until/unless the store grows deterministic
-// mid-batch crash hooks for testing.
-
-#[test]
-fn rfc020_batched_append_all_or_nothing() {
-    // Simulate: tool invoke() buffers a memory_store event, then
-    // ToolInvocationCompleted is added. The batch must contain both.
-    // If the batch is not committed (crash), neither event exists in cache.
-    use cairn_runtime::startup::ToolCallResultCache;
-
-    let cache = ToolCallResultCache::new();
-    let tcid = ToolCallId::derive("run-batch", 0, 0, "memory_store", r#"{"doc":"d1"}"#);
-
-    // Before batch commit: cache has no entry
-    assert!(cache.get(&tcid).is_none(), "no result before batch commit");
-
-    // Simulate batch commit: both the memory event and completion land together
-    let mut committed_cache = ToolCallResultCache::new();
-    committed_cache.insert(CachedToolResult {
-        tool_call_id: tcid.clone(),
-        tool_name: "memory_store".into(),
-        result_json: serde_json::json!({"stored": true}),
-        completed_at: 5000,
-    });
-
-    // After commit: cache has the entry
-    assert!(
-        committed_cache.get(&tcid).is_some(),
-        "result must exist after batch commit"
-    );
-
-    // Simulate crash BEFORE batch commit: a separate cache stays empty
-    let crashed_cache = ToolCallResultCache::new();
-    assert!(
-        crashed_cache.get(&tcid).is_none(),
-        "crashed cache must have no partial state"
-    );
-
-    // Key invariant: there is no state where the memory event is visible
-    // but ToolInvocationCompleted is not — because they're in the same batch.
-    // If the batch didn't commit, neither exists. If it did, both exist.
 }
 
 // ── Helper ──────────────────────────────────────────────────────────────────
