@@ -9,32 +9,16 @@
 //!
 //! Do NOT cite a passing test from this file as evidence that an RFC
 //! 020 durability invariant holds. That claim requires a real
-//! integration test against a persistent event log — see the
-//! end-to-end compliance suite.
+//! integration test against a persistent event log — the authoritative
+//! compliance evidence for RFC 020 invariants #6 and #11 lives in
+//! `crates/cairn-app/tests/test_rfc020_tool_idempotency.rs`, which
+//! exercises `RuntimeExecutePhase::execute` against a real
+//! `InMemoryStore`, `ToolInvocationServiceImpl`, and
+//! `ToolCallResultCache` without mocks on the hot path.
 //!
 //! These unit tests exist only as fast type-level regression guards
 //! (seconds to run; catch obvious breakage before the multi-minute
 //! LiveHarness suite is worth spinning up).
-//!
-//! # History — Track-3-dependent mocks migrated
-//!
-//! PR #82 (RFC 020 Track 3) shipped end-to-end integration tests that
-//! exercise `RuntimeExecutePhase::execute` against a real `InMemoryStore`,
-//! `ToolInvocationServiceImpl`, and `ToolCallResultCache`. Those real
-//! tests supersede four mock-based tests that previously lived here:
-//!
-//! | Deleted mock                                           | Superseded by (in `crates/cairn-app/tests/test_rfc020_tool_idempotency.rs`) |
-//! |--------------------------------------------------------|-----------------------------------------------------------------------------|
-//! | `rfc020_invariant6_tool_result_cache_hit_on_resume`    | `cache_hit_on_resume_skips_invocation`                                      |
-//! | `rfc020_dangerous_pause_requires_operator_confirmation`| `dangerous_pause_pauses_recovery`                                           |
-//! | `rfc020_author_responsible_redispatches_with_same_id`  | `author_responsible_redispatches_with_same_id`                              |
-//! | `rfc020_batched_append_all_or_nothing`                 | `batched_append_is_atomic_all_or_none`                                      |
-//!
-//! The Track 3 integration tests drive the real dispatch path without
-//! mocks on the hot path, so they are the authoritative compliance
-//! evidence for RFC 020 invariants #6 and #11. Keeping duplicate mock
-//! copies here would risk them drifting and falsely signalling green
-//! while the real path regresses.
 
 use cairn_domain::recovery::{CheckpointKind, RetrySafety};
 use cairn_runtime::startup::{
