@@ -187,7 +187,7 @@ async fn recovery_summary_event_emitted_on_restart() {
 
     // Sweep 1 → one RecoverySummary event.
     let _ = svc
-        .recover_all(&boot1, &[], &[])
+        .recover_all(&boot1, &[], &[], &[])
         .await
         .expect("sweep 1 must succeed");
     let summaries_after_sweep1 = count_recovery_summaries(store.as_ref()).await;
@@ -198,7 +198,7 @@ async fn recovery_summary_event_emitted_on_restart() {
 
     // Sweep 2 → exactly one more RecoverySummary event.
     let _ = svc
-        .recover_all(&boot2, &[], &[])
+        .recover_all(&boot2, &[], &[], &[])
         .await
         .expect("sweep 2 must succeed");
     let summaries_after_sweep2 = count_recovery_summaries(store.as_ref()).await;

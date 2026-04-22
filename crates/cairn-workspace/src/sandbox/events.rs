@@ -119,4 +119,22 @@ pub enum SandboxEvent {
         sandbox_path: PathBuf,
         detected_at: u64,
     },
+    /// RFC 020 §"Run recovery matrix": a sandbox whose registry entry +
+    /// on-disk root both survived the previous cairn-app boot and is
+    /// healthy (not lost, not allowlist-revoked, not drifted). Emitted
+    /// by `SandboxService::recover_all` when the registry sidecar and
+    /// filesystem agree. The bound run stays in its existing non-
+    /// terminal state; the orchestrator picks it up on its next tick
+    /// and calls `provision_or_reconnect` which short-circuits to the
+    /// already-recovered session. The run-level `RecoveryService`
+    /// emits `RecoveryAttempted { reason: "sandbox_reattached" }` +
+    /// `RecoveryCompleted { recovered: true }` for audit trail but
+    /// does not transition state.
+    SandboxReattached {
+        sandbox_id: SandboxId,
+        run_id: RunId,
+        project: ProjectKey,
+        sandbox_path: PathBuf,
+        reattached_at: u64,
+    },
 }

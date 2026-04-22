@@ -105,6 +105,21 @@ pub type AllowlistRevokedRun = (
     /* repo_id = */ String,
 );
 
+/// Runs whose bound sandbox survived the crash cleanly — registry
+/// sidecar + on-disk root are both intact and the repo binding (if
+/// any) is still allowlisted.
+///
+/// Produced by `SandboxService::recover_all`, consumed by
+/// [`RecoveryService::recover_all`]. Each entry MUST cause the
+/// run-recovery sweep to emit
+/// `RecoveryAttempted { reason: "sandbox_reattached" }` +
+/// `RecoveryCompleted { recovered: true }` for audit-trail symmetry
+/// with the sandbox-lost and allowlist-revoked rows. No state
+/// transition: the run stays in its existing non-terminal state and
+/// the orchestrator resumes it on its next tick via
+/// `provision_or_reconnect`.
+pub type SandboxReattachedRun = (cairn_domain::RunId, cairn_domain::ProjectKey);
+
 #[async_trait]
 pub trait RecoveryService: Send + Sync {
     /// Sweep every non-terminal run and emit the appropriate recovery events.
@@ -131,6 +146,7 @@ pub trait RecoveryService: Send + Sync {
         boot_id: &BootId,
         sandbox_lost_runs: &[SandboxLostRun],
         allowlist_revoked_runs: &[AllowlistRevokedRun],
+        sandbox_reattached_runs: &[SandboxReattachedRun],
     ) -> Result<RunRecoverySummary, RuntimeError>;
 }
 
@@ -159,6 +175,7 @@ where
         boot_id: &BootId,
         sandbox_lost_runs: &[SandboxLostRun],
         allowlist_revoked_runs: &[AllowlistRevokedRun],
+        sandbox_reattached_runs: &[SandboxReattachedRun],
     ) -> Result<RunRecoverySummary, RuntimeError> {
         // RFC 020 Track 4 — timer for the per-boot RecoverySummary audit event.
         let sweep_started_ms = current_unix_ms();
@@ -340,6 +357,49 @@ where
             )));
         }
 
+        // RFC 020 §"Run recovery matrix" — sandbox_reattached row. For
+        // every `(run, project)` pair whose bound sandbox survived the
+        // crash cleanly, emit an advisory `RecoveryAttempted{reason:
+        // "sandbox_reattached"}` so the audit trail records the fact
+        // that the reattach sweep picked this run up. We deliberately
+        // do NOT emit a matching `RecoveryCompleted` or push a
+        // `RunRecoveryOutcome` entry here: the run is still
+        // non-terminal in the projection, and the normal Running /
+        // WaitingApproval / Paused / WaitingDependency sweep below
+        // must still see it so wedge detection (Cursor Bugbot
+        // medium-1) and approval-crash-window advancement can run.
+        // The `RecoveryCompleted` event is emitted by that sweep's
+        // `plan_for_run` path, which is also where the outcome
+        // accounting happens. The advisory `RecoveryAttempted`
+        // emitted here simply adds a reason-keyed breadcrumb on top
+        // of whatever reason string `plan_for_run` generates.
+        //
+        // Guard against a badly-seeded workspace sweep that lists the
+        // same run under both `sandbox_lost_runs` / `allowlist_
+        // revoked_runs` and `sandbox_reattached_runs` — those rows
+        // mutate state, and emitting a reattach breadcrumb after the
+        // Running → Failed / Running → WaitingApproval transition
+        // would falsely imply the run is still healthy.
+        let mut sandbox_reattached_handled: std::collections::HashSet<cairn_domain::RunId> =
+            std::collections::HashSet::new();
+        for (run_id, project) in sandbox_reattached_runs {
+            if !sandbox_reattached_handled.insert(run_id.clone()) {
+                continue;
+            }
+            if sandbox_lost_handled.contains(run_id) || allowlist_revoked_handled.contains(run_id) {
+                continue;
+            }
+            sandbox_lost_events.push(make_envelope(RuntimeEvent::RecoveryAttempted(
+                RecoveryAttempted {
+                    project: project.clone(),
+                    run_id: Some(run_id.clone()),
+                    task_id: None,
+                    reason: "sandbox_reattached".to_owned(),
+                    boot_id: Some(boot_id.as_str().to_owned()),
+                },
+            )));
+        }
+
         // Enumerate every non-terminal run state listed in RFC 020's matrix.
         // `Pending` is intentionally excluded — a run that never transitioned
         // out of Pending has no side-effects to reassert.
@@ -378,6 +438,17 @@ where
         // Skip runs that we already transitioned via the sandbox_lost
         // handler above — their state has been staged in `all_events` but
         // the projection `runs` vector still reflects pre-transition state.
+        // NOTE: reattached runs are NOT filtered out here (Cursor
+        // Bugbot medium-1). Unlike the sandbox-lost and
+        // allowlist-revoked handlers which mutate run state and
+        // require the scan to skip them (to avoid observing stale
+        // projection state), the reattach handler is advisory only —
+        // it emits a reason-keyed breadcrumb but does not touch the
+        // run. Filtering reattached runs from the scan would suppress
+        // wedge detection (Running >5min with no checkpoint → Failed)
+        // and approval-crash-window advancement (WaitingApproval with
+        // an approval resolved during the crash window), both of
+        // which are run-state mutations this sweep owns.
         let runs: Vec<RunRecord> = runs
             .into_iter()
             .filter(|r| {

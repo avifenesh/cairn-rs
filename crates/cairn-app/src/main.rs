@@ -1133,14 +1133,45 @@ async fn main() {
         }
     }
 
+    // Test-only: seed a healthy sandbox scenario so the RFC 020
+    // `sandbox_reattach_overlay_or_reflink` integration test (test
+    // #3) can exercise the reattach emission + audit-trail path
+    // without wiring a lightweight HTTP sandbox-provision surface
+    // first. Same release-stripping discipline as
+    // `CAIRN_TEST_SEED_LOST_SANDBOX` above.
+    //
+    // Format:
+    // `CAIRN_TEST_SEED_SANDBOX=<run_id>:<tenant>:<workspace>:<project>`.
+    // Writes a registry sidecar for a sandbox whose on-disk root
+    // exists and carries no bound repo (so the allowlist-revoke
+    // sweep is a no-op). The recovery sweep surfaces it on
+    // `summary.reattached_runs` and `RecoveryService::recover_all`
+    // records advisory audit events. Idempotent across sigkill+
+    // restart: the store-event guard skips re-seeding once the run
+    // projection already has a record.
+    #[cfg(debug_assertions)]
+    if let Ok(spec) = std::env::var("CAIRN_TEST_SEED_SANDBOX") {
+        if let Err(error) = seed_reattachable_sandbox_for_test(
+            &lib_state,
+            lib_state.sandbox_service.base_dir(),
+            &spec,
+        )
+        .await
+        {
+            eprintln!("CAIRN_TEST_SEED_SANDBOX seed failed: {error}");
+        }
+    }
+
     // Step 4a: sandbox reconciliation.
     //
-    // `lost_runs` is threaded into Track 1 run recovery below so the
-    // run-level service can transition the bound runs to `failed` with
-    // `reason: sandbox_lost` per RFC 020 §"Run recovery matrix".
-    let (sandbox_lost_runs, allowlist_revoked_runs): (
+    // `lost_runs` / `allowlist_revoked_runs` / `reattached_runs` are
+    // threaded into Track 1 run recovery below so the run-level
+    // service can emit the matching matrix-row events per RFC 020
+    // §"Run recovery matrix".
+    let (sandbox_lost_runs, allowlist_revoked_runs, sandbox_reattached_runs): (
         Vec<cairn_runtime::SandboxLostRun>,
         Vec<cairn_runtime::AllowlistRevokedRun>,
+        Vec<cairn_runtime::SandboxReattachedRun>,
     ) = match lib_state.sandbox_service.recover_all().await {
         Ok(summary) => {
             if summary.reconnected > 0
@@ -1148,20 +1179,23 @@ async fn main() {
                 || summary.failed > 0
                 || summary.lost > 0
                 || summary.preserved_allowlist_revoked > 0
+                || summary.reattached > 0
             {
                 eprintln!(
                     "sandbox recovery: reconnected={} preserved={} failed={} lost={} \
-                     allowlist_revoked={}",
+                     allowlist_revoked={} reattached={}",
                     summary.reconnected,
                     summary.preserved,
                     summary.failed,
                     summary.lost,
                     summary.preserved_allowlist_revoked,
+                    summary.reattached,
                 );
             }
             let count = (summary.reconnected as u64)
                 .saturating_add(summary.preserved as u64)
-                .saturating_add(summary.preserved_allowlist_revoked as u64);
+                .saturating_add(summary.preserved_allowlist_revoked as u64)
+                .saturating_add(summary.reattached as u64);
             lib_state.readiness.update_branch("4a", |b| {
                 b.sandboxes = BranchStatus::complete(count);
             });
@@ -1170,14 +1204,14 @@ async fn main() {
                 .into_iter()
                 .map(|(run, project, repo)| (run, project, repo.as_str().to_owned()))
                 .collect();
-            (summary.lost_runs, revoked)
+            (summary.lost_runs, revoked, summary.reattached_runs)
         }
         Err(error) => {
             eprintln!("sandbox recovery failed: {error}");
             lib_state.readiness.update_branch("4a", |b| {
                 b.sandboxes = BranchStatus::failed(error.to_string());
             });
-            (Vec::new(), Vec::new())
+            (Vec::new(), Vec::new(), Vec::new())
         }
     };
 
@@ -1208,6 +1242,7 @@ async fn main() {
             &boot_id,
             &sandbox_lost_runs,
             &allowlist_revoked_runs,
+            &sandbox_reattached_runs,
         )
         .await
         {
@@ -1681,6 +1716,134 @@ async fn seed_allowlist_revoked_sandbox_for_test(
         .append(&envelopes)
         .await
         .map_err(|e| format!("append seed events: {e}"))?;
+    Ok(())
+}
+
+/// Test-only scaffolding for the RFC 020
+/// `sandbox_reattach_overlay_or_reflink` integration test (#3).
+///
+/// Seeds a recovery registry sidecar for a healthy overlay sandbox
+/// (no bound repo, so the allowlist-revoke sweep is a no-op) whose
+/// on-disk root exists as a stub directory. `SandboxService::
+/// recover_all` surfaces it on `summary.reattached_runs`;
+/// `RecoveryService::recover_all` emits `RecoveryAttempted{reason:
+/// "sandbox_reattached"}` + `RecoveryCompleted{recovered:true}` for
+/// audit-trail symmetry. The bound run is seeded in the `Running`
+/// state and must STAY `Running` across sigkill+restart — no
+/// transition happens on the reattach path.
+///
+/// `#[cfg(debug_assertions)]` strips this symbol from release builds
+/// so a production cairn-app cannot be coerced into injecting fake
+/// sandbox state. Same precedent as `seed_lost_sandbox_for_test`.
+///
+/// Spec format: `<run_id>:<tenant>:<workspace>:<project>`.
+/// Platform note: overlay-only (Linux). Reflink reattach goes through
+/// the same `recover_all` code path and would seed identically; not
+/// exercised here because reflink requires macOS-specific filesystem
+/// semantics that aren't part of the Linux CI image.
+#[cfg(debug_assertions)]
+async fn seed_reattachable_sandbox_for_test(
+    lib_state: &cairn_app::AppState,
+    sandbox_base_dir: &std::path::Path,
+    spec: &str,
+) -> Result<(), String> {
+    use cairn_domain::{
+        EventEnvelope, EventSource, ProjectKey, RunCreated, RunId, RunState, RunStateChanged,
+        RuntimeEvent, SessionCreated, SessionId, StateTransition,
+    };
+
+    let parts: Vec<&str> = spec.splitn(4, ':').collect();
+    if parts.len() != 4 {
+        return Err(format!(
+            "expected <run_id>:<tenant>:<workspace>:<project>, got {spec}"
+        ));
+    }
+    let run_id = RunId::new(parts[0]);
+    let project = ProjectKey::new(parts[1], parts[2], parts[3]);
+    let session_id = SessionId::new(format!("sess-{}", parts[0]));
+    let sandbox_id = format!("sbx-{}", parts[0]);
+
+    // Idempotency: on sigkill+restart the run already exists in the
+    // projection. Re-seeding would reset it to Running and double-
+    // append Created events — both are schema errors. The registry
+    // sidecar is stable across boots and drives the reattach emission
+    // on every recover_all sweep regardless.
+    use cairn_store::projections::RunReadModel;
+    let already_seeded = matches!(lib_state.runtime.store.get(&run_id).await, Ok(Some(_)));
+
+    // Write a stub sandbox directory at the expected path so the
+    // lost-sweep skips this entry (`path.exists() == true`) and the
+    // reattach-sweep picks it up. The directory is empty — real
+    // provisioning creates an overlay layout here, but the reattach
+    // path never reads it.
+    let _ = sandbox_base_dir;
+    let sandbox_path = lib_state.sandbox_service.base_dir().join(&sandbox_id);
+    std::fs::create_dir_all(&sandbox_path).map_err(|e| format!("create stub sandbox dir: {e}"))?;
+
+    // Registry sidecar — `repo_id: None` so the allowlist-revoke
+    // sweep skips this entry. The path exists → the lost sweep also
+    // skips. The reattach sweep picks it up unconditionally.
+    lib_state
+        .sandbox_service
+        .seed_registry_entry_for_test(
+            cairn_workspace::SandboxId::new(sandbox_id.clone()),
+            run_id.clone(),
+            project.clone(),
+            cairn_workspace::SandboxStrategy::Overlay,
+            sandbox_path,
+        )
+        .map_err(|e| format!("seed registry entry: {e}"))?;
+
+    if already_seeded {
+        eprintln!("[TEST SEED] CAIRN_TEST_SEED_SANDBOX: run {run_id} already seeded; registry entry refreshed, store events skipped");
+        return Ok(());
+    }
+
+    // Seed session + run + Running transition so the recovery sweep
+    // sees a non-terminal run bound to the healthy sandbox.
+    let mut envelopes: Vec<EventEnvelope<RuntimeEvent>> = Vec::new();
+    envelopes.push(EventEnvelope::for_runtime_event(
+        cairn_domain::EventId::new(format!("seed-reattach-session-{}", parts[0])),
+        EventSource::Runtime,
+        RuntimeEvent::SessionCreated(SessionCreated {
+            project: project.clone(),
+            session_id: session_id.clone(),
+        }),
+    ));
+    envelopes.push(EventEnvelope::for_runtime_event(
+        cairn_domain::EventId::new(format!("seed-reattach-run-created-{}", parts[0])),
+        EventSource::Runtime,
+        RuntimeEvent::RunCreated(RunCreated {
+            project: project.clone(),
+            session_id: session_id.clone(),
+            run_id: run_id.clone(),
+            parent_run_id: None,
+            prompt_release_id: None,
+            agent_role_id: None,
+        }),
+    ));
+    envelopes.push(EventEnvelope::for_runtime_event(
+        cairn_domain::EventId::new(format!("seed-reattach-run-running-{}", parts[0])),
+        EventSource::Runtime,
+        RuntimeEvent::RunStateChanged(RunStateChanged {
+            project: project.clone(),
+            run_id: run_id.clone(),
+            transition: StateTransition {
+                from: Some(RunState::Pending),
+                to: RunState::Running,
+            },
+            failure_class: None,
+            pause_reason: None,
+            resume_trigger: None,
+        }),
+    ));
+    lib_state
+        .runtime
+        .store
+        .append(&envelopes)
+        .await
+        .map_err(|e| format!("append seed events: {e}"))?;
+    eprintln!("[TEST SEED] CAIRN_TEST_SEED_SANDBOX: seeded healthy sandbox for run {run_id}");
     Ok(())
 }
 
