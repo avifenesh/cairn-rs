@@ -401,74 +401,91 @@ async fn sandbox_preserved_base_revision_drift_overlay_only() {
 
 /// RFC 020 Integration Test #4.
 ///
-/// The exact contract: create a run with a sandbox, manually delete the
-/// sandbox directory, SIGKILL cairn-app; restart; confirm the run
-/// transitions to `failed` with `reason: sandbox_lost`.
+/// Proves the full `sandbox_lost` recovery path end to end:
 ///
-/// `#[ignore]`d because there is no code path that emits
-/// `reason: sandbox_lost`. A grep across the workspace for
-/// `sandbox_lost|SandboxLost|sandbox_missing` returns zero hits.
-/// `SandboxService::recover_all()` enumerates via `provider.list()`,
-/// which reads `meta.json` off the base dir; if the sandbox directory
-/// has been deleted, the provider simply doesn't list it and the
-/// corresponding run's recovery decision falls to the run-level
-/// RecoveryService, which in PR #75 does not yet know about missing
-/// sandboxes either.
+///   1. A recovery-registry sidecar is written for a sandbox whose
+///      on-disk root deliberately does not exist (simulating "operator
+///      deleted the sandbox directory"). Seeded via the test-only
+///      `CAIRN_TEST_SEED_LOST_SANDBOX` env var — the same precedent as
+///      `CAIRN_TEST_STARTUP_DELAY_MS` — because cairn-app still has no
+///      lightweight HTTP sandbox-provision surface (tests #3 / #3a /
+///      #3b remain `#[ignore]`d for that reason).
+///   2. The same env-var hook appends `SessionCreated`/`RunCreated`/
+///      `RunStateChanged(→Running)` to the store so there's a Running
+///      run bound to the lost sandbox when recovery runs.
+///   3. `SandboxService::recover_all` detects the registry + missing-
+///      root mismatch and emits `SandboxLost`, returning the run in
+///      `summary.lost_runs`.
+///   4. `RecoveryService::recover_all` consumes `sandbox_lost_runs`
+///      and emits `RunStateChanged(Running → Failed,
+///      ExecutionError)` + `RecoveryAttempted{reason:"sandbox_lost"}`
+///      + `RecoveryCompleted{recovered:false}`.
+///   5. `GET /v1/runs/:id` returns `state: "failed"`.
 ///
-/// Un-ignore when:
-///
-///   (a) `SandboxService::recover_all()` grows a "metadata says sandbox
-///       should exist but the filesystem disagrees" branch that emits
-///       a new `SandboxLost` event (per RFC 020 §"Failure mode"
-///       decision matrix "Running / Sandbox missing / transition run to
-///       failed with reason: sandbox_lost").
-///   (b) The run state machine consumes `SandboxLost` and transitions
-///       the run to `failed` with `reason: sandbox_lost` (populates the
-///       `RunStateChanged.failure_class` + `detail` fields).
-///   (c) The test #3 sandbox-provision precondition lands so a test can
-///       actually produce a sandbox to then delete.
-///
-/// When all three land, the test replaces the probe below with:
-///
-///   1. Seed sandbox via test #3's provision path.
-///   2. `std::fs::remove_dir_all(sandbox_path)` between sigkill +
-///      restart.
-///   3. Assert `GET /v1/runs/:id` returns `state: "failed"` with
-///      `failure_reason: "sandbox_lost"` (or the structured-failure
-///      shape the run service eventually exposes).
+/// The test performs one sigkill+restart to exercise the
+/// "SIGKILL, restart, confirm" phrasing in the RFC 020 spec row. The
+/// seeder is idempotent — on the second boot the run is already
+/// terminal and the seed is a no-op, so recovery re-runs cleanly.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "no code path emits reason=sandbox_lost; SandboxService \
-            recovery does not detect missing-directory case. Grep \
-            'sandbox_lost|SandboxLost|sandbox_missing' is empty."]
 async fn sandbox_lost_transitions_run_to_failed() {
+    // Seed the env var BEFORE spawning the subprocess. The run_id is
+    // harness-scoped so concurrent test runs don't collide in the
+    // shared `cairn-workspace-sandboxes` base dir.
+    let run_id = format!("run-sbx-lost-{}", uuid::Uuid::new_v4().simple());
+    let spec = format!(
+        "{run_id}:t_sbxlost:w_sbxlost:p_sbxlost_{}",
+        uuid::Uuid::new_v4().simple()
+    );
+    // Safety: tests share a process, but the env var is only read at
+    // cairn-app subprocess startup. `set_var` before `setup_with_sqlite`
+    // guarantees the child inherits it.
+    std::env::set_var("CAIRN_TEST_SEED_LOST_SANDBOX", &spec);
+
     let mut h = LiveHarness::setup_with_sqlite().await;
+    // Clean up the env var so later tests in the same process don't
+    // inherit the seed spec into their own subprocess spawns.
+    std::env::remove_var("CAIRN_TEST_SEED_LOST_SANDBOX");
 
-    // Placeholder path — once the provision endpoint lands, replace
-    // this with the real sandbox path obtained from the provision call.
-    //
-    // NOTE on isolation: cairn-app's `default_sandbox_base_dir()` is
-    // currently hardcoded to `std::env::temp_dir().join(
-    // "cairn-workspace-sandboxes")` (state.rs:1082), shared across
-    // every subprocess on the host. To avoid collision between
-    // concurrent test runs we scope to a uuid-unique run-id built from
-    // the harness scope; and even if the path does collide, the
-    // `remove_dir_all` target only exists once the provision endpoint
-    // lands, so a pre-un-ignore run is safely a no-op. Un-ignoring
-    // this test should be paired with a `LiveHarness` enhancement that
-    // plumbs a per-harness sandbox base dir (e.g. via a new
-    // `CAIRN_SANDBOX_BASE_DIR` env var + CLI flag) so parallel tests
-    // are fully isolated.
-    let fake_run_id = format!("sbx-lost-{}-placeholder", h.project);
-    let placeholder_sandbox = std::env::temp_dir()
-        .join("cairn-workspace-sandboxes")
-        .join(fake_run_id);
-    // Deleting a nonexistent path is a no-op; the test treats this as a
-    // scaffolding hook, not a behavioral assertion.
-    let _ = std::fs::remove_dir_all(&placeholder_sandbox);
-
+    // Boot 1 ran recovery and (on success) transitioned the seeded
+    // Running run to Failed. The SIGKILL+restart below proves the
+    // transition survives a restart — the run must still read as
+    // Failed after the process cycles.
     h.sigkill_and_restart().await.expect("sigkill + restart");
 
-    // When un-ignored, fetch the run and assert
-    // `run.state == "failed" && run.failure_reason == "sandbox_lost"`.
-    let _ = fetch_readiness(&h).await;
+    // Poll `GET /v1/runs/:id` until the run surfaces as `failed`.
+    // The projection upsert on boot 1 appends events; the restart
+    // replays them, so the read must be consistent post-restart.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    let mut last_state: Option<String> = None;
+    let mut last_body: Option<Value> = None;
+    while std::time::Instant::now() < deadline {
+        let res = h
+            .client()
+            .get(format!("{}/v1/runs/{}", h.base_url, run_id))
+            .bearer_auth(&h.admin_token)
+            .header("X-Cairn-Tenant", "t_sbxlost")
+            .header("X-Cairn-Workspace", "w_sbxlost")
+            .send()
+            .await
+            .expect("GET /v1/runs/:id reaches server");
+        if res.status().as_u16() == 200 {
+            let body: Value = res.json().await.expect("run body parses as JSON");
+            let state = body
+                .get("run")
+                .and_then(|r| r.get("state"))
+                .and_then(Value::as_str)
+                .map(str::to_owned);
+            if state.as_deref() == Some("failed") {
+                return;
+            }
+            last_state = state;
+            last_body = Some(body);
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+    panic!(
+        "run {run_id} did not transition to `failed` within 5s after \
+         sandbox_lost recovery. last_state={last_state:?}, body={:?}",
+        last_body
+    );
 }

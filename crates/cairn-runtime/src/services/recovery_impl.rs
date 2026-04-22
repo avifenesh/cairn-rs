@@ -73,6 +73,16 @@ const APPROVAL_SCAN_LIMIT: usize = 50_000;
 /// Implementations must be idempotent: calling `recover_all` twice for the
 /// same run across two boots must not duplicate state transitions beyond
 /// what the projection already reflects.
+/// Runs whose bound sandbox has been detected as missing at boot.
+///
+/// Produced by `SandboxService::recover_all` (the workspace layer knows
+/// about filesystems), consumed by [`RecoveryService::recover_all`] (the
+/// runtime layer knows about run lifecycles). Each entry MUST cause the
+/// run-recovery sweep to transition the bound run to `Failed` with
+/// `reason: sandbox_lost` per RFC 020 §"Run recovery matrix" row
+/// "Running / Sandbox missing".
+pub type SandboxLostRun = (cairn_domain::RunId, cairn_domain::ProjectKey);
+
 #[async_trait]
 pub trait RecoveryService: Send + Sync {
     /// Sweep every non-terminal run and emit the appropriate recovery events.
@@ -82,7 +92,16 @@ pub trait RecoveryService: Send + Sync {
     /// into every emitted event for audit-trail correlation. On error,
     /// startup MUST halt — cairn-app is not a durable system if it serves
     /// traffic with unknown run state.
-    async fn recover_all(&self, boot_id: &BootId) -> Result<RunRecoverySummary, RuntimeError>;
+    ///
+    /// `sandbox_lost_runs` carries the `(run_id, project)` pairs whose
+    /// sandboxes were detected as missing during the preceding sandbox
+    /// recovery sweep. Default implementations MUST transition each such
+    /// run to `Failed` with `reason: sandbox_lost` before returning.
+    async fn recover_all(
+        &self,
+        boot_id: &BootId,
+        sandbox_lost_runs: &[SandboxLostRun],
+    ) -> Result<RunRecoverySummary, RuntimeError>;
 }
 
 /// Stateless RFC 020 Track 1 recovery service.
@@ -105,11 +124,84 @@ impl<S> RecoveryService for RecoveryServiceImpl<S>
 where
     S: EventLog + RunReadModel + CheckpointReadModel + ApprovalReadModel + 'static,
 {
-    async fn recover_all(&self, boot_id: &BootId) -> Result<RunRecoverySummary, RuntimeError> {
+    async fn recover_all(
+        &self,
+        boot_id: &BootId,
+        sandbox_lost_runs: &[SandboxLostRun],
+    ) -> Result<RunRecoverySummary, RuntimeError> {
         let mut summary = RunRecoverySummary {
             boot_id: Some(boot_id.as_str().to_owned()),
             ..Default::default()
         };
+
+        // RFC 020 §"Run recovery matrix" — sandbox_lost rows are handled
+        // up front so the later Running-state sweep below does not observe
+        // the same runs in a state we're about to mutate. Each row becomes
+        // a `RecoveryAttempted{reason:"sandbox_lost"}` + `RunStateChanged
+        // → Failed` + `RecoveryCompleted{recovered:false}` triple so the
+        // audit trail is symmetric with the normal Running-run paths.
+        let mut sandbox_lost_events: Vec<cairn_domain::EventEnvelope<RuntimeEvent>> = Vec::new();
+        let mut sandbox_lost_handled: std::collections::HashSet<cairn_domain::RunId> =
+            std::collections::HashSet::new();
+        for (run_id, project) in sandbox_lost_runs {
+            // De-duplicate: a registry entry that was already processed in
+            // an earlier recovery sweep (e.g. on a previous boot that
+            // crashed before persisting) might appear twice. The sandbox
+            // service clears the registry entry after emitting
+            // `SandboxLost`, but belt-and-braces the pair here too.
+            if !sandbox_lost_handled.insert(run_id.clone()) {
+                continue;
+            }
+            let current = RunReadModel::get(self.store.as_ref(), run_id).await?;
+            let from_state = current.as_ref().map(|r| r.state);
+            sandbox_lost_events.push(make_envelope(RuntimeEvent::RecoveryAttempted(
+                RecoveryAttempted {
+                    project: project.clone(),
+                    run_id: Some(run_id.clone()),
+                    task_id: None,
+                    reason: "sandbox_lost".to_owned(),
+                    boot_id: Some(boot_id.as_str().to_owned()),
+                },
+            )));
+            // Only emit the transition if the run is not already terminal.
+            // A sandbox can go missing after the run is already complete
+            // (operator tidy-up on an archived project) — in that case the
+            // advisory `RecoveryAttempted` above is the full audit trail
+            // and we must not violate the run state machine.
+            if let Some(from) = from_state {
+                if !from.is_terminal()
+                    && cairn_domain::can_transition_run_state(from, RunState::Failed)
+                {
+                    sandbox_lost_events.push(make_envelope(RuntimeEvent::RunStateChanged(
+                        RunStateChanged {
+                            project: project.clone(),
+                            run_id: run_id.clone(),
+                            transition: StateTransition {
+                                from: Some(from),
+                                to: RunState::Failed,
+                            },
+                            failure_class: Some(FailureClass::ExecutionError),
+                            pause_reason: None,
+                            resume_trigger: None,
+                        },
+                    )));
+                    summary.failed_runs += 1;
+                    summary.outcomes.push(RunRecoveryOutcome::Failed {
+                        run_id: run_id.clone(),
+                        reason: "sandbox_lost".to_owned(),
+                    });
+                }
+            }
+            sandbox_lost_events.push(make_envelope(RuntimeEvent::RecoveryCompleted(
+                RecoveryCompleted {
+                    project: project.clone(),
+                    run_id: Some(run_id.clone()),
+                    task_id: None,
+                    recovered: false,
+                    boot_id: Some(boot_id.as_str().to_owned()),
+                },
+            )));
+        }
 
         // Enumerate every non-terminal run state listed in RFC 020's matrix.
         // `Pending` is intentionally excluded — a run that never transitioned
@@ -127,7 +219,6 @@ where
             runs.extend(batch);
         }
 
-        summary.scanned_runs = runs.len() as u32;
         let now_ms = current_unix_ms();
 
         // Per-project cache of resolved approvals, lazily populated when the
@@ -146,7 +237,15 @@ where
         // lot in a single `EventLog::append`. On a boot with thousands of
         // non-terminal runs this turns what would be N round-trips to
         // Postgres/SQLite into one atomic append, bounding startup latency.
-        let mut all_events = Vec::new();
+        let mut all_events = sandbox_lost_events;
+        // Skip runs that we already transitioned via the sandbox_lost
+        // handler above — their state has been staged in `all_events` but
+        // the projection `runs` vector still reflects pre-transition state.
+        let runs: Vec<RunRecord> = runs
+            .into_iter()
+            .filter(|r| !sandbox_lost_handled.contains(&r.run_id))
+            .collect();
+        summary.scanned_runs = (runs.len() as u32).saturating_add(summary.failed_runs);
         for run in runs {
             let plan = self
                 .plan_for_run(&run, boot_id, now_ms, &mut resolved_approvals_by_project)
