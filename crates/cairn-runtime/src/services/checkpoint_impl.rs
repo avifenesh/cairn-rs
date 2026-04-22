@@ -38,6 +38,13 @@ where
             checkpoint_id: checkpoint_id.clone(),
             disposition: CheckpointDisposition::Latest,
             data: None,
+            // RFC 020 Track 4: legacy single-checkpoint path (kept for
+            // admin `POST /v1/runs/:id/checkpoint` and ad-hoc saves). The
+            // dual Intent/Result checkpoints use `save_dual_checkpoint`
+            // which fills these fields.
+            kind: None,
+            message_history_size: None,
+            tool_call_ids: Vec::new(),
         }));
 
         self.store.append(&[event]).await?;
@@ -45,6 +52,41 @@ where
         CheckpointReadModel::get(self.store.as_ref(), &checkpoint_id)
             .await?
             .ok_or_else(|| RuntimeError::Internal("checkpoint not found after save".into()))
+    }
+
+    async fn save_dual(
+        &self,
+        project: &ProjectKey,
+        run_id: &RunId,
+        checkpoint_id: CheckpointId,
+        kind: CheckpointKind,
+        message_history: serde_json::Value,
+        tool_call_ids: Vec<String>,
+    ) -> Result<CheckpointRecord, RuntimeError> {
+        // Record post-serialization size so ops can track checkpoint cost
+        // (RFC 020 Gap 3: v1 ships full snapshots, not diffs; this field
+        // is the signal operators watch to decide if Track 4b diff-based
+        // checkpoints are worth the complexity).
+        let message_history_size = serde_json::to_string(&message_history)
+            .map(|s| s.len() as u32)
+            .unwrap_or(0);
+
+        let event = make_envelope(RuntimeEvent::CheckpointRecorded(CheckpointRecorded {
+            project: project.clone(),
+            run_id: run_id.clone(),
+            checkpoint_id: checkpoint_id.clone(),
+            disposition: CheckpointDisposition::Latest,
+            data: Some(message_history),
+            kind: Some(kind),
+            message_history_size: Some(message_history_size),
+            tool_call_ids,
+        }));
+
+        self.store.append(&[event]).await?;
+
+        CheckpointReadModel::get(self.store.as_ref(), &checkpoint_id)
+            .await?
+            .ok_or_else(|| RuntimeError::Internal("checkpoint not found after save_dual".into()))
     }
 
     async fn get(

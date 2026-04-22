@@ -1198,9 +1198,9 @@ async fn main() {
     // long enough to read run state has no business serving traffic.
     // Multi-instance correctness is deferred to a future RFC (RFC 020
     // delta Gap 2 resolution — v1 is single-instance).
+    let boot_id = cairn_domain::BootId::new(uuid::Uuid::now_v7().to_string());
+    eprintln!("cairn-app boot_id={boot_id}");
     {
-        let boot_id = cairn_domain::BootId::new(uuid::Uuid::now_v7().to_string());
-        eprintln!("cairn-app boot_id={boot_id}");
         let recovery_service =
             cairn_runtime::RecoveryServiceImpl::new(lib_state.runtime.store.clone());
         match cairn_runtime::RecoveryService::recover_all(
@@ -1259,10 +1259,13 @@ async fn main() {
         b.tool_result_cache = BranchStatus::complete(cache_populated as u64);
     });
 
-    // RFC 020 §"Decision Cache Survival": rebuild the in-process decision
-    // cache from persisted `DecisionRecorded` events. Expired entries are
-    // dropped; a `DecisionCacheWarmup` audit event is emitted with the
-    // restored/expired counts so operators can observe the replay.
+    // RFC 020 §"Decision Cache Survival" (PR #85): rebuild the in-process
+    // decision cache from persisted `DecisionRecorded` events. Expired
+    // entries are dropped; a `DecisionCacheWarmup` audit event is emitted
+    // with the restored/expired counts so operators can observe the
+    // replay. RFC 020 Track 4's original DecisionCacheWarmup emission was
+    // replaced by this PR-#85 path — the event shape carries real counts
+    // from the service layer, not the stub count=0 Track 4 started with.
     let decision_replay = cairn_runtime::decisions::replay_decision_cache(
         lib_state.runtime.store.as_ref(),
         lib_state.runtime.decisions.as_ref(),

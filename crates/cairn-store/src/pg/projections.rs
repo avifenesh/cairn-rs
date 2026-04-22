@@ -395,6 +395,8 @@ impl PgSyncProjection {
             // ToolCallResultCache consumes these via in-memory scan / replay.
             RuntimeEvent::ToolInvocationCacheHit(_) => log_stub("ToolInvocationCacheHit"),
             RuntimeEvent::ToolRecoveryPaused(_) => log_stub("ToolRecoveryPaused"),
+            // RFC 020 Track 4: boot-level recovery audit event.
+            RuntimeEvent::RecoverySummaryEmitted(_) => log_stub("RecoverySummaryEmitted"),
 
             RuntimeEvent::TenantCreated(e) => {
                 sqlx::query(

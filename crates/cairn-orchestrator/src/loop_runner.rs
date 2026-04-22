@@ -63,6 +63,210 @@ pub trait CheckpointHook: Send + Sync {
         decide: &DecideOutput,
         execute: &ExecuteOutcome,
     ) -> Result<(), OrchestratorError>;
+
+    /// RFC 020 Track 4 — persist the `Intent` checkpoint after decide
+    /// produces proposals and Track 3 mints their `ToolCallId`s, but
+    /// *before* execute dispatches. On crash between decide and execute,
+    /// recovery reads this checkpoint, walks the planned `ToolCallId`s,
+    /// consults the `ToolCallResultCache`, and re-dispatches only the
+    /// misses (per RFC 020 Gap 13 resolution).
+    ///
+    /// Default impl: no-op. `NoOpCheckpointHook` and test doubles inherit
+    /// the no-op; production wiring overrides with a real save that calls
+    /// `CheckpointService::save_dual(..., CheckpointKind::Intent, ...)`.
+    async fn save_intent(
+        &self,
+        _ctx: &OrchestrationContext,
+        _gather: &GatherOutput,
+        _decide: &DecideOutput,
+    ) -> Result<(), OrchestratorError> {
+        Ok(())
+    }
+
+    /// RFC 020 Track 4 — persist the `Result` checkpoint after all
+    /// dispatches settle (success / timeout / fail). Complements
+    /// `save_intent`: the two checkpoints form the per-iteration pair that
+    /// closes RFC 020 invariant #5. Default delegates to `save` so
+    /// implementors with a single-checkpoint history keep working.
+    async fn save_result(
+        &self,
+        ctx: &OrchestrationContext,
+        gather: &GatherOutput,
+        decide: &DecideOutput,
+        execute: &ExecuteOutcome,
+    ) -> Result<(), OrchestratorError> {
+        self.save(ctx, gather, decide, execute).await
+    }
+}
+
+/// RFC 020 Track 4 — `CheckpointHook` that emits dual (Intent + Result)
+/// checkpoints via `CheckpointService::save_dual`.
+///
+/// Intent is written after decide (before execute dispatches) and carries
+/// the planned `ToolCallId`s Track 3 minted; Result is written after
+/// execute completes and carries the post-iteration message history with
+/// an empty `tool_call_ids` (the Intent checkpoint owns the full list per
+/// Q4 resolution).
+///
+/// Full-snapshot bodies (Gap 3 resolution — v1 ships full snapshots, not
+/// diffs). The emitted `CheckpointRecorded` event carries
+/// `message_history_size` so operators can monitor cost and decide if
+/// Track 4b diff compaction is worth the complexity.
+pub struct DualCheckpointHook {
+    project: cairn_domain::ProjectKey,
+    checkpoints: std::sync::Arc<dyn cairn_runtime::CheckpointService>,
+}
+
+impl DualCheckpointHook {
+    pub fn new(
+        project: cairn_domain::ProjectKey,
+        checkpoints: std::sync::Arc<dyn cairn_runtime::CheckpointService>,
+    ) -> Self {
+        Self {
+            project,
+            checkpoints,
+        }
+    }
+
+    fn mint_checkpoint_id() -> cairn_domain::CheckpointId {
+        cairn_domain::CheckpointId::new(format!("cp_{}", uuid::Uuid::now_v7()))
+    }
+
+    fn planned_tool_call_ids(decide: &DecideOutput) -> Vec<String> {
+        // Advisory planned-call markers for the Intent checkpoint audit
+        // body. These are NOT the hashed `ToolCallId`s execute mints —
+        // bugbot #84/medium flagged that my earlier implementation sorted
+        // by (tool_name, args) and normalized via `Value::to_string()`,
+        // which diverged from `execute_impl.rs` (positional `call_index`
+        // + per-handler `normalize_for_cache`). Rather than reconstruct
+        // the handler registry in the checkpoint hook (a layering break —
+        // the registry lives inside `RuntimeExecutePhase`), we:
+        //
+        // 1. Preserve proposal order (so `call_index` in the marker
+        //    matches execute's positional dispatch order).
+        // 2. Carry the raw proposal args (JSON `to_string`), clearly
+        //    labelled as a PLAN marker, not the hashed cache key.
+        //
+        // The accurate hashed `ToolCallId` lands on
+        // `ToolInvocationCompleted.tool_call_id` at dispatch time, which
+        // is what recovery reads via `ToolCallResultCache::get`. The
+        // Intent checkpoint's `tool_call_ids` is a human-readable audit
+        // record of the plan, useful for operator dashboards and the
+        // future resume path (Gap 13 consumer).
+        //
+        // Proposals without a `tool_name` (CompleteRun /
+        // EscalateToOperator / CreateMemory) have no stream-facing tool
+        // analogue and produce no marker.
+        decide
+            .proposals
+            .iter()
+            .enumerate()
+            .filter_map(|(call_index, proposal)| {
+                let tool_name = proposal.tool_name.as_deref()?;
+                let args_json = proposal
+                    .tool_args
+                    .as_ref()
+                    .map(|v| v.to_string())
+                    .unwrap_or_else(|| "null".to_owned());
+                Some(format!("planned:{call_index}:{tool_name}:{args_json}"))
+            })
+            .collect()
+    }
+
+    fn build_history_snapshot(
+        ctx: &OrchestrationContext,
+        gather: &GatherOutput,
+        decide: &DecideOutput,
+        execute: Option<&ExecuteOutcome>,
+    ) -> serde_json::Value {
+        // Full-snapshot body (RFC 020 Gap 3): serialize the iteration
+        // artifacts we have in hand. Concrete shape is stable JSON so a
+        // future resume path can parse it without schema migration.
+        serde_json::json!({
+            "run_id": ctx.run_id.as_str(),
+            "iteration": ctx.iteration,
+            "goal": ctx.goal,
+            "step_history": ctx.step_history,
+            "gather": {
+                "memory_chunk_count": gather.memory_chunks.len(),
+                "step_history_count": gather.step_history.len(),
+            },
+            "decide": {
+                "proposal_count": decide.proposals.len(),
+                "requires_approval": decide.requires_approval,
+                "model_id": decide.model_id,
+                "latency_ms": decide.latency_ms,
+            },
+            "execute": execute.map(|e| serde_json::json!({
+                "result_count": e.results.len(),
+                "loop_signal": format!("{:?}", e.loop_signal),
+            })),
+        })
+    }
+}
+
+#[async_trait::async_trait]
+impl CheckpointHook for DualCheckpointHook {
+    async fn save(
+        &self,
+        ctx: &OrchestrationContext,
+        gather: &GatherOutput,
+        decide: &DecideOutput,
+        execute: &ExecuteOutcome,
+    ) -> Result<(), OrchestratorError> {
+        // Fallback path for callers using the legacy single-`save` API.
+        // `save_result` is the canonical Track 4 post-execute path.
+        self.save_result(ctx, gather, decide, execute).await
+    }
+
+    async fn save_intent(
+        &self,
+        ctx: &OrchestrationContext,
+        gather: &GatherOutput,
+        decide: &DecideOutput,
+    ) -> Result<(), OrchestratorError> {
+        let cp_id = Self::mint_checkpoint_id();
+        let body = Self::build_history_snapshot(ctx, gather, decide, None);
+        let tool_call_ids = Self::planned_tool_call_ids(decide);
+        self.checkpoints
+            .save_dual(
+                &self.project,
+                &ctx.run_id,
+                cp_id,
+                cairn_domain::CheckpointKind::Intent,
+                body,
+                tool_call_ids,
+            )
+            .await
+            .map(|_| ())
+            .map_err(OrchestratorError::Runtime)
+    }
+
+    async fn save_result(
+        &self,
+        ctx: &OrchestrationContext,
+        gather: &GatherOutput,
+        decide: &DecideOutput,
+        execute: &ExecuteOutcome,
+    ) -> Result<(), OrchestratorError> {
+        let cp_id = Self::mint_checkpoint_id();
+        let body = Self::build_history_snapshot(ctx, gather, decide, Some(execute));
+        // RFC 020 Track 4 §6 Q4 — Result checkpoint carries an empty
+        // `tool_call_ids`. Intent already owns the full planned list;
+        // duplicating here only inflates the event body.
+        self.checkpoints
+            .save_dual(
+                &self.project,
+                &ctx.run_id,
+                cp_id,
+                cairn_domain::CheckpointKind::Result,
+                body,
+                Vec::new(),
+            )
+            .await
+            .map(|_| ())
+            .map_err(OrchestratorError::Runtime)
+    }
 }
 
 /// A no-op `CheckpointHook` — used in tests and local mode where durability
@@ -457,6 +661,30 @@ where
                 ));
             }
 
+            // ── (4b) RFC 020 Track 4: INTENT CHECKPOINT ───────────────────────
+            // Before any dispatch, persist the decide output + planned
+            // `ToolCallId`s (Track 3 minted these in execute's pre-dispatch
+            // stage; see `execute_impl.rs` — the Intent checkpoint captures
+            // the *intent* to invoke them). On crash between here and
+            // execute completion, recovery walks the planned IDs, consults
+            // `ToolCallResultCache`, and re-dispatches only misses.
+            // Default `CheckpointHook::save_intent` is a no-op; production
+            // wiring overrides to invoke `CheckpointService::save_dual(…,
+            // CheckpointKind::Intent, …)`. Failure is logged + swallowed;
+            // RFC 020 invariant #5 is best-effort, not blocking.
+            if let Err(e) = self
+                .checkpoint_hook
+                .save_intent(ctx, &gather_output, &decide_output)
+                .await
+            {
+                tracing::warn!(
+                    run_id    = %ctx.run_id,
+                    iteration = ctx.iteration,
+                    error     = %e,
+                    "intent checkpoint save failed — continuing without intent checkpoint"
+                );
+            }
+
             // ── (5a) FF stream: tool_call frames (intent) ────────────────────
             // Appended BEFORE execute so a process restart mid-dispatch leaves
             // an in-flight marker that `restore_frames()` can observe. Only
@@ -596,9 +824,12 @@ where
             // Sync ctx.step_history so the hook sees the just-pushed summary.
             ctx.step_history = step_history.clone();
 
+            // RFC 020 Track 4: call `save_result` (dual-checkpoint Result
+            // side). Default impl delegates to `save`, so legacy single-
+            // checkpoint hooks keep their existing behavior.
             if let Err(e) = self
                 .checkpoint_hook
-                .save(ctx, &gather_output, &decide_output, &execute_outcome)
+                .save_result(ctx, &gather_output, &decide_output, &execute_outcome)
                 .await
             {
                 // Checkpoint failures are logged but do NOT abort the run.
@@ -607,13 +838,13 @@ where
                     run_id    = %ctx.run_id,
                     iteration = ctx.iteration,
                     error     = %e,
-                    "checkpoint save failed — continuing without checkpoint"
+                    "result checkpoint save failed — continuing without checkpoint"
                 );
             } else {
                 tracing::debug!(
                     run_id    = %ctx.run_id,
                     iteration = ctx.iteration,
-                    "checkpoint saved"
+                    "result checkpoint saved"
                 );
             }
 

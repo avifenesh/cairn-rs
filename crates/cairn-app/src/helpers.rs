@@ -1037,6 +1037,8 @@ pub fn event_type_name(event: &RuntimeEvent) -> &'static str {
         RuntimeEvent::PlanRevisionRequested(_) => "plan_revision_requested",
         RuntimeEvent::DecisionRecorded(_) => "decision_recorded",
         RuntimeEvent::DecisionCacheWarmup(_) => "decision_cache_warmup",
+        // RFC 020 Track 4
+        RuntimeEvent::RecoverySummaryEmitted(_) => "recovery_summary",
     }
 }
 
@@ -1547,7 +1549,8 @@ pub(crate) fn event_message(event: &RuntimeEvent) -> String {
         | RuntimeEvent::PlanProposed(_)
         | RuntimeEvent::PlanApproved(_)
         | RuntimeEvent::PlanRejected(_)
-        | RuntimeEvent::PlanRevisionRequested(_) => "unknown".to_string(),
+        | RuntimeEvent::PlanRevisionRequested(_)
+        | RuntimeEvent::RecoverySummaryEmitted(_) => "unknown".to_string(),
     }
 }
 

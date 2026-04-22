@@ -847,6 +847,9 @@ mod sqlite_parity {
                 checkpoint_id: CheckpointId::new("cp_z"),
                 disposition: CheckpointDisposition::Superseded,
                 data: None,
+                kind: None,
+                message_history_size: None,
+                tool_call_ids: Vec::new(),
             })),
             make_envelope(RuntimeEvent::CheckpointRecorded(CheckpointRecorded {
                 project: project.clone(),
@@ -854,6 +857,9 @@ mod sqlite_parity {
                 checkpoint_id: CheckpointId::new("cp_a"),
                 disposition: CheckpointDisposition::Superseded,
                 data: None,
+                kind: None,
+                message_history_size: None,
+                tool_call_ids: Vec::new(),
             })),
             make_envelope(RuntimeEvent::CheckpointRecorded(CheckpointRecorded {
                 project: project.clone(),
@@ -861,6 +867,9 @@ mod sqlite_parity {
                 checkpoint_id: CheckpointId::new("cp_m"),
                 disposition: CheckpointDisposition::Latest,
                 data: None,
+                kind: None,
+                message_history_size: None,
+                tool_call_ids: Vec::new(),
             })),
         ])
         .await

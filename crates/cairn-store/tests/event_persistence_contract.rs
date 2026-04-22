@@ -139,6 +139,9 @@ fn checkpoint_event(
             checkpoint_id: CheckpointId::new(ckpt),
             disposition: CheckpointDisposition::Latest,
             data: None,
+            kind: None,
+            message_history_size: None,
+            tool_call_ids: Vec::new(),
         }),
     )
 }

@@ -39,7 +39,10 @@ pub use emitter::{ChannelEmitter, NoOpEmitter, OrchestratorEvent, OrchestratorEv
 pub use error::OrchestratorError;
 pub use execute::ExecutePhase;
 pub use gather::GatherPhase;
-pub use loop_runner::{OrchestratorLoop, LEASE_UNHEALTHY_REASON};
+pub use loop_runner::{
+    CheckpointHook, DualCheckpointHook, NoOpCheckpointHook, OrchestratorLoop,
+    LEASE_UNHEALTHY_REASON,
+};
 pub use task_sink::{NoOpTaskSink, TaskFrameSink};
 
 pub mod gather_impl;

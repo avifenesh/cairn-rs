@@ -46,6 +46,9 @@ fn checkpoint_event(
             run_id: run_id(),
             checkpoint_id: CheckpointId::new(cp_id),
             disposition,
+            kind: None,
+            message_history_size: None,
+            tool_call_ids: Vec::new(),
             data: Some(serde_json::json!({ "step": cp_id })),
         }),
     )

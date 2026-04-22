@@ -1244,7 +1244,9 @@ impl InMemoryStore {
             | RuntimeEvent::PlanRevisionRequested(_)
             // RFC 020 Track 3: audit-only events; no in-memory projection update.
             | RuntimeEvent::ToolInvocationCacheHit(_)
-            | RuntimeEvent::ToolRecoveryPaused(_) => {}
+            | RuntimeEvent::ToolRecoveryPaused(_)
+            // RFC 020 Track 4: boot-level recovery audit event.
+            | RuntimeEvent::RecoverySummaryEmitted(_) => {}
             RuntimeEvent::ScheduledTaskCreated(e) => {
                 state.scheduled_tasks.insert(
                     e.scheduled_task_id.as_str().to_owned(),
@@ -5401,6 +5403,9 @@ mod tests {
                     checkpoint_id: CheckpointId::new("cp_1"),
                     disposition: CheckpointDisposition::Latest,
                     data: None,
+                    kind: None,
+                    message_history_size: None,
+                    tool_call_ids: Vec::new(),
                 },
             ))])
             .await
@@ -5414,6 +5419,9 @@ mod tests {
                     checkpoint_id: CheckpointId::new("cp_2"),
                     disposition: CheckpointDisposition::Latest,
                     data: None,
+                    kind: None,
+                    message_history_size: None,
+                    tool_call_ids: Vec::new(),
                 },
             ))])
             .await
@@ -5711,6 +5719,9 @@ mod tests {
                     checkpoint_id: checkpoint_id_1.clone(),
                     disposition: CheckpointDisposition::Latest,
                     data: None,
+                    kind: None,
+                    message_history_size: None,
+                    tool_call_ids: Vec::new(),
                 },
             ))])
             .await
@@ -5725,6 +5736,9 @@ mod tests {
                     checkpoint_id: checkpoint_id_2.clone(),
                     disposition: CheckpointDisposition::Latest,
                     data: None,
+                    kind: None,
+                    message_history_size: None,
+                    tool_call_ids: Vec::new(),
                 },
             ))])
             .await

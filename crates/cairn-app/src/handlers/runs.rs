@@ -2171,8 +2171,19 @@ pub(crate) async fn orchestrate_run_handler(
             exporter: state.otlp_exporter.clone(),
         });
 
+    // RFC 020 Track 4 — dual checkpoint hook. Wires the orchestrator loop
+    // to `CheckpointService::save_dual` so each iteration emits an Intent
+    // checkpoint (post-decide, pre-execute) and a Result checkpoint
+    // (post-execute), closing invariant #5 end-to-end.
+    let dual_ckpt_hook: std::sync::Arc<dyn cairn_orchestrator::CheckpointHook> =
+        std::sync::Arc::new(cairn_orchestrator::DualCheckpointHook::new(
+            ctx.project.clone(),
+            std::sync::Arc::new(CheckpointServiceImpl::new(state.runtime.store.clone())),
+        ));
+
     match OrchestratorLoop::new(gather, decide, execute, cfg)
         .with_emitter(emitter)
+        .with_checkpoint_hook(dual_ckpt_hook)
         .run(ctx)
         .await
     {
