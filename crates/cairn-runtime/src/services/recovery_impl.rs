@@ -359,17 +359,27 @@ where
 
         // RFC 020 §"Run recovery matrix" — sandbox_reattached row. For
         // every `(run, project)` pair whose bound sandbox survived the
-        // crash cleanly, emit `RecoveryAttempted{reason:"sandbox_
-        // reattached"}` + `RecoveryCompleted{recovered:true}` for
-        // audit-trail symmetry. No `RunStateChanged`: the run is
-        // expected to still be non-terminal and the orchestrator will
-        // resume it on its next tick via `provision_or_reconnect`,
-        // which short-circuits to the reattached session. Guard
-        // against runs that also appeared in `sandbox_lost_runs` /
-        // `allowlist_revoked_runs` — a badly-seeded workspace sweep
-        // could double-report, and an `Running → Failed` transition
-        // from the lost handler must not be followed by a reattach
-        // advisory event implying the run is still healthy.
+        // crash cleanly, emit an advisory `RecoveryAttempted{reason:
+        // "sandbox_reattached"}` so the audit trail records the fact
+        // that the reattach sweep picked this run up. We deliberately
+        // do NOT emit a matching `RecoveryCompleted` or push a
+        // `RunRecoveryOutcome` entry here: the run is still
+        // non-terminal in the projection, and the normal Running /
+        // WaitingApproval / Paused / WaitingDependency sweep below
+        // must still see it so wedge detection (Cursor Bugbot
+        // medium-1) and approval-crash-window advancement can run.
+        // The `RecoveryCompleted` event is emitted by that sweep's
+        // `plan_for_run` path, which is also where the outcome
+        // accounting happens. The advisory `RecoveryAttempted`
+        // emitted here simply adds a reason-keyed breadcrumb on top
+        // of whatever reason string `plan_for_run` generates.
+        //
+        // Guard against a badly-seeded workspace sweep that lists the
+        // same run under both `sandbox_lost_runs` / `allowlist_
+        // revoked_runs` and `sandbox_reattached_runs` — those rows
+        // mutate state, and emitting a reattach breadcrumb after the
+        // Running → Failed / Running → WaitingApproval transition
+        // would falsely imply the run is still healthy.
         let mut sandbox_reattached_handled: std::collections::HashSet<cairn_domain::RunId> =
             std::collections::HashSet::new();
         for (run_id, project) in sandbox_reattached_runs {
@@ -388,19 +398,6 @@ where
                     boot_id: Some(boot_id.as_str().to_owned()),
                 },
             )));
-            sandbox_lost_events.push(make_envelope(RuntimeEvent::RecoveryCompleted(
-                RecoveryCompleted {
-                    project: project.clone(),
-                    run_id: Some(run_id.clone()),
-                    task_id: None,
-                    recovered: true,
-                    boot_id: Some(boot_id.as_str().to_owned()),
-                },
-            )));
-            summary.recovered_runs += 1;
-            summary.outcomes.push(RunRecoveryOutcome::Recovered {
-                run_id: run_id.clone(),
-            });
         }
 
         // Enumerate every non-terminal run state listed in RFC 020's matrix.
@@ -441,12 +438,22 @@ where
         // Skip runs that we already transitioned via the sandbox_lost
         // handler above — their state has been staged in `all_events` but
         // the projection `runs` vector still reflects pre-transition state.
+        // NOTE: reattached runs are NOT filtered out here (Cursor
+        // Bugbot medium-1). Unlike the sandbox-lost and
+        // allowlist-revoked handlers which mutate run state and
+        // require the scan to skip them (to avoid observing stale
+        // projection state), the reattach handler is advisory only —
+        // it emits a reason-keyed breadcrumb but does not touch the
+        // run. Filtering reattached runs from the scan would suppress
+        // wedge detection (Running >5min with no checkpoint → Failed)
+        // and approval-crash-window advancement (WaitingApproval with
+        // an approval resolved during the crash window), both of
+        // which are run-state mutations this sweep owns.
         let runs: Vec<RunRecord> = runs
             .into_iter()
             .filter(|r| {
                 !sandbox_lost_handled.contains(&r.run_id)
                     && !allowlist_revoked_handled.contains(&r.run_id)
-                    && !sandbox_reattached_handled.contains(&r.run_id)
             })
             .collect();
         // `scanned_runs` must reflect everything recovery touched this
@@ -458,8 +465,7 @@ where
         // (Cursor Bugbot low-1.)
         summary.scanned_runs = (runs.len() as u32)
             .saturating_add(summary.failed_runs)
-            .saturating_add(summary.advanced_runs)
-            .saturating_add(summary.recovered_runs);
+            .saturating_add(summary.advanced_runs);
         for run in runs {
             let plan = self
                 .plan_for_run(&run, boot_id, now_ms, &mut resolved_approvals_by_project)
