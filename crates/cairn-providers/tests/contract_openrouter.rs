@@ -13,15 +13,16 @@
 //! OpenRouter API, and overwrites the fixture with the raw response body.
 //! The refreshed fixture should then be committed to git.
 //!
-//! # Scope
+//! # Invariant
 //!
-//! This is the first of three planned reality-check tests for provider
-//! integration: this contract test (provider shape drift), then chaos
-//! tests (failure-mode behavior), then soak tests (long-running stability).
-//! Other providers (Anthropic-native, Bedrock Converse, Vertex, etc.) will
-//! get their own contract tests in follow-up PRs using the same pattern.
+//! The assertion block pins every response field the orchestrator reads
+//! (content, finish_reason, usage token counts, and the
+//! `total_tokens == prompt_tokens + completion_tokens` budgeting
+//! invariant).  Optional fields that providers may add or omit (e.g.
+//! `refusal`, `native_finish_reason`, top-level `id`) are deliberately
+//! not part of the contract so provider evolution does not cause noise.
 //!
-//! # Why OpenRouter first
+//! # Why OpenRouter
 //!
 //! - Cheap — free-tier models cost $0 per request.
 //! - OpenAI-compatible wire format — exercises the shared parser used by
@@ -41,7 +42,7 @@
 
 use std::env;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::time::{Duration, SystemTime};
 
 use cairn_providers::{
@@ -308,6 +309,4 @@ fn openrouter_fixture_contains_no_secrets() {
         "fixture {} references OPENROUTER_API_KEY — sanitize before committing",
         path.display()
     );
-    // Silence unused-import complaints in pathological builds.
-    let _ = Path::new(".");
 }
