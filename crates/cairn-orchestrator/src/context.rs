@@ -60,6 +60,16 @@ pub struct OrchestrationContext {
     /// after every iteration; gather copies it into `GatherOutput.step_history`
     /// (optionally merged with checkpointed entries on resume).
     pub step_history: Vec<StepSummary>,
+    /// RFC 020 Track 3: true when this iteration is replaying after a crash.
+    ///
+    /// Set by the loop runner on entry to the execute phase if the run was
+    /// resumed from a checkpoint. The execute phase consults this (together
+    /// with the tool's `RetrySafety` classification) to decide whether to
+    /// silently re-dispatch, serve from cache, or pause for operator approval.
+    ///
+    /// Defaults to `false` for fresh (non-recovered) runs. Set only for the
+    /// first post-recovery iteration; subsequent iterations use `false`.
+    pub is_recovery: bool,
 }
 
 // ── GatherOutput ─────────────────────────────────────────────────────────────

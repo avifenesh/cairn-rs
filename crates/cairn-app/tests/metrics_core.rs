@@ -217,6 +217,8 @@ async fn tool_invocations_counted_by_name_and_outcome() {
                     tool_name: tool.to_owned(),
                     finished_at_ms: 0,
                     outcome,
+                    tool_call_id: None,
+                    result_json: None,
                 }),
                 id,
             )])

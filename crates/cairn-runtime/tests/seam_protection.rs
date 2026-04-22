@@ -132,6 +132,7 @@ async fn tool_invocation_complete_emits_event() {
         ToolInvocationId::new("inv_1"),
         None,
         "test.tool".to_owned(),
+        &[], None, None,
     )
     .await
     .unwrap();

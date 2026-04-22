@@ -177,6 +177,15 @@ fn assert_all_variants_covered(event: &RuntimeEvent) {
                 Some(RuntimeEntityRef::ToolInvocation { .. })
             ));
         }
+        RuntimeEvent::ToolInvocationCacheHit(_) => {
+            assert!(matches!(
+                eref,
+                Some(RuntimeEntityRef::ToolInvocation { .. })
+            ));
+        }
+        RuntimeEvent::ToolRecoveryPaused(_) => {
+            assert!(matches!(eref, Some(RuntimeEntityRef::Run { .. })));
+        }
         RuntimeEvent::SignalIngested(_) => {
             assert!(matches!(eref, Some(RuntimeEntityRef::Signal { .. })));
         }
@@ -685,6 +694,8 @@ fn all_variants() -> Vec<RuntimeEvent> {
             tool_name: "read_file".to_owned(),
             finished_at_ms: ts + 100,
             outcome: ToolInvocationOutcomeKind::Success,
+            tool_call_id: None,
+            result_json: None,
         }),
         RuntimeEvent::ToolInvocationFailed(ToolInvocationFailed {
             project: p(),
@@ -694,6 +705,25 @@ fn all_variants() -> Vec<RuntimeEvent> {
             finished_at_ms: ts,
             outcome: ToolInvocationOutcomeKind::PermanentFailure,
             error_message: Some("denied".to_owned()),
+        }),
+        RuntimeEvent::ToolInvocationCacheHit(cairn_domain::ToolInvocationCacheHit {
+            project: p(),
+            invocation_id: ToolInvocationId::new("inv3"),
+            run_id: Some(run()),
+            task_id: None,
+            tool_name: "read_file".to_owned(),
+            tool_call_id: "tc_00000000".to_owned(),
+            original_completed_at_ms: ts,
+            served_at_ms: ts + 50,
+        }),
+        RuntimeEvent::ToolRecoveryPaused(cairn_domain::ToolRecoveryPaused {
+            project: p(),
+            run_id: run(),
+            task_id: None,
+            tool_name: "shell_exec".to_owned(),
+            tool_call_id: "tc_00000001".to_owned(),
+            reason: "DangerousPause".to_owned(),
+            paused_at_ms: ts,
         }),
         RuntimeEvent::SignalIngested(SignalIngested {
             project: p(),
@@ -1562,11 +1592,12 @@ fn all_variants() -> Vec<RuntimeEvent> {
 #[test]
 fn all_runtime_event_variants_covered_count() {
     let variants = all_variants();
-    // 130 variants in the RuntimeEvent enum, including trigger/template lifecycle events.
+    // 132 variants in the RuntimeEvent enum (130 baseline + RFC 020 Track 3:
+    // ToolInvocationCacheHit, ToolRecoveryPaused).
     assert_eq!(
         variants.len(),
-        130,
-        "all_variants() must construct exactly 130 RuntimeEvent instances"
+        132,
+        "all_variants() must construct exactly 132 RuntimeEvent instances"
     );
 }
 

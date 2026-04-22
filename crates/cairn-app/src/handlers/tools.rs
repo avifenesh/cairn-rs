@@ -293,6 +293,7 @@ pub(crate) async fn complete_tool_invocation_handler(
             invocation_id.clone(),
             record.task_id.clone(),
             tool_name,
+        &[], None, None,
         )
         .await
     {

@@ -404,6 +404,8 @@ mod tests {
                 tool_name: "memory_search".to_owned(),
                 finished_at_ms: 1700000000042,
                 outcome: cairn_domain::tool_invocation::ToolInvocationOutcomeKind::Success,
+            tool_call_id: None,
+            result_json: None,
             },
         );
         let spans = exporter.event_to_spans(&event);

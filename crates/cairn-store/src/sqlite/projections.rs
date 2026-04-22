@@ -457,6 +457,9 @@ impl SqliteSyncProjection {
             RuntimeEvent::ToolInvocationProgressUpdated(_) => {
                 log_stub("ToolInvocationProgressUpdated")
             }
+            // RFC 020 Track 3: audit-only events; no projection update needed.
+            RuntimeEvent::ToolInvocationCacheHit(_) => log_stub("ToolInvocationCacheHit"),
+            RuntimeEvent::ToolRecoveryPaused(_) => log_stub("ToolRecoveryPaused"),
         }
 
         Ok(())

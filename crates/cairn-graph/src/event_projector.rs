@@ -458,7 +458,10 @@ impl<P: GraphProjection> EventProjector<P> {
             | RuntimeEvent::TaskDependencyResolved(_)
             | RuntimeEvent::TaskLeaseExpired(_)
             | RuntimeEvent::TaskPriorityChanged(_)
-            | RuntimeEvent::ToolInvocationProgressUpdated(_) => {}
+            | RuntimeEvent::ToolInvocationProgressUpdated(_)
+            // RFC 020 Track 3: audit-only events; no graph projection.
+            | RuntimeEvent::ToolInvocationCacheHit(_)
+            | RuntimeEvent::ToolRecoveryPaused(_) => {}
 
             RuntimeEvent::EvalRunStarted(e) => {
                 self.add_node(

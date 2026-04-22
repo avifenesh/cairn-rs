@@ -277,6 +277,14 @@ impl ToolCallId {
     pub fn as_str(&self) -> &str {
         &self.0
     }
+
+    /// RFC 020 Track 3: reconstruct a `ToolCallId` from its persisted string
+    /// form (as stored on `ToolInvocationCompleted.tool_call_id`). Used by
+    /// the startup replay to rebuild the cache without access to the original
+    /// args that went into `derive`.
+    pub fn from_raw(raw: String) -> Self {
+        Self(raw)
+    }
 }
 
 impl std::fmt::Display for ToolCallId {
@@ -312,6 +320,12 @@ impl ToolCallResultCache {
     /// Insert a completed tool result.
     pub fn insert(&mut self, result: CachedToolResult) {
         self.entries.insert(result.tool_call_id.0.clone(), result);
+    }
+
+    /// RFC 020 Track 3: insert by raw string key (used by startup replay
+    /// when rebuilding from `ToolInvocationCompleted` events).
+    pub fn insert_raw(&mut self, key: String, result: CachedToolResult) {
+        self.entries.insert(key, result);
     }
 
     /// Look up a cached result by tool call ID.
@@ -563,6 +577,63 @@ impl Default for ToolDispatchBatch {
     fn default() -> Self {
         Self::new()
     }
+}
+
+// ── Cache replay (RFC 020 Track 3) ──────────────────────────────────────────
+
+/// Replay `ToolInvocationCompleted` events from the event log into a
+/// `ToolCallResultCache`. Called once during cairn-app startup so a
+/// restart serves cached results for tools that completed before the
+/// previous process crashed.
+///
+/// Events without `tool_call_id` (legacy / pre-Track-3 log entries) are
+/// skipped — they carry no deterministic key to hash into, so no cache
+/// hit is possible on replay regardless.
+///
+/// Returns the number of cache entries populated.
+pub async fn replay_tool_result_cache<S: cairn_store::EventLog>(
+    store: &S,
+    cache: &std::sync::Mutex<ToolCallResultCache>,
+) -> Result<usize, cairn_store::StoreError> {
+    use cairn_domain::RuntimeEvent;
+    use cairn_store::EventPosition;
+
+    let mut populated = 0usize;
+    let mut cursor: Option<EventPosition> = None;
+    const PAGE: usize = 500;
+    loop {
+        let page = store.read_stream(cursor, PAGE).await?;
+        if page.is_empty() {
+            break;
+        }
+        let last = page.last().map(|e| e.position);
+        for stored in &page {
+            if let RuntimeEvent::ToolInvocationCompleted(ev) = &stored.envelope.payload {
+                if let (Some(tcid_str), Some(result)) = (&ev.tool_call_id, &ev.result_json) {
+                    let mut guard = cache.lock().unwrap_or_else(|e| e.into_inner());
+                    // ToolCallId is a newtype around String; rebuild by hashing
+                    // is not possible since we don't have the args, but we can
+                    // reconstruct via a private constructor? Use pub as_str.
+                    // We stored the string form, so build a proxy:
+                    guard.insert_raw(tcid_str.clone(), CachedToolResult {
+                        tool_call_id: ToolCallId::from_raw(tcid_str.clone()),
+                        tool_name: ev.tool_name.clone(),
+                        result_json: result.clone(),
+                        completed_at: ev.finished_at_ms,
+                    });
+                    populated += 1;
+                }
+            }
+        }
+        match last {
+            Some(pos) => cursor = Some(pos),
+            None => break,
+        }
+        if page.len() < PAGE {
+            break;
+        }
+    }
+    Ok(populated)
 }
 
 // ── Tests ───────────────────────────────────────────────────────────────────

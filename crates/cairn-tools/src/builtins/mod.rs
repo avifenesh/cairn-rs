@@ -315,6 +315,43 @@ impl From<&str> for ToolError {
     }
 }
 
+// ── normalize_for_cache default (RFC 020 Track 3) ────────────────────────────
+
+/// Default JSON normalization used by [`ToolHandler::normalize_for_cache`].
+///
+/// Recursively sorts object keys lexicographically and drops well-known
+/// temporal / request-identity fields that do not carry semantic meaning.
+/// The result is emitted as compact JSON — identical arguments (modulo key
+/// order and temporal noise) always map to the same string.
+pub fn default_normalize_for_cache(args: &Value) -> String {
+    /// Fields stripped during default normalization. Tools whose arguments
+    /// legitimately include these names should override `normalize_for_cache`.
+    const TEMPORAL_FIELDS: &[&str] =
+        &["timestamp", "timestamp_ms", "request_id", "idempotency_key", "nonce", "_at"];
+
+    fn strip(v: Value) -> Value {
+        match v {
+            Value::Object(map) => {
+                let mut sorted: Vec<(String, Value)> = map
+                    .into_iter()
+                    .filter(|(k, _)| !TEMPORAL_FIELDS.contains(&k.as_str()))
+                    .map(|(k, v)| (k, strip(v)))
+                    .collect();
+                sorted.sort_by(|a, b| a.0.cmp(&b.0));
+                let mut out = serde_json::Map::with_capacity(sorted.len());
+                for (k, v) in sorted {
+                    out.insert(k, v);
+                }
+                Value::Object(out)
+            }
+            Value::Array(items) => Value::Array(items.into_iter().map(strip).collect()),
+            other => other,
+        }
+    }
+
+    serde_json::to_string(&strip(args.clone())).unwrap_or_default()
+}
+
 // ── ToolHandler trait ─────────────────────────────────────────────────────────
 
 /// Async interface that every built-in tool must implement.
@@ -395,6 +432,26 @@ pub trait ToolHandler: Send + Sync {
     /// Default is `DangerousPause` (conservative — tools must opt in to retry).
     fn retry_safety(&self) -> RetrySafety {
         RetrySafety::DangerousPause
+    }
+
+    /// RFC 020 Track 3: normalize tool arguments for cache-key derivation.
+    ///
+    /// Called by the orchestrator to compute a stable cache-key input from
+    /// the tool's arguments, feeding into
+    /// [`cairn_runtime::startup::ToolCallId::derive`]. The return value is
+    /// hashed into the deterministic `ToolCallId` so a resumed run computing
+    /// the same call at the same step gets the same ID.
+    ///
+    /// Default implementation:
+    /// - sort JSON object keys lexicographically (recursively),
+    /// - drop well-known temporal fields (`timestamp`, `request_id`,
+    ///   `idempotency_key`, `nonce`) that do not carry semantic meaning,
+    /// - re-emit as compact JSON.
+    ///
+    /// Tools that need different normalization (path canonicalization,
+    /// secret redaction, header normalization, etc.) override this method.
+    fn normalize_for_cache(&self, args: &Value) -> String {
+        default_normalize_for_cache(args)
     }
 
     /// Execute the tool with the given project context and parsed arguments.

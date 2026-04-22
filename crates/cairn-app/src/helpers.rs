@@ -934,6 +934,8 @@ pub fn event_type_name(event: &RuntimeEvent) -> &'static str {
         RuntimeEvent::ToolInvocationProgressUpdated(_) => "tool_invocation_progress_updated",
         RuntimeEvent::ToolInvocationCompleted(_) => "tool_invocation_completed",
         RuntimeEvent::ToolInvocationFailed(_) => "tool_invocation_failed",
+        RuntimeEvent::ToolInvocationCacheHit(_) => "tool_invocation_cache_hit",
+        RuntimeEvent::ToolRecoveryPaused(_) => "tool_recovery_paused",
         RuntimeEvent::SignalIngested(_) => "signal_ingested",
         RuntimeEvent::SignalSubscriptionCreated(_) => "signal_subscription_created",
         RuntimeEvent::SignalRouted(_) => "signal_routed",
@@ -1167,6 +1169,18 @@ pub(crate) fn event_message(event: &RuntimeEvent) -> String {
         }
         RuntimeEvent::ToolInvocationFailed(failed) => {
             format!("Tool invocation {} failed", failed.invocation_id)
+        }
+        RuntimeEvent::ToolInvocationCacheHit(hit) => {
+            format!(
+                "Tool invocation {} served from cache (tool_call_id={})",
+                hit.invocation_id, hit.tool_call_id
+            )
+        }
+        RuntimeEvent::ToolRecoveryPaused(paused) => {
+            format!(
+                "Recovery paused on {} for run {} (tool_call_id={})",
+                paused.tool_name, paused.run_id, paused.tool_call_id
+            )
         }
         RuntimeEvent::SignalIngested(ingested) => format!("Signal {} ingested", ingested.signal_id),
         RuntimeEvent::SignalSubscriptionCreated(subscription) => {

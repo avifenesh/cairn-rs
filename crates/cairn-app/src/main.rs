@@ -1147,6 +1147,24 @@ async fn main() {
     lib_state.replay_graph().await;
     lib_state.replay_evals().await;
     lib_state.replay_triggers().await;
+
+    // RFC 020 Track 3: populate the tool-call result cache from
+    // `ToolInvocationCompleted` events that landed before this boot.
+    // Empty on first boot; non-empty after a crash-restart with completed
+    // tool calls in the log. Idempotent: re-running is a no-op overwrite.
+    let cache_populated = cairn_runtime::startup::replay_tool_result_cache(
+        lib_state.runtime.store.as_ref(),
+        lib_state.tool_result_cache.as_ref(),
+    )
+    .await
+    .unwrap_or_else(|e| {
+        tracing::warn!(error = %e, "tool_result_cache replay failed");
+        0
+    });
+    lib_state.readiness.update_branch("5", |b| {
+        b.tool_result_cache = BranchStatus::complete(cache_populated as u64);
+    });
+
     lib_state.runtime.store.reset_usage_counters();
 
     // Flip the remaining RFC 020 readiness branches. Each represents a

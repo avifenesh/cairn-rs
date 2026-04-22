@@ -391,6 +391,10 @@ impl PgSyncProjection {
             RuntimeEvent::ResourceShareRevoked(_) => log_stub("ResourceShareRevoked"),
             RuntimeEvent::ResourceShared(_) => log_stub("ResourceShared"),
             RuntimeEvent::RoutePolicyUpdated(_) => log_stub("RoutePolicyUpdated"),
+            // RFC 020 Track 3: audit-only events; no projection update needed.
+            // ToolCallResultCache consumes these via in-memory scan / replay.
+            RuntimeEvent::ToolInvocationCacheHit(_) => log_stub("ToolInvocationCacheHit"),
+            RuntimeEvent::ToolRecoveryPaused(_) => log_stub("ToolRecoveryPaused"),
 
             RuntimeEvent::TenantCreated(e) => {
                 sqlx::query(
