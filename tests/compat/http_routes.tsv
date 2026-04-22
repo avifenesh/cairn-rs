@@ -1,133 +1,437 @@
 method	route	classification	query_or_body_detail	minimum_contract
-GET	/health	preserve	-	{ ok: boolean }
-GET	/v1/dashboard	preserve	query: limit?, source?	dashboard payload used by overview
-GET	/v1/overview	preserve	-	operator overview dashboard
-GET	/v1/feed	preserve	query: limit?, before?, source?, unread?	{ items, hasMore }
-POST	/v1/feed/:id/read	preserve	path param: id	{ ok }
-POST	/v1/feed/read-all	preserve	-	{ changed }
-GET	/v1/tasks	preserve	query: status?, type?	{ items, hasMore }
-POST	/v1/tasks/:id/cancel	preserve	path param: id	{ ok }
-GET	/v1/approvals	preserve	query: status?	{ items, hasMore }
-POST	/v1/approvals/:id/approve	preserve	path param: id	{ ok }
-POST	/v1/approvals/:id/deny	preserve	path param: id	{ ok }
-GET	/v1/assistant/sessions	preserve	-	{ items }
-GET	/v1/assistant/sessions/:sessionId	preserve	path param: sessionId	{ items } chat messages
-POST	/v1/assistant/message	preserve	body: { message, mode?, sessionId? }	{ taskId }
-POST	/v1/assistant/voice	transitional	multipart: audio, mode?, sessionId?	{ taskId, transcript }
-GET	/v1/memories	preserve	query: status?, category?	{ items, hasMore }
-GET	/v1/memories/search	preserve	query: q required, limit?	{ items }
-POST	/v1/memories	preserve	body: { content, category }	create memory response object
-POST	/v1/memories/:id/accept	preserve	path param: id	{ ok }
-POST	/v1/memories/:id/reject	preserve	path param: id	{ ok }
-GET	/v1/fleet	transitional	-	{ agents, summary }
-GET	/v1/skills	preserve	-	{ items, summary, currentlyActive? }
-GET	/v1/soul	transitional	-	current singleton asset wrapper
-PUT	/v1/soul	transitional	body: { content }	{ ok, sha }
-GET	/v1/soul/history	transitional	-	{ items }
-GET	/v1/soul/patches	transitional	-	{ items }
-GET	/v1/costs	preserve	-	cost summary payload
-GET	/v1/metrics	preserve	-	metrics read model
-GET	/v1/status	preserve	-	runtime/system status
-POST	/v1/poll/run	preserve	-	{ ok }
-GET	/v1/stream	preserve	query: token?, lastEventId?	SSE stream with replay support
-GET	/v1/runs	preserve	query: session_id?, limit?	{ items }
-GET	/v1/runs/:id	preserve	path param: id	run detail
-GET	/v1/prompts/assets	preserve	query: limit?	{ items }
-GET	/v1/prompts/releases	preserve	query: limit?	{ items }
-GET	/v1/graph/trace	preserve	query: root_id, kind	subgraph
-GET	/v1/policies/decisions	preserve	query: limit?	{ items }
-GET	/v1/evals/runs	preserve	query: limit?	{ items }
-GET	/v1/evals/datasets	preserve	query: limit?	{ items }
-GET	/v1/sources	preserve	-	source connection health
-GET	/v1/channels	preserve	query: limit?	{ items }
-GET	/v1/providers/health	preserve	-	provider connection health
-GET	/v1/settings	preserve	-	deployment settings
-GET	/v1/admin/tenants	preserve	-	{ items }
-GET	/v1/admin/workspaces	preserve	-	{ items }
-GET	/v1/config	preserve	-	configuration key-value pairs
-GET	/v1/config/:key	preserve	path param: key	single config value
-PUT	/v1/config/:key	preserve	path param: key, body: value	{ ok }
+DELETE	/v1/admin/models/:id	preserve	-	-
+DELETE	/v1/admin/tenants/:tenant_id/credentials/:id	preserve	-	-
+DELETE	/v1/admin/workspaces/:id/shares/:share_id	preserve	-	-
+DELETE	/v1/admin/workspaces/:workspace_id/members/:id	preserve	-	-
+DELETE	/v1/auth/tokens/:id	preserve	-	-
 DELETE	/v1/config/:key	preserve	path param: key	{ ok }
-GET	/v1/sessions/:id/llm-traces	preserve	path param: id	LLM call traces for session
-POST	/v1/import/validate	preserve	body: import payload	{ valid, errors[] }
-POST	/v1/import/preview	preserve	body: import payload	{ plan, conflicts[] }
-POST	/v1/import/apply	preserve	body: import payload	{ report }
-GET	/v1/export/:format	preserve	path param: format	exported bundle
-GET	/v1/import/reports	preserve	query: limit?	{ items }
-GET	/v1/admin/entitlements	preserve	-	tenant entitlement set
+DELETE	/v1/integrations/:integration_id	preserve	-	-
+DELETE	/v1/integrations/:integration_id/overrides	preserve	-	-
+DELETE	/v1/mailbox/:id	preserve	-	-
+DELETE	/v1/plugins/:id	preserve	-	-
+DELETE	/v1/plugins/:id/uninstall	preserve	-	-
+DELETE	/v1/projects/:proj/plugins/:id	preserve	-	-
+DELETE	/v1/projects/:project/repos/:owner/:repo	preserve	-	-
+DELETE	/v1/projects/:project/run-templates/:template_id	preserve	-	-
+DELETE	/v1/projects/:project/triggers/:trigger_id	preserve	-	-
+DELETE	/v1/providers/connections/:id	preserve	-	-
+DELETE	/v1/providers/pools/:id/connections/:conn_id	preserve	-	-
+DELETE	/v1/settings/defaults/:scope/:scope_id/:key	preserve	-	-
+DELETE	/v1/signals/subscriptions/:id	preserve	-	-
+DELETE	/v1/sources/:id	preserve	-	-
+GET	/.well-known/agent.json	preserve	-	A2A Agent Card (RFC 021)
+GET	/docs	preserve	-	-
+GET	/health	preserve	-	{ ok: boolean }
+GET	/health/ready	preserve	-	-
+GET	/healthz	preserve	-	-
+GET	/metrics	preserve	-	-
+GET	/openapi.json	preserve	-	-
+GET	/ready	preserve	-	-
+GET	/v1/a2a/tasks/:id	preserve	-	A2A task status
+GET	/v1/admin/audit-log	preserve	-	audit log entries
+GET	/v1/admin/audit-log/:resource_type/:resource_id	preserve	-	-
 GET	/v1/admin/capabilities	preserve	-	feature capability map
+GET	/v1/admin/entitlements	preserve	-	tenant entitlement set
+GET	/v1/admin/event-count	preserve	-	-
+GET	/v1/admin/event-log	preserve	-	-
 GET	/v1/admin/license	preserve	-	active license record
 GET	/v1/admin/logs	preserve	-	admin logs
-POST	/v1/admin/license/activate	preserve	body: { license_key }	{ ok }
-POST	/v1/admin/tenants	preserve	-	-
-POST	/v1/admin/license/override	preserve	-	-
-POST	/v1/onboarding/template	preserve	-	-
-POST	/v1/prompts/assets	preserve	-	-
-POST	/v1/prompts/releases	preserve	-	-
-POST	/v1/approval-policies	preserve	-	-
-POST	/v1/runs/process-scheduled-resumes	preserve	-	-
-POST	/v1/tool-invocations	preserve	-	-
-POST	/v1/plugins	preserve	-	-
-POST	/v1/tasks/expire-leases	preserve	-	-
-POST	/v1/evals/datasets	preserve	-	-
-POST	/v1/evals/baselines	preserve	-	-
-POST	/v1/evals/rubrics	preserve	-	-
-POST	/v1/evals/runs	preserve	-	-
-POST	/v1/sources	preserve	-	-
-POST	/v1/sources/process-refresh	preserve	-	-
-POST	/v1/ingest/jobs	preserve	-	-
-POST	/v1/channels	preserve	-	-
-POST	/v1/memory/ingest	preserve	-	-
-POST	/v1/memory/deep-search	preserve	-	-
-POST	/v1/providers/budget	preserve	-	-
-POST	/v1/providers/pools	preserve	-	-
-POST	/v1/providers/connections	preserve	-	-
-POST	/v1/providers/run-health-checks	preserve	-	-
-POST	/v1/providers/bindings	preserve	-	-
-POST	/v1/providers/policies	preserve	-	-
-GET	/v1/admin/audit-log	preserve	-	audit log entries
+GET	/v1/admin/models	preserve	-	-
+GET	/v1/admin/models/:id	preserve	-	-
 GET	/v1/admin/notifications/failed	preserve	-	failed notification records
+GET	/v1/admin/operators/:id/notifications	preserve	-	-
+GET	/v1/admin/tenants	preserve	-	{ items }
+GET	/v1/admin/tenants/:id	preserve	-	-
+GET	/v1/admin/tenants/:id/overview	preserve	-	-
+GET	/v1/admin/tenants/:id/snapshots	preserve	-	-
+GET	/v1/admin/tenants/:tenant_id/credentials	preserve	-	-
+GET	/v1/admin/tenants/:tenant_id/operator-profiles	preserve	-	-
+GET	/v1/admin/tenants/:tenant_id/quota	preserve	-	-
+GET	/v1/admin/tenants/:tenant_id/retention-policy	preserve	-	-
+GET	/v1/admin/tenants/:tenant_id/workspaces	preserve	-	-
+GET	/v1/admin/workspaces	preserve	-	{ items }
+GET	/v1/admin/workspaces/:id/shares	preserve	-	-
+GET	/v1/admin/workspaces/:workspace_id/members	preserve	-	-
+GET	/v1/admin/workspaces/:workspace_id/projects	preserve	-	-
+GET	/v1/agent-templates	preserve	-	-
 GET	/v1/approval-policies	preserve	-	{ items }
+GET	/v1/approvals	preserve	query: status?	{ items, hasMore }
+GET	/v1/approvals/pending	preserve	-	-
+GET	/v1/assistant/sessions	preserve	-	{ items }
+GET	/v1/assistant/sessions/:sessionId	preserve	path param: sessionId	{ items } chat messages
+GET	/v1/auth/tokens	preserve	-	-
+GET	/v1/bundles/export	preserve	-	-
+GET	/v1/bundles/export/prompts	preserve	-	-
+GET	/v1/changelog	preserve	-	-
+GET	/v1/channels	preserve	query: limit?	{ items }
+GET	/v1/channels/:id/messages	preserve	-	-
 GET	/v1/checkpoints	preserve	query: run_id	{ items }
+GET	/v1/checkpoints/:id	preserve	-	-
+GET	/v1/config	preserve	-	configuration key-value pairs
+GET	/v1/config/:key	preserve	path param: key	single config value
+GET	/v1/costs	preserve	-	cost summary payload
+GET	/v1/dashboard	preserve	query: limit?, source?	dashboard payload used by overview
+GET	/v1/dashboard/activity	preserve	-	-
+GET	/v1/db/status	preserve	-	-
+GET	/v1/decisions	preserve	query: scope?, kind?, outcome?	{ items }
+GET	/v1/decisions/:id	preserve	-	full decision with reasoning chain
+GET	/v1/decisions/cache	preserve	-	{ items } active cached decisions
+GET	/v1/docs	preserve	-	-
+GET	/v1/entitlements	preserve	-	-
+GET	/v1/entitlements/usage	preserve	-	-
+GET	/v1/evals/assets/:asset_id/export	preserve	-	-
+GET	/v1/evals/assets/:asset_id/report	preserve	-	-
+GET	/v1/evals/assets/:asset_id/trend	preserve	-	-
+GET	/v1/evals/assets/:asset_id/winner	preserve	-	-
+GET	/v1/evals/baselines/:id	preserve	-	-
+GET	/v1/evals/compare	preserve	-	-
+GET	/v1/evals/dashboard	preserve	-	-
+GET	/v1/evals/datasets	preserve	query: limit?	{ items }
+GET	/v1/evals/datasets/:id	preserve	-	-
 GET	/v1/evals/matrices/guardrail	preserve	-	{ rows }
 GET	/v1/evals/matrices/memory-quality	preserve	-	{ rows }
 GET	/v1/evals/matrices/permissions	preserve	-	{ rows }
 GET	/v1/evals/matrices/prompt-comparison	preserve	-	{ rows }
+GET	/v1/evals/matrices/provider-routing	preserve	-	-
 GET	/v1/evals/matrices/skill-health	preserve	-	{ rows }
+GET	/v1/evals/rubrics/:id	preserve	-	-
+GET	/v1/evals/runs	preserve	query: limit?	{ items }
+GET	/v1/evals/runs/:id	preserve	-	-
+GET	/v1/evals/scorecard/:asset_id	preserve	-	-
+GET	/v1/events	preserve	-	-
+GET	/v1/events/recent	preserve	-	-
+GET	/v1/export/:format	preserve	path param: format	exported bundle
+GET	/v1/feed	preserve	query: limit?, before?, source?, unread?	{ items, hasMore }
+GET	/v1/fleet	transitional	-	{ agents, summary }
+GET	/v1/graph/dependency-path/:run_id	preserve	-	-
+GET	/v1/graph/execution-trace/:run_id	preserve	-	-
+GET	/v1/graph/multi-hop/:node_id	preserve	-	-
+GET	/v1/graph/prompt-provenance/:release_id	preserve	-	-
+GET	/v1/graph/provenance/:node_id	preserve	-	-
+GET	/v1/graph/retrieval-provenance/:run_id	preserve	-	-
+GET	/v1/graph/trace	preserve	query: root_id, kind	subgraph
+GET	/v1/health/detailed	preserve	-	-
+GET	/v1/import/reports	preserve	query: limit?	{ items }
 GET	/v1/ingest/jobs	preserve	query: limit?	{ items }
+GET	/v1/ingest/jobs/:id	preserve	-	-
+GET	/v1/integrations	preserve	-	-
+GET	/v1/integrations/:integration_id	preserve	-	-
+GET	/v1/integrations/:integration_id/overrides	preserve	-	-
+GET	/v1/mailbox	preserve	-	-
+GET	/v1/memories	preserve	query: status?, category?	{ items, hasMore }
+GET	/v1/memories/search	preserve	query: q required, limit?	{ items }
 GET	/v1/memory/diagnostics	preserve	-	index status
+GET	/v1/memory/documents/:id	preserve	-	-
+GET	/v1/memory/documents/:id/versions	preserve	-	-
+GET	/v1/memory/provenance/:document_id	preserve	-	-
+GET	/v1/memory/related/:document_id	preserve	-	-
 GET	/v1/memory/search	preserve	query: q, limit?	{ results }
+GET	/v1/metrics	preserve	-	metrics read model
+GET	/v1/metrics/prometheus	preserve	-	-
+GET	/v1/notifications	preserve	-	-
 GET	/v1/onboarding/status	preserve	-	onboarding progress
 GET	/v1/onboarding/templates	preserve	-	{ items }
+GET	/v1/openapi.json	preserve	-	-
+GET	/v1/overview	preserve	-	operator overview dashboard
 GET	/v1/plugins	preserve	-	{ items }
+GET	/v1/plugins/:id	preserve	-	-
+GET	/v1/plugins/:id/capabilities	preserve	-	-
+GET	/v1/plugins/:id/health	preserve	-	-
+GET	/v1/plugins/:id/logs	preserve	-	-
+GET	/v1/plugins/:id/metrics	preserve	-	-
+GET	/v1/plugins/:id/pending-signals	preserve	-	-
+GET	/v1/plugins/:id/tools	preserve	-	-
+GET	/v1/plugins/catalog	preserve	-	-
+GET	/v1/plugins/tools/search	preserve	-	-
+GET	/v1/policies/decisions	preserve	query: limit?	{ items }
+GET	/v1/projects/:project/repos	preserve	-	-
+GET	/v1/projects/:project/repos/:owner/:repo	preserve	-	-
+GET	/v1/projects/:project/run-templates	preserve	-	-
+GET	/v1/projects/:project/run-templates/:template_id	preserve	-	-
+GET	/v1/projects/:project/triggers	preserve	-	-
+GET	/v1/projects/:project/triggers/:trigger_id	preserve	-	-
+GET	/v1/prompts/assets	preserve	query: limit?	{ items }
+GET	/v1/prompts/assets/:id/versions	preserve	-	-
+GET	/v1/prompts/assets/:id/versions/:version_id/diff	preserve	-	-
+GET	/v1/prompts/assets/:id/versions/:version_id/template-vars	preserve	-	-
+GET	/v1/prompts/releases	preserve	query: limit?	{ items }
+GET	/v1/prompts/releases/:id/history	preserve	-	-
 GET	/v1/providers/bindings	preserve	query: limit?	{ items }
+GET	/v1/providers/bindings/:id/cost-stats	preserve	-	-
 GET	/v1/providers/bindings/cost-ranking	preserve	-	{ items }
 GET	/v1/providers/budget	preserve	-	budget summary
 GET	/v1/providers/connections	preserve	query: limit?	{ items }
+GET	/v1/providers/connections/:id/discover-models	preserve	-	-
+GET	/v1/providers/connections/:id/health-schedule	preserve	-	-
+GET	/v1/providers/connections/:id/models	preserve	-	-
+GET	/v1/providers/connections/:id/resolve-key	preserve	-	-
+GET	/v1/providers/connections/:id/test	preserve	-	-
+GET	/v1/providers/health	preserve	-	provider connection health
+GET	/v1/providers/ollama/models	preserve	-	-
+GET	/v1/providers/ollama/models/:name/info	preserve	-	-
 GET	/v1/providers/policies	preserve	query: limit?	{ items }
 GET	/v1/providers/pools	preserve	-	{ items }
+GET	/v1/providers/registry	preserve	-	-
+GET	/v1/rate-limit	preserve	-	-
+GET	/v1/runs	preserve	query: session_id?, limit?	{ items }
+GET	/v1/runs/:id	preserve	path param: id	run detail
+GET	/v1/runs/:id/approvals	preserve	-	-
+GET	/v1/runs/:id/audit	preserve	-	-
+GET	/v1/runs/:id/checkpoint-strategy	preserve	-	-
+GET	/v1/runs/:id/children	preserve	-	-
+GET	/v1/runs/:id/cost	preserve	-	-
+GET	/v1/runs/:id/events	preserve	-	-
+GET	/v1/runs/:id/export	preserve	-	-
+GET	/v1/runs/:id/interventions	preserve	-	-
+GET	/v1/runs/:id/replay	preserve	-	-
+GET	/v1/runs/:id/sla	preserve	-	-
+GET	/v1/runs/:id/tasks	preserve	-	-
+GET	/v1/runs/:id/tool-invocations	preserve	-	-
 GET	/v1/runs/cost-alerts	preserve	-	{ items }
 GET	/v1/runs/escalated	preserve	-	{ items }
 GET	/v1/runs/resume-due	preserve	-	{ items }
 GET	/v1/runs/sla-breached	preserve	-	{ items }
 GET	/v1/runs/stalled	preserve	-	{ items }
+GET	/v1/sessions	preserve	-	-
+GET	/v1/sessions/:id	preserve	-	-
+GET	/v1/sessions/:id/active-runs	preserve	-	-
+GET	/v1/sessions/:id/activity	preserve	-	-
+GET	/v1/sessions/:id/cost	preserve	-	-
+GET	/v1/sessions/:id/events	preserve	-	-
+GET	/v1/sessions/:id/export	preserve	-	-
+GET	/v1/sessions/:id/llm-traces	preserve	path param: id	LLM call traces for session
+GET	/v1/sessions/:id/runs	preserve	-	-
+GET	/v1/settings	preserve	-	deployment settings
+GET	/v1/settings/defaults/all	preserve	-	-
+GET	/v1/settings/defaults/resolve/:key	preserve	-	-
 GET	/v1/settings/tls	preserve	-	TLS config
+GET	/v1/signals	preserve	-	-
+GET	/v1/signals/subscriptions	preserve	-	-
+GET	/v1/skills	preserve	-	{ items, summary, currentlyActive? }
+GET	/v1/soul	transitional	-	current singleton asset wrapper
+GET	/v1/soul/history	transitional	-	{ items }
+GET	/v1/soul/patches	transitional	-	{ items }
+GET	/v1/sources	preserve	-	source connection health
+GET	/v1/sources/:id	preserve	-	-
+GET	/v1/sources/:id/chunks	preserve	-	-
+GET	/v1/sources/:id/quality	preserve	-	-
+GET	/v1/sources/:id/refresh-schedule	preserve	-	-
+GET	/v1/sqeq/events	preserve	query: sqeq_session_id	SSE event stream (RFC 021)
+GET	/v1/stats	preserve	-	-
+GET	/v1/status	preserve	-	runtime/system status
+GET	/v1/stream	preserve	query: token?, lastEventId?	SSE stream with replay support
 GET	/v1/streams/runtime	preserve	query: token?	SSE runtime stream
+GET	/v1/system/info	preserve	-	-
+GET	/v1/system/role	preserve	-	-
+GET	/v1/tasks	preserve	query: status?, type?	{ items, hasMore }
+GET	/v1/tasks/:id	preserve	-	-
+GET	/v1/tasks/:id/dependencies	preserve	-	-
 GET	/v1/tasks/expired	preserve	-	{ items }
+GET	/v1/telemetry/usage	preserve	-	-
+GET	/v1/templates	preserve	-	-
+GET	/v1/templates/:id	preserve	-	-
 GET	/v1/tool-invocations	preserve	query: run_id?, limit?	{ items }
-GET	/.well-known/agent.json	preserve	-	A2A Agent Card (RFC 021)
-GET	/v1/a2a/tasks/:id	preserve	-	A2A task status
-GET	/v1/decisions	preserve	query: scope?, kind?, outcome?	{ items }
-GET	/v1/decisions/:id	preserve	-	full decision with reasoning chain
-GET	/v1/decisions/cache	preserve	-	{ items } active cached decisions
+GET	/v1/tool-invocations/:id	preserve	-	-
+GET	/v1/tool-invocations/:id/progress	preserve	-	-
+GET	/v1/trace/:trace_id	preserve	-	-
+GET	/v1/traces	preserve	-	-
+GET	/v1/traces/export	preserve	-	-
+GET	/v1/webhooks/github/actions	preserve	-	-
+GET	/v1/webhooks/github/installations	preserve	-	-
+GET	/v1/webhooks/github/queue	preserve	-	-
+GET	/v1/workers	preserve	-	-
+GET	/v1/workers/:id	preserve	-	-
+GET	/v1/ws	preserve	-	-
+GET	/version	preserve	-	-
+POST	/v1/a2a/tasks	preserve	body: A2A task shape	A2A task submission
+POST	/v1/admin/backup	preserve	-	-
+POST	/v1/admin/license/activate	preserve	body: { license_key }	{ ok }
+POST	/v1/admin/license/override	preserve	-	-
+POST	/v1/admin/models/import-litellm	preserve	-	-
+POST	/v1/admin/notifications/:id/retry	preserve	-	-
+POST	/v1/admin/operators/:id/notifications	preserve	-	-
+POST	/v1/admin/rebuild-projections	preserve	-	-
+POST	/v1/admin/restore	preserve	-	-
+POST	/v1/admin/rotate-token	preserve	-	-
+POST	/v1/admin/rotate-waitpoint-hmac	preserve	-	-
+POST	/v1/admin/snapshot	preserve	-	-
+POST	/v1/admin/tenants	preserve	-	-
+POST	/v1/admin/tenants/:id/compact-event-log	preserve	-	-
+POST	/v1/admin/tenants/:id/restore	preserve	-	-
+POST	/v1/admin/tenants/:id/snapshot	preserve	-	-
+POST	/v1/admin/tenants/:tenant_id/apply-retention	preserve	-	-
+POST	/v1/admin/tenants/:tenant_id/credentials	preserve	-	-
+POST	/v1/admin/tenants/:tenant_id/credentials/rotate-key	preserve	-	-
+POST	/v1/admin/tenants/:tenant_id/operator-profiles	preserve	-	-
+POST	/v1/admin/tenants/:tenant_id/quota	preserve	-	-
+POST	/v1/admin/tenants/:tenant_id/retention-policy	preserve	-	-
+POST	/v1/admin/tenants/:tenant_id/workspaces	preserve	-	-
+POST	/v1/admin/workspaces/:id/shares	preserve	-	-
+POST	/v1/admin/workspaces/:workspace_id/members	preserve	-	-
+POST	/v1/admin/workspaces/:workspace_id/projects	preserve	-	-
+POST	/v1/agent-templates/:id/instantiate	preserve	-	-
+POST	/v1/approval-policies	preserve	-	-
+POST	/v1/approvals	preserve	-	-
+POST	/v1/approvals/:id/approve	preserve	path param: id	{ ok }
+POST	/v1/approvals/:id/delegate	preserve	-	-
+POST	/v1/approvals/:id/deny	preserve	path param: id	{ ok }
+POST	/v1/approvals/:id/reject	preserve	-	-
+POST	/v1/approvals/:id/resolve	preserve	-	-
+POST	/v1/assistant/message	preserve	body: { message, mode?, sessionId? }	{ taskId }
+POST	/v1/assistant/voice	transitional	multipart: audio, mode?, sessionId?	{ taskId, transcript }
+POST	/v1/auth/tokens	preserve	-	-
+POST	/v1/bundles/apply	preserve	-	-
+POST	/v1/bundles/export-filtered	preserve	-	-
+POST	/v1/bundles/import	preserve	-	-
+POST	/v1/bundles/plan	preserve	-	-
+POST	/v1/bundles/validate	preserve	-	-
+POST	/v1/channels	preserve	-	-
+POST	/v1/channels/:id/consume	preserve	-	-
+POST	/v1/channels/:id/send	preserve	-	-
+POST	/v1/chat/stream	preserve	-	-
+POST	/v1/checkpoints/:id/restore	preserve	-	-
 POST	/v1/decisions/:id/invalidate	preserve	body: { reason }	invalidate one cached decision
 POST	/v1/decisions/evaluate	preserve	body: { kind, principal?, subject?, tenant_id?, workspace_id?, project_id?, correlation_id? }	{ decision_id, outcome, source, cached, cache_hit, original_decision_id } via RFC 019 pipeline
 POST	/v1/decisions/invalidate	preserve	body: { scope, kind }	bulk invalidation
 POST	/v1/decisions/invalidate-by-rule	preserve	body: { rule_id }	selective invalidation via rule
+POST	/v1/evals/baselines	preserve	-	-
+POST	/v1/evals/datasets	preserve	-	-
+POST	/v1/evals/datasets/:id/entries	preserve	-	-
+POST	/v1/evals/rubrics	preserve	-	-
+POST	/v1/evals/runs	preserve	-	-
+POST	/v1/evals/runs/:id/compare-baseline	preserve	-	-
+POST	/v1/evals/runs/:id/complete	preserve	-	-
+POST	/v1/evals/runs/:id/score	preserve	-	-
+POST	/v1/evals/runs/:id/score-rubric	preserve	-	-
+POST	/v1/evals/runs/:id/start	preserve	-	-
+POST	/v1/events/append	preserve	-	-
+POST	/v1/feed/:id/read	preserve	path param: id	{ ok }
+POST	/v1/feed/read-all	preserve	-	{ changed }
+POST	/v1/import/apply	preserve	body: import payload	{ report }
+POST	/v1/import/preview	preserve	body: import payload	{ plan, conflicts[] }
+POST	/v1/import/validate	preserve	body: import payload	{ valid, errors[] }
+POST	/v1/ingest/jobs	preserve	-	-
+POST	/v1/ingest/jobs/:id/complete	preserve	-	-
+POST	/v1/ingest/jobs/:id/fail	preserve	-	-
+POST	/v1/integrations	preserve	-	-
+POST	/v1/mailbox	preserve	-	-
+POST	/v1/memories	preserve	body: { content, category }	create memory response object
+POST	/v1/memories/:id/accept	preserve	path param: id	{ ok }
+POST	/v1/memories/:id/reject	preserve	path param: id	{ ok }
+POST	/v1/memory/deep-search	preserve	-	-
+POST	/v1/memory/embed	preserve	-	-
+POST	/v1/memory/feedback	preserve	-	-
+POST	/v1/memory/ingest	preserve	-	-
+POST	/v1/notifications/:id/read	preserve	-	-
+POST	/v1/notifications/read-all	preserve	-	-
+POST	/v1/onboarding/template	preserve	-	-
+POST	/v1/plugins	preserve	-	-
+POST	/v1/plugins/:id/credentials	preserve	-	-
+POST	/v1/plugins/:id/eval-score	preserve	-	-
+POST	/v1/plugins/:id/install	preserve	-	-
+POST	/v1/plugins/:id/verify	preserve	-	-
+POST	/v1/policies	preserve	-	-
+POST	/v1/policies/evaluate	preserve	-	-
+POST	/v1/poll/run	preserve	-	{ ok }
+POST	/v1/projects/:proj/plugins/:id	preserve	-	-
+POST	/v1/projects/:project/repos	preserve	-	-
+POST	/v1/projects/:project/run-templates	preserve	-	-
+POST	/v1/projects/:project/triggers	preserve	-	-
+POST	/v1/projects/:project/triggers/:trigger_id/disable	preserve	-	-
+POST	/v1/projects/:project/triggers/:trigger_id/enable	preserve	-	-
+POST	/v1/projects/:project/triggers/:trigger_id/resume	preserve	-	-
+POST	/v1/prompts/assets	preserve	-	-
+POST	/v1/prompts/assets/:id/versions	preserve	-	-
+POST	/v1/prompts/assets/:id/versions/:version_id/render	preserve	-	-
+POST	/v1/prompts/releases	preserve	-	-
+POST	/v1/prompts/releases/:id/activate	preserve	-	-
+POST	/v1/prompts/releases/:id/request-approval	preserve	-	-
+POST	/v1/prompts/releases/:id/rollback	preserve	-	-
+POST	/v1/prompts/releases/:id/rollout	preserve	-	-
+POST	/v1/prompts/releases/:id/transition	preserve	-	-
+POST	/v1/prompts/releases/compare	preserve	-	-
+POST	/v1/providers/:id/health-check	preserve	-	-
+POST	/v1/providers/:id/recover	preserve	-	-
+POST	/v1/providers/bindings	preserve	-	-
+POST	/v1/providers/budget	preserve	-	-
+POST	/v1/providers/connections	preserve	-	-
+POST	/v1/providers/connections/:id/health-schedule	preserve	-	-
+POST	/v1/providers/connections/:id/models	preserve	-	-
+POST	/v1/providers/ollama/delete	preserve	-	-
+POST	/v1/providers/ollama/generate	preserve	-	-
+POST	/v1/providers/ollama/pull	preserve	-	-
+POST	/v1/providers/ollama/stream	preserve	-	-
+POST	/v1/providers/policies	preserve	-	-
+POST	/v1/providers/pools	preserve	-	-
+POST	/v1/providers/pools/:id/connections	preserve	-	-
+POST	/v1/providers/run-health-checks	preserve	-	-
+POST	/v1/runs	preserve	-	-
 POST	/v1/runs/:id/approve	preserve	body: { reviewer_comments? }	approve plan run
+POST	/v1/runs/:id/cancel	preserve	-	-
+POST	/v1/runs/:id/checkpoint	preserve	-	-
+POST	/v1/runs/:id/checkpoint-strategy	preserve	-	-
+POST	/v1/runs/:id/claim	preserve	-	-
+POST	/v1/runs/:id/cost-alert	preserve	-	-
+POST	/v1/runs/:id/diagnose	preserve	-	-
+POST	/v1/runs/:id/intervene	preserve	-	-
+POST	/v1/runs/:id/orchestrate	preserve	-	-
+POST	/v1/runs/:id/pause	preserve	-	-
+POST	/v1/runs/:id/recover	preserve	-	-
 POST	/v1/runs/:id/reject	preserve	body: { reason }	reject plan run
+POST	/v1/runs/:id/replay-to-checkpoint	preserve	-	-
+POST	/v1/runs/:id/resume	preserve	-	-
 POST	/v1/runs/:id/revise	preserve	body: { reviewer_comments }	create revision plan run
-GET	/v1/sqeq/events	preserve	query: sqeq_session_id	SSE event stream (RFC 021)
+POST	/v1/runs/:id/sla	preserve	-	-
+POST	/v1/runs/:id/spawn	preserve	-	-
+POST	/v1/runs/:id/tasks	preserve	-	-
+POST	/v1/runs/batch	preserve	-	-
+POST	/v1/runs/process-scheduled-resumes	preserve	-	-
+POST	/v1/sessions	preserve	-	-
+POST	/v1/sessions/import	preserve	-	-
+POST	/v1/signals	preserve	-	-
+POST	/v1/signals/subscriptions	preserve	-	-
+POST	/v1/sources	preserve	-	-
+POST	/v1/sources/:id/refresh-schedule	preserve	-	-
+POST	/v1/sources/process-refresh	preserve	-	-
 POST	/v1/sqeq/initialize	preserve	body: { protocol_versions, scope, subscriptions }	SQ/EQ session init
 POST	/v1/sqeq/submit	preserve	body: { method, correlation_id, params }	SQ/EQ command submission
-POST	/v1/a2a/tasks	preserve	body: A2A task shape	A2A task submission
+POST	/v1/tasks	preserve	-	-
+POST	/v1/tasks/:id/cancel	preserve	path param: id	{ ok }
+POST	/v1/tasks/:id/claim	preserve	-	-
+POST	/v1/tasks/:id/complete	preserve	-	-
+POST	/v1/tasks/:id/dependencies	preserve	-	-
+POST	/v1/tasks/:id/fail	preserve	-	-
+POST	/v1/tasks/:id/heartbeat	preserve	-	-
+POST	/v1/tasks/:id/priority	preserve	-	-
+POST	/v1/tasks/:id/release-lease	preserve	-	-
+POST	/v1/tasks/:id/start	preserve	-	-
+POST	/v1/tasks/batch/cancel	preserve	-	-
+POST	/v1/tasks/expire-leases	preserve	-	-
+POST	/v1/templates/:id/apply	preserve	-	-
+POST	/v1/test/webhook	preserve	-	-
+POST	/v1/tool-invocations	preserve	-	-
+POST	/v1/tool-invocations/:id/cancel	preserve	-	-
+POST	/v1/tool-invocations/:id/complete	preserve	-	-
+POST	/v1/webhooks/:integration_id	preserve	-	-
+POST	/v1/webhooks/github/queue/:issue/retry	preserve	-	-
+POST	/v1/webhooks/github/queue/:issue/skip	preserve	-	-
+POST	/v1/webhooks/github/queue/pause	preserve	-	-
+POST	/v1/webhooks/github/queue/resume	preserve	-	-
+POST	/v1/webhooks/github/scan	preserve	-	-
+POST	/v1/webhooks/github/webhook	preserve	-	-
+POST	/v1/workers/:id/claim	preserve	-	-
+POST	/v1/workers/:id/heartbeat	preserve	-	-
+POST	/v1/workers/:id/reactivate	preserve	-	-
+POST	/v1/workers/:id/report	preserve	-	-
+POST	/v1/workers/:id/suspend	preserve	-	-
+POST	/v1/workers/register	preserve	-	-
+PUT	/v1/admin/models/:id	preserve	-	-
+PUT	/v1/config/:key	preserve	path param: key, body: value	{ ok }
+PUT	/v1/integrations/:integration_id/overrides	preserve	-	-
+PUT	/v1/providers/connections/:id	preserve	-	-
+PUT	/v1/providers/connections/:id/retry-policy	preserve	-	-
+PUT	/v1/settings/defaults/:scope/:scope_id/:key	preserve	-	-
+PUT	/v1/soul	transitional	body: { content }	{ ok, sha }
+PUT	/v1/sources/:id	preserve	-	-
+PUT	/v1/webhooks/github/actions	preserve	-	-
+PUT	/v1/webhooks/github/queue/concurrency	preserve	-	-
