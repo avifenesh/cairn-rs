@@ -1,0 +1,53 @@
+{
+  "choices": [
+    {
+      "finish_reason": "length",
+      "index": 0,
+      "logprobs": null,
+      "message": {
+        "content": null,
+        "reasoning": "Okay, let's see. The problem is about a farmer who has chickens and cows. There are 30 heads and 74 legs.",
+        "reasoning_details": [
+          {
+            "format": "unknown",
+            "index": 0,
+            "text": "Okay, let's see. The problem is about a farmer who has chickens and cows. There are 30 heads and 74 legs.",
+            "type": "reasoning.text"
+          }
+        ],
+        "refusal": null,
+        "role": "assistant"
+      },
+      "native_finish_reason": "length"
+    }
+  ],
+  "created": 1776837103,
+  "id": "gen-1776837103-zNCZ656Pms5f5iKzAOn3",
+  "model": "nvidia/nemotron-nano-9b-v2:free",
+  "object": "chat.completion",
+  "provider": "Nvidia",
+  "system_fingerprint": null,
+  "usage": {
+    "completion_tokens": 30,
+    "completion_tokens_details": {
+      "audio_tokens": 0,
+      "image_tokens": 0,
+      "reasoning_tokens": 27
+    },
+    "cost": 0,
+    "cost_details": {
+      "upstream_inference_completions_cost": 0,
+      "upstream_inference_cost": 0,
+      "upstream_inference_prompt_cost": 0
+    },
+    "is_byok": false,
+    "prompt_tokens": 43,
+    "prompt_tokens_details": {
+      "audio_tokens": 0,
+      "cache_write_tokens": 0,
+      "cached_tokens": 0,
+      "video_tokens": 0
+    },
+    "total_tokens": 73
+  }
+}

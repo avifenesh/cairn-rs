@@ -8,6 +8,7 @@ This directory holds three classes of tests:
 | `builder_test.rs`            | Unit             | No       | Validates `ProviderBuilder` → `ProviderConfig` resolution.           |
 | `bridge_test.rs`             | Unit             | No       | Validates the chat/completion bridge adapters.                       |
 | `contract_openrouter.rs`     | Real-provider    | Opt-in   | Asserts OpenRouter's response shape still matches what cairn parses. |
+| `contract_openrouter_reasoning.rs` | Real-provider | Opt-in | Pins reasoning-model truncated shape (`content: null`, `finish_reason: "length"`). |
 | `fixtures/`                  | Test data        | —        | Checked-in response bodies captured from real providers.             |
 
 ## Contract tests — what and why
