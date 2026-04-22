@@ -12,7 +12,7 @@ use serde_json::{json, Value};
 use crate::adapter::HarnessTool;
 use crate::error::map_harness;
 use crate::sensitive::default_sensitive_patterns;
-use crate::tools::write::record_read_in_global_ledger;
+use crate::tools::write::record_read_in_ledger;
 
 pub struct HarnessRead;
 
@@ -39,7 +39,8 @@ impl HarnessTool for HarnessRead {
         })
     }
     fn execution_class() -> ExecutionClass {
-        ExecutionClass::SupervisedProcess
+        // Match the removed `file_read` tool — reads run in sandboxed isolation.
+        ExecutionClass::SandboxedProcess
     }
     fn permission_level() -> PermissionLevel {
         PermissionLevel::ReadOnly
@@ -73,13 +74,20 @@ impl HarnessTool for HarnessRead {
         read(args, session).await
     }
 
-    fn result_to_tool_result(result: Self::Result) -> Result<ToolResult, ToolError> {
+    fn result_to_tool_result(
+        result: Self::Result,
+        ctx: &ToolContext,
+        project: &ProjectKey,
+    ) -> Result<ToolResult, ToolError> {
         match result {
             ReadResult::Text(t) => {
-                // Populate the write-tool ledger so a subsequent edit / multi_edit
-                // passes the NOT_READ_THIS_SESSION gate. harness-read doesn't
-                // touch the write ledger, so the adapter bridges them.
-                record_read_in_global_ledger(
+                // Populate the session-scoped write-tool ledger so a
+                // subsequent edit / multi_edit passes NOT_READ_THIS_SESSION.
+                // harness-read doesn't touch the write ledger; the adapter
+                // bridges them within a single session boundary only.
+                record_read_in_ledger(
+                    ctx,
+                    project,
                     &t.meta.path,
                     &t.meta.sha256,
                     t.meta.mtime_ms,

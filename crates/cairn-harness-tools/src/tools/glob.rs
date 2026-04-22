@@ -73,7 +73,11 @@ impl HarnessTool for HarnessGlob {
         glob(args, session).await
     }
 
-    fn result_to_tool_result(result: Self::Result) -> Result<ToolResult, ToolError> {
+    fn result_to_tool_result(
+        result: Self::Result,
+        _ctx: &ToolContext,
+        _project: &ProjectKey,
+    ) -> Result<ToolResult, ToolError> {
         match result {
             GlobResult::Paths(p) => Ok(ToolResult::ok(json!({
                 "kind": "paths",

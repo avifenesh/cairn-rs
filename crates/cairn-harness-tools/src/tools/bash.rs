@@ -17,6 +17,22 @@ use crate::adapter::HarnessTool;
 use crate::error::map_harness;
 use crate::sensitive::default_sensitive_patterns;
 
+/// Accept cairn-legacy `working_dir` parameter as an alias for harness's
+/// `cwd`. Drops `working_dir` from the payload before handing off to
+/// `harness_bash::bash`, which uses `serde(deny_unknown_fields)`.
+fn normalize_bash_args(mut args: Value) -> Value {
+    if let Some(obj) = args.as_object_mut() {
+        if !obj.contains_key("cwd") {
+            if let Some(wd) = obj.remove("working_dir") {
+                obj.insert("cwd".to_owned(), wd);
+            }
+        } else {
+            obj.remove("working_dir");
+        }
+    }
+    args
+}
+
 fn build_bash_session(ctx: &ToolContext, hook: PermissionHook) -> BashSessionConfig {
     let cwd = ctx.working_dir.to_string_lossy().into_owned();
     let inner = PermissionPolicy {
@@ -49,13 +65,14 @@ impl HarnessTool for HarnessBash {
             "type": "object",
             "required": ["command"],
             "properties": {
-                "command":    { "type": "string", "description": "Shell command to execute." },
-                "cwd":        { "type": "string", "description": "Working directory override." },
-                "timeout_ms": { "type": "integer", "description": "Inactivity timeout in ms." },
-                "description":{ "type": "string", "description": "Human-readable job label." },
-                "background": { "type": "boolean", "description": "Run as a background job." },
-                "env":        { "type": "object", "description": "Extra env vars.",
-                                "additionalProperties": { "type": "string" } }
+                "command":     { "type": "string", "description": "Shell command to execute." },
+                "cwd":         { "type": "string", "description": "Working directory override (alias: working_dir)." },
+                "working_dir": { "type": "string", "description": "Alias for `cwd` — cairn-legacy parameter name." },
+                "timeout_ms":  { "type": "integer", "description": "Inactivity timeout in ms." },
+                "description": { "type": "string", "description": "Human-readable job label." },
+                "background":  { "type": "boolean", "description": "Run as a background job." },
+                "env":         { "type": "object", "description": "Extra env vars.",
+                                 "additionalProperties": { "type": "string" } }
             }
         })
     }
@@ -84,10 +101,14 @@ impl HarnessTool for HarnessBash {
     }
 
     async fn call(args: Value, session: &Self::Session) -> Self::Result {
-        bash(args, session).await
+        bash(normalize_bash_args(args), session).await
     }
 
-    fn result_to_tool_result(result: Self::Result) -> Result<ToolResult, ToolError> {
+    fn result_to_tool_result(
+        result: Self::Result,
+        _ctx: &ToolContext,
+        _project: &ProjectKey,
+    ) -> Result<ToolResult, ToolError> {
         match result {
             BashResult::Ok(ok) => {
                 let truncated = ok.byte_cap;
@@ -187,7 +208,11 @@ impl HarnessTool for HarnessBashOutput {
         bash_output(args, session).await
     }
 
-    fn result_to_tool_result(result: Self::Result) -> Result<ToolResult, ToolError> {
+    fn result_to_tool_result(
+        result: Self::Result,
+        _ctx: &ToolContext,
+        _project: &ProjectKey,
+    ) -> Result<ToolResult, ToolError> {
         match result {
             BashOutputResult::Output {
                 output,
@@ -264,7 +289,11 @@ impl HarnessTool for HarnessBashKill {
         bash_kill(args, session).await
     }
 
-    fn result_to_tool_result(result: Self::Result) -> Result<ToolResult, ToolError> {
+    fn result_to_tool_result(
+        result: Self::Result,
+        _ctx: &ToolContext,
+        _project: &ProjectKey,
+    ) -> Result<ToolResult, ToolError> {
         match result {
             BashKillResult::Killed {
                 output,

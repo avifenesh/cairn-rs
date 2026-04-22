@@ -82,7 +82,11 @@ impl HarnessTool for HarnessGrep {
         grep(args, session).await
     }
 
-    fn result_to_tool_result(result: Self::Result) -> Result<ToolResult, ToolError> {
+    fn result_to_tool_result(
+        result: Self::Result,
+        _ctx: &ToolContext,
+        _project: &ProjectKey,
+    ) -> Result<ToolResult, ToolError> {
         match result {
             GrepResult::FilesWithMatches(r) => Ok(ToolResult::ok(json!({
                 "kind": "files_with_matches",

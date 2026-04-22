@@ -50,16 +50,18 @@ impl HarnessTool for HarnessWebFetch {
         })
     }
     fn execution_class() -> ExecutionClass {
-        ExecutionClass::Sensitive
+        // Match the removed `web_fetch` tool — non-sensitive read-only fetch.
+        ExecutionClass::SupervisedProcess
     }
     fn permission_level() -> PermissionLevel {
-        PermissionLevel::Execute
+        PermissionLevel::ReadOnly
     }
     fn category() -> ToolCategory {
         ToolCategory::Web
     }
     fn tool_effect() -> ToolEffect {
-        ToolEffect::External
+        // Web reads are observational — must be visible in Plan mode.
+        ToolEffect::Observational
     }
     fn retry_safety() -> RetrySafety {
         RetrySafety::IdempotentSafe
@@ -84,7 +86,11 @@ impl HarnessTool for HarnessWebFetch {
         webfetch(args, session).await
     }
 
-    fn result_to_tool_result(result: Self::Result) -> Result<ToolResult, ToolError> {
+    fn result_to_tool_result(
+        result: Self::Result,
+        _ctx: &ToolContext,
+        _project: &ProjectKey,
+    ) -> Result<ToolResult, ToolError> {
         match result {
             WebFetchResult::Ok(ok) => {
                 let truncated = ok.byte_cap;

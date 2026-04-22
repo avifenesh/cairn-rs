@@ -77,8 +77,15 @@ pub trait HarnessTool: Send + Sync + 'static {
     /// Invoke the upstream async entrypoint.
     async fn call(args: Value, session: &Self::Session) -> Self::Result;
 
-    /// Convert the upstream result union into cairn's `ToolResult` / `ToolError`.
-    fn result_to_tool_result(result: Self::Result) -> Result<ToolResult, ToolError>;
+    /// Convert the upstream result union into cairn's `ToolResult` /
+    /// `ToolError`. `ctx` + `project` are passed through so adapters can
+    /// record side-effects scoped to the current session (e.g. the read
+    /// adapter recording into the write-tool ledger).
+    fn result_to_tool_result(
+        result: Self::Result,
+        ctx: &ToolContext,
+        project: &ProjectKey,
+    ) -> Result<ToolResult, ToolError>;
 }
 
 /// Wrapper implementing `ToolHandler` for any `HarnessTool`.
@@ -157,6 +164,6 @@ impl<H: HarnessTool> ToolHandler for HarnessBuiltin<H> {
         let hook = crate::hook::build_cairn_hook();
         let session = H::build_session(ctx, project, hook);
         let result = H::call(args, &session).await;
-        H::result_to_tool_result(result)
+        H::result_to_tool_result(result, ctx, project)
     }
 }

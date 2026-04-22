@@ -48,6 +48,76 @@ async fn bash_echo_succeeds() {
 }
 
 #[tokio::test]
+async fn bash_accepts_cairn_working_dir_alias() {
+    let dir = TempDir::new().unwrap();
+    let sub = dir.path().join("sub");
+    std::fs::create_dir(&sub).unwrap();
+
+    let tool = HarnessBuiltin::<HarnessBash>::new();
+    // Send the cairn-legacy `working_dir` arg; adapter must remap to `cwd`.
+    let res = tool
+        .execute_with_context(
+            &project(),
+            json!({ "command": "pwd", "working_dir": sub.to_string_lossy() }),
+            &ctx_for(&dir),
+        )
+        .await
+        .expect("bash with working_dir alias should succeed");
+    let stdout = res.output["stdout"].as_str().unwrap_or("");
+    assert!(
+        stdout.contains("/sub"),
+        "expected pwd to report the alias-mapped cwd; got {stdout:?}"
+    );
+}
+
+#[tokio::test]
+async fn ledger_is_scoped_per_session() {
+    // Cross-session read must NOT satisfy NOT_READ_THIS_SESSION for another session.
+    use cairn_harness_tools::HarnessEdit;
+
+    let dir = TempDir::new().unwrap();
+    let path = dir.path().join("target.txt");
+    std::fs::write(&path, "original\n").unwrap();
+
+    let mut ctx_a = ToolContext::default();
+    ctx_a.working_dir = dir.path().to_path_buf();
+    ctx_a.session_id = Some("session-A".to_owned());
+
+    let mut ctx_b = ToolContext::default();
+    ctx_b.working_dir = dir.path().to_path_buf();
+    ctx_b.session_id = Some("session-B".to_owned());
+
+    // Read under session A.
+    let _ = HarnessBuiltin::<HarnessRead>::new()
+        .execute_with_context(
+            &project(),
+            json!({ "path": path.to_string_lossy() }),
+            &ctx_a,
+        )
+        .await
+        .expect("read in session A");
+
+    // Edit from session B must fail with NOT_READ_THIS_SESSION.
+    let err = HarnessBuiltin::<HarnessEdit>::new()
+        .execute_with_context(
+            &project(),
+            json!({
+                "path": path.to_string_lossy(),
+                "old_string": "original",
+                "new_string": "NEW",
+            }),
+            &ctx_b,
+        )
+        .await
+        .expect_err("edit from session B must be rejected");
+    let msg = format!("{err:?}");
+    assert!(
+        msg.contains("NotReadThisSession") || msg.contains("NOT_READ_THIS_SESSION"),
+        "expected NOT_READ_THIS_SESSION, got {msg}"
+    );
+}
+
+#[tokio::test]
 async fn read_returns_text_for_existing_file() {
     let dir = TempDir::new().unwrap();
     let file = dir.path().join("greeting.txt");
