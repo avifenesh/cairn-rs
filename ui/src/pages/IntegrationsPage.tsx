@@ -361,7 +361,10 @@ export function IntegrationsPage() {
           <div className="flex items-center gap-2">
             {isConfigured && (
               <>
-                {/* Concurrency selector */}
+                {/* Concurrency selector. Option set unions the preset stops
+                    with the current server value so a server-clamped value
+                    outside the presets (server accepts 1..=20) still renders
+                    as the selected option. */}
                 <div className="flex items-center gap-1.5">
                   <span className={clsx("text-[10px]", text.muted)}>Parallel:</span>
                   <select
@@ -383,9 +386,12 @@ export function IntegrationsPage() {
                       "focus:outline-none focus:ring-1 focus:ring-indigo-500/40"
                     )}
                   >
-                    {[1, 2, 3, 5, 10].map((n) => (
-                      <option key={n} value={n}>{n}</option>
-                    ))}
+                    {Array.from(new Set([1, 2, 3, 5, 10, maxConcurrent]))
+                      .filter((n) => n >= 1 && n <= 20)
+                      .sort((a, b) => a - b)
+                      .map((n) => (
+                        <option key={n} value={n}>{n}</option>
+                      ))}
                   </select>
                 </div>
 
