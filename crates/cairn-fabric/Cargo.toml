@@ -14,19 +14,28 @@ default = []
 test-harness = ["dep:testcontainers", "dep:url"]
 
 [dependencies]
-# FlowFabric crates — consumed from crates.io. 0.2 adds waitpoint HMAC
-# rotation (`ff_rotate_waitpoint_hmac_secret` FCALL + grace window) that
-# cairn-fabric surfaces via the rotate_waitpoint_hmac admin endpoint.
-# 0.2 is behavior-compatible for claim/submit/complete paths; the only
-# semver break is `ScriptError` gaining `#[non_exhaustive]`, which cairn
-# never matches exhaustively. Edition bumped to 2024 in FF; cairn
-# builds under edition 2021 unaffected.
-ff-core = "0.2"
-ff-sdk = "0.2"
-ff-engine = "0.2"
-ff-scheduler = "0.2"
-ff-script = "0.2"
-ferriskey = "0.2"
+# FlowFabric crates — consumed from crates.io at 0.3.2 family.
+# RFC-012 Stage 1a: EngineBackend trait + EngineError crate-move from
+# ff-sdk to ff-core. ScannerFilter { namespace, instance_tag } added for
+# cross-instance isolation (FF#122). `ScriptError` is `#[non_exhaustive]`;
+# cairn never matches exhaustively. Edition bumped to 2024 in FF; cairn
+# builds under edition 2021 unaffected. Bumping the minor version across
+# all FF crates requires lockstep updates here — they share internal API
+# surface.
+ff-core = "0.3"
+ff-sdk = "0.3"
+ff-engine = "0.3"
+ff-scheduler = "0.3"
+ff-script = "0.3"
+ff-backend-valkey = "0.3"
+# Needed for `Engine::start_with_completions` which takes an
+# `Arc<ff_observability::Metrics>`. ff-engine does NOT re-export the
+# type; pulled in at the same version to stay lock-step with FF's
+# internal minor-version churn.
+ff-observability = "0.3"
+# ferriskey 0.3 ships alongside FF 0.3 family. Must share a single
+# version with FF crates to avoid duplicate-crate type mismatches.
+ferriskey = "0.3"
 
 # Cairn crates
 cairn-domain = { path = "../cairn-domain" }
@@ -60,3 +69,8 @@ uuid = { version = "1", features = ["v4"] }
 # the real blanket impl (not a mock). Dev-only — library code in
 # cairn-fabric does not depend on cairn-orchestrator.
 cairn-orchestrator = { path = "../cairn-orchestrator" }
+# Needed by `test_scanner_filter_upstream` to `.next()` on FF's
+# `CompletionStream`. Dev-only — production cairn-fabric consumes the
+# stream via `ff_engine::Engine::start_with_completions`, which does
+# its own hand-rolled `poll_next` loop and doesn't pull `futures` in.
+futures = "0.3"

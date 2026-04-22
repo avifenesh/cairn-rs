@@ -523,16 +523,37 @@ impl Worker {
     ///   this as "don't advance the cursor" so we retry on the next
     ///   poll and don't lose the event.
     ///
-    /// **Cross-instance isolation.** Before classifying, we require
-    /// the exec's `cairn.instance_id` tag to match `self.own_instance_id`.
-    /// Two cairn-app instances sharing a Valkey otherwise see each
-    /// other's state-change frames in their global event log: the
-    /// `lease_expiry` ZSET is partition-global (FF-owned, not cairn-
-    /// scoped), so a poll on partition `N` enumerates every cairn
-    /// instance's leased executions on that partition. The tag filter
-    /// turns this into a subscriber-side partition of the frame stream
-    /// by instance ownership — foreign frames are dropped with cursor
-    /// advance, so we don't replay them on every poll.
+    /// **Cross-instance isolation (subscriber layer).** Before
+    /// classifying, we require the exec's `cairn.instance_id` tag to
+    /// match `self.own_instance_id`. Two cairn-app instances sharing a
+    /// Valkey otherwise see each other's state-change frames in their
+    /// global event log: the `lease_expiry` ZSET is partition-global
+    /// (FF-owned, not cairn-scoped), so a poll on partition `N`
+    /// enumerates every cairn instance's leased executions on that
+    /// partition. The tag filter turns this into a subscriber-side
+    /// partition of the frame stream by instance ownership — foreign
+    /// frames are dropped with cursor advance, so we don't replay them
+    /// on every poll.
+    ///
+    /// **Why this layer is still needed alongside FF's upstream
+    /// `ScannerFilter`** (FF PR #127 / issue #122). The upstream
+    /// filter narrows FF's own engine-side scanners and the
+    /// `subscribe_completions_filtered` DAG dispatch stream: it
+    /// prevents *this* cairn instance's FF scanners from writing
+    /// lease_expiry transitions for foreign executions and prevents
+    /// this instance's completion dispatch loop from firing on foreign
+    /// completions. It does NOT cover this path. `LeaseHistorySubscriber`
+    /// XREADs the per-execution `:lease:history` stream discovered via
+    /// the partition-global `lease_expiry` ZSET — when *instance B*'s
+    /// FF scanner writes an `expired` entry into *B*'s exec stream,
+    /// instance A's subscriber still sees that stream key in the shared
+    /// ZSET and would XREAD it. The upstream filter cannot drop those
+    /// frames because they were written by a separate FF scanner
+    /// process; they're legitimate entries on a stream cairn is
+    /// polling by-partition. This subscriber-side tag gate is the
+    /// mechanism that keeps A's event log blind to B's lease
+    /// transitions on that shared stream. Do NOT remove it when the
+    /// upstream filter lands — it covers a different boundary.
     ///
     /// Frames without the tag are treated as foreign too. Pre-upgrade
     /// executions that predate the filter lack the tag; operators doing

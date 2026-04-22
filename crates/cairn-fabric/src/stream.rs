@@ -1,7 +1,7 @@
 use ff_core::contracts::StreamFrame;
 use ff_core::partition::PartitionConfig;
 use ff_core::types::{AttemptIndex, ExecutionId};
-use ff_sdk::task::{read_stream, AppendFrameOutcome, ClaimedTask};
+use ff_sdk::task::{read_stream, AppendFrameOutcome, ClaimedTask, StreamCursor};
 
 use crate::error::FabricError;
 use crate::helpers::now_ms;
@@ -41,13 +41,17 @@ pub async fn restore_frames(
     attempt_index: AttemptIndex,
     count_limit: u64,
 ) -> Result<Vec<StreamFrame>, FabricError> {
+    // FF 0.3.1 replaced the `&str` XRANGE markers with a typed
+    // `StreamCursor` enum at the adapter edge (ff-core#contracts).
+    // `Start` / `End` are the `-` / `+` equivalents — full-range read
+    // behavior unchanged.
     let result = read_stream(
         client,
         partition_config,
         execution_id,
         attempt_index,
-        "-",
-        "+",
+        StreamCursor::Start,
+        StreamCursor::End,
         count_limit,
     )
     .await
