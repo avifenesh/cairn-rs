@@ -224,16 +224,14 @@ impl LiveHarness {
         );
         self.child = Some(child);
 
-        // Spin on connect so callers can immediately issue requests.
+        // Spin on `/health/ready` (not `/health`) so we wait for the full
+        // init graph — event-log replay, FF engine startup, etc. — rather
+        // than just the HTTP listener.
         if !self
-            .poll_status_until(
-                &format!("{}/health", self.base_url),
-                StatusCode::OK,
-                Duration::from_secs(3),
-            )
+            .poll_readiness_until_ready(Duration::from_secs(3))
             .await
         {
-            panic!("restarted cairn-app did not answer /health within 3s");
+            panic!("restarted cairn-app did not become ready within 3s");
         }
         Ok(())
     }
@@ -281,11 +279,16 @@ impl Drop for LiveHarness {
         // child here prevents the default `Drop` from double-logging.
         drop(self.child.take());
         // Best-effort SQLite temp-file cleanup. Ignore errors — the file
-        // may already be gone or the OS may be holding it.
+        // may already be gone or the OS may be holding it. Use `OsString`
+        // append rather than `path.display()` so non-UTF8 paths (rare on
+        // Linux test runners but possible anywhere) still clean up.
         if let HarnessStorage::Sqlite(path) = &self.storage {
             let _ = std::fs::remove_file(path);
-            let _ = std::fs::remove_file(format!("{}-wal", path.display()));
-            let _ = std::fs::remove_file(format!("{}-shm", path.display()));
+            for suffix in ["-wal", "-shm"] {
+                let mut sidecar = path.as_os_str().to_os_string();
+                sidecar.push(suffix);
+                let _ = std::fs::remove_file(std::path::PathBuf::from(sidecar));
+            }
         }
     }
 }
