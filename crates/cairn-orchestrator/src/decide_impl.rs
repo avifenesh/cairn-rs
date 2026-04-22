@@ -777,13 +777,17 @@ fn is_safe_read_action(proposal: &ActionProposal) -> bool {
                 name.as_str(),
                 "memory_search"
                     | "web_fetch"
+                    | "webfetch"
                     | "http_request"
                     | "get_run"
                     | "get_task"
                     | "search_memory"
                     | "list_runs"
+                    | "glob"
                     | "glob_find"
+                    | "grep"
                     | "grep_search"
+                    | "read"
                     | "read_document"
                     | "file_read"
                     | "graph_query"
@@ -1428,9 +1432,13 @@ mod tests {
         // Build a registry with both Observational and External tools.
         let registry = std::sync::Arc::new(
             cairn_tools::builtins::BuiltinToolRegistry::new()
-                .register(std::sync::Arc::new(cairn_tools::GrepSearchTool)) // Observational
+                .register(std::sync::Arc::new(cairn_harness_tools::HarnessBuiltin::<
+                    cairn_harness_tools::HarnessGrep,
+                >::new())) // Observational
                 .register(std::sync::Arc::new(cairn_tools::CalculateTool)) // Observational
-                .register(std::sync::Arc::new(cairn_tools::BashTool)), // External
+                .register(std::sync::Arc::new(cairn_harness_tools::HarnessBuiltin::<
+                    cairn_harness_tools::HarnessBash,
+                >::new())), // External
         );
 
         let phase = LlmDecidePhase::new(
@@ -1451,7 +1459,7 @@ mod tests {
         // The prompt tool descriptor lines use the format "tool_name(params) — desc".
         // Check for descriptor lines, not arbitrary mentions of tool names in prose.
         assert!(
-            prompt.contains("  - grep_search("),
+            prompt.contains("  - grep("),
             "Observational tool descriptor should be in Plan mode prompt"
         );
         assert!(
@@ -1695,13 +1703,13 @@ mod tests {
             serde_json::json!({
                 "id": "call_2",
                 "type": "function",
-                "function": { "name": "grep_search", "arguments": "{\"query\": \"TODO\"}" }
+                "function": { "name": "grep", "arguments": "{\"query\": \"TODO\"}" }
             }),
         ];
         let proposals = tool_calls_to_proposals(&tool_calls, &[]);
         assert_eq!(proposals.len(), 2);
         assert_eq!(proposals[0].tool_name.as_deref(), Some("file_read"));
-        assert_eq!(proposals[1].tool_name.as_deref(), Some("grep_search"));
+        assert_eq!(proposals[1].tool_name.as_deref(), Some("grep"));
     }
 
     /// End-to-end: model returns native tool_calls → proposals are InvokeTool
@@ -1720,7 +1728,7 @@ mod tests {
             ) -> Result<GenerationResponse, ProviderAdapterError> {
                 // Verify tools were sent
                 assert!(!tools.is_empty(), "tools should be passed to generate");
-                assert_eq!(tools[0]["function"]["name"], "grep_search");
+                assert_eq!(tools[0]["function"]["name"], "grep");
 
                 Ok(GenerationResponse {
                     text: String::new(), // no text — only tool_calls
@@ -1731,7 +1739,7 @@ mod tests {
                         "id": "call_1",
                         "type": "function",
                         "function": {
-                            "name": "grep_search",
+                            "name": "grep",
                             "arguments": "{\"query\": \"architecture\"}"
                         }
                     })],
@@ -1740,15 +1748,16 @@ mod tests {
             }
         }
 
-        let registry =
-            Arc::new(BuiltinToolRegistry::new().register(Arc::new(cairn_tools::GrepSearchTool)));
+        let registry = Arc::new(BuiltinToolRegistry::new().register(Arc::new(
+            cairn_harness_tools::HarnessBuiltin::<cairn_harness_tools::HarnessGrep>::new(),
+        )));
         let phase =
             LlmDecidePhase::new(Arc::new(NativeToolProvider), "test-model").with_tools(registry);
         let out = phase.decide(&ctx(), &empty_gather()).await.unwrap();
 
         assert_eq!(out.proposals.len(), 1);
         assert_eq!(out.proposals[0].action_type, ActionType::InvokeTool);
-        assert_eq!(out.proposals[0].tool_name.as_deref(), Some("grep_search"));
+        assert_eq!(out.proposals[0].tool_name.as_deref(), Some("grep"));
         assert_eq!(
             out.proposals[0].tool_args.as_ref().unwrap()["query"],
             "architecture"
@@ -1765,8 +1774,9 @@ mod tests {
         let mock = Arc::new(MockProvider {
             response: r#"[{"action_type":"complete_run","description":"done","confidence":0.9,"requires_approval":false}]"#.to_owned(),
         });
-        let registry =
-            Arc::new(BuiltinToolRegistry::new().register(Arc::new(cairn_tools::GrepSearchTool)));
+        let registry = Arc::new(BuiltinToolRegistry::new().register(Arc::new(
+            cairn_harness_tools::HarnessBuiltin::<cairn_harness_tools::HarnessGrep>::new(),
+        )));
         let phase = LlmDecidePhase::new(mock, "test-model").with_tools(registry);
         let out = phase.decide(&ctx(), &empty_gather()).await.unwrap();
 

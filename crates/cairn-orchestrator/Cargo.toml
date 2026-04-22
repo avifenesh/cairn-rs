@@ -11,6 +11,7 @@ cairn-fabric   = { path = "../cairn-fabric" }
 cairn-memory   = { path = "../cairn-memory" }
 cairn-graph    = { path = "../cairn-graph" }
 cairn-tools    = { path = "../cairn-tools" }
+cairn-harness-tools = { path = "../cairn-harness-tools" }
 async-trait    = "0.1"
 serde          = { version = "1", features = ["derive"] }
 serde_json     = "1"
