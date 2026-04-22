@@ -15,11 +15,20 @@
 //! focused and lets callers take the narrowest dep they need (e.g. a
 //! view-layer worker only needs `Engine`, not `ControlPlaneBackend`).
 //!
-//! # Phase D PR 1 scope
+//! # Phase D scope
 //!
-//! Budget (5 methods), quota (2 methods), rotation (1 method). Phase D
-//! PR 2 adds run/task/session lifecycle FCALLs to this trait (or,
-//! based on shape, a separate `ExecutionLifecycleBackend`).
+//! - **PR 1**: budget (5), quota (2), rotation (1).
+//! - **PR 2a**: run lifecycle (7) + session create/archive (2) +
+//!   claim (1). All FCALL-shaped; fold onto this trait rather than a new
+//!   `ExecutionLifecycleBackend` — one trait keeps services from
+//!   juggling two handles, and the read/tag split (Engine) vs
+//!   FCALL split (ControlPlaneBackend) is already the load-bearing
+//!   axis.
+//! - **PR 2b** (follow-up): task lifecycle (10+ methods including
+//!   `declare_dependency` retry loop + `check_dependencies` envelope
+//!   walk). Deferred because that service has behaviour — multi-FCALL
+//!   retry, graph-revision conflict recovery — that deserves its own
+//!   scope audit.
 //!
 //! # Error model
 //!
@@ -36,7 +45,10 @@ use ff_core::types::{BudgetId, ExecutionId, QuotaPolicyId};
 use crate::error::FabricError;
 
 use super::control_plane_types::{
-    BudgetSpendOutcome, BudgetStatusSnapshot, QuotaAdmission, RotationOutcome,
+    BudgetSpendOutcome, BudgetStatusSnapshot, CancelFlowInput, CancelRunInput, ClaimGrantOutcome,
+    CompleteRunInput, CreateFlowInput, CreateRunExecutionInput, DeliverApprovalSignalInput,
+    ExecutionCreated, FailExecutionOutcome, FailRunInput, FlowCancelOutcome,
+    IssueGrantAndClaimInput, QuotaAdmission, ResumeRunInput, RotationOutcome, SuspendRunInput,
 };
 
 /// Cairn-side FCALL backend for budget, quota, and rotation
@@ -127,4 +139,80 @@ pub trait ControlPlaneBackend: Send + Sync {
         new_secret_hex: &str,
         grace_ms: u64,
     ) -> RotationOutcome;
+
+    // ── Run lifecycle (Phase D PR 2a) ───────────────────────────────────
+    //
+    // FCALL-driven transitions over an `ExecutionId` that represent a
+    // cairn run's lifetime inside FF. Each method wraps ONE FCALL
+    // (`ff_create_execution`, `ff_complete_execution`, …) with its
+    // KEYS/ARGV layout. Services supply the pre-read `ExecutionLeaseContext`
+    // — they already have it from `engine.describe_execution` — so the
+    // impl never re-HGETALLs `exec_core`.
+    //
+    // Bridge-event emission stays caller-side: the service owns the
+    // cairn-state-layer decision of which `BridgeEvent` to fire and
+    // with what `prev_state`. This trait is FF-state-plane only.
+
+    /// Create a run's FF execution. Idempotent on `execution_id`.
+    async fn create_run_execution(
+        &self,
+        input: CreateRunExecutionInput,
+    ) -> Result<ExecutionCreated, FabricError>;
+
+    /// Mark an execution complete (terminal-success).
+    async fn complete_run_execution(&self, input: CompleteRunInput) -> Result<(), FabricError>;
+
+    /// Fail an execution. Returns the typed outcome — callers MUST
+    /// branch on `RetryScheduled` vs `TerminalFailed` before emitting
+    /// `BridgeEvent::ExecutionFailed`.
+    async fn fail_run_execution(
+        &self,
+        input: FailRunInput,
+    ) -> Result<FailExecutionOutcome, FabricError>;
+
+    /// Cancel an execution (operator-initiated terminal).
+    async fn cancel_run_execution(&self, input: CancelRunInput) -> Result<(), FabricError>;
+
+    /// Suspend an execution. Shared by run-pause and
+    /// enter-waiting-approval; the difference is entirely in the
+    /// `SuspendRunInput` fields the caller fills in (reason_code,
+    /// resume_condition_json, timeout_at).
+    async fn suspend_run_execution(&self, input: SuspendRunInput) -> Result<(), FabricError>;
+
+    /// Resume a suspended execution.
+    async fn resume_run_execution(&self, input: ResumeRunInput) -> Result<(), FabricError>;
+
+    /// Deliver an approval signal (approved / rejected) to a run's
+    /// current waitpoint. Reads the HMAC waitpoint token from FF
+    /// inline; callers never see the token.
+    async fn deliver_approval_signal(
+        &self,
+        input: DeliverApprovalSignalInput,
+    ) -> Result<(), FabricError>;
+
+    // ── Session lifecycle (Phase D PR 2a) ───────────────────────────────
+
+    /// Create a flow. Idempotent via FF's `ok_already_satisfied` reply
+    /// — callers MUST emit their `BridgeEvent::SessionCreated`
+    /// unconditionally (the read-model projection is idempotent on
+    /// `EventId`; skipping on the retry would create a permanent
+    /// projection gap when cairn crashed between FCALL commit and
+    /// bridge emit).
+    async fn create_flow(&self, input: CreateFlowInput) -> Result<(), FabricError>;
+
+    /// Cancel (archive) a flow. Returns `AlreadyTerminal` when FF's
+    /// Lua replies `flow_already_terminal` — idempotent re-archive.
+    async fn cancel_flow(&self, input: CancelFlowInput)
+        -> Result<FlowCancelOutcome, FabricError>;
+
+    // ── Claim (Phase D PR 2a) ───────────────────────────────────────────
+
+    /// Execute the `ff_issue_claim_grant` + `ff_claim_execution` pair.
+    /// Dispatches transparently to `ff_claim_resumed_execution` when
+    /// FF signals `use_claim_resumed_execution` (i.e. claim landed on
+    /// an `attempt_interrupted` execution after a suspension resume).
+    async fn issue_grant_and_claim(
+        &self,
+        input: IssueGrantAndClaimInput,
+    ) -> Result<ClaimGrantOutcome, FabricError>;
 }

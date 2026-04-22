@@ -19,3 +19,13 @@ pub const DEFAULT_LEASE_HISTORY_MAXLEN: &str = "1000";
 pub const DEFAULT_LEASE_HISTORY_GRACE_MS: &str = "5000";
 pub const DEFAULT_SIGNAL_MAXLEN: &str = "1000";
 pub const DEFAULT_MAX_SIGNALS_PER_EXECUTION: &str = "10000";
+
+/// Numeric twins of the two `DEFAULT_SIGNAL_*` constants above.
+/// Typed-input callers (see [`DeliverApprovalSignalInput`]) pass
+/// these directly instead of runtime-parsing the string form —
+/// a string typo would otherwise fall through a `.parse().unwrap_or(…)`
+/// and silently diverge from the intended value.
+///
+/// [`DeliverApprovalSignalInput`]: crate::engine::DeliverApprovalSignalInput
+pub const DEFAULT_SIGNAL_MAXLEN_U64: u64 = 1_000;
+pub const DEFAULT_MAX_SIGNALS_PER_EXECUTION_U64: u64 = 10_000;

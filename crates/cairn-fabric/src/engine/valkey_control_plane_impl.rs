@@ -18,21 +18,37 @@ use async_trait::async_trait;
 use ff_core::contracts::ReportUsageResult;
 use ff_core::keys::{
     budget_policies_index, budget_resets_key, quota_policies_index, usage_dedup_key,
-    BudgetKeyContext, IndexKeys, QuotaKeyContext,
+    BudgetKeyContext, ExecKeyContext, FlowKeyContext, IndexKeys, QuotaKeyContext,
 };
-use ff_core::partition::{budget_partition, quota_partition, Partition, PartitionFamily};
-use ff_core::types::{BudgetId, ExecutionId, QuotaPolicyId, TimestampMs};
+use ff_core::partition::{
+    budget_partition, execution_partition, flow_partition, quota_partition, Partition,
+    PartitionFamily,
+};
+use ff_core::types::{
+    AttemptId, AttemptIndex, BudgetId, ExecutionId, LeaseId, QuotaPolicyId, SignalId, SuspensionId,
+    TimestampMs, WaitpointId,
+};
 use ff_sdk::task::parse_report_usage_result;
 
 use crate::error::FabricError;
 use crate::fcall;
-use crate::helpers::{check_fcall_success, fcall_error_code};
+use crate::helpers::{check_fcall_success, fcall_error_code, is_duplicate_result, parse_fail_outcome, FailOutcome};
 
 use super::control_plane::ControlPlaneBackend;
 use super::control_plane_types::{
-    BudgetSpendOutcome, BudgetStatusSnapshot, QuotaAdmission, RotationFailure, RotationOutcome,
+    BudgetSpendOutcome, BudgetStatusSnapshot, CancelFlowInput, CancelRunInput, ClaimGrantOutcome,
+    CompleteRunInput, CreateFlowInput, CreateRunExecutionInput, DeliverApprovalSignalInput,
+    ExecutionCreated, FailExecutionOutcome, FailRunInput, FlowCancelOutcome,
+    IssueGrantAndClaimInput, QuotaAdmission, ResumeRunInput, RotationFailure, RotationOutcome,
+    SuspendRunInput,
 };
 use super::valkey_impl::ValkeyEngine;
+
+/// FF Lua code returned by `ff_cancel_flow` when the flow is already in
+/// a terminal `public_flow_state` (completed / cancelled). Cairn's
+/// session-archive path treats this as success — the operator-visible
+/// `cairn.archived` tag still needs to land.
+const FLOW_ALREADY_TERMINAL: &str = "flow_already_terminal";
 
 const ROTATION_DETAIL_LUA_REJECTED: &str = "lua_rejected";
 const ROTATION_DETAIL_TRANSPORT_ERROR: &str = "transport_error";
@@ -433,6 +449,581 @@ impl ControlPlaneBackend for ValkeyEngine {
             new_kid: new_kid.to_owned(),
         }
     }
+
+    // ── Run lifecycle (Phase D PR 2a) ────────────────────────────────────
+
+    async fn create_run_execution(
+        &self,
+        input: CreateRunExecutionInput,
+    ) -> Result<ExecutionCreated, FabricError> {
+        let partition = execution_partition(&input.execution_id, &self.runtime().partition_config);
+        let ctx = ExecKeyContext::new(&partition, &input.execution_id);
+        let idx = IndexKeys::new(&partition);
+
+        let tags_json = serde_json::to_string(&input.tags).unwrap_or_else(|_| "{}".to_owned());
+
+        let (keys, args) = fcall::execution::build_create_execution(
+            &ctx,
+            &idx,
+            &input.lane_id,
+            &input.execution_id,
+            &input.namespace,
+            crate::constants::EXECUTION_KIND_RUN,
+            "0",
+            &input.policy_json,
+            &tags_json,
+            partition.index,
+        );
+        let key_refs: Vec<&str> = keys.iter().map(|s| s.as_str()).collect();
+        let arg_refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
+
+        let raw: ferriskey::Value = self
+            .runtime()
+            .fcall(fcall::names::FF_CREATE_EXECUTION, &key_refs, &arg_refs)
+            .await
+            .map_err(|e| FabricError::Internal(format!("ff_create_execution: {e}")))?;
+
+        // A DUPLICATE reply is the idempotent-replay success path and
+        // must NOT error. Every other non-OK envelope (typed FF error
+        // or malformed reply) surfaces through `check_fcall_success`
+        // so callers never see `newly_created: true` on a rejected
+        // create — which would otherwise trigger a spurious
+        // `BridgeEvent::ExecutionCreated` emission.
+        let duplicate = is_duplicate_result(&raw);
+        if !duplicate {
+            check_fcall_success(&raw, fcall::names::FF_CREATE_EXECUTION)?;
+        }
+        Ok(ExecutionCreated {
+            newly_created: !duplicate,
+        })
+    }
+
+    async fn complete_run_execution(&self, input: CompleteRunInput) -> Result<(), FabricError> {
+        let partition = execution_partition(&input.execution_id, &self.runtime().partition_config);
+        let ctx = ExecKeyContext::new(&partition, &input.execution_id);
+        let idx = IndexKeys::new(&partition);
+
+        let (keys, args) = fcall::execution::build_complete_execution(
+            &ctx,
+            &idx,
+            input.lease.attempt_index,
+            &input.lease.worker_instance_id,
+            &input.lease.lane_id,
+            &input.execution_id,
+            &input.lease.lease_id,
+            &input.lease.lease_epoch,
+            &input.lease.attempt_id,
+        );
+        let key_refs: Vec<&str> = keys.iter().map(|s| s.as_str()).collect();
+        let arg_refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
+
+        let raw: ferriskey::Value = self
+            .runtime()
+            .fcall(fcall::names::FF_COMPLETE_EXECUTION, &key_refs, &arg_refs)
+            .await
+            .map_err(|e| FabricError::Internal(format!("ff_complete_execution: {e}")))?;
+        check_fcall_success(&raw, fcall::names::FF_COMPLETE_EXECUTION)?;
+        Ok(())
+    }
+
+    async fn fail_run_execution(
+        &self,
+        input: FailRunInput,
+    ) -> Result<FailExecutionOutcome, FabricError> {
+        let partition = execution_partition(&input.execution_id, &self.runtime().partition_config);
+        let ctx = ExecKeyContext::new(&partition, &input.execution_id);
+        let idx = IndexKeys::new(&partition);
+
+        // Read FF's retry policy GET key (populated during create). Fail
+        // loud on transport errors: silent default here would disable
+        // retries for this execution.
+        let retry_policy_json: String = if input.retry_policy_json.is_empty() {
+            self.runtime()
+                .client
+                .get(&ctx.policy())
+                .await
+                .map_err(|e| FabricError::Valkey(format!("GET retry_policy: {e}")))?
+                .unwrap_or_default()
+        } else {
+            input.retry_policy_json.clone()
+        };
+
+        let (keys, args) = fcall::execution::build_fail_execution(
+            &ctx,
+            &idx,
+            input.lease.attempt_index,
+            &input.lease.worker_instance_id,
+            &input.lease.lane_id,
+            &input.execution_id,
+            &input.lease.lease_id,
+            &input.lease.lease_epoch,
+            &input.lease.attempt_id,
+            &input.reason,
+            &input.category,
+            &retry_policy_json,
+        );
+        let key_refs: Vec<&str> = keys.iter().map(|s| s.as_str()).collect();
+        let arg_refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
+
+        let raw: ferriskey::Value = self
+            .runtime()
+            .fcall(fcall::names::FF_FAIL_EXECUTION, &key_refs, &arg_refs)
+            .await
+            .map_err(|e| FabricError::Internal(format!("ff_fail_execution: {e}")))?;
+        check_fcall_success(&raw, fcall::names::FF_FAIL_EXECUTION)?;
+        Ok(match parse_fail_outcome(&raw) {
+            FailOutcome::RetryScheduled => FailExecutionOutcome::RetryScheduled,
+            FailOutcome::TerminalFailed => FailExecutionOutcome::TerminalFailed,
+        })
+    }
+
+    async fn cancel_run_execution(&self, input: CancelRunInput) -> Result<(), FabricError> {
+        let partition = execution_partition(&input.execution_id, &self.runtime().partition_config);
+        let ctx = ExecKeyContext::new(&partition, &input.execution_id);
+        let idx = IndexKeys::new(&partition);
+
+        let wp_id = input.current_waitpoint.unwrap_or_default();
+
+        let (keys, args) = fcall::execution::build_cancel_execution(
+            &ctx,
+            &idx,
+            input.lease.attempt_index,
+            &input.lease.worker_instance_id,
+            &input.lease.lane_id,
+            &wp_id,
+            &input.execution_id,
+            crate::constants::CANCEL_SOURCE_OVERRIDE,
+            crate::constants::CANCEL_SOURCE_OVERRIDE,
+            &input.lease.lease_id,
+            &input.lease.lease_epoch,
+        );
+        let key_refs: Vec<&str> = keys.iter().map(|s| s.as_str()).collect();
+        let arg_refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
+
+        let raw: ferriskey::Value = self
+            .runtime()
+            .fcall(fcall::names::FF_CANCEL_EXECUTION, &key_refs, &arg_refs)
+            .await
+            .map_err(|e| FabricError::Internal(format!("ff_cancel_execution: {e}")))?;
+        check_fcall_success(&raw, fcall::names::FF_CANCEL_EXECUTION)?;
+        Ok(())
+    }
+
+    async fn suspend_run_execution(&self, input: SuspendRunInput) -> Result<(), FabricError> {
+        let partition = execution_partition(&input.execution_id, &self.runtime().partition_config);
+        let ctx = ExecKeyContext::new(&partition, &input.execution_id);
+        let idx = IndexKeys::new(&partition);
+
+        let suspension_id = SuspensionId::new();
+        let waitpoint_id = WaitpointId::new();
+        let waitpoint_key = format!("wpk:{waitpoint_id}");
+
+        let (keys, args) = fcall::suspension::build_suspend_execution(
+            &ctx,
+            &idx,
+            input.lease.attempt_index,
+            &input.lease.worker_instance_id,
+            &input.lease.lane_id,
+            &waitpoint_id,
+            &input.execution_id,
+            &input.lease.attempt_id,
+            &input.lease.lease_id,
+            &input.lease.lease_epoch,
+            &suspension_id,
+            &waitpoint_key,
+            &input.reason_code,
+            &input.timeout_at,
+            &input.resume_condition_json,
+            &input.resume_policy_json,
+            &input.timeout_behavior,
+        );
+        let key_refs: Vec<&str> = keys.iter().map(|s| s.as_str()).collect();
+        let arg_refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
+
+        let raw: ferriskey::Value = self
+            .runtime()
+            .fcall(fcall::names::FF_SUSPEND_EXECUTION, &key_refs, &arg_refs)
+            .await
+            .map_err(|e| FabricError::Internal(format!("ff_suspend_execution: {e}")))?;
+        check_fcall_success(&raw, fcall::names::FF_SUSPEND_EXECUTION)?;
+        Ok(())
+    }
+
+    async fn resume_run_execution(&self, input: ResumeRunInput) -> Result<(), FabricError> {
+        let partition = execution_partition(&input.execution_id, &self.runtime().partition_config);
+        let ctx = ExecKeyContext::new(&partition, &input.execution_id);
+        let idx = IndexKeys::new(&partition);
+
+        let wp_id = input.waitpoint_id.unwrap_or_default();
+
+        let (keys, args) = fcall::suspension::build_resume_execution(
+            &ctx,
+            &idx,
+            &input.lane_id,
+            &wp_id,
+            &input.execution_id,
+            &input.resume_source,
+            "0",
+        );
+        let key_refs: Vec<&str> = keys.iter().map(|s| s.as_str()).collect();
+        let arg_refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
+
+        let raw: ferriskey::Value = self
+            .runtime()
+            .fcall(fcall::names::FF_RESUME_EXECUTION, &key_refs, &arg_refs)
+            .await
+            .map_err(|e| FabricError::Internal(format!("ff_resume_execution: {e}")))?;
+        check_fcall_success(&raw, fcall::names::FF_RESUME_EXECUTION)?;
+        Ok(())
+    }
+
+    async fn deliver_approval_signal(
+        &self,
+        input: DeliverApprovalSignalInput,
+    ) -> Result<(), FabricError> {
+        let partition = execution_partition(&input.execution_id, &self.runtime().partition_config);
+        let ctx = ExecKeyContext::new(&partition, &input.execution_id);
+        let idx = IndexKeys::new(&partition);
+
+        let signal_id = SignalId::new();
+        let now = TimestampMs::now();
+
+        let idem_str = input.idempotency_suffix.clone();
+        let idem_key = ctx.signal_dedup(&input.waitpoint_id, &idem_str);
+
+        // HMAC waitpoint token — FF owns it, cairn never caches. Missing
+        // token surfaces as `Validation` up the stack.
+        let waitpoint_token = crate::signal_bridge::read_waitpoint_token(
+            &self.runtime().client,
+            &ctx,
+            &input.waitpoint_id,
+        )
+        .await?;
+
+        let signal_maxlen = input.maxlen.to_string();
+        let max_signals = input.max_signals_per_execution.to_string();
+
+        let (keys, args) = fcall::suspension::build_deliver_signal(
+            &ctx,
+            &idx,
+            &input.lane_id,
+            &signal_id,
+            &input.waitpoint_id,
+            idem_key,
+            &input.execution_id,
+            input.signal_name,
+            "approval".to_owned(),
+            crate::constants::SOURCE_TYPE_APPROVAL_OPERATOR.to_owned(),
+            crate::constants::SOURCE_IDENTITY.to_owned(),
+            String::new(),
+            idem_str,
+            now,
+            input.signal_dedup_ttl_ms,
+            &signal_maxlen,
+            &max_signals,
+            waitpoint_token.as_str(),
+        );
+        let key_refs: Vec<&str> = keys.iter().map(|s| s.as_str()).collect();
+        let arg_refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
+
+        let raw: ferriskey::Value = self
+            .runtime()
+            .fcall(fcall::names::FF_DELIVER_SIGNAL, &key_refs, &arg_refs)
+            .await
+            .map_err(|e| FabricError::Internal(format!("ff_deliver_signal: {e}")))?;
+        check_fcall_success(&raw, fcall::names::FF_DELIVER_SIGNAL)?;
+        Ok(())
+    }
+
+    // ── Session lifecycle (Phase D PR 2a) ────────────────────────────────
+
+    async fn create_flow(&self, input: CreateFlowInput) -> Result<(), FabricError> {
+        let partition = flow_partition(&input.flow_id, &self.runtime().partition_config);
+        let fctx = FlowKeyContext::new(&partition, &input.flow_id);
+        let now = TimestampMs::now();
+
+        let (keys, args) = fcall::session::build_create_flow(
+            &fctx,
+            &partition,
+            &input.flow_id,
+            &input.flow_kind,
+            &input.namespace,
+            now,
+        );
+        let key_refs: Vec<&str> = keys.iter().map(|s| s.as_str()).collect();
+        let arg_refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
+
+        let raw: ferriskey::Value = self
+            .runtime()
+            .fcall(fcall::names::FF_CREATE_FLOW, &key_refs, &arg_refs)
+            .await?;
+        check_fcall_success(&raw, fcall::names::FF_CREATE_FLOW)?;
+        Ok(())
+    }
+
+    async fn cancel_flow(
+        &self,
+        input: CancelFlowInput,
+    ) -> Result<FlowCancelOutcome, FabricError> {
+        let partition = flow_partition(&input.flow_id, &self.runtime().partition_config);
+        let fctx = FlowKeyContext::new(&partition, &input.flow_id);
+        let now = TimestampMs::now();
+
+        let (keys, args) = fcall::session::build_cancel_flow(
+            &fctx,
+            &input.flow_id,
+            &input.reason,
+            &input.cancel_mode,
+            now,
+        );
+        let key_refs: Vec<&str> = keys.iter().map(|s| s.as_str()).collect();
+        let arg_refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
+
+        let raw: ferriskey::Value = self
+            .runtime()
+            .fcall(fcall::names::FF_CANCEL_FLOW, &key_refs, &arg_refs)
+            .await?;
+
+        // `flow_already_terminal` is acceptable — the flow may already
+        // be completed/cancelled, and cairn still wants to stamp its
+        // archive marker. Dispatch on the typed Lua error code (via
+        // `fcall_error_code`) instead of string-matching the formatted
+        // `FabricError` message; the latter would silently break on
+        // any future tweak to the `Display` impl.
+        if let Some(code) = fcall_error_code(&raw) {
+            if code == FLOW_ALREADY_TERMINAL {
+                return Ok(FlowCancelOutcome::AlreadyTerminal);
+            }
+            // Non-accepted typed code — surface via the shared
+            // envelope-to-error path so the variant matches the rest
+            // of cairn's FCALL error handling.
+            check_fcall_success(&raw, fcall::names::FF_CANCEL_FLOW)?;
+            // Unreachable: check_fcall_success must return Err above
+            // because fcall_error_code only fires on typed errors.
+            unreachable!("fcall_error_code returned Some but check_fcall_success accepted");
+        }
+        check_fcall_success(&raw, fcall::names::FF_CANCEL_FLOW)?;
+        Ok(FlowCancelOutcome::Cancelled)
+    }
+
+    // ── Claim (Phase D PR 2a) ────────────────────────────────────────────
+
+    async fn issue_grant_and_claim(
+        &self,
+        input: IssueGrantAndClaimInput,
+    ) -> Result<ClaimGrantOutcome, FabricError> {
+        let partition = execution_partition(&input.execution_id, &self.runtime().partition_config);
+        let ctx = ExecKeyContext::new(&partition, &input.execution_id);
+        let idx = IndexKeys::new(&partition);
+
+        // ── Step 1: issue claim grant ─────────────────────────────────────
+        let grant_ttl = self.runtime().config.grant_ttl_ms;
+        let grant_keys: Vec<String> = vec![
+            ctx.core(),
+            ctx.claim_grant(),
+            idx.lane_eligible(&input.lane_id),
+        ];
+        let grant_args: Vec<String> = vec![
+            input.execution_id.to_string(),
+            self.runtime().config.worker_id.to_string(),
+            self.runtime().config.worker_instance_id.to_string(),
+            input.lane_id.to_string(),
+            String::new(),
+            grant_ttl.to_string(),
+            String::new(),
+            String::new(),
+        ];
+        let grant_key_refs: Vec<&str> = grant_keys.iter().map(|s| s.as_str()).collect();
+        let grant_arg_refs: Vec<&str> = grant_args.iter().map(|s| s.as_str()).collect();
+
+        let raw_grant: ferriskey::Value = self
+            .runtime()
+            .fcall(
+                fcall::names::FF_ISSUE_CLAIM_GRANT,
+                &grant_key_refs,
+                &grant_arg_refs,
+            )
+            .await
+            .map_err(|e| FabricError::Internal(format!("ff_issue_claim_grant: {e}")))?;
+        check_fcall_success(&raw_grant, fcall::names::FF_ISSUE_CLAIM_GRANT)?;
+
+        // ── Step 2: claim execution ───────────────────────────────────────
+        let total_str: Option<String> = self
+            .runtime()
+            .client
+            .hget(&ctx.core(), "total_attempt_count")
+            .await
+            .unwrap_or(None);
+        let next_idx = total_str
+            .as_deref()
+            .and_then(|s| s.parse::<u32>().ok())
+            .unwrap_or(0);
+        let att_idx = AttemptIndex::new(next_idx);
+
+        let lease_id = LeaseId::new();
+        let attempt_id = AttemptId::new();
+        let renew_before_ms = input.lease_duration_ms / 3;
+
+        let claim_keys: Vec<String> = vec![
+            ctx.core(),
+            ctx.claim_grant(),
+            idx.lane_eligible(&input.lane_id),
+            idx.lease_expiry(),
+            idx.worker_leases(&self.runtime().config.worker_instance_id),
+            ctx.attempt_hash(att_idx),
+            ctx.attempt_usage(att_idx),
+            ctx.attempt_policy(att_idx),
+            ctx.attempts(),
+            ctx.lease_current(),
+            ctx.lease_history(),
+            idx.lane_active(&input.lane_id),
+            idx.attempt_timeout(),
+            idx.execution_deadline(),
+        ];
+        let claim_args: Vec<String> = vec![
+            input.execution_id.to_string(),
+            self.runtime().config.worker_id.to_string(),
+            self.runtime().config.worker_instance_id.to_string(),
+            input.lane_id.to_string(),
+            String::new(),
+            lease_id.to_string(),
+            input.lease_duration_ms.to_string(),
+            renew_before_ms.to_string(),
+            attempt_id.to_string(),
+            "{}".to_owned(),
+            String::new(),
+            String::new(),
+        ];
+        let claim_key_refs: Vec<&str> = claim_keys.iter().map(|s| s.as_str()).collect();
+        let claim_arg_refs: Vec<&str> = claim_args.iter().map(|s| s.as_str()).collect();
+
+        let raw_claim: ferriskey::Value = self
+            .runtime()
+            .fcall(
+                fcall::names::FF_CLAIM_EXECUTION,
+                &claim_key_refs,
+                &claim_arg_refs,
+            )
+            .await
+            .map_err(|e| FabricError::Internal(format!("ff_claim_execution: {e}")))?;
+
+        // Dispatch: if FF returns `use_claim_resumed_execution` the
+        // execution is in `attempt_interrupted` (resumed from suspension)
+        // and must go through `ff_claim_resumed_execution` — which
+        // resumes the SAME attempt instead of allocating a new one. The
+        // grant is still live: FF's dispatch guard runs BEFORE grant
+        // consumption, so we do NOT re-issue it.
+        if fcall_error_code(&raw_claim).as_deref() == Some(USE_CLAIM_RESUMED_EXECUTION) {
+            return self
+                .claim_resumed_execution(&ctx, &idx, &input.execution_id, &input.lane_id, input.lease_duration_ms)
+                .await;
+        }
+
+        check_fcall_success(&raw_claim, fcall::names::FF_CLAIM_EXECUTION)?;
+        let lease_epoch = parse_claim_lease_epoch(&raw_claim)?;
+
+        Ok(ClaimGrantOutcome {
+            lease_id,
+            lease_epoch,
+            attempt_index: att_idx,
+        })
+    }
+}
+
+// ── Claim-resumed (Phase D PR 2a) ───────────────────────────────────────
+
+/// FF's typed dispatch error: the execution's `attempt_state` is
+/// `attempt_interrupted` (resume-from-suspension claim), so the caller
+/// must use `ff_claim_resumed_execution`. See `lua/execution.lua`.
+const USE_CLAIM_RESUMED_EXECUTION: &str = "use_claim_resumed_execution";
+
+impl ValkeyEngine {
+    async fn claim_resumed_execution(
+        &self,
+        ctx: &ExecKeyContext,
+        idx: &IndexKeys,
+        eid: &ExecutionId,
+        lane_id: &ff_core::types::LaneId,
+        lease_duration_ms: u64,
+    ) -> Result<ClaimGrantOutcome, FabricError> {
+        // FF requires the existing attempt_hash as KEYS[6]; re-read the
+        // attempt index from exec_core so the key points at the live
+        // attempt.
+        let att_idx_str: Option<String> = self
+            .runtime()
+            .client
+            .hget(&ctx.core(), "current_attempt_index")
+            .await
+            .unwrap_or(None);
+        let att_idx = AttemptIndex::new(
+            att_idx_str
+                .as_deref()
+                .and_then(|s| s.parse::<u32>().ok())
+                .unwrap_or(0),
+        );
+
+        let lease_id = LeaseId::new();
+
+        let keys: Vec<String> = vec![
+            ctx.core(),
+            ctx.claim_grant(),
+            idx.lane_eligible(lane_id),
+            idx.lease_expiry(),
+            idx.worker_leases(&self.runtime().config.worker_instance_id),
+            ctx.attempt_hash(att_idx),
+            ctx.lease_current(),
+            ctx.lease_history(),
+            idx.lane_active(lane_id),
+            idx.attempt_timeout(),
+            idx.execution_deadline(),
+        ];
+        let args: Vec<String> = vec![
+            eid.to_string(),
+            self.runtime().config.worker_id.to_string(),
+            self.runtime().config.worker_instance_id.to_string(),
+            lane_id.to_string(),
+            String::new(),
+            lease_id.to_string(),
+            lease_duration_ms.to_string(),
+            String::new(),
+        ];
+        let key_refs: Vec<&str> = keys.iter().map(|s| s.as_str()).collect();
+        let arg_refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
+
+        let raw: ferriskey::Value = self
+            .runtime()
+            .fcall(fcall::names::FF_CLAIM_RESUMED_EXECUTION, &key_refs, &arg_refs)
+            .await
+            .map_err(|e| FabricError::Internal(format!("ff_claim_resumed_execution: {e}")))?;
+        check_fcall_success(&raw, fcall::names::FF_CLAIM_RESUMED_EXECUTION)?;
+
+        let lease_epoch = parse_claim_lease_epoch(&raw)?;
+        Ok(ClaimGrantOutcome {
+            lease_id,
+            lease_epoch,
+            attempt_index: att_idx,
+        })
+    }
+}
+
+/// Parse the `lease_epoch` slot of `ff_claim_execution`'s reply:
+/// `{1, "OK", <lease_id>, <lease_epoch>}`. Previously lived inside
+/// `services::claim_common`; lifted here with the rest of the claim
+/// machinery.
+fn parse_claim_lease_epoch(raw: &ferriskey::Value) -> Result<ff_core::types::LeaseEpoch, FabricError> {
+    if let ferriskey::Value::Array(arr) = raw {
+        if let Some(Ok(ferriskey::Value::BulkString(b))) = arr.get(3) {
+            if let Ok(n) = String::from_utf8_lossy(b).parse::<u64>() {
+                return Ok(ff_core::types::LeaseEpoch::new(n));
+            }
+        }
+        if let Some(Ok(ferriskey::Value::Int(n))) = arr.get(3) {
+            return Ok(ff_core::types::LeaseEpoch::new(*n as u64));
+        }
+    }
+    Err(FabricError::Internal(
+        "ff_claim_execution: missing lease_epoch in response".to_owned(),
+    ))
 }
 
 // ── Helpers (free functions, kept file-local) ──────────────────────────

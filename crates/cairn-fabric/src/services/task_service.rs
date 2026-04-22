@@ -23,6 +23,11 @@ pub struct FabricTaskService {
     bridge: Arc<EventBridge>,
     #[allow(dead_code)] // wired-in for the B-phase ports
     engine: Arc<dyn crate::engine::Engine>,
+    /// Only used from [`Self::claim`] in PR 2a to delegate the
+    /// claim FCALL pair through the trait boundary. The rest of
+    /// task_service's FCALLs still issue directly via
+    /// `runtime.fcall(...)` — PR 2b will finish the migration.
+    control_plane: Arc<dyn crate::engine::ControlPlaneBackend>,
 }
 
 impl FabricTaskService {
@@ -30,11 +35,13 @@ impl FabricTaskService {
         runtime: Arc<FabricRuntime>,
         bridge: Arc<EventBridge>,
         engine: Arc<dyn crate::engine::Engine>,
+        control_plane: Arc<dyn crate::engine::ControlPlaneBackend>,
     ) -> Self {
         Self {
             runtime,
             bridge,
             engine,
+            control_plane,
         }
     }
 
@@ -891,17 +898,15 @@ impl FabricTaskService {
         lease_duration_ms: u64,
     ) -> Result<TaskRecord, FabricError> {
         let eid = self.task_to_execution_id(project, session_id, task_id);
-        let partition = execution_partition(&eid, &self.runtime.partition_config);
-        let ctx = ExecKeyContext::new(&partition, &eid);
-        let idx = IndexKeys::new(&partition);
 
-        let lane_str: Option<String> = self
-            .runtime
-            .client
-            .hget(&ctx.core(), "lane_id")
-            .await
-            .map_err(|e| FabricError::Valkey(format!("HGET lane_id: {e}")))?;
-        let lane_id = LaneId::new(lane_str.as_deref().unwrap_or("cairn"));
+        // Read lane from the snapshot — avoids a direct HGET on
+        // `ctx.core()` that would keep task_service importing
+        // `ff_core::keys`. (task_service's *other* call sites still
+        // touch keys directly — that's deferred to PR 2b.)
+        let lane_id = match self.engine.describe_execution(&eid).await? {
+            Some(snap) if !snap.lane_id.as_str().is_empty() => snap.lane_id,
+            _ => LaneId::new("cairn"),
+        };
 
         // Shared grant+claim FCALL sequence (see services/claim_common.rs).
         // Cancel-safety: a drop between the two calls leaves only a grant,
@@ -914,9 +919,7 @@ impl FabricTaskService {
         // violation and the root cause of the silent-emission bug fixed in
         // the parent commit.
         crate::services::claim_common::issue_grant_and_claim(
-            &self.runtime,
-            &ctx,
-            &idx,
+            &self.control_plane,
             &eid,
             &lane_id,
             lease_duration_ms,

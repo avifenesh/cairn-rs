@@ -5,20 +5,25 @@ use cairn_domain::lifecycle::SessionState;
 use cairn_domain::tenancy::ProjectKey;
 use cairn_domain::SessionId;
 use cairn_store::projections::SessionRecord;
-use ff_core::keys::FlowKeyContext;
-use ff_core::partition::{flow_partition, Partition};
 use ff_core::types::{FlowId, Namespace, TimestampMs};
 
 use crate::boot::FabricRuntime;
+use crate::engine::ControlPlaneBackend;
 use crate::error::FabricError;
 use crate::event_bridge::{BridgeEvent, EventBridge};
 use crate::helpers::try_parse_project_key;
 use crate::id_map;
 
 pub struct FabricSessionService {
+    /// Retained for API parity with the other fabric services. Not
+    /// read directly from this service anymore — all FF-state reads
+    /// go through `engine` and all FCALL-dispatch goes through
+    /// `control_plane`.
+    #[allow(dead_code)]
     runtime: Arc<FabricRuntime>,
     bridge: Arc<EventBridge>,
     engine: Arc<dyn crate::engine::Engine>,
+    control_plane: Arc<dyn ControlPlaneBackend>,
 }
 
 impl FabricSessionService {
@@ -26,20 +31,18 @@ impl FabricSessionService {
         runtime: Arc<FabricRuntime>,
         bridge: Arc<EventBridge>,
         engine: Arc<dyn crate::engine::Engine>,
+        control_plane: Arc<dyn ControlPlaneBackend>,
     ) -> Self {
         Self {
             runtime,
             bridge,
             engine,
+            control_plane,
         }
     }
 
     fn flow_id(&self, project: &ProjectKey, session_id: &SessionId) -> FlowId {
         id_map::session_to_flow_id(project, session_id)
-    }
-
-    fn flow_partition(&self, fid: &FlowId) -> Partition {
-        flow_partition(fid, &self.runtime.partition_config)
     }
 
     fn namespace(&self, project: &ProjectKey) -> Namespace {
@@ -64,8 +67,6 @@ impl FabricSessionService {
         session_id: SessionId,
     ) -> Result<SessionRecord, FabricError> {
         let fid = self.flow_id(project, &session_id);
-        let partition = self.flow_partition(&fid);
-        let fctx = FlowKeyContext::new(&partition, &fid);
         let namespace = self.namespace(project);
         let now = TimestampMs::now();
 
@@ -74,23 +75,13 @@ impl FabricSessionService {
             project.tenant_id, project.workspace_id, project.project_id
         );
 
-        let (keys, args) = crate::fcall::session::build_create_flow(
-            &fctx,
-            &partition,
-            &fid,
-            "cairn_session",
-            &namespace,
-            now,
-        );
-        let key_refs: Vec<&str> = keys.iter().map(|s| s.as_str()).collect();
-        let arg_refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
-
-        let raw: ferriskey::Value = self
-            .runtime
-            .fcall(crate::fcall::names::FF_CREATE_FLOW, &key_refs, &arg_refs)
+        self.control_plane
+            .create_flow(crate::engine::CreateFlowInput {
+                flow_id: fid.clone(),
+                flow_kind: "cairn_session".to_owned(),
+                namespace,
+            })
             .await?;
-
-        crate::helpers::check_fcall_success(&raw, crate::fcall::names::FF_CREATE_FLOW)?;
 
         // Stamp the cairn-scoped flow tags in one round-trip via the
         // engine abstraction. Replaces two sequential direct HSETs
@@ -170,8 +161,6 @@ impl FabricSessionService {
         session_id: &SessionId,
     ) -> Result<SessionRecord, FabricError> {
         let fid = self.flow_id(project, session_id);
-        let partition = self.flow_partition(&fid);
-        let fctx = FlowKeyContext::new(&partition, &fid);
 
         // Check the flow exists before issuing the FF-side cancel.
         // Uses the typed snapshot rather than a raw HGETALL — same
@@ -183,33 +172,18 @@ impl FabricSessionService {
             });
         }
 
-        let now = TimestampMs::now();
-
-        let (keys, args) = crate::fcall::session::build_cancel_flow(
-            &fctx,
-            &fid,
-            "session archived",
-            "cancel_all",
-            now,
-        );
-        let key_refs: Vec<&str> = keys.iter().map(|s| s.as_str()).collect();
-        let arg_refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
-
-        let raw: ferriskey::Value = self
-            .runtime
-            .fcall(crate::fcall::names::FF_CANCEL_FLOW, &key_refs, &arg_refs)
+        // `AlreadyTerminal` is acceptable — the flow may already be
+        // completed/cancelled, but cairn still needs to mark it
+        // archived. The trait collapses that branch into a typed
+        // variant so services never see the FF envelope text.
+        let _outcome = self
+            .control_plane
+            .cancel_flow(crate::engine::CancelFlowInput {
+                flow_id: fid.clone(),
+                reason: "session archived".to_owned(),
+                cancel_mode: "cancel_all".to_owned(),
+            })
             .await?;
-
-        // flow_already_terminal is acceptable — the flow may already be
-        // completed/cancelled, but cairn still needs to mark it archived.
-        if let Err(e) =
-            crate::helpers::check_fcall_success(&raw, crate::fcall::names::FF_CANCEL_FLOW)
-        {
-            let msg = e.to_string();
-            if !msg.contains("flow_already_terminal") {
-                return Err(e);
-            }
-        }
 
         // Route the archive-flag write through the engine
         // abstraction instead of reaching into `fctx.core()`
