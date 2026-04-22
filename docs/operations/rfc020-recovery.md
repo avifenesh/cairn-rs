@@ -52,25 +52,45 @@ requests.
 curl -s http://localhost:3000/health/ready | jq
 ```
 
-Progress JSON shape (from [RFC 020 §Startup order](../design/rfcs/020-durable-recovery.md)):
+Progress JSON shape (from `StartupProgress` /`StartupBranches` in
+`crates/cairn-runtime/src/startup.rs`, aligned with [RFC 020 §Startup order](../design/rfcs/020-durable-recovery.md)):
 
 ```json
 {
   "status": "ready",
   "step": "6",
   "branches": {
-    "event_log":         { "state": "complete" },
-    "tool_result_cache": { "state": "complete" },
-    "decision_cache":    { "state": "complete" },
-    "providers":         { "state": "complete" },
-    "runs":              { "state": "complete" }
-  }
+    "event_log":         { "state": "complete", "count": 15234 },
+    "tool_result_cache": { "state": "complete", "count": 42 },
+    "decision_cache":    { "state": "complete", "count": 87 },
+    "memory":            { "state": "complete", "count": 3401 },
+    "graph":             { "state": "complete", "count": 892 },
+    "evals":             { "state": "complete", "count": 14 },
+    "repo_store":        { "state": "complete", "count": 3 },
+    "plugin_host":       { "state": "complete", "count": 1 },
+    "providers":         { "state": "complete", "count": 2 },
+    "sandboxes":         { "state": "complete", "count": 4 },
+    "webhook_dedup":     { "state": "complete", "count": 156 },
+    "triggers":          { "state": "complete", "count": 5 },
+    "runs":              { "state": "complete", "count": 7 }
+  },
+  "started_at": 1775759896876,
+  "elapsed_ms": 2340
 }
 ```
 
-During recovery each branch reports `"pending"`, `"in_progress"`, or
-`"complete"`; counts and elapsed timing populate as branches finish. Readiness
-flips to `200` only when every branch reports `complete`.
+Each branch reports `"pending"` → `"in_progress"` → `"complete"` (or
+`"failed"` with a `detail` string) as it advances. `count` populates when the
+branch finishes and records a branch-specific quantity (events replayed, chunks
+indexed, sandboxes reattached, etc.). Readiness flips to `200` only when every
+branch reports `complete`.
+
+**Note on the current build**: the `/health/ready` handler currently returns a
+simplified response with a subset of branches pre-marked `complete`, because
+the full startup dependency graph is not yet wired into `AppState`. The shape
+above is what operators will receive once Track 2 (see [Roadmap](#roadmap))
+lands the real `ReadinessState` read. Consumers parsing this endpoint should
+tolerate unknown branches and treat any non-`complete` state as not-ready.
 
 Response codes:
 
