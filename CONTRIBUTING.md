@@ -50,7 +50,7 @@ ui/                  React + TypeScript operator dashboard (Vite, Tailwind)
 docs/
   design/rfcs/       RFC specifications
   design/            Architecture notes + FINALIZED runbook
-  api-reference.md   Full endpoint reference
+  api/               Per-subject HTTP API reference (index at api/README.md)
 ```
 
 ---
