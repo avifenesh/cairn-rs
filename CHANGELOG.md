@@ -9,7 +9,30 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- **Cross-instance event leak in `LeaseHistorySubscriber`.** Two
+  cairn-app instances sharing a Valkey previously saw each other's
+  lease-expiry / lease-reclaim frames in their own `/v1/events` stream
+  — `ff:idx:{fp:N}:lease_expiry` ZSETs are partition-global, not
+  cairn-scoped, so the subscriber enumerated every cairn instance's
+  leased executions on each partition and dispatched foreign frames
+  into the local event log. Now every cairn execution carries a
+  `cairn.instance_id` tag at create time and the subscriber drops any
+  frame whose tag doesn't match `FabricConfig::worker_instance_id`.
+  Fixes the `test_rfc020_recovery::clean_crash_recovery_restores_non_terminal_runs`
+  flake (task #185) and the production cross-tenant leak. Docs:
+  `docs/operations/cross-instance-isolation.md`.
+
 ### Added
+
+- **`CAIRN_BACKFILL_INSTANCE_TAG=1`** — one-shot boot-time backfill
+  that stamps `cairn.instance_id` onto every pre-existing exec-tag
+  hash in Valkey that lacks it but carries `cairn.project`. Needed
+  only for operators doing an in-place binary swap with `Running` /
+  `WaitingApproval` executions that predate the filter; default off
+  on fresh deploys. Idempotent across boots — a second pass is a
+  no-op.
 
 #### Durability — RFC 020 Tracks 1–4
 

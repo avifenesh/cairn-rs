@@ -249,6 +249,16 @@ impl FabricTaskService {
                 project.tenant_id, project.workspace_id, project.project_id
             ),
         );
+        // Cross-instance isolation: LeaseHistorySubscriber filters
+        // every frame by `cairn.instance_id` so a cairn-app sharing a
+        // Valkey with another cairn-app (or another tenant's FF
+        // consumer) only consumes its own lease-expiry / reclaim
+        // frames. Missing this tag on create would make the execution
+        // invisible to its owner's subscriber after a lease expiry.
+        tags.insert(
+            "cairn.instance_id".to_owned(),
+            self.runtime.config.worker_instance_id.to_string(),
+        );
         if let Some(sid) = session_id {
             tags.insert("cairn.session_id".to_owned(), sid.as_str().to_owned());
         }
