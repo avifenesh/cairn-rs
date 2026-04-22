@@ -27,7 +27,7 @@ Purpose: concrete architecture decisions for the cairn-rs control plane
 17. [RFC 017 - GitHub Reference Plugin](./017-github-reference-plugin.md) — marketplace reference plugin, GitHub App auth, webhook normalization
 18. [RFC 018 - Agent Loop Enhancements](./018-agent-loop-enhancements.md) — RunMode (Plan/Execute/Direct), Guardian resolver, context compaction, tool visibility
 19. [RFC 019 - Unified Decision Layer](./019-unified-decision-layer.md) — DecisionService, 8-step pipeline, singleflight cache, learned rules
-20. [RFC 020 - Durable Recovery](./020-durable-recovery.md) — startup dependency graph, dual checkpoint, ToolCallId idempotency, RetrySafety enforcement
+20. [RFC 020 - Durable Recovery](./020-durable-recovery.md) — startup dependency graph, dual checkpoint, ToolCallId idempotency, RetrySafety enforcement. **Rev 3** (2026-04) adds the recovery ownership split (FF-owned operational state vs. cairn-owned run-level state), 15 gap resolutions, and durability invariant #12. Tracks 1–4 all shipped; see [`docs/operations/rfc020-recovery.md`](../../operations/rfc020-recovery.md) for operator guidance.
 21. [RFC 021 - Control Plane Protocols](./021-control-plane-protocols.md) — SQ/EQ protocol, A2A Agent Card, OTLP GenAI export
 22. [RFC 022 - Triggers](./022-triggers.md) — signal capture, trigger evaluation, fire-once semantics
 23. [RFC 023 - Business Model and Cloud Architecture](./023-business-model-and-cloud-architecture.md) — BSL 1.1 licensing, cloud architecture, commercial packaging
