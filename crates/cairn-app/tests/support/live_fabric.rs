@@ -127,8 +127,10 @@ impl LiveHarness {
 
         // 5. Rotate admin token. Both exercises the real operator flow and
         //    narrows the window in which the seed token exists.
+        // 60s default — covers real-LLM roundtrips (OpenRouter MiniMax, etc.);
+        // LiveHarness users who need strict timing should construct their own client.
         let client = reqwest::Client::builder()
-            .timeout(Duration::from_secs(10))
+            .timeout(Duration::from_secs(60))
             .build()
             .expect("reqwest client builds");
 
