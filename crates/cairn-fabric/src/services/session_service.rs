@@ -91,11 +91,6 @@ impl FabricSessionService {
             .await?;
 
         crate::helpers::check_fcall_success(&raw, crate::fcall::names::FF_CREATE_FLOW)?;
-        // FF returns `ok_already_satisfied` on a duplicate `ff_create_flow`
-        // (lua/flow.lua:58-59 + helpers.lua ok_already_satisfied). We only
-        // emit the cairn-side `SessionCreated` bridge event on first
-        // creation — duplicate calls must not double-write the projection.
-        let is_duplicate = crate::helpers::is_already_satisfied(&raw);
 
         let _: i64 = self
             .runtime
@@ -110,19 +105,33 @@ impl FabricSessionService {
             .await
             .map_err(|e| FabricError::Internal(format!("hset cairn.session_id: {e}")))?;
 
-        // Emit the bridge event on fresh creation so the cairn-store
-        // SessionReadModel projection gets a matching record. Mirrors the
-        // `ExecutionCreated` pattern in FabricRunService::start — FF owns
-        // the flow, cairn-store owns the projection, the bridge event is
-        // the seam.
-        if !is_duplicate {
-            self.bridge
-                .emit(BridgeEvent::SessionCreated {
-                    session_id: session_id.clone(),
-                    project: project.clone(),
-                })
-                .await;
-        }
+        // Emit the bridge event unconditionally so the cairn-store
+        // `SessionReadModel` projection gets a record even when FF
+        // returns `ok_already_satisfied` for the underlying
+        // `ff_create_flow` call. The previous `!is_already_satisfied`
+        // guard was retry-unsafe in the same shape as the one removed
+        // from `FabricRunService::suspend` (see run_service.rs L823-L832):
+        // if the cairn process crashed between the FCALL committing
+        // and the bridge emit, the next boot's retry would hit
+        // `ok_already_satisfied` and skip the emit permanently — the
+        // projection would have a permanent gap and every downstream
+        // handler that resolves project-from-session-id (e.g.
+        // `FabricSessionServiceAdapter::get` via
+        // `resolve_project_from_session_id`) would 404 forever. That
+        // failure mode is exactly what surfaced the RFC 020
+        // `recovery_summary_emitted_once_per_boot` test #11 regression
+        // (task #178): POST /v1/runs looked up the just-created session
+        // via the read model, saw `None`, and returned 404 "session not
+        // found". The projection is idempotent on `EventId`, so a
+        // duplicate emit on a real replay is a harmless re-write —
+        // strictly safer than dropping the event. Mirrors the
+        // `ExecutionCreated` pattern in `FabricRunService::start`.
+        self.bridge
+            .emit(BridgeEvent::SessionCreated {
+                session_id: session_id.clone(),
+                project: project.clone(),
+            })
+            .await;
 
         let now_ms = now.0 as u64;
         Ok(SessionRecord {

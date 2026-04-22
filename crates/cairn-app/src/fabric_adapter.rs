@@ -87,6 +87,59 @@ pub async fn resolve_project_from_session_id(
     }
 }
 
+/// Poll the `InMemoryStore` `SessionReadModel` until `session_id` is
+/// visible (or 2s elapse). Used by `FabricSessionServiceAdapter::create`
+/// as a read-after-write barrier so callers that `POST /v1/sessions`
+/// followed immediately by `POST /v1/runs` don't race the
+/// `EventBridge` consumer that populates the projection. See the
+/// detailed call-site comment for the failure mode.
+///
+/// Returns `Err(RuntimeError::Internal)` on timeout — strictly safer
+/// than returning OK on a session whose projection the very next
+/// request will 404 on. The 2s ceiling matches `wait_for_run_projected`
+/// in the RFC 020 integration-test harness (same race shape, same
+/// budget). Typical resolution is a single poll at 0ms.
+async fn wait_for_session_projection(
+    store: &Arc<InMemoryStore>,
+    session_id: &SessionId,
+) -> Result<(), RuntimeError> {
+    use std::time::Duration;
+    // `tokio::time::Instant` (not `std::time::Instant`) so the deadline
+    // and `tokio::time::sleep` track the same clock — matters under
+    // `tokio::time::pause()` in unit tests, and is idiomatic for an
+    // async polling loop.
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
+    let mut backoff_us: u64 = 100;
+    loop {
+        if SessionReadModel::get(store.as_ref(), session_id)
+            .await?
+            .is_some()
+        {
+            return Ok(());
+        }
+        if tokio::time::Instant::now() >= deadline {
+            // SEC-007: the error body MUST NOT leak internal details
+            // (bridge consumer state, timing budgets, projection
+            // internals) — `RuntimeError::Internal`'s message flows
+            // unredacted into HTTP 500 response bodies via
+            // `runtime_error_response`. Log the full diagnostic
+            // context for operators, surface an opaque message to the
+            // caller. Same pattern as `fabric_err_to_runtime`'s
+            // `Internal`/`Valkey` arms below.
+            tracing::error!(
+                session_id = %session_id,
+                "session projection not populated within 2s \
+                 (EventBridge consumer may be stalled)"
+            );
+            return Err(RuntimeError::Internal("fabric layer error".into()));
+        }
+        tokio::time::sleep(Duration::from_micros(backoff_us)).await;
+        // Cap at 5 ms so tail-latency samples stay bounded; we're
+        // looking at a sub-ms channel drain in the happy path.
+        backoff_us = (backoff_us * 2).min(5_000);
+    }
+}
+
 /// Translate a `FabricError` into the handler-facing `RuntimeError`.
 ///
 /// Both types already carry structured NotFound / Validation / Internal
@@ -998,11 +1051,44 @@ impl SessionService for FabricSessionServiceAdapter {
         project: &ProjectKey,
         session_id: SessionId,
     ) -> Result<SessionRecord, RuntimeError> {
-        self.fabric
+        let record = self
+            .fabric
             .sessions
-            .create(project, session_id)
+            .create(project, session_id.clone())
             .await
-            .map_err(fabric_err_to_runtime)
+            .map_err(fabric_err_to_runtime)?;
+
+        // Read-after-write barrier: wait for the `SessionCreated` bridge
+        // event to be drained by the `EventBridge` consumer and applied
+        // to the `InMemoryStore` session projection before returning.
+        //
+        // Why this matters — task #178 regression: the bridge is an
+        // async mpsc pipeline (see `cairn-fabric::event_bridge`). A
+        // caller that creates a session and immediately creates a run
+        // (e.g. `POST /v1/sessions` → `POST /v1/runs`) can outrun the
+        // consumer: `FabricSessionService::create` returns as soon as
+        // the FF `ff_create_flow` FCALL + `cairn.*` HSETs commit; the
+        // `BridgeEvent::SessionCreated` is still queued in the
+        // consumer channel. The immediately-following run handler then
+        // calls `state.runtime.sessions.get(&session_id)`, which goes
+        // through this adapter's `get()` → `resolve_project_from_session_id`
+        // → `SessionReadModel::get` on the InMemoryStore and finds
+        // `None`, so the run handler returns 404 "session not found"
+        // even though the session's FF flow exists and the caller just
+        // received a 201 for it. That failure mode broke the three
+        // RFC 020 integration tests (#1, #6, #11) on `origin/main`
+        // the moment the shared Valkey test container got busy enough
+        // to serialise consumer wake-ups behind other writers.
+        //
+        // Strategy: bounded poll with exponential-ish backoff. 2s budget
+        // matches the wider-than-expected tail observed on CI under
+        // concurrent test load; the typical path resolves in the first
+        // 1ms poll. Timing out is strictly better than returning
+        // without the projection — the alternative is a silent race
+        // that only surfaces as a 404 on an immediately-following
+        // lookup.
+        wait_for_session_projection(&self.store, &session_id).await?;
+        Ok(record)
     }
 
     async fn get(&self, session_id: &SessionId) -> Result<Option<SessionRecord>, RuntimeError> {
@@ -1414,5 +1500,90 @@ mod tests {
              fabric.runs.start_with_correlation — delegating to plain \
              `fabric.runs.start()` would still drop it",
         );
+    }
+
+    /// Task #178 regression: `wait_for_session_projection` must return
+    /// `Ok(())` the first time the projection row appears.
+    ///
+    /// Pre-fix, `FabricSessionServiceAdapter::create` returned as soon as
+    /// `fabric.sessions.create()` committed the FF flow, without waiting
+    /// for the async `EventBridge` consumer to drain the
+    /// `BridgeEvent::SessionCreated` into the `InMemoryStore` projection.
+    /// A tightly-following `POST /v1/runs` then failed with 404 "session
+    /// not found" because `FabricSessionServiceAdapter::get` resolves
+    /// `(session_id) -> ProjectKey` through that exact projection. The
+    /// three RFC 020 integration tests (#1, #6, #11) tripped this.
+    ///
+    /// This test pins the barrier helper's contract: once a
+    /// `SessionCreated` envelope is appended to the store the polling
+    /// loop returns immediately (no sleep), and a missing session
+    /// stays missing for the full 2s budget before erroring. Both
+    /// shapes are needed: "returns on first success" is the happy
+    /// path, "errors loudly on timeout" is the safety rail that
+    /// keeps a silent-404 from reaching the next handler.
+    #[tokio::test]
+    async fn wait_for_session_projection_returns_when_row_present() {
+        let store = Arc::new(InMemoryStore::new());
+        let project = test_project();
+        let session_id = SessionId::new("sess_barrier");
+        seed_session(&store, &project, &session_id).await;
+        // Present from t=0 → loop returns on first probe, well under
+        // the 2s ceiling.
+        let start = std::time::Instant::now();
+        wait_for_session_projection(&store, &session_id)
+            .await
+            .expect("projection is already populated");
+        assert!(
+            start.elapsed() < std::time::Duration::from_millis(100),
+            "barrier should return immediately when row is present (took {:?})",
+            start.elapsed(),
+        );
+    }
+
+    #[tokio::test]
+    async fn wait_for_session_projection_errors_on_missing_row() {
+        // An empty store with no producer will never populate the row —
+        // the barrier must error out, not hang forever. Two load-bearing
+        // assertions:
+        //
+        // 1. At ~250ms the helper is still polling (didn't wrongly
+        //    return `Ok(())` before the deadline, didn't wedge).
+        // 2. After the 2s budget elapses the helper returns
+        //    `Err(RuntimeError::Internal("fabric layer error"))` — the
+        //    hard safety-rail that keeps a silent-404 out of the next
+        //    handler, with an opaque SEC-007-compliant message.
+        //
+        // Real wall-clock — `tokio::time::pause()` / `advance()` need
+        // the `test-util` feature which the crate doesn't enable.
+        // 2s is cheap enough for a unit test on CI.
+        let store = Arc::new(InMemoryStore::new());
+        let session_id = SessionId::new("sess_never");
+
+        let fut = wait_for_session_projection(&store, &session_id);
+        tokio::pin!(fut);
+
+        // Probe: at t≈250ms the loop must still be polling.
+        let probe = tokio::time::timeout(std::time::Duration::from_millis(250), &mut fut).await;
+        assert!(
+            probe.is_err(),
+            "barrier must not return before the 2s deadline on an \
+             empty store (got {probe:?})",
+        );
+
+        // Final: resume awaiting the future — it will observe its own
+        // deadline crossing (~1.75s from now) and return Err.
+        match (&mut fut).await {
+            Err(RuntimeError::Internal(msg)) => {
+                // SEC-007: surfaced message must be the opaque token,
+                // not any internal timing/bridge-state detail.
+                assert_eq!(
+                    msg, "fabric layer error",
+                    "barrier error message must be opaque (SEC-007); got {msg:?}",
+                );
+            }
+            other => {
+                panic!("barrier must return RuntimeError::Internal on timeout, got {other:?}",)
+            }
+        }
     }
 }
