@@ -351,17 +351,237 @@ impl SqliteSyncProjection {
             RuntimeEvent::IngestJobCompleted(_) => log_stub("IngestJobCompleted"),
             RuntimeEvent::EvalRunStarted(_) => log_stub("EvalRunStarted"),
             RuntimeEvent::EvalRunCompleted(_) => log_stub("EvalRunCompleted"),
-            RuntimeEvent::PromptAssetCreated(_) => log_stub("PromptAssetCreated"),
-            RuntimeEvent::PromptVersionCreated(_) => log_stub("PromptVersionCreated"),
+            RuntimeEvent::PromptAssetCreated(e) => {
+                sqlx::query(
+                    "INSERT INTO prompt_assets
+                         (prompt_asset_id, tenant_id, workspace_id, project_id, name, kind,
+                          scope, status, created_at, updated_at)
+                     VALUES (?, ?, ?, ?, ?, ?, NULL, 'draft', ?, ?)
+                     ON CONFLICT(prompt_asset_id) DO NOTHING",
+                )
+                .bind(e.prompt_asset_id.as_str())
+                .bind(e.project.tenant_id.as_str())
+                .bind(e.project.workspace_id.as_str())
+                .bind(e.project.project_id.as_str())
+                .bind(&e.name)
+                .bind(&e.kind)
+                .bind(e.created_at as i64)
+                .bind(now)
+                .execute(&mut **tx)
+                .await
+                .map_err(|err| StoreError::Internal(err.to_string()))?;
+            }
+            RuntimeEvent::PromptVersionCreated(e) => {
+                // SQLite has no `SELECT ... FOR UPDATE`. sqlx opens
+                // transactions as DEFERRED by default, so concurrent
+                // appenders to the same asset could in principle both
+                // compute MAX+1 and insert the same version_number. In
+                // local-mode there is a single append path serialized
+                // by `SqliteEventLog`, which makes this safe in
+                // practice. A defensive `UNIQUE(prompt_asset_id,
+                // version_number)` constraint belongs in a dedicated
+                // hardening PR that applies symmetrically to Postgres
+                // V016 — tracked for follow-up.
+                let version_number: i64 = sqlx::query_scalar(
+                    "SELECT COALESCE(MAX(version_number), 0) + 1
+                     FROM prompt_versions
+                     WHERE prompt_asset_id = ?",
+                )
+                .bind(e.prompt_asset_id.as_str())
+                .fetch_one(&mut **tx)
+                .await
+                .map_err(|err| StoreError::Internal(err.to_string()))?;
+
+                sqlx::query(
+                    "INSERT INTO prompt_versions
+                         (prompt_version_id, prompt_asset_id, tenant_id, workspace_id, project_id,
+                          version_number, content_hash, content, format, created_by, created_at)
+                     VALUES (?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, ?)
+                     ON CONFLICT(prompt_version_id) DO NOTHING",
+                )
+                .bind(e.prompt_version_id.as_str())
+                .bind(e.prompt_asset_id.as_str())
+                .bind(e.project.tenant_id.as_str())
+                .bind(e.project.workspace_id.as_str())
+                .bind(e.project.project_id.as_str())
+                .bind(version_number)
+                .bind(&e.content_hash)
+                .bind(e.created_at as i64)
+                .execute(&mut **tx)
+                .await
+                .map_err(|err| StoreError::Internal(err.to_string()))?;
+            }
             RuntimeEvent::ApprovalPolicyCreated(_) => log_stub("ApprovalPolicyCreated"),
-            RuntimeEvent::PromptReleaseCreated(_) => log_stub("PromptReleaseCreated"),
-            RuntimeEvent::PromptReleaseTransitioned(_) => log_stub("PromptReleaseTransitioned"),
-            RuntimeEvent::PromptRolloutStarted(_) => log_stub("PromptRolloutStarted"),
-            RuntimeEvent::TenantCreated(_) => log_stub("TenantCreated"),
-            RuntimeEvent::WorkspaceCreated(_) => log_stub("WorkspaceCreated"),
-            RuntimeEvent::ProjectCreated(_) => log_stub("ProjectCreated"),
-            RuntimeEvent::RouteDecisionMade(_) => log_stub("RouteDecisionMade"),
-            RuntimeEvent::ProviderCallCompleted(_) => log_stub("ProviderCallCompleted"),
+            RuntimeEvent::PromptReleaseCreated(e) => {
+                sqlx::query(
+                    "INSERT INTO prompt_releases
+                         (prompt_release_id, prompt_asset_id, prompt_version_id,
+                          tenant_id, workspace_id, project_id,
+                          release_tag, state, rollout_target, created_at, updated_at)
+                     VALUES (?, ?, ?, ?, ?, ?, ?, 'draft', NULL, ?, ?)
+                     ON CONFLICT(prompt_release_id) DO NOTHING",
+                )
+                .bind(e.prompt_release_id.as_str())
+                .bind(e.prompt_asset_id.as_str())
+                .bind(e.prompt_version_id.as_str())
+                .bind(e.project.tenant_id.as_str())
+                .bind(e.project.workspace_id.as_str())
+                .bind(e.project.project_id.as_str())
+                .bind(e.release_tag.as_deref())
+                .bind(e.created_at as i64)
+                .bind(e.created_at as i64)
+                .execute(&mut **tx)
+                .await
+                .map_err(|err| StoreError::Internal(err.to_string()))?;
+            }
+            RuntimeEvent::PromptReleaseTransitioned(e) => {
+                sqlx::query(
+                    "UPDATE prompt_releases
+                     SET state = ?, updated_at = ?
+                     WHERE prompt_release_id = ?",
+                )
+                .bind(&e.to_state)
+                .bind(now)
+                .bind(e.prompt_release_id.as_str())
+                .execute(&mut **tx)
+                .await
+                .map_err(|err| StoreError::Internal(err.to_string()))?;
+            }
+            // RFC 001 gradual rollout — state tracked via prompt_releases;
+            // mirrors PG which treats this as a no-op projection event.
+            RuntimeEvent::PromptRolloutStarted(_) => {}
+            RuntimeEvent::TenantCreated(e) => {
+                sqlx::query(
+                    "INSERT INTO tenants (tenant_id, name, created_at, updated_at)
+                     VALUES (?, ?, ?, ?)
+                     ON CONFLICT(tenant_id) DO NOTHING",
+                )
+                .bind(e.tenant_id.as_str())
+                .bind(&e.name)
+                .bind(e.created_at as i64)
+                .bind(e.created_at as i64)
+                .execute(&mut **tx)
+                .await
+                .map_err(|err| StoreError::Internal(err.to_string()))?;
+            }
+            RuntimeEvent::WorkspaceCreated(e) => {
+                sqlx::query(
+                    "INSERT INTO workspaces (workspace_id, tenant_id, name, created_at, updated_at)
+                     VALUES (?, ?, ?, ?, ?)
+                     ON CONFLICT(workspace_id) DO NOTHING",
+                )
+                .bind(e.workspace_id.as_str())
+                .bind(e.tenant_id.as_str())
+                .bind(&e.name)
+                .bind(e.created_at as i64)
+                .bind(e.created_at as i64)
+                .execute(&mut **tx)
+                .await
+                .map_err(|err| StoreError::Internal(err.to_string()))?;
+            }
+            RuntimeEvent::ProjectCreated(e) => {
+                sqlx::query(
+                    "INSERT INTO projects (project_id, workspace_id, tenant_id, name, created_at, updated_at)
+                     VALUES (?, ?, ?, ?, ?, ?)
+                     ON CONFLICT(project_id) DO NOTHING",
+                )
+                .bind(e.project.project_id.as_str())
+                .bind(e.project.workspace_id.as_str())
+                .bind(e.project.tenant_id.as_str())
+                .bind(&e.name)
+                .bind(e.created_at as i64)
+                .bind(e.created_at as i64)
+                .execute(&mut **tx)
+                .await
+                .map_err(|err| StoreError::Internal(err.to_string()))?;
+            }
+            RuntimeEvent::RouteDecisionMade(e) => {
+                let operation_kind = enum_to_str(&e.operation_kind)?;
+                let final_status = enum_to_str(&e.final_status)?;
+                // selector_context is not carried by the event (mirrors PG).
+                let selector_ctx: Option<String> = None;
+                sqlx::query(
+                    "INSERT INTO route_decisions
+                         (route_decision_id, tenant_id, workspace_id, project_id,
+                          operation_kind, route_policy_id, terminal_route_attempt_id,
+                          selected_provider_binding_id, selected_route_attempt_id,
+                          selector_context, attempt_count, fallback_used, final_status,
+                          created_at)
+                     VALUES (?, ?, ?, ?, ?, NULL, NULL, ?, NULL, ?, ?, ?, ?, ?)
+                     ON CONFLICT(route_decision_id) DO NOTHING",
+                )
+                .bind(e.route_decision_id.as_str())
+                .bind(e.project.tenant_id.as_str())
+                .bind(e.project.workspace_id.as_str())
+                .bind(e.project.project_id.as_str())
+                .bind(operation_kind)
+                .bind(
+                    e.selected_provider_binding_id
+                        .as_ref()
+                        .map(|id| id.as_str()),
+                )
+                .bind(selector_ctx)
+                .bind(e.attempt_count as i64)
+                .bind(i64::from(e.fallback_used))
+                .bind(final_status)
+                .bind(e.decided_at as i64)
+                .execute(&mut **tx)
+                .await
+                .map_err(|err| StoreError::Internal(err.to_string()))?;
+            }
+            RuntimeEvent::ProviderCallCompleted(e) => {
+                let operation_kind = enum_to_str(&e.operation_kind)?;
+                let status = enum_to_str(&e.status)?;
+                let error_class = e.error_class.as_ref().map(enum_to_str).transpose()?;
+                let latency_ms: Option<i64> = e.latency_ms.map(|v| v as i64).or_else(|| {
+                    if e.started_at > 0 && e.finished_at >= e.started_at {
+                        Some((e.finished_at - e.started_at) as i64)
+                    } else {
+                        None
+                    }
+                });
+                sqlx::query(
+                    "INSERT INTO provider_calls
+                         (provider_call_id, route_decision_id, route_attempt_id,
+                          tenant_id, workspace_id, project_id,
+                          operation_kind, provider_binding_id, provider_connection_id,
+                          provider_adapter, provider_model_id,
+                          task_id, run_id, prompt_release_id, fallback_position,
+                          status, latency_ms, input_tokens, output_tokens, cost_micros,
+                          error_class, raw_error_message, retry_count, created_at)
+                     VALUES
+                         (?, ?, ?, ?, ?, ?, ?, ?, ?, '', ?,
+                          ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                          ?, ?, ?, ?)
+                     ON CONFLICT(provider_call_id) DO NOTHING",
+                )
+                .bind(e.provider_call_id.as_str())
+                .bind(e.route_decision_id.as_str())
+                .bind(e.route_attempt_id.as_str())
+                .bind(e.project.tenant_id.as_str())
+                .bind(e.project.workspace_id.as_str())
+                .bind(e.project.project_id.as_str())
+                .bind(operation_kind)
+                .bind(e.provider_binding_id.as_str())
+                .bind(e.provider_connection_id.as_str())
+                .bind(e.provider_model_id.as_str())
+                .bind(e.task_id.as_ref().map(|id| id.as_str()))
+                .bind(e.run_id.as_ref().map(|id| id.as_str()))
+                .bind(e.prompt_release_id.as_ref().map(|id| id.as_str()))
+                .bind(e.fallback_position as i64)
+                .bind(status)
+                .bind(latency_ms)
+                .bind(e.input_tokens.map(|v| v as i64))
+                .bind(e.output_tokens.map(|v| v as i64))
+                .bind(e.cost_micros.map(|v| v as i64))
+                .bind(error_class)
+                .bind(e.raw_error_message.as_deref())
+                .bind(e.retry_count as i64)
+                .bind(e.completed_at as i64)
+                .execute(&mut **tx)
+                .await
+                .map_err(|err| StoreError::Internal(err.to_string()))?;
+            }
             RuntimeEvent::OutcomeRecorded(_) => log_stub("OutcomeRecorded"),
             RuntimeEvent::ScheduledTaskCreated(_) => log_stub("ScheduledTaskCreated"),
             RuntimeEvent::PlanProposed(_) => log_stub("PlanProposed"),
@@ -388,8 +608,31 @@ impl SqliteSyncProjection {
             RuntimeEvent::RetentionPolicySet(_) => log_stub("RetentionPolicySet"),
             RuntimeEvent::RunCostAlertSet(_) => log_stub("RunCostAlertSet"),
             RuntimeEvent::RunCostAlertTriggered(_) => log_stub("RunCostAlertTriggered"),
-            RuntimeEvent::WorkspaceMemberAdded(_) => log_stub("WorkspaceMemberAdded"),
-            RuntimeEvent::WorkspaceMemberRemoved(_) => log_stub("WorkspaceMemberRemoved"),
+            RuntimeEvent::WorkspaceMemberAdded(e) => {
+                let role = enum_to_str(&e.role)?;
+                sqlx::query(
+                    "INSERT INTO workspace_members (workspace_id, operator_id, role, added_at_ms)
+                     VALUES (?, ?, ?, ?)
+                     ON CONFLICT(workspace_id, operator_id) DO UPDATE SET role = excluded.role",
+                )
+                .bind(e.workspace_key.workspace_id.as_str())
+                .bind(e.member_id.as_str())
+                .bind(role)
+                .bind(e.added_at_ms as i64)
+                .execute(&mut **tx)
+                .await
+                .map_err(|err| StoreError::Internal(err.to_string()))?;
+            }
+            RuntimeEvent::WorkspaceMemberRemoved(e) => {
+                sqlx::query(
+                    "DELETE FROM workspace_members WHERE workspace_id = ? AND operator_id = ?",
+                )
+                .bind(e.workspace_key.workspace_id.as_str())
+                .bind(e.member_id.as_str())
+                .execute(&mut **tx)
+                .await
+                .map_err(|err| StoreError::Internal(err.to_string()))?;
+            }
             RuntimeEvent::ApprovalDelegated(_) => log_stub("ApprovalDelegated"),
             RuntimeEvent::AuditLogEntryRecorded(_) => log_stub("AuditLogEntryRecorded"),
             RuntimeEvent::CheckpointStrategySet(_) => log_stub("CheckpointStrategySet"),
