@@ -6,8 +6,8 @@ Audience: product owner, architecture lead, parallel coding agents
 
 Companion execution artifact:
 
-- [`MANAGER_THREE_WORKER_REPLAN.md`](./MANAGER_THREE_WORKER_REPLAN.md)
-- [`EIGHT_WORKER_EXECUTION_PLAN.md`](./EIGHT_WORKER_EXECUTION_PLAN.md)
+- [`MANAGER_THREE_WORKER_REPLAN.md`](./8-worker-plan/MANAGER_THREE_WORKER_REPLAN.md)
+- [`EIGHT_WORKER_EXECUTION_PLAN.md`](./8-worker-plan/EIGHT_WORKER_EXECUTION_PLAN.md)
 
 ## Purpose
 
@@ -1032,7 +1032,7 @@ These should be decided by short RFCs, not by drift during implementation.
 11. deployment shape: self-hosted, hybrid, or managed control plane
 12. onboarding and starter-template strategy
 
-Initial RFC drafts live in [`docs/design/rfcs/`](./rfcs/README.md).
+Initial RFC drafts live in [`docs/design/rfcs/`](../rfcs/README.md).
 
 Supporting decision tables:
 
