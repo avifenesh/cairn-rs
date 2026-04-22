@@ -33,7 +33,7 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **`POST /v1/decisions/evaluate` added to `http_routes.tsv`.** Route
   handler existed and was reachable in production, but the compatibility
   catalogue did not list it, so the drift check could not detect
-  regressions. Close surfaced by #192. (#105)
+  regressions. Gap surfaced by #192. (#105)
 
 - **Session projection read-after-write race closed for RFC 020 test
   #11.** `RecoverySummary` could be emitted before the session projection
@@ -48,12 +48,13 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
-- **9-table SQLite port (option B parity).** Ports `workspace_members`,
-  `repo_access`, `tenants`, `workspaces`, `projects`, `prompt_assets`,
-  `prompt_releases`, `memory_documents`, and one more table to the
-  SQLite backend so team-mode deployments on single-node hardware can
-  run without Postgres. Schema-parity check (`cargo test -p cairn-store
-  --test schema_parity`) now passes for these tables. (#102)
+- **9-table SQLite port (option B parity).** Ports `tenants`,
+  `workspaces`, `projects`, `workspace_members`, `prompt_assets`,
+  `prompt_versions`, `prompt_releases`, `route_decisions`, and
+  `provider_calls` to the SQLite backend so team-mode deployments on
+  single-node hardware can run without Postgres. Schema-parity check
+  (`cargo test -p cairn-store --test schema_parity`) now passes for
+  these tables. (#102)
 
 - **`route_policies` ported to SQLite.** Completes option B parity
   for the 10-table block tracked by the schema-parity check. (#104)
