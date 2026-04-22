@@ -268,14 +268,14 @@ impl FabricRunService {
     ) -> Result<RunRecord, FabricError> {
         let eid = self.execution_id(project, session_id, run_id);
 
-        let snapshot = self
-            .engine
-            .describe_execution(&eid)
-            .await?
-            .ok_or_else(|| FabricError::NotFound {
-                entity: "run",
-                id: run_id.to_string(),
-            })?;
+        let snapshot =
+            self.engine
+                .describe_execution(&eid)
+                .await?
+                .ok_or_else(|| FabricError::NotFound {
+                    entity: "run",
+                    id: run_id.to_string(),
+                })?;
         let lane_id = if snapshot.lane_id.as_str().is_empty() {
             self.lane_id(project)
         } else {
@@ -303,14 +303,14 @@ impl FabricRunService {
         run_id: &RunId,
     ) -> Result<RunRecord, FabricError> {
         let eid = self.execution_id(project, session_id, run_id);
-        let snapshot = self
-            .engine
-            .describe_execution(&eid)
-            .await?
-            .ok_or_else(|| FabricError::NotFound {
-                entity: "run",
-                id: run_id.to_string(),
-            })?;
+        let snapshot =
+            self.engine
+                .describe_execution(&eid)
+                .await?
+                .ok_or_else(|| FabricError::NotFound {
+                    entity: "run",
+                    id: run_id.to_string(),
+                })?;
         let prev_state = ff_public_state_to_run_state(&snapshot);
         let lease = self.resolve_lease_context(&snapshot);
 
@@ -340,14 +340,14 @@ impl FabricRunService {
         failure_class: FailureClass,
     ) -> Result<RunRecord, FabricError> {
         let eid = self.execution_id(project, session_id, run_id);
-        let snapshot = self
-            .engine
-            .describe_execution(&eid)
-            .await?
-            .ok_or_else(|| FabricError::NotFound {
-                entity: "run",
-                id: run_id.to_string(),
-            })?;
+        let snapshot =
+            self.engine
+                .describe_execution(&eid)
+                .await?
+                .ok_or_else(|| FabricError::NotFound {
+                    entity: "run",
+                    id: run_id.to_string(),
+                })?;
         let prev_state = ff_public_state_to_run_state(&snapshot);
         let lease = self.resolve_lease_context(&snapshot);
 
@@ -390,14 +390,14 @@ impl FabricRunService {
         run_id: &RunId,
     ) -> Result<RunRecord, FabricError> {
         let eid = self.execution_id(project, session_id, run_id);
-        let snapshot = self
-            .engine
-            .describe_execution(&eid)
-            .await?
-            .ok_or_else(|| FabricError::NotFound {
-                entity: "run",
-                id: run_id.to_string(),
-            })?;
+        let snapshot =
+            self.engine
+                .describe_execution(&eid)
+                .await?
+                .ok_or_else(|| FabricError::NotFound {
+                    entity: "run",
+                    id: run_id.to_string(),
+                })?;
         let prev_state = ff_public_state_to_run_state(&snapshot);
         let lease = self.resolve_lease_context(&snapshot);
         let current_waitpoint = snapshot.current_waitpoint.clone();
@@ -429,14 +429,14 @@ impl FabricRunService {
         reason: PauseReason,
     ) -> Result<RunRecord, FabricError> {
         let eid = self.execution_id(project, session_id, run_id);
-        let snapshot = self
-            .engine
-            .describe_execution(&eid)
-            .await?
-            .ok_or_else(|| FabricError::NotFound {
-                entity: "run",
-                id: run_id.to_string(),
-            })?;
+        let snapshot =
+            self.engine
+                .describe_execution(&eid)
+                .await?
+                .ok_or_else(|| FabricError::NotFound {
+                    entity: "run",
+                    id: run_id.to_string(),
+                })?;
         let prev_state = ff_public_state_to_run_state(&snapshot);
         let lease = self.resolve_lease_context(&snapshot);
 
@@ -535,14 +535,14 @@ impl FabricRunService {
         _target: RunResumeTarget,
     ) -> Result<RunRecord, FabricError> {
         let eid = self.execution_id(project, session_id, run_id);
-        let snapshot = self
-            .engine
-            .describe_execution(&eid)
-            .await?
-            .ok_or_else(|| FabricError::NotFound {
-                entity: "run",
-                id: run_id.to_string(),
-            })?;
+        let snapshot =
+            self.engine
+                .describe_execution(&eid)
+                .await?
+                .ok_or_else(|| FabricError::NotFound {
+                    entity: "run",
+                    id: run_id.to_string(),
+                })?;
         let prev_state = ff_public_state_to_run_state(&snapshot);
         let lane_id = if snapshot.lane_id.as_str().is_empty() {
             LaneId::new("cairn")
@@ -579,14 +579,14 @@ impl FabricRunService {
         let params = crate::suspension::for_approval(run_id.as_str(), None);
 
         let eid = self.execution_id(project, session_id, run_id);
-        let snapshot = self
-            .engine
-            .describe_execution(&eid)
-            .await?
-            .ok_or_else(|| FabricError::NotFound {
-                entity: "run",
-                id: run_id.to_string(),
-            })?;
+        let snapshot =
+            self.engine
+                .describe_execution(&eid)
+                .await?
+                .ok_or_else(|| FabricError::NotFound {
+                    entity: "run",
+                    id: run_id.to_string(),
+                })?;
         let prev_state = ff_public_state_to_run_state(&snapshot);
         let lease = self.resolve_lease_context(&snapshot);
 
@@ -634,14 +634,14 @@ impl FabricRunService {
         decision: ApprovalDecision,
     ) -> Result<RunRecord, FabricError> {
         let eid = self.execution_id(project, session_id, run_id);
-        let snapshot = self
-            .engine
-            .describe_execution(&eid)
-            .await?
-            .ok_or_else(|| FabricError::NotFound {
-                entity: "run",
-                id: run_id.to_string(),
-            })?;
+        let snapshot =
+            self.engine
+                .describe_execution(&eid)
+                .await?
+                .ok_or_else(|| FabricError::NotFound {
+                    entity: "run",
+                    id: run_id.to_string(),
+                })?;
 
         let lane_id = if snapshot.lane_id.as_str().is_empty() {
             LaneId::new("cairn")

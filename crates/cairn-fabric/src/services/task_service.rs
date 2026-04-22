@@ -584,10 +584,7 @@ impl FabricTaskService {
     ) -> Result<Vec<TaskDependencyRecord>, FabricError> {
         let eid = self.task_to_execution_id(project, Some(session_id), task_id);
 
-        let eligibility = self
-            .control_plane
-            .evaluate_flow_eligibility(&eid)
-            .await?;
+        let eligibility = self.control_plane.evaluate_flow_eligibility(&eid).await?;
 
         if eligibility != EligibilityResult::BlockedByDependencies {
             return Ok(Vec::new());

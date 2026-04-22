@@ -21,8 +21,8 @@ use std::collections::HashMap;
 
 use cairn_fabric::engine::{
     AddExecutionToFlowInput, ApplyDependencyToChildInput, BudgetSpendOutcome, CancelFlowInput,
-    CreateFlowInput, EligibilityResult, FlowCancelOutcome, QuotaAdmission, StageDependencyEdgeInput,
-    StageDependencyOutcome, SubmitTaskInput,
+    CreateFlowInput, EligibilityResult, FlowCancelOutcome, QuotaAdmission,
+    StageDependencyEdgeInput, StageDependencyOutcome, SubmitTaskInput,
 };
 use ff_core::types::{
     BudgetId, EdgeId, ExecutionId, FlowId, LaneId, Namespace, WorkerId, WorkerInstanceId,
@@ -356,7 +356,8 @@ async fn engine_register_heartbeat_mark_dead_roundtrip() {
 async fn control_plane_submit_task_is_idempotent() {
     let h = TestHarness::setup().await;
     let task_id = cairn_domain::TaskId::new(format!("cp_task_{}", uuid::Uuid::new_v4()));
-    let eid = cairn_fabric::id_map::task_to_execution_id(&h.project, &task_id, h.partition_config());
+    let eid =
+        cairn_fabric::id_map::task_to_execution_id(&h.project, &task_id, h.partition_config());
     let namespace = cairn_fabric::id_map::tenant_to_namespace(&h.project.tenant_id);
     let lane = cairn_fabric::id_map::project_to_lane(&h.project);
 
