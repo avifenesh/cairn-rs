@@ -2709,7 +2709,17 @@ mod tests {
              and MUST NOT emit BaseRevisionDrift",
         );
         assert!(summary.base_revision_drift_runs.is_empty());
-        assert!(sink.drain().is_empty());
+        // After PR #88 the reattach sweep may emit `SandboxReattached`
+        // for this entry (path exists, no drift-handled tombstone, no
+        // allowlist-revoked tombstone) — that's a separate, correct
+        // contract. Here we assert only that no drift event fires.
+        let events = sink.drain();
+        assert!(
+            !events
+                .iter()
+                .any(|e| matches!(e, SandboxEvent::SandboxBaseRevisionDrift { .. })),
+            "reflink sandbox must not emit SandboxBaseRevisionDrift; got {events:?}",
+        );
     }
 
     #[tokio::test]
@@ -2758,6 +2768,14 @@ mod tests {
         let summary = service.recover_all().await.unwrap();
         assert_eq!(summary.preserved_base_revision_drift, 0);
         assert!(summary.base_revision_drift_runs.is_empty());
-        assert!(sink.drain().is_empty());
+        // Reattach sweep (PR #88) may emit `SandboxReattached` — it is
+        // the drift absence we're locking in here, not overall silence.
+        let events = sink.drain();
+        assert!(
+            !events
+                .iter()
+                .any(|e| matches!(e, SandboxEvent::SandboxBaseRevisionDrift { .. })),
+            "clone-missing must not emit SandboxBaseRevisionDrift; got {events:?}",
+        );
     }
 }
