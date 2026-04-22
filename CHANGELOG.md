@@ -9,6 +9,15 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Security
+
+- Removed the dev-admin-token one-click hint from the login page now
+  that the UI is reachable from untrusted networks. The placeholder
+  hint inside the input still shows `dev-admin-token` when the client
+  is pointed at a `localhost`/`127.*` server, but the prominent
+  one-click autofill button — which used to broadcast the default credential
+  to any visitor — is gone.
+
 ### Added
 
 - **`cairn-harness-tools` crate** — adapter bridging the `@agent-sh/harness-*`

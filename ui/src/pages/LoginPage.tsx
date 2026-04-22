@@ -119,20 +119,6 @@ export function LoginPage({ onLogin }: LoginPageProps) {
               </div>
             )}
 
-            {/* Dev shortcut */}
-            {isDev && !token && !error && (
-              <p className="text-[11px] text-gray-300 dark:text-zinc-600">
-                Dev mode — try{' '}
-                <button
-                  type="button"
-                  onClick={() => setToken('dev-admin-token')}
-                  className="font-mono text-gray-400 dark:text-zinc-600 hover:text-indigo-400 underline underline-offset-2 transition-colors"
-                >
-                  dev-admin-token
-                </button>
-              </p>
-            )}
-
             {/* Submit */}
             <button
               type="submit"
