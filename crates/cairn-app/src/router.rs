@@ -312,6 +312,13 @@ impl AppBootstrap {
         let state = Arc::new(AppState::new_with_runtime(config, runtime, fabric).await?);
         let router = Self::build_router(state.clone());
         state.metrics.mark_started();
+        // Tests that inject a runtime aren't exercising the RFC 020
+        // startup graph — they skip the main.rs recovery sequence by
+        // construction — so flip readiness synchronously here. Tests
+        // that DO want to observe the recovery transition use
+        // `LiveHarness`, which spawns the real `cairn-app` binary and
+        // hits the real startup sequence.
+        state.readiness.mark_ready();
         Ok((router, state))
     }
 
