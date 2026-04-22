@@ -120,10 +120,7 @@ pub async fn backfill_instance_tag(
                 .execute()
                 .await
                 .map_err(|e| format!("HGET cairn.project {key}: {e}"))?;
-            let has_project = matches!(
-                project_raw,
-                Value::BulkString(_) | Value::SimpleString(_)
-            );
+            let has_project = matches!(project_raw, Value::BulkString(_) | Value::SimpleString(_));
             if !has_project {
                 outcome.skipped_foreign += 1;
                 continue;
@@ -135,10 +132,8 @@ pub async fn backfill_instance_tag(
                 .execute()
                 .await
                 .map_err(|e| format!("HGET cairn.instance_id {key}: {e}"))?;
-            let already_tagged = matches!(
-                instance_raw,
-                Value::BulkString(_) | Value::SimpleString(_)
-            );
+            let already_tagged =
+                matches!(instance_raw, Value::BulkString(_) | Value::SimpleString(_));
             if already_tagged {
                 outcome.skipped_tagged += 1;
                 continue;
