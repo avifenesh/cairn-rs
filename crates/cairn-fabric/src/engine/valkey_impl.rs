@@ -211,12 +211,7 @@ impl Engine for ValkeyEngine {
         Ok(())
     }
 
-    async fn set_flow_tag(
-        &self,
-        id: &FlowId,
-        key: &str,
-        value: &str,
-    ) -> Result<(), FabricError> {
+    async fn set_flow_tag(&self, id: &FlowId, key: &str, value: &str) -> Result<(), FabricError> {
         validate_tag_namespace(key)?;
         let partition = flow_partition(id, &self.runtime.partition_config);
         let fctx = FlowKeyContext::new(&partition, id);

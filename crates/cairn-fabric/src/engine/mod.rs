@@ -158,12 +158,7 @@ pub trait Engine: Send + Sync {
     /// Namespace-guarded: see [`Self::set_execution_tag`] for the
     /// rule. Callers never see the Valkey hash layout — the impl
     /// constructs the flow's core key internally.
-    async fn set_flow_tag(
-        &self,
-        id: &FlowId,
-        key: &str,
-        value: &str,
-    ) -> Result<(), FabricError>;
+    async fn set_flow_tag(&self, id: &FlowId, key: &str, value: &str) -> Result<(), FabricError>;
 
     /// Bulk-set flow tags in a single round-trip.
     ///
