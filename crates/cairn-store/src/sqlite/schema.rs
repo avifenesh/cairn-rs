@@ -264,9 +264,9 @@ CREATE TABLE IF NOT EXISTS prompt_versions (
     tenant_id         TEXT NOT NULL,
     workspace_id      TEXT NOT NULL,
     project_id        TEXT NOT NULL,
-    -- The projection allocates version_number via COALESCE(MAX+1) in a
-    -- serialized append path. UNIQUE(asset, version_number) defends
-    -- against a future concurrent-append path.
+    -- The projection allocates version_number via COALESCE(MAX, 0) + 1
+    -- in a serialized append path. UNIQUE(prompt_asset_id, version_number)
+    -- defends against a future concurrent-append path.
     version_number    INTEGER NOT NULL,
     content_hash      TEXT NOT NULL,
     content           TEXT,
@@ -351,8 +351,8 @@ CREATE INDEX IF NOT EXISTS idx_provider_calls_decision
 
 -- ── Route policies (RFC 007 provider routing) ──────────────────────────
 -- `rules` is a JSON array of RoutePolicyRule, written and read
--- wholesale (no server-side JSONB operators), so TEXT is portable
--- against Postgres JSONB.
+-- wholesale (no server-side JSONB operators), so TEXT is a portable
+-- substitute for Postgres JSONB.
 
 CREATE TABLE IF NOT EXISTS route_policies (
     policy_id   TEXT PRIMARY KEY,
