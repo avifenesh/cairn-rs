@@ -673,7 +673,32 @@ impl SqliteSyncProjection {
             RuntimeEvent::RecoveryEscalated(_) => log_stub("RecoveryEscalated"),
             RuntimeEvent::ResourceShareRevoked(_) => log_stub("ResourceShareRevoked"),
             RuntimeEvent::ResourceShared(_) => log_stub("ResourceShared"),
-            RuntimeEvent::RoutePolicyCreated(_) => log_stub("RoutePolicyCreated"),
+            RuntimeEvent::RoutePolicyCreated(e) => {
+                // `rules` is stored as a JSON string (SQLite has no JSONB);
+                // mirrors PG V018 but uses TEXT. Serialized wholesale on
+                // write, parsed wholesale on read by the service layer.
+                let rules = serde_json::to_string(&e.rules)
+                    .map_err(|err| StoreError::Serialization(err.to_string()))?;
+                sqlx::query(
+                    "INSERT INTO route_policies (policy_id, tenant_id, name, rules, enabled, created_at, updated_at)
+                     VALUES (?, ?, ?, ?, ?, ?, ?)
+                     ON CONFLICT(policy_id) DO UPDATE
+                     SET name = excluded.name, rules = excluded.rules, updated_at = excluded.updated_at",
+                )
+                .bind(&e.policy_id)
+                .bind(e.tenant_id.as_str())
+                .bind(&e.name)
+                .bind(rules)
+                .bind(if e.enabled { 1_i64 } else { 0_i64 })
+                .bind(now)
+                .bind(now)
+                .execute(&mut **tx)
+                .await
+                .map_err(|err| StoreError::Internal(err.to_string()))?;
+            }
+            // Mirrors PG: RoutePolicyUpdated is not projected (log_stub on
+            // both backends). The event is kept for audit; the rules set is
+            // updated via a new RoutePolicyCreated ON CONFLICT DO UPDATE.
             RuntimeEvent::RoutePolicyUpdated(_) => log_stub("RoutePolicyUpdated"),
             RuntimeEvent::RunSlaBreached(_) => log_stub("RunSlaBreached"),
             RuntimeEvent::RunSlaSet(_) => log_stub("RunSlaSet"),

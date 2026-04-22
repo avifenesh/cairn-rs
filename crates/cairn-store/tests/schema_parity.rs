@@ -8,11 +8,10 @@
 //! Recommended by the portability audit — see the project memory note
 //! `project_pg_specific_audit.md` §7 "Pattern Analysis".
 //!
-//! The test is un-ignored as of the 9-table parity port (Option B). A
-//! single known-exception (`route_policies`) is allow-listed via the
-//! `KNOWN_POSTGRES_ONLY` constant while the JSONB→TEXT design is
-//! discussed — see `project_sqlite_parity_route_policies_pending.md`
-//! in the project memory. Any additional drift fails CI.
+//! The test is un-ignored as of the 9-table parity port (Option B) and
+//! with the `route_policies` port (Path 1: JSONB→TEXT + app-side JSON),
+//! the `KNOWN_POSTGRES_ONLY` allow-list is now empty. Any drift between
+//! the Postgres migrations and the SQLite DDL fails CI.
 
 use std::collections::BTreeSet;
 use std::fs;
@@ -258,13 +257,11 @@ fn infra_tables() -> BTreeSet<String> {
 /// pointer to project memory so future maintainers know when it can be
 /// removed.
 ///
-/// - `route_policies` (V018): uses `JSONB NOT NULL DEFAULT '[]'` for
-///   the `rules` column. Porting to SQLite requires either (a) TEXT +
-///   app-side JSON parse on every read/write, or (b) a feature-gated
-///   Postgres-only API surface. Decision pending — see
-///   `project_sqlite_parity_route_policies_pending.md` in the agent
-///   memory index.
-const KNOWN_POSTGRES_ONLY: &[&str] = &["route_policies"];
+/// Empty as of the `route_policies` SQLite port (Path 1: TEXT + app-side
+/// JSON serialization). If a future table genuinely cannot be ported —
+/// e.g. because it depends on Postgres-specific features with no portable
+/// substitute — add it here with a memory pointer justifying the choice.
+const KNOWN_POSTGRES_ONLY: &[&str] = &[];
 
 #[test]
 fn postgres_and_sqlite_define_the_same_tables() {

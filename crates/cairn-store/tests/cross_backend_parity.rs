@@ -1192,4 +1192,121 @@ mod sqlite_parity {
             "tool invocation ordering must survive rebuild"
         );
     }
+
+    /// RoutePolicyCreated on the SQLite backend round-trips the `rules`
+    /// vector through the TEXT/JSON column defined in the V018-equivalent
+    /// SQLite DDL. Exercises the projection INSERT + wholesale JSON
+    /// serialization path (Path 1 of the JSONB parity decision).
+    #[tokio::test]
+    async fn route_policy_rules_round_trip_through_sqlite() {
+        use cairn_domain::events::RoutePolicyCreated;
+        use cairn_domain::providers::RoutePolicyRule;
+        use cairn_store::sqlite::{SqliteAdapter, SqliteEventLog};
+
+        let adapter = SqliteAdapter::in_memory().await.unwrap();
+        let event_log = SqliteEventLog::new(adapter.pool().clone());
+
+        let rules = vec![
+            RoutePolicyRule {
+                rule_id: "rule_primary".to_owned(),
+                policy_id: "pol_rt".to_owned(),
+                priority: 10,
+                description: Some("Primary fallback".to_owned()),
+            },
+            RoutePolicyRule {
+                rule_id: "rule_secondary".to_owned(),
+                policy_id: "pol_rt".to_owned(),
+                priority: 20,
+                description: None,
+            },
+        ];
+
+        let event = make_envelope(RuntimeEvent::RoutePolicyCreated(RoutePolicyCreated {
+            tenant_id: TenantId::new("tenant_rt"),
+            policy_id: "pol_rt".to_owned(),
+            name: "Round-trip Policy".to_owned(),
+            rules: rules.clone(),
+            enabled: true,
+        }));
+
+        event_log.append(&[event]).await.unwrap();
+
+        // Read back the row directly — the service layer parses `rules`
+        // app-side with serde_json, so this test does the same.
+        let row: (String, String, String, i64) = sqlx::query_as(
+            "SELECT name, tenant_id, rules, enabled FROM route_policies WHERE policy_id = ?",
+        )
+        .bind("pol_rt")
+        .fetch_one(adapter.pool())
+        .await
+        .unwrap();
+
+        assert_eq!(row.0, "Round-trip Policy");
+        assert_eq!(row.1, "tenant_rt");
+        assert_eq!(row.3, 1, "enabled should round-trip as 1");
+
+        let parsed: Vec<RoutePolicyRule> = serde_json::from_str(&row.2).unwrap();
+        assert_eq!(parsed, rules, "rules must round-trip verbatim");
+    }
+
+    /// A second RoutePolicyCreated with the same policy_id must upsert,
+    /// mirroring the PG `ON CONFLICT DO UPDATE` shape.
+    #[tokio::test]
+    async fn route_policy_upsert_replaces_name_and_rules() {
+        use cairn_domain::events::RoutePolicyCreated;
+        use cairn_domain::providers::RoutePolicyRule;
+        use cairn_store::sqlite::{SqliteAdapter, SqliteEventLog};
+
+        let adapter = SqliteAdapter::in_memory().await.unwrap();
+        let event_log = SqliteEventLog::new(adapter.pool().clone());
+
+        let first = make_envelope(RuntimeEvent::RoutePolicyCreated(RoutePolicyCreated {
+            tenant_id: TenantId::new("tenant_up"),
+            policy_id: "pol_up".to_owned(),
+            name: "Initial".to_owned(),
+            rules: vec![RoutePolicyRule {
+                rule_id: "r1".to_owned(),
+                policy_id: "pol_up".to_owned(),
+                priority: 1,
+                description: None,
+            }],
+            enabled: true,
+        }));
+        event_log.append(&[first]).await.unwrap();
+
+        let second = make_envelope(RuntimeEvent::RoutePolicyCreated(RoutePolicyCreated {
+            tenant_id: TenantId::new("tenant_up"),
+            policy_id: "pol_up".to_owned(),
+            name: "Renamed".to_owned(),
+            rules: vec![
+                RoutePolicyRule {
+                    rule_id: "r1".to_owned(),
+                    policy_id: "pol_up".to_owned(),
+                    priority: 5,
+                    description: Some("updated".to_owned()),
+                },
+                RoutePolicyRule {
+                    rule_id: "r2".to_owned(),
+                    policy_id: "pol_up".to_owned(),
+                    priority: 10,
+                    description: None,
+                },
+            ],
+            enabled: true,
+        }));
+        event_log.append(&[second]).await.unwrap();
+
+        let row: (String, String) =
+            sqlx::query_as("SELECT name, rules FROM route_policies WHERE policy_id = ?")
+                .bind("pol_up")
+                .fetch_one(adapter.pool())
+                .await
+                .unwrap();
+
+        assert_eq!(row.0, "Renamed", "upsert must replace name");
+        let parsed: Vec<RoutePolicyRule> = serde_json::from_str(&row.1).unwrap();
+        assert_eq!(parsed.len(), 2, "upsert must replace the rules vector");
+        assert_eq!(parsed[0].priority, 5);
+        assert_eq!(parsed[1].rule_id, "r2");
+    }
 }
