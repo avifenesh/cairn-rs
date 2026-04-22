@@ -253,10 +253,6 @@ CREATE TABLE IF NOT EXISTS prompt_assets (
     scope           TEXT,
     status          TEXT,
     created_at      INTEGER NOT NULL,
-    -- NOT NULL: mirrors Postgres V023 hardening. The projection writes
-    -- updated_at on every insert (see sqlite/projections.rs
-    -- PromptAssetCreated), so this constraint formalizes an invariant
-    -- the code already satisfies.
     updated_at      INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_prompt_assets_project
@@ -268,9 +264,9 @@ CREATE TABLE IF NOT EXISTS prompt_versions (
     tenant_id         TEXT NOT NULL,
     workspace_id      TEXT NOT NULL,
     project_id        TEXT NOT NULL,
-    -- NOT NULL + UNIQUE(asset, version_number): mirrors Postgres V023
-    -- hardening. The projection allocates via COALESCE(MAX+1); these
-    -- constraints defend against a future concurrent-append path.
+    -- The projection allocates version_number via COALESCE(MAX+1) in a
+    -- serialized append path. UNIQUE(asset, version_number) defends
+    -- against a future concurrent-append path.
     version_number    INTEGER NOT NULL,
     content_hash      TEXT NOT NULL,
     content           TEXT,
@@ -353,12 +349,10 @@ CREATE TABLE IF NOT EXISTS provider_calls (
 CREATE INDEX IF NOT EXISTS idx_provider_calls_decision
     ON provider_calls (route_decision_id, created_at, provider_call_id);
 
--- ── Route policies (mirrors V018 Postgres migration) ────────────────────
--- RFC 007 provider routing. `rules` is a serialised JSON array of
--- RoutePolicyRule; the column is written and read wholesale (no JSONB
--- operators server-side), so TEXT is a portable substitution for Postgres
--- JSONB. See `project_sqlite_parity_route_policies_pending.md` for the
--- design call (Path 1 — app-side JSON).
+-- ── Route policies (RFC 007 provider routing) ──────────────────────────
+-- `rules` is a JSON array of RoutePolicyRule, written and read
+-- wholesale (no server-side JSONB operators), so TEXT is portable
+-- against Postgres JSONB.
 
 CREATE TABLE IF NOT EXISTS route_policies (
     policy_id   TEXT PRIMARY KEY,
