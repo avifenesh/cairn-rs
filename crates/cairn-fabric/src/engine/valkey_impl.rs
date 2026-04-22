@@ -433,7 +433,7 @@ impl Engine for ValkeyEngine {
                 .arg(batch_cap.to_string().as_str())
                 .execute()
                 .await
-                .map_err(|e| FabricError::Internal(format!("ZRANGEBYSCORE lease_expiry: {e}")))?;
+                .map_err(|e| FabricError::Valkey(format!("ZRANGEBYSCORE lease_expiry: {e}")))?;
 
             // Reply shape: Array of alternating [member, score, member, score, ...].
             if let ferriskey::Value::Array(items) = raw {
@@ -451,7 +451,17 @@ impl Engine for ValkeyEngine {
                         // Malformed member — skip rather than fail the whole scan.
                         continue;
                     };
-                    let expires_at_ms: u64 = score.parse().unwrap_or(0);
+                    // Skip malformed scores rather than coercing to 0: a 0
+                    // fallback would surface the row as "expired at epoch",
+                    // a false-positive that would confuse operator dashboards.
+                    let Ok(expires_at_ms) = score.parse::<u64>() else {
+                        tracing::warn!(
+                            execution_id = %eid,
+                            raw_score = %score,
+                            "lease_expiry score unparseable; skipping row",
+                        );
+                        continue;
+                    };
                     out.push(super::control_plane_types::ExpiredLease {
                         execution_id: eid,
                         expires_at_ms,

@@ -119,7 +119,11 @@ impl FabricTaskService {
                     .current_lease_epoch
                     .map(|e| e.0.to_string())
                     .unwrap_or_else(|| "1".to_owned()),
-                self.runtime.config.worker_instance_id.clone(),
+                // Mirror FabricRunService::resolve_lease_context: no-lease
+                // placeholder is the literal "cairn" default, not the
+                // runtime's own instance id. Matches the documented
+                // "fills cairn defaults" contract on this method.
+                ff_core::types::WorkerInstanceId::new("cairn"),
             ),
         };
         ExecutionLeaseContext {
@@ -1018,10 +1022,11 @@ impl FabricTaskService {
         // for the projection to catch up.
         //
         // Delegates to `Engine::list_expired_leases` (ZRANGEBYSCORE
-        // across every execution partition). Kind filtering is done
-        // by walking the `cairn.execution_kind` tag: FF's lease_expiry
-        // index is cross-kind (it carries runs too), so we drop any
-        // execution whose tag isn't `cairn_task`.
+        // across every execution partition). FF's lease_expiry index
+        // is cross-kind (it carries runs + tasks); kind filtering is
+        // done by checking the presence of the `cairn.task_id` tag,
+        // which is only stamped by task submission. Run executions
+        // carry `cairn.run_id` instead and are skipped here.
         let expired = self.engine.list_expired_leases(now, limit).await?;
 
         let mut out = Vec::with_capacity(expired.len());
@@ -1030,7 +1035,8 @@ impl FabricTaskService {
                 Some(s) => s,
                 None => continue,
             };
-            // Kind filter: only surface cairn_task executions.
+            // Tag filter: only surface tasks (runs don't stamp
+            // `cairn.task_id`).
             let Some(task_id_str) = snapshot.tags.get("cairn.task_id").cloned() else {
                 continue;
             };
