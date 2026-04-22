@@ -607,21 +607,31 @@ pub async fn replay_tool_result_cache<S: cairn_store::EventLog>(
             break;
         }
         let last = page.last().map(|e| e.position);
-        for stored in &page {
-            if let RuntimeEvent::ToolInvocationCompleted(ev) = &stored.envelope.payload {
-                if let (Some(tcid_str), Some(result)) = (&ev.tool_call_id, &ev.result_json) {
-                    let mut guard = cache.lock().unwrap_or_else(|e| e.into_inner());
-                    // ToolCallId is a newtype around String; rebuild by hashing
-                    // is not possible since we don't have the args, but we can
-                    // reconstruct via a private constructor? Use pub as_str.
-                    // We stored the string form, so build a proxy:
-                    guard.insert_raw(tcid_str.clone(), CachedToolResult {
-                        tool_call_id: ToolCallId::from_raw(tcid_str.clone()),
-                        tool_name: ev.tool_name.clone(),
-                        result_json: result.clone(),
-                        completed_at: ev.finished_at_ms,
-                    });
-                    populated += 1;
+        // Lock the cache ONCE per page instead of once per event. The
+        // startup replay is the hot path during recovery, and on a busy
+        // event log this reduces lock-acquire overhead from O(events) to
+        // O(pages) while preserving single-thread-at-a-time mutation.
+        {
+            let mut guard = cache.lock().unwrap_or_else(|e| e.into_inner());
+            for stored in &page {
+                if let RuntimeEvent::ToolInvocationCompleted(ev) = &stored.envelope.payload {
+                    if let (Some(tcid_str), Some(result)) = (&ev.tool_call_id, &ev.result_json) {
+                        // `tool_call_id` is persisted as the stringified
+                        // `ToolCallId`; rebuild the newtype through
+                        // `from_raw` (the hash-from-args derivation is
+                        // unavailable at replay time because args are not
+                        // carried on `ToolInvocationCompleted`).
+                        guard.insert_raw(
+                            tcid_str.clone(),
+                            CachedToolResult {
+                                tool_call_id: ToolCallId::from_raw(tcid_str.clone()),
+                                tool_name: ev.tool_name.clone(),
+                                result_json: result.clone(),
+                                completed_at: ev.finished_at_ms,
+                            },
+                        );
+                        populated += 1;
+                    }
                 }
             }
         }

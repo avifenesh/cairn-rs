@@ -189,11 +189,13 @@ impl ExecutePhase for RuntimeExecutePhase {
         let mut results: Vec<ActionResult> = Vec::with_capacity(decide.proposals.len());
         let mut loop_signal = LoopSignal::Continue;
 
-        for proposal in &decide.proposals {
+        for (proposal_index, proposal) in decide.proposals.iter().enumerate() {
             // Per-proposal wall-clock; `dispatch_one` initialises
             // `duration_ms: 0` and we overwrite with the real elapsed.
             let started_at = std::time::Instant::now();
-            let mut result = self.dispatch_one(ctx, proposal).await?;
+            let mut result = self
+                .dispatch_one(ctx, proposal, proposal_index as u32)
+                .await?;
             result.duration_ms = started_at.elapsed().as_millis() as u64;
 
             // Capture any terminal loop signal from this action before pushing.
@@ -227,6 +229,7 @@ impl RuntimeExecutePhase {
         &self,
         ctx: &OrchestrationContext,
         proposal: &cairn_domain::ActionProposal,
+        call_index: u32,
     ) -> Result<ActionResult, OrchestratorError> {
         match proposal.action_type {
             // ── InvokeTool ─────────────────────────────────────────────────
@@ -406,10 +409,17 @@ impl RuntimeExecutePhase {
                     if let Some(registry) = self.tool_registry.as_ref() {
                         if let Some(handler) = registry.get(&tool_name) {
                             let normalized = handler.normalize_for_cache(&tool_args);
+                            // `call_index` is the proposal's position within
+                            // the current DecideOutput.proposals vector. Using
+                            // the index (not a hardcoded 0) guarantees two
+                            // parallel invocations of the SAME tool with
+                            // IDENTICAL normalized args still get distinct
+                            // ToolCallIds — the orchestrator dispatches them
+                            // in order, so the index is stable across replay.
                             let id = ToolCallId::derive(
                                 ctx.run_id.as_str(),
                                 ctx.iteration,
-                                0,
+                                call_index,
                                 &tool_name,
                                 &normalized,
                             );
@@ -447,6 +457,14 @@ impl RuntimeExecutePhase {
                                 served_at_ms: now,
                             },
                         );
+                        // Persist the cached tool_call_id + result_json on
+                        // the new ToolInvocationCompleted too. Downstream
+                        // projections (including the next boot's
+                        // `replay_tool_result_cache`) expect every
+                        // completion event to carry these when they exist;
+                        // leaving them `None` would silently break cache
+                        // rebuild after a restart that intersected a
+                        // cache-hit turn.
                         self.tool_invocation_service
                             .record_completed(
                                 &ctx.project,
@@ -454,8 +472,8 @@ impl RuntimeExecutePhase {
                                 ctx.task_id.clone(),
                                 tool_name.clone(),
                                 &[cache_event],
-                                None,
-                                None,
+                                Some(id.as_str().to_owned()),
+                                Some(cached.result_json.clone()),
                             )
                             .await
                             .map_err(OrchestratorError::Runtime)?;
@@ -512,7 +530,18 @@ impl RuntimeExecutePhase {
                                     )
                                     .await
                                     .map_err(OrchestratorError::Runtime)?;
-                                let approval_id = ApprovalId::new(new_id("appr"));
+                                // Deterministic approval_id derived from the
+                                // tool_call_id so two recovery sweeps of the
+                                // same crashed iteration ask the operator
+                                // for ONE approval, not N. `new_id()` uses
+                                // a per-process counter that resets on
+                                // restart, which would silently duplicate
+                                // the pending approval on every boot of a
+                                // wedged run.
+                                let approval_id = ApprovalId::new(format!(
+                                    "appr_recovery_{}",
+                                    id.as_str()
+                                ));
                                 // Append the pause audit event. Best-effort;
                                 // approval request below records the primary
                                 // transition.

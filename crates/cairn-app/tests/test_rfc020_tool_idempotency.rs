@@ -220,6 +220,96 @@ async fn cache_hit_on_resume_skips_invocation() {
         .filter(|e| matches!(&e.envelope.payload, RuntimeEvent::ToolInvocationCacheHit(_)))
         .count();
     assert_eq!(cache_hits, 1, "exactly one ToolInvocationCacheHit emitted");
+
+    // Both completions must carry identical `tool_call_id` + `result_json`,
+    // including the cache-hit path. Gemini #2: if the cache-hit completion
+    // dropped these fields, projections (including `replay_tool_result_cache`
+    // on a subsequent boot that intersected this turn) would silently lose
+    // the cached result.
+    let completions: Vec<_> = events
+        .iter()
+        .filter_map(|e| match &e.envelope.payload {
+            RuntimeEvent::ToolInvocationCompleted(c) => Some(c),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(completions.len(), 2, "two completion events (first + cache-hit)");
+    assert_eq!(
+        completions[0].tool_call_id, completions[1].tool_call_id,
+        "both completions must carry the same tool_call_id"
+    );
+    assert!(
+        completions[0].tool_call_id.is_some(),
+        "tool_call_id must be set on first completion"
+    );
+    assert_eq!(
+        completions[0].result_json, completions[1].result_json,
+        "cache-hit completion must re-emit the cached result_json"
+    );
+    assert!(
+        completions[1].result_json.is_some(),
+        "result_json must be populated on the cache-hit completion"
+    );
+}
+
+// ── Parallel tool calls get distinct ToolCallIds (Gemini #1 regression) ──────
+
+/// Two InvokeTool proposals in the SAME DecideOutput with identical tool +
+/// identical normalized args must still mint distinct `ToolCallId`s. The
+/// orchestrator uses the proposal's position within the turn as
+/// `call_index`, so `tc_{hash of (run, iter, 0, …)}` and
+/// `tc_{hash of (run, iter, 1, …)}` are different and both dispatches run.
+#[tokio::test]
+async fn parallel_calls_of_same_tool_get_distinct_ids() {
+    let store = Arc::new(InMemoryStore::new());
+    let cache = Arc::new(Mutex::new(ToolCallResultCache::new()));
+    let counter = Arc::new(std::sync::atomic::AtomicU32::new(0));
+    let tool = Arc::new(CountingTool {
+        name: "par_tool",
+        counter: counter.clone(),
+        retry_safety: RetrySafety::IdempotentSafe,
+    });
+    let registry = Arc::new(BuiltinToolRegistry::new().register(tool));
+    let execute = build_execute_phase(store.clone(), cache.clone(), registry);
+
+    let ctx = base_ctx("run_parallel", false);
+    let decide = DecideOutput {
+        raw_response: String::new(),
+        // TWO identical proposals — same tool, same args.
+        proposals: vec![
+            make_proposal("par_tool", json!({"q": "same"})),
+            make_proposal("par_tool", json!({"q": "same"})),
+        ],
+        calibrated_confidence: 1.0,
+        requires_approval: false,
+        model_id: "test".to_owned(),
+        latency_ms: 0,
+        input_tokens: None,
+        output_tokens: None,
+    };
+    execute.execute(&ctx, &decide).await.expect("dispatch");
+
+    assert_eq!(
+        counter.load(std::sync::atomic::Ordering::SeqCst),
+        2,
+        "both parallel invocations must run — cache MUST NOT collide the second with the first"
+    );
+    let ids: Vec<Option<String>> = store
+        .read_stream(None, 200)
+        .await
+        .unwrap()
+        .iter()
+        .filter_map(|e| match &e.envelope.payload {
+            RuntimeEvent::ToolInvocationCompleted(c) => Some(c.tool_call_id.clone()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(ids.len(), 2, "two completion events");
+    assert!(ids[0].is_some() && ids[1].is_some());
+    assert_ne!(
+        ids[0], ids[1],
+        "parallel calls must mint distinct ToolCallIds via call_index"
+    );
 }
 
 // ── RFC 020 Integration Test #13c: ToolCallId determinism across replay ──────
@@ -318,6 +408,28 @@ async fn dangerous_pause_pauses_recovery() {
         .filter(|e| matches!(&e.envelope.payload, RuntimeEvent::ToolRecoveryPaused(_)))
         .count();
     assert_eq!(paused, 1, "exactly one ToolRecoveryPaused event emitted");
+
+    // Gemini #3: approval_id must be deterministic — re-running the pause
+    // path for the same crashed iteration must yield the same approval_id
+    // so the operator sees ONE pending approval, not N. Second dispatch
+    // through the same code path must produce identical approval_id.
+    let first_approval = match &out.results[0].status {
+        cairn_orchestrator::context::ActionStatus::AwaitingApproval { approval_id } => {
+            approval_id.as_str().to_owned()
+        }
+        _ => panic!("expected AwaitingApproval"),
+    };
+    let out2 = execute.execute(&ctx, &decide).await.expect("second dispatch");
+    let second_approval = match &out2.results[0].status {
+        cairn_orchestrator::context::ActionStatus::AwaitingApproval { approval_id } => {
+            approval_id.as_str().to_owned()
+        }
+        _ => panic!("expected AwaitingApproval on second dispatch"),
+    };
+    assert_eq!(
+        first_approval, second_approval,
+        "approval_id must be deterministic across recovery retries ({first_approval} != {second_approval})"
+    );
 }
 
 // ── RFC 020 Integration Test #13b: AuthorResponsible → same tool_call_id ─────
