@@ -44,6 +44,12 @@ use super::control_plane_types::{
 };
 use super::valkey_impl::ValkeyEngine;
 
+/// FF Lua code returned by `ff_cancel_flow` when the flow is already in
+/// a terminal `public_flow_state` (completed / cancelled). Cairn's
+/// session-archive path treats this as success — the operator-visible
+/// `cairn.archived` tag still needs to land.
+const FLOW_ALREADY_TERMINAL: &str = "flow_already_terminal";
+
 const ROTATION_DETAIL_LUA_REJECTED: &str = "lua_rejected";
 const ROTATION_DETAIL_TRANSPORT_ERROR: &str = "transport_error";
 const ROTATION_DETAIL_UNPARSEABLE_ENVELOPE: &str = "unparseable_envelope";
@@ -477,8 +483,18 @@ impl ControlPlaneBackend for ValkeyEngine {
             .await
             .map_err(|e| FabricError::Internal(format!("ff_create_execution: {e}")))?;
 
+        // A DUPLICATE reply is the idempotent-replay success path and
+        // must NOT error. Every other non-OK envelope (typed FF error
+        // or malformed reply) surfaces through `check_fcall_success`
+        // so callers never see `newly_created: true` on a rejected
+        // create — which would otherwise trigger a spurious
+        // `BridgeEvent::ExecutionCreated` emission.
+        let duplicate = is_duplicate_result(&raw);
+        if !duplicate {
+            check_fcall_success(&raw, fcall::names::FF_CREATE_EXECUTION)?;
+        }
         Ok(ExecutionCreated {
-            newly_created: !is_duplicate_result(&raw),
+            newly_created: !duplicate,
         })
     }
 
@@ -768,19 +784,26 @@ impl ControlPlaneBackend for ValkeyEngine {
             .fcall(fcall::names::FF_CANCEL_FLOW, &key_refs, &arg_refs)
             .await?;
 
-        // `flow_already_terminal` is acceptable — the flow may already be
-        // completed/cancelled, and cairn still wants to stamp its archive
-        // marker. Surface via the typed outcome instead of erroring.
-        match check_fcall_success(&raw, fcall::names::FF_CANCEL_FLOW) {
-            Ok(()) => Ok(FlowCancelOutcome::Cancelled),
-            Err(e) => {
-                if e.to_string().contains("flow_already_terminal") {
-                    Ok(FlowCancelOutcome::AlreadyTerminal)
-                } else {
-                    Err(e)
-                }
+        // `flow_already_terminal` is acceptable — the flow may already
+        // be completed/cancelled, and cairn still wants to stamp its
+        // archive marker. Dispatch on the typed Lua error code (via
+        // `fcall_error_code`) instead of string-matching the formatted
+        // `FabricError` message; the latter would silently break on
+        // any future tweak to the `Display` impl.
+        if let Some(code) = fcall_error_code(&raw) {
+            if code == FLOW_ALREADY_TERMINAL {
+                return Ok(FlowCancelOutcome::AlreadyTerminal);
             }
+            // Non-accepted typed code — surface via the shared
+            // envelope-to-error path so the variant matches the rest
+            // of cairn's FCALL error handling.
+            check_fcall_success(&raw, fcall::names::FF_CANCEL_FLOW)?;
+            // Unreachable: check_fcall_success must return Err above
+            // because fcall_error_code only fires on typed errors.
+            unreachable!("fcall_error_code returned Some but check_fcall_success accepted");
         }
+        check_fcall_success(&raw, fcall::names::FF_CANCEL_FLOW)?;
+        Ok(FlowCancelOutcome::Cancelled)
     }
 
     // ── Claim (Phase D PR 2a) ────────────────────────────────────────────

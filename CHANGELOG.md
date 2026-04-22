@@ -36,7 +36,7 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   harness-tools upstream.
 
 - **Phase D PR 2a — run / session / claim FF leaks closed via
-  `ControlPlaneBackend`.** Extended the trait with 11 new methods
+  `ControlPlaneBackend`.** Extended the trait with 10 new methods
   (`create_run_execution`, `complete_run_execution`,
   `fail_run_execution`, `cancel_run_execution`, `suspend_run_execution`,
   `resume_run_execution`, `deliver_approval_signal`, `create_flow`,

@@ -110,7 +110,7 @@ leak lines in:
 
 ### Phase D PR 2a — run / session / claim lifecycle (shipped)
 
-Extends `ControlPlaneBackend` with 11 run/session/claim FCALL methods
+Extends `ControlPlaneBackend` with 10 run/session/claim FCALL methods
 (`create_run_execution`, `complete_run_execution`, `fail_run_execution`,
 `cancel_run_execution`, `suspend_run_execution`, `resume_run_execution`,
 `deliver_approval_signal`, `create_flow`, `cancel_flow`,

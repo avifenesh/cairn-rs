@@ -94,10 +94,7 @@ impl FabricRunService {
     /// FF hasn't stamped them yet (early-lifecycle runs that haven't
     /// been claimed). Matches the pre-migration behaviour of the
     /// direct `HGETALL exec_core` reads.
-    async fn resolve_lease_context(
-        &self,
-        snapshot: &ExecutionSnapshot,
-    ) -> ExecutionLeaseContext {
+    fn resolve_lease_context(&self, snapshot: &ExecutionSnapshot) -> ExecutionLeaseContext {
         let lane_id = if snapshot.lane_id.as_str().is_empty() {
             LaneId::new("cairn")
         } else {
@@ -315,7 +312,7 @@ impl FabricRunService {
                 id: run_id.to_string(),
             })?;
         let prev_state = ff_public_state_to_run_state(&snapshot);
-        let lease = self.resolve_lease_context(&snapshot).await;
+        let lease = self.resolve_lease_context(&snapshot);
 
         self.control_plane
             .complete_run_execution(CompleteRunInput {
@@ -352,7 +349,7 @@ impl FabricRunService {
                 id: run_id.to_string(),
             })?;
         let prev_state = ff_public_state_to_run_state(&snapshot);
-        let lease = self.resolve_lease_context(&snapshot).await;
+        let lease = self.resolve_lease_context(&snapshot);
 
         let category = crate::state_map::failure_class_category(failure_class);
         let reason = crate::state_map::failure_class_reason(failure_class);
@@ -402,7 +399,7 @@ impl FabricRunService {
                 id: run_id.to_string(),
             })?;
         let prev_state = ff_public_state_to_run_state(&snapshot);
-        let lease = self.resolve_lease_context(&snapshot).await;
+        let lease = self.resolve_lease_context(&snapshot);
         let current_waitpoint = snapshot.current_waitpoint.clone();
 
         self.control_plane
@@ -441,7 +438,7 @@ impl FabricRunService {
                 id: run_id.to_string(),
             })?;
         let prev_state = ff_public_state_to_run_state(&snapshot);
-        let lease = self.resolve_lease_context(&snapshot).await;
+        let lease = self.resolve_lease_context(&snapshot);
 
         let params = match reason.kind {
             PauseReasonKind::OperatorPause => crate::suspension::for_operator_hold(),
@@ -591,7 +588,7 @@ impl FabricRunService {
                 id: run_id.to_string(),
             })?;
         let prev_state = ff_public_state_to_run_state(&snapshot);
-        let lease = self.resolve_lease_context(&snapshot).await;
+        let lease = self.resolve_lease_context(&snapshot);
 
         // Approval waitpoints listen for EITHER approval_granted or
         // approval_rejected — `match_mode=any`. (Pre-migration this
@@ -682,12 +679,8 @@ impl FabricRunService {
                 signal_name,
                 idempotency_suffix: idem_suffix,
                 signal_dedup_ttl_ms: self.runtime.config.signal_dedup_ttl_ms,
-                maxlen: crate::constants::DEFAULT_SIGNAL_MAXLEN
-                    .parse()
-                    .unwrap_or(1000),
-                max_signals_per_execution: crate::constants::DEFAULT_MAX_SIGNALS_PER_EXECUTION
-                    .parse()
-                    .unwrap_or(10_000),
+                maxlen: crate::constants::DEFAULT_SIGNAL_MAXLEN_U64,
+                max_signals_per_execution: crate::constants::DEFAULT_MAX_SIGNALS_PER_EXECUTION_U64,
             })
             .await?;
 

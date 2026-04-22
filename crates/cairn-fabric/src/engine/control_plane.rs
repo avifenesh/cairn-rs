@@ -18,8 +18,8 @@
 //! # Phase D scope
 //!
 //! - **PR 1**: budget (5), quota (2), rotation (1).
-//! - **PR 2a**: run lifecycle (7) + session archive (1) + claim (1).
-//!   All FCALL-shaped; fold onto this trait rather than a new
+//! - **PR 2a**: run lifecycle (7) + session create/archive (2) +
+//!   claim (1). All FCALL-shaped; fold onto this trait rather than a new
 //!   `ExecutionLifecycleBackend` — one trait keeps services from
 //!   juggling two handles, and the read/tag split (Engine) vs
 //!   FCALL split (ControlPlaneBackend) is already the load-bearing
