@@ -1,14 +1,26 @@
-//! RFC 020 recovery integration tests (#1, #6, #11).
+//! RFC 020 recovery integration tests — compliance evidence for the
+//! `RecoveryServiceImpl` durability invariants.
 //!
-//! Compliance evidence for RFC 020 Track 1 (`RecoveryServiceImpl`). Per the
-//! user rule `feedback_integration_tests_only.md`, unit tests on recovery
-//! types do not count — this file is the end-to-end proof.
+//! Every test in this file:
 //!
-//! | RFC 020 # | Test fn                                                     | Shipped in |
-//! |-----------|-------------------------------------------------------------|------------|
-//! | #1        | `clean_crash_recovery_restores_non_terminal_runs`           | PR #75     |
-//! | #6        | `in_flight_approval_survives_crash`                         | PR #163    |
-//! | #11       | `recovery_summary_emitted_once_per_boot`                    | PR #163    |
+//! 1. Boots a real `cairn-app` subprocess via [`LiveHarness`] with a
+//!    per-test SQLite event log so state survives process restart.
+//! 2. Drives cairn through its public HTTP surface only — no in-process
+//!    shortcuts. This is load-bearing: only a real `SIGKILL` + respawn
+//!    cycle is admissible proof for RFC 020 invariants; in-memory
+//!    "simulated restarts" don't exercise the boot-time event-log
+//!    replay or the readiness gate.
+//! 3. Asserts against the secondary event log (`GET /v1/events`), not
+//!    against transient in-memory views. The event log is the durable
+//!    source of truth that `RecoveryService` itself reads on boot.
+//!
+//! Test → RFC 020 invariant mapping:
+//!
+//! | RFC 020 # | Test fn                                                     |
+//! |-----------|-------------------------------------------------------------|
+//! | #1        | `clean_crash_recovery_restores_non_terminal_runs`           |
+//! | #6        | `in_flight_approval_survives_crash`                         |
+//! | #11       | `recovery_summary_emitted_once_per_boot`                    |
 //!
 //! What the test does:
 //!
@@ -476,10 +488,12 @@ async fn request_approval(h: &LiveHarness, run_id: &str, approval_id: &str) {
 async fn approval_pending(h: &LiveHarness, approval_id: &str) -> bool {
     let res = h
         .client()
-        .get(format!(
-            "{}/v1/approvals?tenant_id={}&workspace_id={}&project_id={}",
-            h.base_url, h.tenant, h.workspace, h.project,
-        ))
+        .get(format!("{}/v1/approvals", h.base_url))
+        .query(&[
+            ("tenant_id", &h.tenant),
+            ("workspace_id", &h.workspace),
+            ("project_id", &h.project),
+        ])
         .bearer_auth(&h.admin_token)
         .send()
         .await

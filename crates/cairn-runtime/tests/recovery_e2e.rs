@@ -1,36 +1,22 @@
-//! Unit tests for RFC 020 recovery primitives.
+//! Unit tests for RFC 020 recovery primitives — **not compliance proof.**
 //!
-//! # Scope
+//! # Footgun
 //!
-//! This file holds **unit tests** on the recovery types declared in
-//! `cairn_runtime::startup` (`ToolCallId`, `ToolCallResultCache`,
-//! `CheckpointMeta`, `ReadinessState`, `RecoverySummary`, …) and on the pure
-//! `recovery_dispatch_decision()` function. Per the user rule
-//! `feedback_integration_tests_only.md`, these tests **do not count as RFC
-//! 020 compliance proof** — they exercise types in isolation without ever
-//! crashing a real `cairn-app` process. They remain in the workspace because
-//! they are fast, type-level regression guards that catch obvious breakage
-//! before the integration suite runs.
+//! Tests in this file exercise `cairn_runtime::startup` types
+//! (`ToolCallId`, `ToolCallResultCache`, `CheckpointMeta`,
+//! `ReadinessState`, `RecoverySummary`) and the pure
+//! `recovery_dispatch_decision()` function **in isolation**. They never
+//! boot `cairn-app`, never crash it, and never replay an event log.
 //!
-//! # Compliance proof lives elsewhere
+//! Do NOT cite a passing test from this file as evidence that an RFC
+//! 020 durability invariant holds. That claim requires a real
+//! `SIGKILL` + respawn against a persistent event log — see
+//! `crates/cairn-app/tests/test_rfc020_recovery.rs` for the integration
+//! counterpart.
 //!
-//! The end-to-end, crash-and-replay integration tests that actually prove
-//! RFC 020 invariants are in `crates/cairn-app/tests/test_rfc020_*.rs`
-//! and drive a real subprocess over HTTP via the `LiveHarness` fixture.
-//! See `project_recovery_e2e_migration_plan.md` for the full migration map.
-//!
-//! # Migration status (PR 1 of 3 — `project_recovery_e2e_migration_plan.md`)
-//!
-//! | Former test                                     | Action            | Replaced by                                                      |
-//! |-------------------------------------------------|-------------------|------------------------------------------------------------------|
-//! | `rfc020_invariant5_dual_checkpoint_per_iteration` | KEEP_AS_UNIT    | (pending Track 4 — no integration counterpart yet)               |
-//! | `rfc020_invariant6_tool_result_cache_hit_on_resume` | KEEP_AS_UNIT (blocked on Track 3) | planned `test_rfc020_08_tool_result_cache_hit` (future PR) |
-//! | `rfc020_dangerous_pause_requires_operator_confirmation` | KEEP_AS_UNIT (blocked on Track 3) | planned `test_rfc020_13a_dangerous_pause` (future PR)       |
-//! | `rfc020_author_responsible_redispatches_with_same_id` | KEEP_AS_UNIT (blocked on Track 3) | planned `test_rfc020_13b_author_responsible_redispatch` (future PR) |
-//! | `rfc020_clean_recovery_state_survives_restart`  | **DELETED**       | `test_rfc020_recovery::clean_crash_recovery_restores_non_terminal_runs` (PR #75) |
-//! | `rfc020_in_flight_approval_survives_restart`    | **DELETED**       | `test_rfc020_recovery::in_flight_approval_survives_crash` (this PR) |
-//! | `rfc020_recovery_summary_has_all_counters`      | **DELETED**       | `test_rfc020_recovery::recovery_summary_emitted_once_per_boot` (this PR) |
-//! | `rfc020_batched_append_all_or_nothing`          | KEEP_AS_UNIT      | (batch atomicity relies on store ACID; crash timing not repeatable from LiveHarness) |
+//! These unit tests exist only as fast type-level regression guards
+//! (seconds to run; catch obvious breakage before the multi-minute
+//! LiveHarness suite is worth spinning up).
 
 use cairn_domain::recovery::{CheckpointKind, RetrySafety};
 use cairn_runtime::startup::{
