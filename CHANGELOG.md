@@ -11,6 +11,21 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **Integration test coverage for `ff_renew_lease` (task heartbeat).**
+  New `crates/cairn-fabric/tests/integration/test_heartbeat.rs` adds two
+  live-harness tests: `test_heartbeat_extends_lease_expiry` (happy path —
+  asserts `lease_expires_at_ms` strictly grows and the lease epoch is
+  preserved) and `test_heartbeat_with_stale_epoch_is_rejected` (contract —
+  asserts `FF_RENEW_LEASE` rejects a bogus epoch with `stale_lease` per
+  `FlowFabric/lua/lease.lua:81-82`, and that the rejection does not
+  corrupt the live lease). Closes the last zero-coverage FCALL in the
+  Phase D PR 2 service-layer scope (run_service + task_service +
+  session_service + claim_common). The other four COVERAGE.md §4 targets
+  — `ff_suspend_execution`, `ff_resume_execution`, `ff_deliver_signal`,
+  `ff_create_flow` / `ff_cancel_flow` — are already covered by
+  `test_suspension.rs` and `test_session.rs`; their status in
+  `COVERAGE.md` is refreshed in the same PR.
+
 - **FF metrics surfaced on `/metrics`.** `cairn-fabric` now compiles
   `ff-observability` with the `enabled` feature (real OTEL → Prometheus
   exporter) and retains the shared `Arc<ff_observability::Metrics>` on

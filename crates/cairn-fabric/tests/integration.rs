@@ -31,6 +31,7 @@ mod integration {
     pub mod test_checkpoint;
     pub mod test_engine;
     pub mod test_event_emission;
+    pub mod test_heartbeat;
     pub mod test_instance_tag_filter;
     pub mod test_lease_history_subscriber;
     pub mod test_orchestrator_stream;

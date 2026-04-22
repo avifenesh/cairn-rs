@@ -3,6 +3,37 @@
 Audit of `crates/cairn-fabric/tests/integration/` against the 17 functions
 declared in `src/fcall/mod.rs::CRITICAL_CONTRACTS`.
 
+**Last refresh: 2026-04-22 — Phase D PR 2 coverage gate.**
+
+- Live test files: 14 (`test_budget.rs`, `test_checkpoint.rs`,
+  `test_engine.rs`, `test_event_emission.rs`, `test_heartbeat.rs`,
+  `test_instance_tag_filter.rs`, `test_lease_history_subscriber.rs`,
+  `test_orchestrator_stream.rs`, `test_run_lifecycle.rs`,
+  `test_scanner_filter_perf.rs`, `test_scanner_filter_upstream.rs`,
+  `test_session.rs`, `test_suspension.rs`, `test_task_dependencies.rs`).
+- FCALL functions exercised by at least one integration test: **15 / 17**.
+- FCALL functions with **zero** integration coverage: **2 / 17**
+  (`ff_check_admission_and_record`, `ff_create_quota_policy` — both in
+  `quota_service`, out of scope for Phase D PR 2).
+
+### Coverage deltas from the original audit
+
+| FCALL | Status | Test file(s) |
+|-------|--------|--------------|
+| `ff_suspend_execution` | **LIVE** | `test_suspension.rs::test_suspend_and_resume_roundtrip`, `::test_signal_delivery_resumes_waiter`, `::test_enter_approval_after_prior_approval_creates_fresh_waitpoint`, `::task_pause_and_resume_emit_state_changed` |
+| `ff_resume_execution` | **LIVE** | `test_suspension.rs::test_suspend_and_resume_roundtrip`, `::task_pause_and_resume_emit_state_changed` |
+| `ff_deliver_signal` | **LIVE** | `test_suspension.rs::test_signal_delivery_resumes_waiter`, `::test_signal_delivery_is_idempotent` |
+| `ff_renew_lease` | **LIVE** | `test_heartbeat.rs::test_heartbeat_extends_lease_expiry`, `::test_heartbeat_with_stale_epoch_is_rejected` |
+| `ff_create_flow` | **LIVE** | `test_session.rs::test_session_create_and_cancel_flow` |
+| `ff_cancel_flow` | **LIVE** | `test_session.rs::test_session_create_and_cancel_flow`, `::test_double_archive_is_idempotent` |
+| `ff_check_admission_and_record` | **MISSING** | `quota_service` — out of Phase D PR 2 scope |
+| `ff_create_quota_policy` | **MISSING** | `quota_service` — out of Phase D PR 2 scope |
+
+The §2 / §4 tables below preserve the original audit for historical
+context. Anything marked LIVE above supersedes the §2/§4 "No" entries.
+
+### Original audit (frozen; superseded where annotated above)
+
 - Existing tests: **9** across `test_run_lifecycle.rs` + `test_budget.rs`
 - FCALL functions exercised (at least once): **9 / 17 = 53%**
 - FCALL functions with **zero** integration coverage: **8 / 17 = 47%**
