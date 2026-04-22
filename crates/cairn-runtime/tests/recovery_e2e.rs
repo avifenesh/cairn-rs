@@ -41,8 +41,8 @@ use cairn_runtime::startup::{
 #[test]
 fn rfc020_invariant6_same_tool_call_id_on_resume() {
     // The key insight: ToolCallId is derived from position, not time/PID
-    let original = ToolCallId::derive("run-200", 1, 0, "bash", r#"{"cmd":"make test"}"#);
-    let resumed = ToolCallId::derive("run-200", 1, 0, "bash", r#"{"cmd":"make test"}"#);
+    let original = ToolCallId::derive("run-200", 1, 0, "bash", r#"{"command":"make test"}"#);
+    let resumed = ToolCallId::derive("run-200", 1, 0, "bash", r#"{"command":"make test"}"#);
     assert_eq!(original, resumed, "resumed run gets same ToolCallId");
 }
 

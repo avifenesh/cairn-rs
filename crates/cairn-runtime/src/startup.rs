@@ -668,15 +668,15 @@ mod tests {
 
     #[test]
     fn tool_call_id_differs_on_step() {
-        let id1 = ToolCallId::derive("run-1", 0, 0, "bash", r#"{"cmd":"ls"}"#);
-        let id2 = ToolCallId::derive("run-1", 1, 0, "bash", r#"{"cmd":"ls"}"#);
+        let id1 = ToolCallId::derive("run-1", 0, 0, "bash", r#"{"command":"ls"}"#);
+        let id2 = ToolCallId::derive("run-1", 1, 0, "bash", r#"{"command":"ls"}"#);
         assert_ne!(id1, id2);
     }
 
     #[test]
     fn tool_call_id_differs_on_run() {
-        let id1 = ToolCallId::derive("run-1", 0, 0, "bash", r#"{"cmd":"ls"}"#);
-        let id2 = ToolCallId::derive("run-2", 0, 0, "bash", r#"{"cmd":"ls"}"#);
+        let id1 = ToolCallId::derive("run-1", 0, 0, "bash", r#"{"command":"ls"}"#);
+        let id2 = ToolCallId::derive("run-2", 0, 0, "bash", r#"{"command":"ls"}"#);
         assert_ne!(id1, id2);
     }
 

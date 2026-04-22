@@ -15,7 +15,7 @@
 //! {
 //!   "action_type": "invoke_tool",
 //!   "tool_name": "tool_search",
-//!   "tool_args": { "query": "execute shell commands", "namespace": "cairn" }
+//!   "tool_args": { "query": "execute shell commands" }
 //! }
 //! ```
 //!
@@ -93,8 +93,10 @@ impl ToolHandler for ToolSearchTool {
                 },
                 "namespace": {
                     "type": "string",
-                    "description": "Optional namespace prefix to narrow results, \
-                                    e.g. 'cairn', 'mcp', 'plugin'"
+                    "description": "Optional tool-name prefix to narrow results. \
+                                    Matches tools whose name starts with this string, \
+                                    e.g. 'web' to surface web_fetch, or 'mcp.' to surface \
+                                    MCP-provided tools when registered under that prefix."
                 }
             }
         })
