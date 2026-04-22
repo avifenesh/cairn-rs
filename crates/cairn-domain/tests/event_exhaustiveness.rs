@@ -561,6 +561,20 @@ fn assert_all_variants_covered(event: &RuntimeEvent) {
                 })
             );
         }
+        // RFC 020 §"Decision Cache Survival": DecisionRecorded is
+        // project-scoped but carries no entity_ref (the decision_id is
+        // not a runtime entity in the RuntimeEntityRef sense; the
+        // reasoning chain is served from the serialised event_json).
+        RuntimeEvent::DecisionRecorded(_) => {
+            assert_ne!(proj.tenant_id.as_str(), "_system");
+            assert!(eref.is_none());
+        }
+        // Emitted once per startup replay — tenant/system-scoped, no
+        // entity_ref.
+        RuntimeEvent::DecisionCacheWarmup(_) => {
+            assert_eq!(proj.tenant_id.as_str(), "_system");
+            assert!(eref.is_none());
+        }
     }
 }
 
@@ -1584,6 +1598,25 @@ fn all_variants() -> Vec<RuntimeEvent> {
             reviewer_comments: "please reconsider step 3".to_owned(),
             requested_at: ts,
         }),
+        RuntimeEvent::DecisionRecorded(cairn_domain::events::DecisionRecorded {
+            project: p(),
+            decision_id: DecisionId::new("dec_exh_1"),
+            decision_key: cairn_domain::decisions::DecisionKey {
+                kind_tag: "tool_invocation".to_owned(),
+                scope_ref: cairn_domain::decisions::DecisionScopeRef::Project(p()),
+                semantic_hash: "exhhash".to_owned(),
+            },
+            outcome: cairn_domain::decisions::DecisionOutcome::Allowed,
+            cached: true,
+            expires_at: ts + 1_000,
+            decided_at: ts,
+            event_json: "{}".to_owned(),
+        }),
+        RuntimeEvent::DecisionCacheWarmup(cairn_domain::events::DecisionCacheWarmup {
+            cached: 3,
+            expired_and_dropped: 1,
+            warmed_at: ts,
+        }),
     ]
 }
 
@@ -1592,12 +1625,13 @@ fn all_variants() -> Vec<RuntimeEvent> {
 #[test]
 fn all_runtime_event_variants_covered_count() {
     let variants = all_variants();
-    // 132 variants in the RuntimeEvent enum (130 baseline + RFC 020 Track 3:
-    // ToolInvocationCacheHit, ToolRecoveryPaused).
+    // 134 variants in the RuntimeEvent enum (130 baseline + RFC 020 Track 3:
+    // ToolInvocationCacheHit, ToolRecoveryPaused + RFC 020 decision-cache
+    // survival pair: DecisionRecorded, DecisionCacheWarmup).
     assert_eq!(
         variants.len(),
-        132,
-        "all_variants() must construct exactly 132 RuntimeEvent instances"
+        134,
+        "all_variants() must construct exactly 134 RuntimeEvent instances"
     );
 }
 

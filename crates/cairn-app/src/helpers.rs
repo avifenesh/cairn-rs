@@ -1035,6 +1035,8 @@ pub fn event_type_name(event: &RuntimeEvent) -> &'static str {
         RuntimeEvent::PlanApproved(_) => "plan_approved",
         RuntimeEvent::PlanRejected(_) => "plan_rejected",
         RuntimeEvent::PlanRevisionRequested(_) => "plan_revision_requested",
+        RuntimeEvent::DecisionRecorded(_) => "decision_recorded",
+        RuntimeEvent::DecisionCacheWarmup(_) => "decision_cache_warmup",
     }
 }
 
@@ -1512,6 +1514,18 @@ pub(crate) fn event_message(event: &RuntimeEvent) -> String {
                     .map(|r| r.to_string())
                     .unwrap_or_default(),
                 e.percent
+            )
+        }
+        RuntimeEvent::DecisionRecorded(recorded) => {
+            format!(
+                "Decision {} recorded (cached: {})",
+                recorded.decision_id, recorded.cached
+            )
+        }
+        RuntimeEvent::DecisionCacheWarmup(warmup) => {
+            format!(
+                "Decision cache warmup: {} restored, {} expired",
+                warmup.cached, warmup.expired_and_dropped
             )
         }
         RuntimeEvent::TaskPriorityChanged(_)

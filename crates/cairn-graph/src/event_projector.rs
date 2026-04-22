@@ -461,7 +461,11 @@ impl<P: GraphProjection> EventProjector<P> {
             | RuntimeEvent::ToolInvocationProgressUpdated(_)
             // RFC 020 Track 3: audit-only events; no graph projection.
             | RuntimeEvent::ToolInvocationCacheHit(_)
-            | RuntimeEvent::ToolRecoveryPaused(_) => {}
+            | RuntimeEvent::ToolRecoveryPaused(_)
+            // RFC 020 decision-cache survival: durable for startup replay,
+            // does not feed the graph projection.
+            | RuntimeEvent::DecisionRecorded(_)
+            | RuntimeEvent::DecisionCacheWarmup(_) => {}
 
             RuntimeEvent::EvalRunStarted(e) => {
                 self.add_node(

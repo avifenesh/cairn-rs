@@ -551,6 +551,7 @@ impl AppBootstrap {
                     (HttpMethod::Get, "/v1/decisions")
                     | (HttpMethod::Get, "/v1/decisions/cache")
                     | (HttpMethod::Get, "/v1/decisions/:id")
+                    | (HttpMethod::Post, "/v1/decisions/evaluate")
                     | (HttpMethod::Post, "/v1/decisions/:id/invalidate")
                     | (HttpMethod::Post, "/v1/decisions/invalidate")
                     | (HttpMethod::Post, "/v1/decisions/invalidate-by-rule") => router,
@@ -1266,6 +1267,7 @@ impl AppBootstrap {
                 axum::Router::new()
                     .route("/", get(list_decisions_handler))
                     .route("/cache", get(list_decision_cache_handler))
+                    .route("/evaluate", post(evaluate_decision_handler))
                     .route("/invalidate", post(bulk_invalidate_decisions_handler))
                     .route("/invalidate-by-rule", post(invalidate_by_rule_handler))
                     .route("/:id", get(get_decision_handler))

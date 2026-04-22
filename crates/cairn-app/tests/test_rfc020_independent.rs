@@ -37,99 +37,129 @@ use support::live_fabric::LiveHarness;
 /// decision is available, and an equivalent request returns via cache hit
 /// without re-nudging.
 ///
-/// This test is `#[ignore]`d as of this commit because the observable surface
-/// needed to drive it end-to-end from HTTP does not yet exist:
+/// Un-ignored once both preconditions landed:
+///   (a) `POST /v1/decisions/evaluate` — RFC 019 pipeline over HTTP;
+///   (b) `DecisionRecorded` event persistence + startup replay so the
+///       cache is rebuilt from the event log (RFC 020 §"Decision Cache
+///       Survival").
 ///
-/// 1. There is no `POST /v1/decisions` evaluate endpoint on cairn-app. The
-///    only decision-cache-writing path today is the in-process orchestrator
-///    calling `DecisionService::evaluate()`, which integration tests cannot
-///    trigger without running a full tool-invoking run.
-///
-/// 2. `DecisionServiceImpl::cache` is an in-process `Mutex<HashMap>` with no
-///    event-log persistence and no startup replay. On restart the map is
-///    empty — so even if we could seed a decision pre-restart, the post-
-///    restart lookup would return `Miss`, not `CacheHit`.
-///
-/// 3. `main.rs` marks `readiness.decision_cache = complete(0)` with a comment
-///    that real per-branch recovery "is handled by a later track", confirming
-///    the feature is deferred.
-///
-/// Un-ignore this test when BOTH of the following land:
-///   (a) a cairn-app HTTP surface that observably writes to the decision
-///       cache (e.g. a `POST /v1/decisions/evaluate` endpoint, or a run
-///       path the test can invoke that exercises `DecisionService::evaluate`
-///       end-to-end and exposes the resulting cache state via
-///       `GET /v1/decisions/cache`);
-///   (b) `DecisionRecorded` event persistence + startup replay so the cache
-///       is rebuilt from the event log.
-///
-/// The test body below is written so that un-ignoring will exercise the
-/// contract once those preconditions are met; until then, it documents
-/// the gap as an explicit `#[ignore] + reason` rather than hiding it.
+/// The assertion pattern mirrors Track 3's tool-idempotency test:
+///   1. Seed: call /evaluate with an observational tool_invocation
+///      (AlwaysCache + 86400s TTL). First call is a fresh evaluation.
+///   2. Pre-restart sanity: an equivalent /evaluate returns cache_hit=true.
+///   3. sigkill + restart.
+///   4. Post-restart: equivalent /evaluate returns cache_hit=true, and the
+///      `source` payload references the ORIGINAL pre-restart decision_id,
+///      proving the in-memory cache was rebuilt from the event log.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "decision cache has no HTTP write-path + no event-log replay yet; \
-            see RFC 020 §'Decision cache' and main.rs readiness stub. \
-            As-of commit 48e63f6 startup marks decision_cache complete(0) \
-            without actually rebuilding any cache state from the event log."]
 async fn decision_cache_survives_restart() {
-    // Boot with SQLite persistence so the event log (once wired to persist
-    // DecisionRecorded) actually survives sigkill.
+    // Boot with SQLite persistence so the event log survives sigkill.
     let mut harness = LiveHarness::setup_with_sqlite().await;
 
-    // ── Pre-restart: seed a cacheable decision ────────────────────────────
-    // Placeholder for when the evaluate endpoint lands. The expected shape:
-    //   POST /v1/decisions/evaluate
-    //   Body: { "kind": { "ToolInvocation": { "tool_name": "grep_search",
-    //                                          "effect": "Observational" } },
-    //           ... }
-    // Response should echo the decision_id + outcome. Observational tool
-    // invocations have CachePolicy::AlwaysCache + 86400s TTL so the first
-    // call always produces a cacheable entry.
-    //
-    // Until the endpoint exists, assert that the endpoint is indeed absent
-    // so that when a future PR adds it, this test starts failing here and
-    // forces us to un-ignore + fill in the seeding step.
-    let probe = harness
+    let body = serde_json::json!({
+        "kind": "tool_invocation",
+        "tool_name": "grep_search",
+        "effect": "observational",
+        "principal": { "type": "system" },
+        "tenant_id": "default",
+        "workspace_id": "default",
+        "project_id": "default",
+        "correlation_id": "rfc020_test7_pre"
+    });
+
+    // ── Step 1: seed a cacheable decision ─────────────────────────────────
+    let pre = harness
+        .client()
+        .post(format!("{}/v1/decisions/evaluate", harness.base_url))
+        .bearer_auth(&harness.admin_token)
+        .json(&body)
+        .send()
+        .await
+        .expect("pre-restart evaluate reaches server");
+    assert_eq!(
+        pre.status().as_u16(),
+        200,
+        "pre-restart /evaluate must succeed"
+    );
+    let pre_body: serde_json::Value = pre.json().await.expect("pre-restart JSON");
+    let original_decision_id = pre_body
+        .get("decision_id")
+        .and_then(|v| v.as_str())
+        .expect("pre-restart decision_id present")
+        .to_owned();
+    assert_eq!(
+        pre_body.get("cached").and_then(|v| v.as_bool()),
+        Some(true),
+        "observational tool_invocation must be cached post-step-7: {pre_body}"
+    );
+
+    // ── Step 2: pre-restart cache hit sanity (in-memory cache) ────────────
+    let hit_before = harness
         .client()
         .post(format!("{}/v1/decisions/evaluate", harness.base_url))
         .bearer_auth(&harness.admin_token)
         .json(&serde_json::json!({
-            "kind": { "ToolInvocation": { "tool_name": "grep_search",
-                                          "effect": "Observational" } }
+            "kind": "tool_invocation",
+            "tool_name": "grep_search",
+            "effect": "observational",
+            "principal": { "type": "system" },
+            "correlation_id": "rfc020_test7_pre_hit"
         }))
         .send()
         .await
-        .expect("probe reaches server");
-    // Accept 404 (no such route) OR 405 (route exists for GET /v1/decisions
-    // but POST on it is not allowed). Both mean "no evaluate endpoint".
-    // When a real `POST /v1/decisions/evaluate` lands, the server will
-    // return 2xx and this assertion will fire, telling whoever is un-
-    // ignoring the test to finish wiring the post-restart cache-hit path.
-    let status = probe.status().as_u16();
-    assert!(
-        matches!(status, 404 | 405),
-        "POST /v1/decisions/evaluate unexpectedly returned {status} — the \
-         endpoint appears to exist. Un-ignore this test and finish wiring \
-         the post-restart cache-hit assertion."
+        .expect("pre-restart second evaluate reaches server");
+    let hit_before_body: serde_json::Value = hit_before.json().await.expect("pre-restart hit JSON");
+    assert_eq!(
+        hit_before_body.get("cache_hit").and_then(|v| v.as_bool()),
+        Some(true),
+        "second equivalent evaluate must be a cache hit pre-restart: {hit_before_body}"
     );
 
-    // ── Restart ───────────────────────────────────────────────────────────
+    // ── Step 3: sigkill + restart ─────────────────────────────────────────
     harness
         .sigkill_and_restart()
         .await
         .expect("sigkill + restart succeeds");
 
-    // ── Post-restart: equivalent request returns via cache hit ────────────
-    // When the evaluate endpoint exists, this second call against the
-    // restarted subprocess must:
-    //   * succeed (200),
-    //   * produce the same `outcome`,
-    //   * expose a `source: "CacheHit"` marker (or equivalent) indicating
-    //     no fresh evaluation was needed,
-    //   * and `GET /v1/decisions/cache` should list the decision with a
-    //     non-zero `hit_count`.
-    //
-    // Intentionally left un-finished — see #[ignore] reason above.
+    // ── Step 4: post-restart cache hit proves event-log replay ────────────
+    let post = harness
+        .client()
+        .post(format!("{}/v1/decisions/evaluate", harness.base_url))
+        .bearer_auth(&harness.admin_token)
+        .json(&serde_json::json!({
+            "kind": "tool_invocation",
+            "tool_name": "grep_search",
+            "effect": "observational",
+            "principal": { "type": "system" },
+            "correlation_id": "rfc020_test7_post"
+        }))
+        .send()
+        .await
+        .expect("post-restart evaluate reaches server");
+    assert_eq!(
+        post.status().as_u16(),
+        200,
+        "post-restart /evaluate must succeed"
+    );
+    let post_body: serde_json::Value = post.json().await.expect("post-restart JSON");
+    assert_eq!(
+        post_body.get("cache_hit").and_then(|v| v.as_bool()),
+        Some(true),
+        "post-restart equivalent evaluate must be a cache hit (event-log \
+         replay rebuilt the cache): {post_body}"
+    );
+    // The `original_decision_id` must point at the pre-restart decision —
+    // not a new one we just wrote. That's the survival proof: the cache
+    // entry is the SAME entry, not a new one that happens to match.
+    let source_orig = post_body
+        .get("original_decision_id")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    assert_eq!(
+        source_orig, original_decision_id,
+        "post-restart cache hit must reference the pre-restart decision_id \
+         ({original_decision_id}), got body={post_body}"
+    );
 }
 
 // ── Test #12: team mode refuses SQLite ───────────────────────────────────────
