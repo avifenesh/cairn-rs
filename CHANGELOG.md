@@ -22,9 +22,54 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   frame whose tag doesn't match `FabricConfig::worker_instance_id`.
   Fixes the `test_rfc020_recovery::clean_crash_recovery_restores_non_terminal_runs`
   flake (task #185) and the production cross-tenant leak. Docs:
-  `docs/operations/cross-instance-isolation.md`.
+  `docs/operations/cross-instance-isolation.md`. (#106)
+
+- **`RoutePolicy.enabled` now plumbed through PG + SQLite projections.**
+  The field was accepted on the wire and persisted in the event log, but
+  both projection writers silently dropped it, so `GET /v1/providers/policies`
+  always returned `enabled = true`. Adds the column to both backends and
+  backfills existing rows. (#108)
+
+- **`POST /v1/decisions/evaluate` added to `http_routes.tsv`.** Route
+  handler existed and was reachable in production, but the compatibility
+  catalogue did not list it, so the drift check could not detect
+  regressions. Gap surfaced by #192. (#105)
+
+- **Session projection read-after-write race closed for RFC 020 test
+  #11.** `RecoverySummary` could be emitted before the session projection
+  saw the preceding terminal transition, causing the compliance test to
+  observe a non-terminal run during recovery enumeration. Recovery now
+  reads from the authoritative projection head. (#100)
+
+- **Per-harness sandbox base dir isolated.** Multiple `LiveHarness`
+  instances in the same test binary previously shared the same sandbox
+  base, producing flaky `SandboxBaseRevisionDrift` emissions when tests
+  ran in parallel. Each harness now derives its own base path. (#99)
 
 ### Added
+
+- **9-table SQLite port (option B parity).** Ports `tenants`,
+  `workspaces`, `projects`, `workspace_members`, `prompt_assets`,
+  `prompt_versions`, `prompt_releases`, `route_decisions`, and
+  `provider_calls` to the SQLite backend so team-mode deployments on
+  single-node hardware can run without Postgres. Schema-parity check
+  (`cargo test -p cairn-store --test schema_parity`) now passes for
+  these tables. (#102)
+
+- **`route_policies` ported to SQLite.** Completes option B parity
+  for the 10-table block tracked by the schema-parity check. (#104)
+
+- **Prompt schema hardened symmetrically in PG + SQLite.** New PG
+  migration `V023` and parallel SQLite DDL tighten `prompt_assets` /
+  `prompt_releases` FK and NOT-NULL constraints so both backends reject
+  the same invalid inputs. (#103)
+
+- **CI `--tests` allow-list extended to close silent coverage gap.**
+  Integration tests in crates not previously in the allow-list (notably
+  `cairn-api`) were never executed in CI. Audited the workspace for
+  `tests/` directories and added every crate with non-empty integration
+  coverage. Contributors adding a new `tests/` directory must extend
+  the allow-list in the same PR. (#107)
 
 - **`CAIRN_BACKFILL_INSTANCE_TAG=1`** — one-shot boot-time backfill
   that stamps `cairn.instance_id` onto every pre-existing exec-tag
@@ -109,6 +154,21 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **OpenRouter fixture refresh** — refreshes the recorded fixture against
   the real API and swaps to a stable free-tier model so the offline path
   stays accurate. (#91)
+- **Real-LLM soak test ladder against OpenRouter MiniMax** — 5-minute
+  (#92), 30-minute (#98), and 1-hour (#101) live-provider soaks against
+  the cairn-app subprocess, asserting no lease expiry / event-log drift /
+  checkpoint divergence under sustained traffic. All three are gated on
+  `OPENROUTER_API_KEY` and skip cleanly in CI without the key.
+- **Chaos resilience suite** — SIGSTOP/SIGCONT, failed-append, and
+  rapid-restart scenarios exercising cairn-app's durability guarantees
+  under adverse conditions. (#95)
+- **Reasoning-model response-shape contract test** — asserts that
+  providers returning `content: null` with `finish_reason: length`
+  (the reasoning-model truncation shape) are surfaced to the orchestrator
+  as a typed error rather than an empty-string fallback. (#96)
+- **recovery_e2e migration — PR 3 of 3 (post-Track-4 cleanup).**
+  Deletes the final batch of Track-4-duplicated mocked tests whose
+  coverage now lives in the LiveHarness Track-4 suite. (#97)
 
 #### Operator documentation
 
