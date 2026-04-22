@@ -239,8 +239,7 @@ impl FabricConfig {
     /// prefix. The builder accepts a bare host + port and applies TLS as
     /// an explicit flag, matching the ferriskey 0.2 public API.
     pub fn valkey_client_builder(&self) -> ferriskey::ClientBuilder {
-        let mut builder =
-            ferriskey::ClientBuilder::new().host(&self.valkey_host, self.valkey_port);
+        let mut builder = ferriskey::ClientBuilder::new().host(&self.valkey_host, self.valkey_port);
         if self.tls {
             builder = builder.tls();
         }
