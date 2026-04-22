@@ -1706,6 +1706,7 @@ pub(crate) async fn orchestrate_run_handler(
         run_mode: body.mode.clone().or(default_run_mode).unwrap_or_default(),
         discovered_tool_names: vec![],
         step_history: vec![],
+        is_recovery: false,
     };
 
     let model_id = match body.model_id {
@@ -2015,6 +2016,7 @@ pub(crate) async fn orchestrate_run_handler(
             ),
         ))
         .checkpoint_every_n_tool_calls(cfg.checkpoint_every_n_tool_calls)
+        .tool_result_cache(state.tool_result_cache.clone())
         .build();
 
     let sse_emitter = std::sync::Arc::new(crate::sse_hooks::SseOrchestratorEmitter::new(

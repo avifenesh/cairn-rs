@@ -312,6 +312,7 @@ pub(crate) async fn webhook_trigger_orchestration(
         run_mode: cairn_domain::decisions::RunMode::default(),
         discovered_tool_names: vec![],
         step_history: vec![],
+        is_recovery: false,
     };
 
     let model_id = {
@@ -388,6 +389,7 @@ pub(crate) async fn webhook_trigger_orchestration(
         .mailbox_service(Arc::new(MailboxServiceImpl::new(store.clone())))
         .tool_invocation_service(Arc::new(ToolInvocationServiceImpl::new(store)))
         .checkpoint_every_n_tool_calls(config.checkpoint_every_n_tool_calls)
+        .tool_result_cache(state.tool_result_cache.clone())
         .build();
 
     let emitter = build_orchestrator_emitter(state);

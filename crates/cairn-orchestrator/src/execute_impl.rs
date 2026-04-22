@@ -23,13 +23,20 @@ use async_trait::async_trait;
 use cairn_domain::{
     policy::ApprovalRequirement,
     tool_invocation::{ToolInvocationOutcomeKind, ToolInvocationTarget},
-    ActionType, ApprovalId, CheckpointId, ExecutionClass, SessionId, TaskId, ToolInvocationId,
+    ActionType, ApprovalId, CheckpointId, ExecutionClass, RuntimeEvent, SessionId, TaskId,
+    ToolInvocationCacheHit, ToolInvocationId, ToolRecoveryPaused,
 };
 use cairn_runtime::{
-    decisions::DecisionService, mailbox::MailboxService, services::ToolInvocationService,
+    decisions::DecisionService,
+    mailbox::MailboxService,
+    services::ToolInvocationService,
+    startup::{CachedToolResult, RecoveryDispatchDecision, ToolCallId, ToolCallResultCache},
     ApprovalService, CheckpointService, RunService, TaskService,
 };
 use cairn_tools::builtins::BuiltinToolRegistry;
+#[allow(unused_imports)]
+use cairn_tools::builtins::ToolHandler;
+use std::sync::Mutex;
 
 use crate::context::{
     ActionResult, ActionStatus, DecideOutput, ExecuteOutcome, LoopSignal, OrchestrationContext,
@@ -66,6 +73,15 @@ pub struct RuntimeExecutePhase {
     /// per-iteration local counter never triggers when each iteration
     /// contains a single tool call.
     tool_call_count: std::sync::atomic::AtomicU32,
+    /// RFC 020 Track 3: shared `ToolCallResultCache` consulted before each
+    /// tool dispatch. A hit serves the cached result, emits
+    /// `ToolInvocationCacheHit`, and skips invocation entirely. A miss
+    /// proceeds to dispatch; successful completions populate the cache so
+    /// a subsequent same-step replay hits.
+    ///
+    /// Optional so existing callers (tests) can omit wiring; production
+    /// always injects a shared cache via the builder.
+    tool_result_cache: Option<Arc<Mutex<ToolCallResultCache>>>,
 }
 
 impl RuntimeExecutePhase {
@@ -88,6 +104,7 @@ pub struct RuntimeExecutePhaseBuilder {
     decision_service: Option<Arc<dyn DecisionService>>,
     checkpoint_every_n_tool_calls: u32,
     tool_output_token_limit: Option<usize>,
+    tool_result_cache: Option<Arc<Mutex<ToolCallResultCache>>>,
 }
 
 impl RuntimeExecutePhaseBuilder {
@@ -131,6 +148,13 @@ impl RuntimeExecutePhaseBuilder {
         self.decision_service = Some(ds);
         self
     }
+    /// RFC 020 Track 3: inject a shared `ToolCallResultCache`. Without it,
+    /// Track 3 cache-hit / recovery-pause behaviour is disabled (every
+    /// dispatch runs fresh). Production wiring always injects one.
+    pub fn tool_result_cache(mut self, cache: Arc<Mutex<ToolCallResultCache>>) -> Self {
+        self.tool_result_cache = Some(cache);
+        self
+    }
     pub fn build(self) -> RuntimeExecutePhase {
         RuntimeExecutePhase {
             run_service: self.run_service.expect("run_service required"),
@@ -148,6 +172,7 @@ impl RuntimeExecutePhaseBuilder {
             checkpoint_every_n_tool_calls: self.checkpoint_every_n_tool_calls.max(1),
             tool_output_token_limit: self.tool_output_token_limit.unwrap_or(2000),
             tool_call_count: std::sync::atomic::AtomicU32::new(0),
+            tool_result_cache: self.tool_result_cache,
         }
     }
 }
@@ -164,11 +189,13 @@ impl ExecutePhase for RuntimeExecutePhase {
         let mut results: Vec<ActionResult> = Vec::with_capacity(decide.proposals.len());
         let mut loop_signal = LoopSignal::Continue;
 
-        for proposal in &decide.proposals {
+        for (proposal_index, proposal) in decide.proposals.iter().enumerate() {
             // Per-proposal wall-clock; `dispatch_one` initialises
             // `duration_ms: 0` and we overwrite with the real elapsed.
             let started_at = std::time::Instant::now();
-            let mut result = self.dispatch_one(ctx, proposal).await?;
+            let mut result = self
+                .dispatch_one(ctx, proposal, proposal_index as u32)
+                .await?;
             result.duration_ms = started_at.elapsed().as_millis() as u64;
 
             // Capture any terminal loop signal from this action before pushing.
@@ -202,6 +229,7 @@ impl RuntimeExecutePhase {
         &self,
         ctx: &OrchestrationContext,
         proposal: &cairn_domain::ActionProposal,
+        call_index: u32,
     ) -> Result<ActionResult, OrchestratorError> {
         match proposal.action_type {
             // ── InvokeTool ─────────────────────────────────────────────────
@@ -371,6 +399,208 @@ impl RuntimeExecutePhase {
                     &ctx.working_dir,
                     proposal.tool_args.clone(),
                 );
+
+                // ── RFC 020 Track 3: mint ToolCallId + consult cache ───────
+                // The ToolCallId is derived from run_id + step + call_index
+                // + tool_name + normalized_args. Deterministic so a resumed
+                // run at the same step recomputes the same ID and hits the
+                // cache.
+                let (tool_call_id, normalized_args, retry_safety) =
+                    if let Some(registry) = self.tool_registry.as_ref() {
+                        if let Some(handler) = registry.get(&tool_name) {
+                            let normalized = handler.normalize_for_cache(&tool_args);
+                            // `call_index` is the proposal's position within
+                            // the current DecideOutput.proposals vector. Using
+                            // the index (not a hardcoded 0) guarantees two
+                            // parallel invocations of the SAME tool with
+                            // IDENTICAL normalized args still get distinct
+                            // ToolCallIds — the orchestrator dispatches them
+                            // in order, so the index is stable across replay.
+                            let id = ToolCallId::derive(
+                                ctx.run_id.as_str(),
+                                ctx.iteration,
+                                call_index,
+                                &tool_name,
+                                &normalized,
+                            );
+                            (Some(id), normalized, handler.retry_safety())
+                        } else {
+                            (
+                                None,
+                                String::new(),
+                                cairn_domain::recovery::RetrySafety::DangerousPause,
+                            )
+                        }
+                    } else {
+                        (
+                            None,
+                            String::new(),
+                            cairn_domain::recovery::RetrySafety::DangerousPause,
+                        )
+                    };
+                let _ = normalized_args; // reserved for future audit emission
+
+                // Consult cache: on hit, serve cached result + emit audit event.
+                if let (Some(ref id), Some(ref cache_arc)) =
+                    (&tool_call_id, &self.tool_result_cache)
+                {
+                    let hit = {
+                        let guard = cache_arc.lock().unwrap_or_else(|e| e.into_inner());
+                        guard.get(id).cloned()
+                    };
+                    if let Some(cached) = hit {
+                        // Atomically emit cache-hit audit + completion marker
+                        // so the invocation lifecycle closes cleanly (the
+                        // earlier `record_start` left it `Started`).
+                        let now = now_ms_u64();
+                        let cache_event =
+                            RuntimeEvent::ToolInvocationCacheHit(ToolInvocationCacheHit {
+                                project: ctx.project.clone(),
+                                invocation_id: inv_id.clone(),
+                                run_id: Some(ctx.run_id.clone()),
+                                task_id: ctx.task_id.clone(),
+                                tool_name: tool_name.clone(),
+                                tool_call_id: id.as_str().to_owned(),
+                                original_completed_at_ms: cached.completed_at,
+                                served_at_ms: now,
+                            });
+                        // Persist the cached tool_call_id + result_json on
+                        // the new ToolInvocationCompleted too. Downstream
+                        // projections (including the next boot's
+                        // `replay_tool_result_cache`) expect every
+                        // completion event to carry these when they exist;
+                        // leaving them `None` would silently break cache
+                        // rebuild after a restart that intersected a
+                        // cache-hit turn.
+                        self.tool_invocation_service
+                            .record_completed(
+                                &ctx.project,
+                                inv_id.clone(),
+                                ctx.task_id.clone(),
+                                tool_name.clone(),
+                                &[cache_event],
+                                Some(id.as_str().to_owned()),
+                                Some(cached.result_json.clone()),
+                            )
+                            .await
+                            .map_err(OrchestratorError::Runtime)?;
+
+                        let context_output = truncate_tool_output_for_context(
+                            cached.result_json.clone(),
+                            self.tool_output_token_limit,
+                        );
+                        return Ok(ActionResult {
+                            proposal: proposal.clone(),
+                            status: ActionStatus::Succeeded,
+                            tool_output: Some(context_output),
+                            invocation_id: Some(inv_id),
+                            duration_ms: 0,
+                        });
+                    }
+
+                    // Cache miss + is_recovery: branch on RetrySafety.
+                    if ctx.is_recovery {
+                        let decision = cairn_runtime::startup::recovery_dispatch_decision(
+                            &cache_arc.lock().unwrap_or_else(|e| e.into_inner()),
+                            id,
+                            &tool_name,
+                            retry_safety,
+                            true,
+                        );
+                        match decision {
+                            RecoveryDispatchDecision::CacheHit => unreachable!(
+                                "recovery_dispatch_decision returned CacheHit after miss"
+                            ),
+                            RecoveryDispatchDecision::Dispatch => {
+                                // Fall through to fresh dispatch below.
+                            }
+                            RecoveryDispatchDecision::Pause { reason, .. } => {
+                                let paused_event =
+                                    RuntimeEvent::ToolRecoveryPaused(ToolRecoveryPaused {
+                                        project: ctx.project.clone(),
+                                        run_id: ctx.run_id.clone(),
+                                        task_id: ctx.task_id.clone(),
+                                        tool_name: tool_name.clone(),
+                                        tool_call_id: id.as_str().to_owned(),
+                                        reason: reason.clone(),
+                                        paused_at_ms: now_ms_u64(),
+                                    });
+                                self.tool_invocation_service
+                                    .record_failed(
+                                        &ctx.project,
+                                        inv_id.clone(),
+                                        ctx.task_id.clone(),
+                                        tool_name.clone(),
+                                        ToolInvocationOutcomeKind::PermanentFailure,
+                                        Some(reason.clone()),
+                                    )
+                                    .await
+                                    .map_err(OrchestratorError::Runtime)?;
+                                // Deterministic approval_id derived from the
+                                // tool_call_id so two recovery sweeps of the
+                                // same crashed iteration ask the operator
+                                // for ONE approval, not N. `new_id()` uses
+                                // a per-process counter that resets on
+                                // restart, which would silently duplicate
+                                // the pending approval on every boot of a
+                                // wedged run.
+                                let approval_id =
+                                    ApprovalId::new(format!("appr_recovery_{}", id.as_str()));
+                                // Append the pause audit event. Best-effort;
+                                // approval request below records the primary
+                                // transition.
+                                if let Err(e) = self
+                                    .approval_service
+                                    .request_with_context(
+                                        &ctx.project,
+                                        approval_id.clone(),
+                                        Some(ctx.run_id.clone()),
+                                        ctx.task_id.clone(),
+                                        ApprovalRequirement::Required,
+                                        Some(format!(
+                                            "RFC 020 recovery pause: re-dispatch of {}",
+                                            tool_name
+                                        )),
+                                        Some(format!(
+                                            "Run `{}` crashed mid-dispatch on `{}` (DangerousPause). \
+                                             Operator must confirm before re-invocation. Reason: {}",
+                                            ctx.run_id, tool_name, reason,
+                                        )),
+                                    )
+                                    .await
+                                {
+                                    tracing::warn!(
+                                        error = %e,
+                                        run_id = %ctx.run_id,
+                                        "approval request for recovery pause failed"
+                                    );
+                                }
+                                // Emit the pause event itself via the tool
+                                // invocation service's audit seam so the
+                                // event log carries it for integration tests
+                                // and operator dashboards.
+                                if let Err(e) = self
+                                    .tool_invocation_service
+                                    .append_audit_events(&[paused_event])
+                                    .await
+                                {
+                                    tracing::warn!(
+                                        error = %e,
+                                        "append ToolRecoveryPaused failed"
+                                    );
+                                }
+                                return Ok(ActionResult {
+                                    proposal: proposal.clone(),
+                                    status: ActionStatus::AwaitingApproval { approval_id },
+                                    tool_output: None,
+                                    invocation_id: Some(inv_id),
+                                    duration_ms: 0,
+                                });
+                            }
+                        }
+                    }
+                }
+
                 // T5-H5: tool_registry is required — no silent-Ok stub. If
                 // someone forgot to wire a registry, every tool invocation
                 // must fail loud rather than synthesise a fake success for
@@ -392,6 +622,11 @@ impl RuntimeExecutePhase {
                     )),
                 };
 
+                // RFC 020 Track 3 invariant #11: drain any events the tool
+                // buffered on the context and pass them to record_completed
+                // as a single atomic append alongside ToolInvocationCompleted.
+                let buffered = tool_ctx.drain_buffered_events();
+
                 match tool_output_result {
                     Ok(output) => {
                         self.tool_invocation_service
@@ -399,10 +634,27 @@ impl RuntimeExecutePhase {
                                 &ctx.project,
                                 inv_id.clone(),
                                 ctx.task_id.clone(),
-                                tool_name,
+                                tool_name.clone(),
+                                &buffered,
+                                tool_call_id.as_ref().map(|id| id.as_str().to_owned()),
+                                Some(output.clone()),
                             )
                             .await
                             .map_err(OrchestratorError::Runtime)?;
+
+                        // Populate cache post-completion so a later replay
+                        // at the same step hits (same ToolCallId).
+                        if let (Some(id), Some(cache_arc)) =
+                            (&tool_call_id, &self.tool_result_cache)
+                        {
+                            let mut guard = cache_arc.lock().unwrap_or_else(|e| e.into_inner());
+                            guard.insert(CachedToolResult {
+                                tool_call_id: id.clone(),
+                                tool_name: tool_name.clone(),
+                                result_json: output.clone(),
+                                completed_at: now_ms_u64(),
+                            });
+                        }
 
                         // T5-H2: counter is cumulative across iterations.
                         // fetch_add returns the pre-increment value; add 1.
@@ -686,6 +938,13 @@ fn first_failure_reason(results: &[ActionResult]) -> Option<String> {
 }
 
 // ── ID generation ─────────────────────────────────────────────────────────────
+
+fn now_ms_u64() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64
+}
 
 fn new_id(prefix: &str) -> String {
     use std::sync::atomic::{AtomicU64, Ordering};

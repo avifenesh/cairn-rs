@@ -1241,7 +1241,10 @@ impl InMemoryStore {
             | RuntimeEvent::PlanProposed(_)
             | RuntimeEvent::PlanApproved(_)
             | RuntimeEvent::PlanRejected(_)
-            | RuntimeEvent::PlanRevisionRequested(_) => {}
+            | RuntimeEvent::PlanRevisionRequested(_)
+            // RFC 020 Track 3: audit-only events; no in-memory projection update.
+            | RuntimeEvent::ToolInvocationCacheHit(_)
+            | RuntimeEvent::ToolRecoveryPaused(_) => {}
             RuntimeEvent::ScheduledTaskCreated(e) => {
                 state.scheduled_tasks.insert(
                     e.scheduled_task_id.as_str().to_owned(),
@@ -5453,6 +5456,8 @@ mod tests {
                         tool_name: "fs.read".to_owned(),
                         finished_at_ms: 105,
                         outcome: ToolInvocationOutcomeKind::Success,
+                        tool_call_id: None,
+                        result_json: None,
                     },
                 )),
             ])

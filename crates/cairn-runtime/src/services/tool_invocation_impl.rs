@@ -32,12 +32,29 @@ pub trait ToolInvocationService: Send + Sync {
     ) -> Result<(), RuntimeError>;
 
     /// Record that a tool invocation completed successfully.
+    ///
+    /// RFC 020 Track 3 (invariant #11): `additional_events` lets callers batch
+    /// tool-buffered side-effect events (e.g. `IngestJobStarted`,
+    /// domain mutations emitted via `ToolContext::buffer_event`) into the
+    /// SAME `EventLog::append` call as the completion marker. Either ALL
+    /// events land or NONE do — no partial state where a projection saw the
+    /// side-effect but the cache did not.
+    ///
+    /// Callers with no buffered events pass `&[]`.
+    ///
+    /// RFC 020 Track 3: `tool_call_id` + `result_json` are threaded into
+    /// the `ToolInvocationCompleted` event so a restart can rebuild
+    /// `ToolCallResultCache` purely from the event log. Legacy / non-
+    /// orchestrator callers pass `None` for both.
     async fn record_completed(
         &self,
         project: &ProjectKey,
         invocation_id: ToolInvocationId,
         task_id: Option<TaskId>,
         tool_name: String,
+        additional_events: &[cairn_domain::RuntimeEvent],
+        tool_call_id: Option<String>,
+        result_json: Option<serde_json::Value>,
     ) -> Result<(), RuntimeError>;
 
     /// Record that a tool invocation failed.
@@ -49,6 +66,15 @@ pub trait ToolInvocationService: Send + Sync {
         tool_name: String,
         outcome: ToolInvocationOutcomeKind,
         error_message: Option<String>,
+    ) -> Result<(), RuntimeError>;
+
+    /// RFC 020 Track 3: append a raw audit event (e.g. `ToolRecoveryPaused`)
+    /// through the tool-invocation service seam. Default routes through
+    /// the underlying event log. Orchestrator uses this for cache / pause
+    /// audit trails that don't fit `record_completed` / `record_failed`.
+    async fn append_audit_events(
+        &self,
+        events: &[cairn_domain::RuntimeEvent],
     ) -> Result<(), RuntimeError>;
 }
 
@@ -110,8 +136,17 @@ where
         invocation_id: ToolInvocationId,
         task_id: Option<TaskId>,
         tool_name: String,
+        additional_events: &[RuntimeEvent],
+        tool_call_id: Option<String>,
+        result_json: Option<serde_json::Value>,
     ) -> Result<(), RuntimeError> {
-        let event = make_envelope(RuntimeEvent::ToolInvocationCompleted(
+        // RFC 020 invariant #11: buffered side-effect events and the completion
+        // marker append in ONE call so durability is all-or-nothing.
+        let mut batch = Vec::with_capacity(additional_events.len() + 1);
+        for ev in additional_events {
+            batch.push(make_envelope(ev.clone()));
+        }
+        batch.push(make_envelope(RuntimeEvent::ToolInvocationCompleted(
             ToolInvocationCompleted {
                 project: project.clone(),
                 invocation_id,
@@ -119,9 +154,11 @@ where
                 tool_name,
                 finished_at_ms: now_ms(),
                 outcome: ToolInvocationOutcomeKind::Success,
+                tool_call_id,
+                result_json,
             },
-        ));
-        self.store.append(&[event]).await?;
+        )));
+        self.store.append(&batch).await?;
         Ok(())
     }
 
@@ -144,6 +181,15 @@ where
             error_message,
         }));
         self.store.append(&[event]).await?;
+        Ok(())
+    }
+
+    async fn append_audit_events(&self, events: &[RuntimeEvent]) -> Result<(), RuntimeError> {
+        if events.is_empty() {
+            return Ok(());
+        }
+        let batch: Vec<_> = events.iter().cloned().map(make_envelope).collect();
+        self.store.append(&batch).await?;
         Ok(())
     }
 }

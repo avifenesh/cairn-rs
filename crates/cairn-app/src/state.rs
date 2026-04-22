@@ -311,6 +311,13 @@ pub struct AppState {
     /// middleware read. Starts with all branches `Pending`; flipped to
     /// `ready` once the startup graph completes (see `main.rs`).
     pub readiness: ReadinessState,
+    /// RFC 020 Track 3: shared tool-call result cache, consulted by
+    /// `RuntimeExecutePhase` before every tool dispatch. Populated at
+    /// startup from the event log (every prior `ToolInvocationCompleted`)
+    /// and incrementally on each completion thereafter. Wrapped in
+    /// `Arc<Mutex<_>>` because both the orchestrator (hot path on each
+    /// tool call) and the startup replay share ownership.
+    pub tool_result_cache: Arc<std::sync::Mutex<cairn_runtime::startup::ToolCallResultCache>>,
     /// Background task that derives lifecycle metrics from the event
     /// log broadcast. Kept on `AppState` so its lifetime tracks the
     /// process; drop/cancel is managed by shutdown paths.
@@ -960,6 +967,9 @@ impl AppState {
                 .unwrap_or_else(|_| ModelRegistry::empty()),
             fabric,
             readiness: ReadinessState::new(),
+            tool_result_cache: Arc::new(std::sync::Mutex::new(
+                cairn_runtime::startup::ToolCallResultCache::new(),
+            )),
             #[cfg(any(feature = "metrics-core", feature = "metrics-providers"))]
             metrics_tap: None,
         };

@@ -172,6 +172,8 @@ async fn tool_invocation_completed_transitions_to_success() {
                 tool_name: "write_file".to_owned(),
                 finished_at_ms: ts + 50,
                 outcome: ToolInvocationOutcomeKind::Success,
+                tool_call_id: None,
+                result_json: None,
             }),
         )])
         .await
@@ -558,6 +560,8 @@ async fn run_audit_trail_captures_mixed_outcomes() {
                     tool_name: "search".to_owned(),
                     finished_at_ms: ts + 20,
                     outcome: ToolInvocationOutcomeKind::Success,
+                    tool_call_id: None,
+                    result_json: None,
                 }),
             ),
             // Second call: fails with protocol violation.

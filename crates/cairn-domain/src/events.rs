@@ -105,6 +105,10 @@ pub enum RuntimeEvent {
     ToolInvocationStarted(ToolInvocationStarted),
     ToolInvocationCompleted(ToolInvocationCompleted),
     ToolInvocationFailed(ToolInvocationFailed),
+    /// RFC 020 Track 3: tool call served from `ToolCallResultCache` on replay.
+    ToolInvocationCacheHit(ToolInvocationCacheHit),
+    /// RFC 020 Track 3: recovery paused on a `DangerousPause` tool with no cached result.
+    ToolRecoveryPaused(ToolRecoveryPaused),
     SignalIngested(SignalIngested),
     ExternalWorkerRegistered(ExternalWorkerRegistered),
     ExternalWorkerReported(ExternalWorkerReported),
@@ -253,6 +257,8 @@ impl RuntimeEvent {
             RuntimeEvent::ToolInvocationStarted(event) => &event.project,
             RuntimeEvent::ToolInvocationCompleted(event) => &event.project,
             RuntimeEvent::ToolInvocationFailed(event) => &event.project,
+            RuntimeEvent::ToolInvocationCacheHit(event) => &event.project,
+            RuntimeEvent::ToolRecoveryPaused(event) => &event.project,
             RuntimeEvent::SignalIngested(event) => &event.project,
             RuntimeEvent::ExternalWorkerRegistered(event) => &event.sentinel_project,
             RuntimeEvent::ExternalWorkerReported(event) => &event.report.project,
@@ -433,6 +439,12 @@ impl RuntimeEvent {
             }
             RuntimeEvent::ToolInvocationFailed(event) => Some(RuntimeEntityRef::ToolInvocation {
                 invocation_id: event.invocation_id.clone(),
+            }),
+            RuntimeEvent::ToolInvocationCacheHit(event) => Some(RuntimeEntityRef::ToolInvocation {
+                invocation_id: event.invocation_id.clone(),
+            }),
+            RuntimeEvent::ToolRecoveryPaused(event) => Some(RuntimeEntityRef::Run {
+                run_id: event.run_id.clone(),
             }),
             RuntimeEvent::SignalIngested(event) => Some(RuntimeEntityRef::Signal {
                 signal_id: event.signal_id.clone(),
@@ -800,6 +812,18 @@ pub struct ToolInvocationCompleted {
     pub tool_name: String,
     pub finished_at_ms: u64,
     pub outcome: ToolInvocationOutcomeKind,
+    /// RFC 020 Track 3: deterministic tool-call ID for idempotent recovery.
+    /// `None` when the orchestrator has not minted one (legacy event-log
+    /// entries and non-orchestrator callers like `handlers/tools.rs`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_call_id: Option<String>,
+    /// RFC 020 Track 3: cached tool-result payload. Enables the startup
+    /// replay to rebuild `ToolCallResultCache` from the event log so a
+    /// resumed run on a fresh process still serves cache hits.
+    /// `None` when the tool returned no useful result or the legacy
+    /// record path was used.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub result_json: Option<serde_json::Value>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -811,6 +835,41 @@ pub struct ToolInvocationFailed {
     pub finished_at_ms: u64,
     pub outcome: ToolInvocationOutcomeKind,
     pub error_message: Option<String>,
+}
+
+/// RFC 020 Track 3: a tool invocation was served from the result cache
+/// instead of being re-dispatched. Emitted when a resumed run recomputes
+/// the same `ToolCallId` (deterministic by run_id + step + call_index +
+/// tool_name + normalized_args) and finds a prior completion in the cache.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ToolInvocationCacheHit {
+    pub project: ProjectKey,
+    pub invocation_id: ToolInvocationId,
+    pub run_id: Option<RunId>,
+    pub task_id: Option<TaskId>,
+    pub tool_name: String,
+    /// Deterministic tool-call identifier (stringified `ToolCallId`).
+    pub tool_call_id: String,
+    /// When the cached result was first produced (ms since epoch).
+    pub original_completed_at_ms: u64,
+    /// When the cache hit was served on this boot (ms since epoch).
+    pub served_at_ms: u64,
+}
+
+/// RFC 020 Track 3: recovery of a tool call that cannot be safely re-dispatched
+/// (classified as `DangerousPause`) — the run transitions to `WaitingApproval`
+/// and the operator must confirm before proceeding.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ToolRecoveryPaused {
+    pub project: ProjectKey,
+    pub run_id: RunId,
+    pub task_id: Option<TaskId>,
+    pub tool_name: String,
+    /// Deterministic tool-call identifier (stringified `ToolCallId`).
+    pub tool_call_id: String,
+    /// Human-readable reason — e.g. "DangerousPause tool with no cached result on recovery".
+    pub reason: String,
+    pub paused_at_ms: u64,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

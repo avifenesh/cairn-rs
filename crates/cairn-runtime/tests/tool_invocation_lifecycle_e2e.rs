@@ -144,6 +144,9 @@ async fn tool_invocation_start_progress_complete() {
         inv_id.clone(),
         Some(task_id.clone()),
         "fs.read".to_owned(),
+        &[],
+        None,
+        None,
     )
     .await
     .unwrap();
@@ -426,9 +429,17 @@ async fn all_terminal_outcomes_set_finished_at_ms() {
         .unwrap();
 
         if *outcome == ToolInvocationOutcomeKind::Success {
-            svc.record_completed(&project(), inv.clone(), None, "t".to_owned())
-                .await
-                .unwrap();
+            svc.record_completed(
+                &project(),
+                inv.clone(),
+                None,
+                "t".to_owned(),
+                &[],
+                None,
+                None,
+            )
+            .await
+            .unwrap();
         } else {
             svc.record_failed(
                 &project(),

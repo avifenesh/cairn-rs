@@ -91,6 +91,9 @@ where
                                 request.invocation_id.clone(),
                                 request.task_id.clone(),
                                 tool_name.clone(),
+                                &[],
+                                None,
+                                None,
                             )
                             .await
                             .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> {
@@ -239,6 +242,9 @@ mod tests {
                 _: ToolInvocationId,
                 _: Option<cairn_domain::TaskId>,
                 _: String,
+                _: &[cairn_domain::RuntimeEvent],
+                _: Option<String>,
+                _: Option<serde_json::Value>,
             ) -> Result<(), cairn_runtime::error::RuntimeError> {
                 Ok(())
             }
@@ -251,6 +257,13 @@ mod tests {
                 _: String,
                 _: ToolInvocationOutcomeKind,
                 _: Option<String>,
+            ) -> Result<(), cairn_runtime::error::RuntimeError> {
+                Ok(())
+            }
+
+            async fn append_audit_events(
+                &self,
+                _: &[cairn_domain::RuntimeEvent],
             ) -> Result<(), cairn_runtime::error::RuntimeError> {
                 Ok(())
             }
@@ -285,6 +298,9 @@ mod tests {
                 _: ToolInvocationId,
                 _: Option<cairn_domain::TaskId>,
                 _: String,
+                _: &[cairn_domain::RuntimeEvent],
+                _: Option<String>,
+                _: Option<serde_json::Value>,
             ) -> Result<(), cairn_runtime::error::RuntimeError> {
                 Ok(())
             }
@@ -296,6 +312,13 @@ mod tests {
                 _: String,
                 _: ToolInvocationOutcomeKind,
                 _: Option<String>,
+            ) -> Result<(), cairn_runtime::error::RuntimeError> {
+                Ok(())
+            }
+
+            async fn append_audit_events(
+                &self,
+                _: &[cairn_domain::RuntimeEvent],
             ) -> Result<(), cairn_runtime::error::RuntimeError> {
                 Ok(())
             }
@@ -555,6 +578,9 @@ mod tests {
                 _: ToolInvocationId,
                 _: Option<cairn_domain::TaskId>,
                 _: String,
+                _: &[cairn_domain::RuntimeEvent],
+                _: Option<String>,
+                _: Option<serde_json::Value>,
             ) -> Result<(), cairn_runtime::error::RuntimeError> {
                 Ok(())
             }
@@ -567,6 +593,13 @@ mod tests {
                 _: String,
                 _: ToolInvocationOutcomeKind,
                 _: Option<String>,
+            ) -> Result<(), cairn_runtime::error::RuntimeError> {
+                Ok(())
+            }
+
+            async fn append_audit_events(
+                &self,
+                _: &[cairn_domain::RuntimeEvent],
             ) -> Result<(), cairn_runtime::error::RuntimeError> {
                 Ok(())
             }

@@ -266,6 +266,8 @@ fn assistant_tool_call_completed_and_failed_now_preserve_tool_name_and_task_id()
         tool_name: "list_approvals".to_owned(),
         finished_at_ms: 200,
         outcome: ToolInvocationOutcomeKind::Success,
+        tool_call_id: None,
+        result_json: None,
     });
     let failed = RuntimeEvent::ToolInvocationFailed(ToolInvocationFailed {
         project: ProjectKey::new("t", "w", "p"),
