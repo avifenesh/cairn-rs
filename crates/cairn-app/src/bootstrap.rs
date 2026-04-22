@@ -67,8 +67,10 @@ pub fn enforce_team_mode_storage_invariant(config: &BootstrapConfig) {
 
 /// Parse a `--mode` value. Fatal on unknown values so a fat-fingered
 /// env var or CLI flag fails loud instead of silently falling back to
-/// local mode.
-fn parse_mode_value(raw: &str, source: &str) -> DeploymentMode {
+/// local mode. Exposed (`pub`) so `main.rs`'s binary-side parser can
+/// share the same fail-loud helper instead of open-coding a divergent
+/// `eprintln!` + `exit(1)`.
+pub fn parse_mode_value(raw: &str, source: &str) -> DeploymentMode {
     match raw {
         "team" | "self-hosted" => DeploymentMode::SelfHostedTeam,
         "local" => DeploymentMode::Local,
@@ -80,8 +82,9 @@ fn parse_mode_value(raw: &str, source: &str) -> DeploymentMode {
 /// string `memory` selects the in-memory backend (matching the
 /// documented `cairn-app --db memory` usage); anything with a Postgres
 /// scheme becomes Postgres; everything else is treated as a SQLite
-/// path, matching the original CLI semantics.
-fn parse_db_value(raw: &str) -> StorageBackend {
+/// path, matching the original CLI semantics. Exposed (`pub`) so
+/// `main.rs` can share the parser and stay in sync with the library.
+pub fn parse_db_value(raw: &str) -> StorageBackend {
     if raw == "memory" {
         StorageBackend::InMemory
     } else if raw.starts_with("postgres://") || raw.starts_with("postgresql://") {
@@ -97,11 +100,58 @@ fn parse_db_value(raw: &str) -> StorageBackend {
 
 /// Track which configuration fields came from CLI flags so the
 /// env-var fallback pass below does not clobber explicit user intent.
+///
+/// Public so `main.rs` can reuse the same struct when wiring env-var
+/// fallback into the binary-side parser (`apply_env_fallback` below is
+/// the shared mutator).
 #[derive(Default)]
-struct CliProvided {
-    mode: bool,
-    port: bool,
-    db: bool,
+pub struct CliProvided {
+    pub mode: bool,
+    pub port: bool,
+    pub db: bool,
+}
+
+/// Apply env-var fallback for `CAIRN_MODE` / `CAIRN_PORT` / `CAIRN_DB`
+/// using the supplied `env` lookup. CLI-provided fields (tracked in
+/// `provided`) are left untouched so the flag always wins. Invalid
+/// values fatal loud via `fatal_cli` so a fat-fingered `CAIRN_PORT=foo`
+/// is caught at boot rather than silently falling back to the default.
+///
+/// Empty strings are treated as unset so container compose files can
+/// clear a container-wide default without tripping the validation.
+///
+/// Exposed for reuse in `main.rs`'s binary-side parser; the library's
+/// own `parse_args_with_env` calls the same helper internally.
+pub fn apply_env_fallback<F>(config: &mut BootstrapConfig, provided: &CliProvided, env: F)
+where
+    F: Fn(&str) -> Result<String, std::env::VarError>,
+{
+    if !provided.mode {
+        if let Ok(raw) = env("CAIRN_MODE") {
+            let trimmed = raw.trim();
+            if !trimmed.is_empty() {
+                config.mode = parse_mode_value(trimmed, "CAIRN_MODE");
+            }
+        }
+    }
+    if !provided.port {
+        if let Ok(raw) = env("CAIRN_PORT") {
+            let trimmed = raw.trim();
+            if !trimmed.is_empty() {
+                config.listen_port = trimmed
+                    .parse::<u16>()
+                    .unwrap_or_else(|_| fatal_cli(format!("Invalid CAIRN_PORT: {}", trimmed)));
+            }
+        }
+    }
+    if !provided.db {
+        if let Ok(raw) = env("CAIRN_DB") {
+            let trimmed = raw.trim();
+            if !trimmed.is_empty() {
+                config.storage = parse_db_value(trimmed);
+            }
+        }
+    }
 }
 
 pub fn parse_args_from(args: &[String]) -> BootstrapConfig {
@@ -176,36 +226,7 @@ where
         i += 1;
     }
 
-    // Env-var fallback. CLI flags take precedence — only apply env
-    // vars when the corresponding flag was not provided. Empty string
-    // is treated as unset so operators can clear a var in compose files
-    // without flipping back to the default "local" mode.
-    if !cli.mode {
-        if let Ok(raw) = env("CAIRN_MODE") {
-            let trimmed = raw.trim();
-            if !trimmed.is_empty() {
-                config.mode = parse_mode_value(trimmed, "CAIRN_MODE");
-            }
-        }
-    }
-    if !cli.port {
-        if let Ok(raw) = env("CAIRN_PORT") {
-            let trimmed = raw.trim();
-            if !trimmed.is_empty() {
-                config.listen_port = trimmed
-                    .parse::<u16>()
-                    .unwrap_or_else(|_| fatal_cli(format!("Invalid CAIRN_PORT: {}", trimmed)));
-            }
-        }
-    }
-    if !cli.db {
-        if let Ok(raw) = env("CAIRN_DB") {
-            let trimmed = raw.trim();
-            if !trimmed.is_empty() {
-                config.storage = parse_db_value(trimmed);
-            }
-        }
-    }
+    apply_env_fallback(&mut config, &cli, env);
 
     if config.tls_cert_path.is_some() && config.tls_key_path.is_some() {
         config.tls_enabled = true;
@@ -561,8 +582,7 @@ mod tests {
 
     #[test]
     fn env_cairn_port_applied_when_flag_absent() {
-        let config =
-            parse_args_with_env(&args(&[]), env_from(&[("CAIRN_PORT", "9090")]));
+        let config = parse_args_with_env(&args(&[]), env_from(&[("CAIRN_PORT", "9090")]));
         assert_eq!(config.listen_port, 9090);
     }
 
@@ -578,10 +598,7 @@ mod tests {
     #[test]
     #[should_panic(expected = "Invalid CAIRN_PORT")]
     fn env_cairn_port_rejects_garbage() {
-        let _ = parse_args_with_env(
-            &args(&[]),
-            env_from(&[("CAIRN_PORT", "not-a-port")]),
-        );
+        let _ = parse_args_with_env(&args(&[]), env_from(&[("CAIRN_PORT", "not-a-port")]));
     }
 
     #[test]
@@ -604,8 +621,7 @@ mod tests {
 
     #[test]
     fn env_cairn_db_memory_applied() {
-        let config =
-            parse_args_with_env(&args(&[]), env_from(&[("CAIRN_DB", "memory")]));
+        let config = parse_args_with_env(&args(&[]), env_from(&[("CAIRN_DB", "memory")]));
         assert!(matches!(config.storage, StorageBackend::InMemory));
     }
 
@@ -667,8 +683,7 @@ mod tests {
     #[test]
     #[should_panic(expected = "Unknown mode (CAIRN_MODE)")]
     fn env_cairn_mode_rejects_garbage() {
-        let _ =
-            parse_args_with_env(&args(&[]), env_from(&[("CAIRN_MODE", "hybrid")]));
+        let _ = parse_args_with_env(&args(&[]), env_from(&[("CAIRN_MODE", "hybrid")]));
     }
 
     #[test]
