@@ -747,12 +747,14 @@ fn all_variants() -> Vec<RuntimeEvent> {
             run_id: Some(run()),
             task_id: None,
             reason: "retry".to_owned(),
+            boot_id: None,
         }),
         RuntimeEvent::RecoveryCompleted(RecoveryCompleted {
             project: p(),
             run_id: Some(run()),
             task_id: None,
             recovered: true,
+            boot_id: None,
         }),
         RuntimeEvent::UserMessageAppended(UserMessageAppended {
             project: p(),

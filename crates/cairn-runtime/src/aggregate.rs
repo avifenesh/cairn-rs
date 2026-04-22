@@ -77,13 +77,23 @@ pub struct InMemoryServices {
 
     // ── Observability ──────────────────────────────────────────────────────
     //
-    // Recovery is NOT on this struct. FF's background scanners
-    // (DelayedPromoter, LeaseExpiryScanner, AttemptTimeoutScanner,
-    // ExecutionDeadlineScanner, SuspensionTimeoutScanner,
-    // PendingWaitpointExpiryScanner, BudgetResetScanner, BudgetReconciler,
-    // QuotaReconciler, DependencyReconciler, FlowProjector,
-    // IndexReconciler, RetentionTrimmer, UnblockScanner) own recovery
-    // unconditionally. This crate holds no recovery sweep.
+    // RFC 020: Recovery ownership split.
+    //
+    // Operational recovery (FF state): LeaseExpiryScanner,
+    // AttemptTimeoutScanner, ExecutionDeadlineScanner,
+    // SuspensionTimeoutScanner, PendingWaitpointExpiryScanner,
+    // BudgetResetScanner, BudgetReconciler, QuotaReconciler,
+    // DependencyReconciler, FlowProjector, IndexReconciler,
+    // RetentionTrimmer, UnblockScanner — owned by FlowFabric's 14
+    // background scanners. They run continuously, not at cairn-app boot.
+    //
+    // Run-level recovery (cairn state): `RecoveryServiceImpl::recover_all`
+    // runs once at startup (after `SandboxService::recover_all`, before the
+    // readiness gate flips). It enumerates non-terminal runs, applies the
+    // RFC 020 recovery matrix, emits `RecoveryAttempted`/`RecoveryCompleted`
+    // events carrying the boot id, and lets the orchestrator resume the run
+    // on its next tick. See RFC 020 §"Recovery ownership split" and the
+    // design delta in `project_rfc020_delta_and_gaps.md` (Part A).
     pub observability: LlmObservabilityServiceImpl<InMemoryStore>,
 
     // ── Provider & routing ─────────────────────────────────────────────────

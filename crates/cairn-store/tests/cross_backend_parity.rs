@@ -991,6 +991,7 @@ mod sqlite_parity {
                 run_id: Some(RunId::new("r1")),
                 task_id: None,
                 reason: "lease expired".to_owned(),
+                boot_id: None,
             })),
         ];
 

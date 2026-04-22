@@ -105,6 +105,7 @@ async fn recovery_attempted_is_stored_in_event_log() {
                 run_id: Some(run_id("1")),
                 task_id: None,
                 reason: "run stalled for 30 s — initiating recovery sweep".to_owned(),
+                boot_id: None,
             }),
         )])
         .await
@@ -143,6 +144,7 @@ async fn recovery_completed_success_marks_recovered() {
                     run_id: Some(run_id("2")),
                     task_id: None,
                     reason: "task lease expired — re-queuing".to_owned(),
+                    boot_id: None,
                 }),
             ),
             ev(
@@ -152,6 +154,7 @@ async fn recovery_completed_success_marks_recovered() {
                     run_id: Some(run_id("2")),
                     task_id: None,
                     recovered: true,
+                    boot_id: None,
                 }),
             ),
         ])
@@ -201,6 +204,7 @@ async fn recovery_escalated_stored_with_all_fields() {
                         run_id: Some(run_id("3")),
                         task_id: Some(task_id("3")),
                         reason: format!("attempt {i}: checkpoint restore failed"),
+                        boot_id: None,
                     }),
                 ),
                 ev(
@@ -210,6 +214,7 @@ async fn recovery_escalated_stored_with_all_fields() {
                         run_id: Some(run_id("3")),
                         task_id: Some(task_id("3")),
                         recovered: false,
+                        boot_id: None,
                     }),
                 ),
             ])
@@ -291,6 +296,7 @@ async fn escalation_chain_is_queryable_in_causal_order() {
                     run_id: Some(run_id("chain")),
                     task_id: None,
                     reason: "run stalled — recovery initiated".to_owned(),
+                    boot_id: None,
                 }),
             ),
             ev(
@@ -300,6 +306,7 @@ async fn escalation_chain_is_queryable_in_causal_order() {
                     run_id: Some(run_id("chain")),
                     task_id: None,
                     recovered: false,
+                    boot_id: None,
                 }),
             ),
             ev(
@@ -377,6 +384,7 @@ async fn recovery_completed_false_is_distinct_from_success() {
                     run_id: Some(run_id("fail")),
                     task_id: None,
                     reason: "recovery initiated".to_owned(),
+                    boot_id: None,
                 }),
             ),
             ev(
@@ -386,6 +394,7 @@ async fn recovery_completed_false_is_distinct_from_success() {
                     run_id: Some(run_id("fail")),
                     task_id: None,
                     recovered: false,
+                    boot_id: None,
                 }),
             ),
         ])
@@ -424,6 +433,7 @@ async fn recovery_events_are_isolated_by_run() {
                     run_id: Some(run_id("iso_a")),
                     task_id: None,
                     reason: "run A recovery".to_owned(),
+                    boot_id: None,
                 }),
             ),
             ev(
@@ -433,6 +443,7 @@ async fn recovery_events_are_isolated_by_run() {
                     run_id: Some(run_id("iso_b")),
                     task_id: None,
                     reason: "run B recovery".to_owned(),
+                    boot_id: None,
                 }),
             ),
             ev(
@@ -442,6 +453,7 @@ async fn recovery_events_are_isolated_by_run() {
                     run_id: Some(run_id("iso_b")),
                     task_id: None,
                     recovered: true,
+                    boot_id: None,
                 }),
             ),
         ])

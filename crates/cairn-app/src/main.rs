@@ -1094,12 +1094,51 @@ async fn main() {
         }
     }
 
-    // Recovery sweeps (lease expiry, interrupted runs, stale dependencies)
-    // used to run here before serving traffic. Removed in the Fabric
-    // finalization round — FlowFabric's 14 background scanners own recovery
-    // unconditionally, so a boot-time cairn-side sweep would either be
-    // no-op duplication (Fabric on) or a pointless read against an
-    // in-memory store that has nothing to recover (Fabric off).
+    // ── RFC 020 Track 1: run-level recovery ──────────────────────────────
+    //
+    // Operational recovery (lease expiry, attempt timeouts, dependency
+    // reconciliation, …) is owned unconditionally by FF's 14 background
+    // scanners. This sweep covers the other half: non-terminal runs that
+    // existed in the cairn event log when the previous boot died. The
+    // service emits advisory `RecoveryAttempted`/`RecoveryCompleted`
+    // events keyed by `boot_id`, advances `WaitingApproval` runs whose
+    // approval resolved during the crash window, and fails out wedged
+    // `Running` runs with no checkpoint and no recent progress. Actual
+    // re-execution happens on the orchestrator's next tick — recovery
+    // only prepares state.
+    //
+    // On error we halt startup. A cairn-app that can't reach the store
+    // long enough to read run state has no business serving traffic.
+    // Multi-instance correctness is deferred to a future RFC (RFC 020
+    // delta Gap 2 resolution — v1 is single-instance).
+    {
+        let boot_id = cairn_domain::BootId::new(uuid::Uuid::now_v7().to_string());
+        eprintln!("cairn-app boot_id={boot_id}");
+        let recovery_service =
+            cairn_runtime::RecoveryServiceImpl::new(lib_state.runtime.store.clone());
+        match cairn_runtime::RecoveryService::recover_all(&recovery_service, &boot_id).await {
+            Ok(summary) => {
+                if summary.scanned_runs > 0 {
+                    eprintln!(
+                        "run recovery: scanned={} recovered={} advanced={} failed={} boot_id={}",
+                        summary.scanned_runs,
+                        summary.recovered_runs,
+                        summary.advanced_runs,
+                        summary.failed_runs,
+                        boot_id,
+                    );
+                }
+            }
+            Err(error) => {
+                // Halt startup: cairn-app does not serve traffic without
+                // reconciled run state (RFC 020 Open Q #7 / Gap 6
+                // resolution). systemd / Kubernetes re-runs us; an
+                // operator gets paged after N failures.
+                eprintln!("run recovery failed: {error}");
+                std::process::exit(1);
+            }
+        }
+    }
 
     // ── Startup replays ────────────────────────────────────────────────────────
     // Replay all store events into in-memory projections so pre-existing data
