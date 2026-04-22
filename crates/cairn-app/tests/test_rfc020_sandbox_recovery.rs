@@ -61,8 +61,6 @@
 
 mod support;
 
-use std::time::Duration;
-
 use serde_json::Value;
 use support::live_fabric::LiveHarness;
 
@@ -132,18 +130,35 @@ async fn sandbox_recovery_branch_completes_on_clean_boot() {
          full branch: {branch:#?}"
     );
 
-    // `count` must be serializable as a non-negative integer. Missing
-    // `count` would indicate a plumbing regression that lost the
-    // `SandboxRecoverySummary` numbers.
-    let count = branch
-        .get("count")
-        .and_then(Value::as_u64)
-        .unwrap_or_else(|| {
-            panic!("sandboxes branch missing numeric `count`: {branch:#?}");
-        });
+    // `count` must be present and parse as a u64 — this is the field
+    // that `BranchStatus::complete(n)` writes. A missing `count` when
+    // `state == "complete"` is a schema drift: the serializer dropped
+    // the `SandboxRecoverySummary` numbers from the JSON payload, which
+    // would silently hide recovery volume from operators. Fail loudly so
+    // the drift is caught at the next CI run.
+    let count_value = branch.get("count").unwrap_or_else(|| {
+        panic!(
+            "sandboxes branch has state=complete but missing `count` \
+             (schema drift — BranchStatus::complete(n) must serialize \
+             count). Branch: {branch:#?}"
+        );
+    });
     assert!(
-        count < i64::MAX as u64,
-        "sandbox recovery count is wildly out of range: {count}"
+        count_value.is_u64(),
+        "sandboxes branch `count` must serialize as u64; got {count_value:?} \
+         in {branch:#?}"
+    );
+
+    // On a completed branch the `detail` field is omitted (per
+    // `BranchStatus::complete` which leaves `detail = None`, combined
+    // with `#[serde(skip_serializing_if = "Option::is_none")]`). A
+    // present `detail` on a `complete` branch means recovery degraded
+    // its status — operators should see that surface loudly rather
+    // than be hidden behind a no-op assertion.
+    assert!(
+        branch.get("detail").is_none(),
+        "sandboxes branch is complete but carries a `detail` — recovery \
+         degraded? Branch: {branch:#?}"
     );
 }
 
@@ -373,11 +388,13 @@ async fn sandbox_preserved_base_revision_drift_overlay_only() {
     // boot-2 contains exactly one `sandbox_base_revision_drift` +
     // `sandbox_preserved` pair (for the overlay) and zero drift events
     // for the reflink.
+    //
+    // `sigkill_and_restart` already polls `/health/ready` to 200 via
+    // `poll_readiness_until_ready`, so the readiness snapshot below
+    // is guaranteed to reflect the post-recovery state — no sleeps or
+    // secondary polling needed. At un-ignore time, this is the hook
+    // where event-log diff + branch-count assertions slot in.
     let _ = fetch_readiness(&h).await;
-
-    // Short delay so readiness polling settles — drop in a real
-    // assertion here at un-ignore time.
-    tokio::time::sleep(Duration::from_millis(50)).await;
 }
 
 // ── Test #4: sandbox lost ───────────────────────────────────────────────────
@@ -426,11 +443,25 @@ async fn sandbox_preserved_base_revision_drift_overlay_only() {
 async fn sandbox_lost_transitions_run_to_failed() {
     let mut h = LiveHarness::setup_with_sqlite().await;
 
-    // Placeholder path — once the provision endpoint lands, replace this
-    // with a real sandbox path obtained from the provision call.
+    // Placeholder path — once the provision endpoint lands, replace
+    // this with the real sandbox path obtained from the provision call.
+    //
+    // NOTE on isolation: cairn-app's `default_sandbox_base_dir()` is
+    // currently hardcoded to `std::env::temp_dir().join(
+    // "cairn-workspace-sandboxes")` (state.rs:1082), shared across
+    // every subprocess on the host. To avoid collision between
+    // concurrent test runs we scope to a uuid-unique run-id built from
+    // the harness scope; and even if the path does collide, the
+    // `remove_dir_all` target only exists once the provision endpoint
+    // lands, so a pre-un-ignore run is safely a no-op. Un-ignoring
+    // this test should be paired with a `LiveHarness` enhancement that
+    // plumbs a per-harness sandbox base dir (e.g. via a new
+    // `CAIRN_SANDBOX_BASE_DIR` env var + CLI flag) so parallel tests
+    // are fully isolated.
+    let fake_run_id = format!("sbx-lost-{}-placeholder", h.project);
     let placeholder_sandbox = std::env::temp_dir()
         .join("cairn-workspace-sandboxes")
-        .join("sbx-nonexistent-run");
+        .join(fake_run_id);
     // Deleting a nonexistent path is a no-op; the test treats this as a
     // scaffolding hook, not a behavioral assertion.
     let _ = std::fs::remove_dir_all(&placeholder_sandbox);
