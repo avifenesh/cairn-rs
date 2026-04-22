@@ -1,50 +1,40 @@
-//! Unit tests for RFC 020 recovery primitives — **not compliance proof.**
+//! Pure-type unit tests for RFC 020 recovery primitives — **not compliance proof.**
 //!
-//! # Footgun
+//! # Scope
 //!
 //! Tests in this file exercise `cairn_runtime::startup` types
-//! (`ToolCallId`, `CheckpointMeta`, `ReadinessState`) and the pure
+//! (`ToolCallId`, `ReadinessState`) and the pure
 //! `recovery_dispatch_decision()` function **in isolation**. They never
 //! boot `cairn-app`, never crash it, and never replay an event log.
 //!
-//! Do NOT cite a passing test from this file as evidence that an RFC
-//! 020 durability invariant holds. That claim requires a real
-//! integration test against a persistent event log — the authoritative
-//! compliance evidence for RFC 020 invariants #6 and #11 lives in
-//! `crates/cairn-app/tests/test_rfc020_tool_idempotency.rs`, which
-//! exercises `RuntimeExecutePhase::execute` against a real
-//! `InMemoryStore`, `ToolInvocationServiceImpl`, and
-//! `ToolCallResultCache` without mocks on the hot path.
+//! # Footgun
 //!
-//! These unit tests exist only as fast type-level regression guards
-//! (seconds to run; catch obvious breakage before the multi-minute
-//! LiveHarness suite is worth spinning up).
+//! Do NOT cite a passing test from this file as evidence that an RFC
+//! 020 durability invariant holds. A durability claim requires a
+//! LiveHarness-based integration test that exercises a real event log
+//! across crash and restart. The authoritative RFC 020 compliance
+//! evidence lives under `crates/cairn-app/tests/`:
+//!
+//! - `test_rfc020_dual_checkpoint.rs` — Invariants #5/#11/#14 (dual
+//!   checkpoints + `RecoverySummaryEmitted` audit event).
+//! - `test_rfc020_tool_idempotency.rs` — Invariants #6 and #11
+//!   (`ToolCallId` determinism + tool-result-cache re-hydration).
+//! - `test_rfc020_recovery.rs` — end-to-end crash/restart coverage via
+//!   LiveHarness.
+//!
+//! # Role
+//!
+//! These tests are fast regression guards for the underlying type
+//! invariants: deterministic ID derivation, pure dispatch-decision
+//! classification, and `ReadinessState` lifecycle transitions. They
+//! fail in milliseconds on obvious breakage and keep the multi-minute
+//! LiveHarness suite from having to catch trivial type regressions.
 
-use cairn_domain::recovery::{CheckpointKind, RetrySafety};
+use cairn_domain::recovery::RetrySafety;
 use cairn_runtime::startup::{
-    recovery_dispatch_decision, BranchState, CheckpointMeta, ReadinessState,
-    RecoveryDispatchDecision, ToolCallId, ToolCallResultCache,
+    recovery_dispatch_decision, BranchState, ReadinessState, RecoveryDispatchDecision, ToolCallId,
+    ToolCallResultCache,
 };
-
-// ── RFC 020 Invariant 5: Two checkpoints per iteration ──────────────────────
-
-#[test]
-fn rfc020_invariant5_dual_checkpoint_per_iteration() {
-    // Intent checkpoint after decide, before execute
-    let planned_calls = vec![
-        ToolCallId::derive("run-100", 3, 0, "memory_search", r#"{"query":"login bug"}"#),
-        ToolCallId::derive("run-100", 3, 1, "grep_search", r#"{"pattern":"auth"}"#),
-    ];
-    let intent = CheckpointMeta::intent("run-100", 3, 25, planned_calls.clone());
-    assert_eq!(intent.kind, CheckpointKind::Intent);
-    assert_eq!(intent.step_number, 3);
-    assert_eq!(intent.tool_calls_snapshot.len(), 2);
-
-    // Result checkpoint after execute completes
-    let result = CheckpointMeta::result("run-100", 3, 29, planned_calls);
-    assert_eq!(result.kind, CheckpointKind::Result);
-    assert!(result.message_history_size > intent.message_history_size);
-}
 
 // ── RFC 020 Invariant 6: ToolCallId determinism on resume ───────────────────
 
