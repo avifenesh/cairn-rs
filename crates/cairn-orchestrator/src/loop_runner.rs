@@ -133,36 +133,43 @@ impl DualCheckpointHook {
     }
 
     fn planned_tool_call_ids(decide: &DecideOutput) -> Vec<String> {
-        // Mirror the deterministic derivation Track 3 uses in
-        // `execute_impl.rs`: sort by (tool_name, normalized_args) and
-        // assign `call_index` per-step. We replicate the derivation
-        // here so the Intent checkpoint carries the same IDs execute
-        // will see when it dispatches. Proposals without a
-        // `tool_name` produce no ToolCallId (they are bookkeeping
-        // actions — CompleteRun, EscalateToOperator, CreateMemory).
-        let mut tools: Vec<(&str, String)> = Vec::new();
-        for proposal in &decide.proposals {
-            let Some(tool_name) = proposal.tool_name.as_deref() else {
-                continue;
-            };
-            let normalized = proposal
-                .tool_args
-                .as_ref()
-                .map(|v| v.to_string())
-                .unwrap_or_else(|| "null".to_owned());
-            tools.push((tool_name, normalized));
-        }
-        tools.sort_by(|a, b| a.0.cmp(b.0).then(a.1.cmp(&b.1)));
-        // The hash derivation (run_id + step + call_index + name +
-        // normalized_args) lives in `cairn_runtime::startup::ToolCallId::derive`.
-        // The Intent checkpoint captures ToolCallIds as strings for the
-        // audit event; the full derive is re-done by execute at dispatch
-        // time (same inputs → same hash). Record a planned-call marker
-        // keyed by (tool_name, normalized_args) so the checkpoint body
-        // includes the planned set deterministically.
-        tools
-            .into_iter()
-            .map(|(name, args)| format!("planned:{name}:{args}"))
+        // Advisory planned-call markers for the Intent checkpoint audit
+        // body. These are NOT the hashed `ToolCallId`s execute mints —
+        // bugbot #84/medium flagged that my earlier implementation sorted
+        // by (tool_name, args) and normalized via `Value::to_string()`,
+        // which diverged from `execute_impl.rs` (positional `call_index`
+        // + per-handler `normalize_for_cache`). Rather than reconstruct
+        // the handler registry in the checkpoint hook (a layering break —
+        // the registry lives inside `RuntimeExecutePhase`), we:
+        //
+        // 1. Preserve proposal order (so `call_index` in the marker
+        //    matches execute's positional dispatch order).
+        // 2. Carry the raw proposal args (JSON `to_string`), clearly
+        //    labelled as a PLAN marker, not the hashed cache key.
+        //
+        // The accurate hashed `ToolCallId` lands on
+        // `ToolInvocationCompleted.tool_call_id` at dispatch time, which
+        // is what recovery reads via `ToolCallResultCache::get`. The
+        // Intent checkpoint's `tool_call_ids` is a human-readable audit
+        // record of the plan, useful for operator dashboards and the
+        // future resume path (Gap 13 consumer).
+        //
+        // Proposals without a `tool_name` (CompleteRun /
+        // EscalateToOperator / CreateMemory) have no stream-facing tool
+        // analogue and produce no marker.
+        decide
+            .proposals
+            .iter()
+            .enumerate()
+            .filter_map(|(call_index, proposal)| {
+                let tool_name = proposal.tool_name.as_deref()?;
+                let args_json = proposal
+                    .tool_args
+                    .as_ref()
+                    .map(|v| v.to_string())
+                    .unwrap_or_else(|| "null".to_owned());
+                Some(format!("planned:{call_index}:{tool_name}:{args_json}"))
+            })
             .collect()
     }
 
