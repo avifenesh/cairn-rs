@@ -83,6 +83,7 @@ impl LeaseHistorySubscriber {
         num_flow_partitions: u16,
         bridge: Arc<EventBridge>,
         cursor_store: Arc<dyn FfLeaseHistoryCursorStore>,
+        own_instance_id: String,
     ) -> Self {
         let cancel = CancellationToken::new();
         let worker = Worker {
@@ -92,6 +93,7 @@ impl LeaseHistorySubscriber {
             cursor_store,
             cancel: cancel.clone(),
             cursors: HashMap::new(),
+            own_instance_id,
         };
         let handle = tokio::spawn(worker.run());
         tracing::info!(
@@ -119,6 +121,14 @@ struct Worker {
     /// In-memory mirror of the persisted cursor table, keyed by
     /// `(partition_tag, execution_id)`.
     cursors: HashMap<(String, String), String>,
+    /// This cairn-app instance's id (from `FabricConfig::worker_instance_id`,
+    /// threaded through `LeaseHistorySubscriber::start`). Used in
+    /// `fetch_entity_context` to reject frames whose exec was created by
+    /// another cairn-app sharing the same Valkey. Without this filter,
+    /// a two-instance-one-Valkey deploy sees foreign runs' state changes
+    /// in its own `/v1/events` log (RFC 020 test #1 flake + production
+    /// cross-tenant leak).
+    own_instance_id: String,
 }
 
 impl Worker {
@@ -503,20 +513,32 @@ impl Worker {
     }
 
     /// HGETALL on the exec's `:tags` hash, return a classified
-    /// (Task vs Run) + project + id tuple. Returns None when tags
-    /// lack cairn.task_id / cairn.run_id — another tenant sharing
-    /// the Valkey (integration-test harness collision), not our
-    /// execution. Also returns None on any parse failure.
-    /// Fetch the exec's cairn tag bundle and classify it as a Task
-    /// or Run. Returns:
+    /// (Task vs Run) + project + id tuple. Returns:
     /// - `Ok(Some(ctx))` — successfully classified our execution.
-    /// - `Ok(None)` — HGETALL succeeded but the tags don't carry
-    ///   `cairn.task_id` / `cairn.run_id` (either another tenant on
-    ///   a shared Valkey, or missing/mis-shaped tags). Permanent:
+    /// - `Ok(None)` — the frame belongs to another cairn-app instance
+    ///   sharing the Valkey, OR the tags lack `cairn.task_id` /
+    ///   `cairn.run_id`, OR any parse failure. Permanent outcome —
     ///   cursor can advance past this frame safely.
     /// - `Err(_)` — transient Valkey failure. `handle_frame` treats
     ///   this as "don't advance the cursor" so we retry on the next
     ///   poll and don't lose the event.
+    ///
+    /// **Cross-instance isolation.** Before classifying, we require
+    /// the exec's `cairn.instance_id` tag to match `self.own_instance_id`.
+    /// Two cairn-app instances sharing a Valkey otherwise see each
+    /// other's state-change frames in their global event log: the
+    /// `lease_expiry` ZSET is partition-global (FF-owned, not cairn-
+    /// scoped), so a poll on partition `N` enumerates every cairn
+    /// instance's leased executions on that partition. The tag filter
+    /// turns this into a subscriber-side partition of the frame stream
+    /// by instance ownership — foreign frames are dropped with cursor
+    /// advance, so we don't replay them on every poll.
+    ///
+    /// Frames without the tag are treated as foreign too. Pre-upgrade
+    /// executions that predate the filter lack the tag; operators doing
+    /// an in-place binary swap must run `CAIRN_BACKFILL_INSTANCE_TAG=1`
+    /// on the new boot to re-tag outstanding `Running` / `WaitingApproval`
+    /// executions — otherwise their lease expiries are silently foreign.
     async fn fetch_entity_context(
         &self,
         partition: &Partition,
@@ -543,6 +565,21 @@ impl Worker {
         let Some(project) = try_parse_project_key(project_str) else {
             return Ok(None);
         };
+        // Cross-instance isolation gate. Must come after the
+        // `cairn.project` check so we don't pay the tag read cost on
+        // obviously-foreign frames, and before the task/run
+        // classification so we don't accidentally emit a bridge event
+        // for another instance's execution.
+        match tags.get("cairn.instance_id") {
+            Some(tag) if tag == &self.own_instance_id => {}
+            Some(_) | None => {
+                tracing::trace!(
+                    exec_id,
+                    "lease-history frame belongs to a different cairn instance (or is untagged); skipping"
+                );
+                return Ok(None);
+            }
+        }
         if let Some(task_id) = tags.get("cairn.task_id") {
             Ok(Some(EntityContext::Task {
                 project,

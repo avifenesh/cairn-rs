@@ -164,6 +164,12 @@ impl FabricRunService {
                 project.tenant_id, project.workspace_id, project.project_id
             ),
         );
+        // Cross-instance isolation — see task_service::submit for why
+        // this tag is mandatory on every execution cairn creates.
+        tags.insert(
+            "cairn.instance_id".to_owned(),
+            self.runtime.config.worker_instance_id.to_string(),
+        );
         if let Some(parent) = parent_run_id {
             tags.insert("cairn.parent_run_id".to_owned(), parent.as_str().to_owned());
         }

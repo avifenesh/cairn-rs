@@ -73,6 +73,7 @@ impl FabricServices {
                 runtime.partition_config.num_flow_partitions,
                 bridge.clone(),
                 store,
+                runtime.config.worker_instance_id.to_string(),
             )
         });
 

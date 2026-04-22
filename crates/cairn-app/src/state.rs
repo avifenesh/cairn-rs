@@ -1171,6 +1171,49 @@ async fn build_runtime_with_optional_fabric() -> Result<
     .map_err(|e| format!("FabricServices::start failed: {e}"))?;
     let fabric = Arc::new(fabric);
 
+    // One-shot cross-instance tag backfill. Gated on
+    // `CAIRN_BACKFILL_INSTANCE_TAG=1` so a fresh deploy pays no cost.
+    // Only applies when an operator does an in-place binary swap with
+    // pre-existing `Running`/`WaitingApproval` executions that predate
+    // the `cairn.instance_id` tag filter. Idempotent — running twice
+    // is a no-op on the second pass because the HSET only fires on
+    // hashes that lack the tag. Logs once at completion.
+    if std::env::var("CAIRN_BACKFILL_INSTANCE_TAG").as_deref() == Ok("1") {
+        match cairn_fabric::instance_tag_backfill::backfill_instance_tag(
+            &fabric.runtime.client,
+            fabric.runtime.config.worker_instance_id.as_str(),
+        )
+        .await
+        {
+            Ok(outcome) => {
+                tracing::info!(
+                    scanned = outcome.scanned,
+                    tagged = outcome.tagged,
+                    skipped_tagged = outcome.skipped_tagged,
+                    skipped_foreign = outcome.skipped_foreign,
+                    "backfilled cairn.instance_id on {} executions",
+                    outcome.tagged,
+                );
+                eprintln!(
+                    "backfilled cairn.instance_id on {} executions (scanned={} skipped_tagged={} skipped_foreign={})",
+                    outcome.tagged,
+                    outcome.scanned,
+                    outcome.skipped_tagged,
+                    outcome.skipped_foreign,
+                );
+            }
+            Err(e) => {
+                // Do not halt startup: the backfill is advisory. A
+                // failed pass leaves existing foreign behavior intact
+                // (lease expiries on untagged execs are dropped). An
+                // operator can re-run by restarting with the env var
+                // still set.
+                tracing::error!(error = %e, "cairn.instance_id backfill failed");
+                eprintln!("warning: cairn.instance_id backfill failed: {e}");
+            }
+        }
+    }
+
     // Build the adapters that implement the cairn-runtime traits but
     // route mutations to Fabric. Each shares the same store for projection
     // reads (the resolvers look up project from bare ids).
