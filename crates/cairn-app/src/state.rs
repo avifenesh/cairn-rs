@@ -1104,7 +1104,24 @@ impl AppState {
 
 // ── Helpers (local copies of private lib.rs fns used by new()) ───────────────
 
+/// Resolve the sandbox base directory.
+///
+/// Production default: `$TMPDIR/cairn-workspace-sandboxes`.
+///
+/// Honors the `CAIRN_SANDBOX_BASE_DIR` env var override when set. This
+/// exists primarily for per-harness test isolation: the default
+/// `/tmp/cairn-workspace-sandboxes` is a process-global directory, and
+/// parallel integration tests that seed entries into its
+/// `recovery_registry/` subdirectory can race one another during
+/// `SandboxService::recover_all`'s drift sweep. Test harnesses should
+/// set this env var to a unique per-harness path before spawning the
+/// cairn-app subprocess. Production deployments leave it unset.
 fn default_sandbox_base_dir() -> PathBuf {
+    if let Ok(override_path) = std::env::var("CAIRN_SANDBOX_BASE_DIR") {
+        if !override_path.is_empty() {
+            return PathBuf::from(override_path);
+        }
+    }
     std::env::temp_dir().join("cairn-workspace-sandboxes")
 }
 

@@ -81,6 +81,11 @@ pub struct LiveHarness {
     valkey_host: String,
     valkey_port: u16,
     storage: HarnessStorage,
+    /// Per-harness sandbox base dir. Isolates `SandboxService` state
+    /// (including `recovery_registry/`) from concurrent harnesses that
+    /// would otherwise share `$TMPDIR/cairn-workspace-sandboxes` and
+    /// race each other during `recover_all`'s drift sweep.
+    sandbox_base_dir: PathBuf,
 }
 
 impl LiveHarness {
@@ -110,13 +115,25 @@ impl LiveHarness {
         let workspace = format!("w_{suffix}");
         let project = format!("p_{suffix}");
 
+        // Per-harness sandbox base dir. Passed to the subprocess via
+        // `CAIRN_SANDBOX_BASE_DIR` so concurrent harnesses don't race
+        // on the default shared `cairn-workspace-sandboxes` registry.
+        let sandbox_base_dir = std::env::temp_dir().join(format!("cairn-sandboxes-test-{suffix}"));
+
         // 3. Bootstrap admin token, rotated immediately after startup.
         let seed_admin = format!("seed-admin-{suffix}-padding");
         let final_admin = format!("test-admin-{suffix}-{}", uuid::Uuid::new_v4().simple());
 
         // 4. Spawn the real binary on port 0 (OS-assigned).
-        let child =
-            spawn_subprocess_internal(0, &seed_admin, &suffix, &valkey_host, valkey_port, &storage);
+        let child = spawn_subprocess_internal(
+            0,
+            &seed_admin,
+            &suffix,
+            &valkey_host,
+            valkey_port,
+            &storage,
+            &sandbox_base_dir,
+        );
         let (child, bound_url) = read_listening_banner(child).await;
 
         // Team mode forces the listener to bind 0.0.0.0 so tests can't dial
@@ -161,6 +178,7 @@ impl LiveHarness {
             valkey_host,
             valkey_port,
             storage,
+            sandbox_base_dir,
         }
     }
 
@@ -225,6 +243,7 @@ impl LiveHarness {
             &self.valkey_host,
             self.valkey_port,
             &self.storage,
+            &self.sandbox_base_dir,
         );
         let (child, bound_url) = read_listening_banner(child).await;
         let base_url = bound_url.replace("0.0.0.0", "127.0.0.1");
@@ -302,6 +321,11 @@ impl Drop for LiveHarness {
                 let _ = std::fs::remove_file(std::path::PathBuf::from(sidecar));
             }
         }
+        // Best-effort cleanup of the per-harness sandbox base dir. Ignore
+        // errors — a process that didn't actually materialize the dir
+        // (no sandbox activity) is fine, and /tmp will be reclaimed by
+        // the OS regardless.
+        let _ = std::fs::remove_dir_all(&self.sandbox_base_dir);
     }
 }
 
@@ -315,6 +339,7 @@ fn spawn_subprocess_internal(
     valkey_host: &str,
     valkey_port: u16,
     storage: &HarnessStorage,
+    sandbox_base_dir: &std::path::Path,
 ) -> Child {
     let bin = env!("CARGO_BIN_EXE_cairn-app");
     let mut cmd = Command::new(bin);
@@ -334,6 +359,10 @@ fn spawn_subprocess_internal(
         .env("CAIRN_FABRIC_WORKER_ID", format!("worker-{suffix}"))
         .env("CAIRN_FABRIC_INSTANCE_ID", format!("instance-{suffix}"))
         .env("CAIRN_ADMIN_TOKEN", admin_token)
+        // Per-harness sandbox dir keeps `SandboxService` recovery
+        // state (including `recovery_registry/`) disjoint across
+        // concurrent LiveHarness subprocesses.
+        .env("CAIRN_SANDBOX_BASE_DIR", sandbox_base_dir)
         // Waitpoint HMAC: required by FabricConfig to avoid shipping a
         // runtime that would reject every ff_suspend_execution.
         .env(
