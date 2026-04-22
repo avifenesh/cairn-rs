@@ -111,29 +111,42 @@ pub async fn backfill_instance_tag(
         let (next, keys) = scan_step(client, &cursor, PATTERN, SCAN_COUNT).await?;
         for key in keys {
             outcome.scanned += 1;
-            // HGET twice is cheap vs an HGETALL that parses the full
-            // tag bundle; we only need two fields.
-            let project_raw: Value = client
-                .cmd("HGET")
+            // One HMGET reads both fields in a single round-trip
+            // instead of two sequential HGETs — saves ~N network
+            // trips on a scan of N execs. We only need these two
+            // fields (not a full HGETALL) because the tag hash
+            // routinely holds many other cairn.* tags that the
+            // backfill does not consult.
+            let raw: Value = client
+                .cmd("HMGET")
                 .arg(key.as_str())
                 .arg("cairn.project")
+                .arg("cairn.instance_id")
                 .execute()
                 .await
-                .map_err(|e| format!("HGET cairn.project {key}: {e}"))?;
-            let has_project = matches!(project_raw, Value::BulkString(_) | Value::SimpleString(_));
+                .map_err(|e| format!("HMGET {key}: {e}"))?;
+            let arr = match raw {
+                Value::Array(a) => a,
+                other => return Err(format!("HMGET {key}: unexpected reply shape {other:?}")),
+            };
+            if arr.len() != 2 {
+                return Err(format!(
+                    "HMGET {key}: expected 2-element reply, got {}",
+                    arr.len()
+                ));
+            }
+            let has_project = matches!(
+                arr[0].as_ref(),
+                Ok(Value::BulkString(_)) | Ok(Value::SimpleString(_))
+            );
+            let already_tagged = matches!(
+                arr[1].as_ref(),
+                Ok(Value::BulkString(_)) | Ok(Value::SimpleString(_))
+            );
             if !has_project {
                 outcome.skipped_foreign += 1;
                 continue;
             }
-            let instance_raw: Value = client
-                .cmd("HGET")
-                .arg(key.as_str())
-                .arg("cairn.instance_id")
-                .execute()
-                .await
-                .map_err(|e| format!("HGET cairn.instance_id {key}: {e}"))?;
-            let already_tagged =
-                matches!(instance_raw, Value::BulkString(_) | Value::SimpleString(_));
             if already_tagged {
                 outcome.skipped_tagged += 1;
                 continue;
