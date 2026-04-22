@@ -1094,6 +1094,12 @@ async fn main() {
     // Running run bound to the lost sandbox. Idempotent: a second
     // invocation with the same run_id is a no-op once the run is
     // terminal, so sigkill+restart does not double-seed.
+    //
+    // Gated behind `#[cfg(debug_assertions)]` (same precedent as
+    // `CAIRN_TEST_STARTUP_DELAY_MS` a few hundred lines down). Release
+    // builds strip the hook entirely so the env var cannot inject fake
+    // events into a production cairn-app — accidentally or maliciously.
+    #[cfg(debug_assertions)]
     if let Ok(spec) = std::env::var("CAIRN_TEST_SEED_LOST_SANDBOX") {
         if let Err(error) =
             seed_lost_sandbox_for_test(&lib_state, lib_state.sandbox_service.base_dir(), &spec)
@@ -1352,10 +1358,14 @@ async fn main() {
 /// `SandboxService::recover_all` to detect a missing sandbox and for
 /// `RecoveryService::recover_all` to transition the bound run to `failed`
 /// with `reason: sandbox_lost`. Called only when
-/// `CAIRN_TEST_SEED_LOST_SANDBOX` is set — production cairn-app never
-/// runs this path.
+/// `CAIRN_TEST_SEED_LOST_SANDBOX` is set in a debug build — release
+/// builds strip this function entirely via `#[cfg(debug_assertions)]`
+/// so a production cairn-app cannot be coerced into injecting fake
+/// `SessionCreated` / `RunCreated` / `RunStateChanged` events into its
+/// store.
 ///
 /// Spec format: `<run_id>:<tenant>:<workspace>:<project>`.
+#[cfg(debug_assertions)]
 async fn seed_lost_sandbox_for_test(
     lib_state: &cairn_app::AppState,
     sandbox_base_dir: &std::path::Path,
