@@ -120,9 +120,15 @@ fn sample_rss_kb(pid: u32) -> Option<u64> {
     let status = fs::read_to_string(format!("/proc/{pid}/status")).ok()?;
     for line in status.lines() {
         if let Some(rest) = line.strip_prefix("VmRSS:") {
-            // Format: `VmRSS:   12345 kB`
-            let digits: String = rest.chars().filter(|c| c.is_ascii_digit()).collect();
-            return digits.parse().ok();
+            // Format: `VmRSS:   12345 kB`. Parse the first whitespace-
+            // separated token so we don't accidentally concatenate any
+            // other digits that may appear on the line in future kernel
+            // versions.
+            return rest
+                .trim_start()
+                .split_ascii_whitespace()
+                .next()
+                .and_then(|s| s.parse().ok());
         }
     }
     None
@@ -134,7 +140,11 @@ fn sample_fd_count(pid: u32) -> Option<usize> {
     Some(dir.filter_map(|e| e.ok()).count())
 }
 
-/// One metric sample captured periodically during the soak.
+/// One metric sample captured periodically during the soak. RSS and
+/// fd are required (`/proc` is always available on Linux — absence
+/// means the subprocess died, which is itself a failure we want to
+/// surface). Event count is optional because it rides on an HTTP
+/// endpoint that may transiently hiccup mid-soak.
 #[derive(Debug, Clone)]
 struct Sample {
     elapsed_s: u64,
@@ -142,29 +152,60 @@ struct Sample {
     fd_count: usize,
     ready_ok: bool,
     status_ok: bool,
-    event_count: usize,
+    event_count: Option<usize>,
 }
 
 /// Query `/v1/events/recent?limit=500` and return the number of events.
-/// Loose proxy for event-log growth; the exact number is informational.
-async fn event_count(client: &reqwest::Client, base_url: &str, token: &str) -> usize {
-    match client
+/// Strict variant — panics on any transport/status/JSON failure. Used
+/// for the baseline + end anchors where a 0-by-error would silently
+/// invalidate the assertion.
+async fn event_count_strict(client: &reqwest::Client, base_url: &str, token: &str) -> usize {
+    let r = client
         .get(format!("{base_url}/v1/events/recent?limit=500"))
         .bearer_auth(token)
         .send()
         .await
-    {
-        Ok(r) if r.status().is_success() => match r.json::<Value>().await {
-            Ok(v) => v
-                .get("items")
-                .and_then(|i| i.as_array())
-                .map(|a| a.len())
-                .or_else(|| v.as_array().map(|a| a.len()))
-                .unwrap_or(0),
-            Err(_) => 0,
-        },
-        _ => 0,
+        .expect("event-log request succeeds");
+    assert!(
+        r.status().is_success(),
+        "event-log endpoint non-success: {}",
+        r.status()
+    );
+    let v = r
+        .json::<Value>()
+        .await
+        .expect("event-log body parses as JSON");
+    v.get("items")
+        .and_then(|i| i.as_array())
+        .map(|a| a.len())
+        .or_else(|| v.as_array().map(|a| a.len()))
+        .expect("event-log response shaped as items[] or top-level array")
+}
+
+/// Tolerant variant used inside the periodic sampler. Mid-run HTTP
+/// blips to `/v1/events/recent` are not what we are soaking for —
+/// logging and returning `None` is preferable to aborting a 1-hour
+/// test for a transient 5xx. The strict baseline/end anchors already
+/// prevent a silent all-zero pass.
+async fn event_count_sample(
+    client: &reqwest::Client,
+    base_url: &str,
+    token: &str,
+) -> Option<usize> {
+    let r = client
+        .get(format!("{base_url}/v1/events/recent?limit=500"))
+        .bearer_auth(token)
+        .send()
+        .await
+        .ok()?;
+    if !r.status().is_success() {
+        return None;
     }
+    let v = r.json::<Value>().await.ok()?;
+    v.get("items")
+        .and_then(|i| i.as_array())
+        .map(|a| a.len())
+        .or_else(|| v.as_array().map(|a| a.len()))
 }
 
 async fn ready_ok(client: &reqwest::Client, base_url: &str) -> bool {
@@ -303,7 +344,7 @@ async fn cairn_app_sustains_1hr_real_llm_soak() {
     // 6. Baseline metrics before any run traffic.
     let baseline_rss = sample_rss_kb(pid).expect("/proc/pid/status readable");
     let baseline_fd = sample_fd_count(pid).expect("/proc/pid/fd readable");
-    let baseline_events = event_count(h.client(), &h.base_url, &h.admin_token).await;
+    let baseline_events = event_count_strict(h.client(), &h.base_url, &h.admin_token).await;
     eprintln!(
         "[soak] baseline: rss={} kB, fd={}, events={}",
         baseline_rss, baseline_fd, baseline_events
@@ -332,11 +373,14 @@ async fn cairn_app_sustains_1hr_real_llm_soak() {
                 if elapsed >= SOAK_DURATION {
                     break;
                 }
-                let rss = sample_rss_kb(pid).unwrap_or(0);
-                let fdc = sample_fd_count(pid).unwrap_or(0);
+                // `/proc/<pid>/...` must succeed — if it doesn't the
+                // subprocess is dead and we want to fail, not paper
+                // over it with a zero sample.
+                let rss = sample_rss_kb(pid).expect("/proc/pid/status readable mid-soak");
+                let fdc = sample_fd_count(pid).expect("/proc/pid/fd readable mid-soak");
                 let ready = ready_ok(&client, &base_url).await;
                 let stat = status_ok(&client, &base_url, &token).await;
-                let evs = event_count(&client, &base_url, &token).await;
+                let evs = event_count_sample(&client, &base_url, &token).await;
                 let s = Sample {
                     elapsed_s: elapsed.as_secs(),
                     rss_kb: rss,
@@ -347,9 +391,13 @@ async fn cairn_app_sustains_1hr_real_llm_soak() {
                 };
                 samples.lock().await.push(s.clone());
                 if elapsed >= next_log {
+                    let evs_str = s
+                        .event_count
+                        .map(|n| n.to_string())
+                        .unwrap_or_else(|| "n/a".to_owned());
                     eprintln!(
                         "[soak @ {}s] rss={} kB, fd={}, ready={}, status={}, events={}",
-                        s.elapsed_s, s.rss_kb, s.fd_count, s.ready_ok, s.status_ok, s.event_count,
+                        s.elapsed_s, s.rss_kb, s.fd_count, s.ready_ok, s.status_ok, evs_str,
                     );
                     next_log += LOG_INTERVAL;
                 }
@@ -440,16 +488,22 @@ async fn cairn_app_sustains_1hr_real_llm_soak() {
         }));
     }
 
-    // 10. Wait for everything.
-    for h in worker_handles {
-        let _ = h.await;
+    // 10. Wait for everything. Propagate panics from worker/sampler
+    //     tasks — a silently-swallowed panic would let the test claim
+    //     success while the inside of a worker crashed.
+    for (wid, handle) in worker_handles.into_iter().enumerate() {
+        handle
+            .await
+            .unwrap_or_else(|e| panic!("worker {wid} panicked during soak: {e}"));
     }
-    let _ = sampler.await;
+    sampler
+        .await
+        .expect("sampler task finished without panicking");
 
     // 11. End metrics.
-    let end_rss = sample_rss_kb(pid).unwrap_or(0);
-    let end_fd = sample_fd_count(pid).unwrap_or(0);
-    let end_events = event_count(h.client(), &h.base_url, &h.admin_token).await;
+    let end_rss = sample_rss_kb(pid).expect("/proc/pid/status readable at end");
+    let end_fd = sample_fd_count(pid).expect("/proc/pid/fd readable at end");
+    let end_events = event_count_strict(h.client(), &h.base_url, &h.admin_token).await;
     let total_iter: usize = iterations_per_worker
         .iter()
         .map(|c| c.load(Ordering::Relaxed))
