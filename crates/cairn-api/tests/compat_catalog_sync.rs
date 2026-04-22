@@ -11,8 +11,8 @@
 //!
 //! The "real" route set is the union of three code sources:
 //!
-//! 1. `cairn_api::http::preserved_route_catalog()` — the 132 Phase-0 preserved
-//!    routes registered by the fold inside `AppBootstrap::build_catalog_routes`.
+//! 1. `cairn_api::http::preserved_route_catalog()` — the preserved route
+//!    entries registered by the fold inside `AppBootstrap::build_catalog_routes`.
 //! 2. Explicit `.route("/path", method(handler))` calls in
 //!    `crates/cairn-app/src/router.rs` — the library router's non-catalog
 //!    handlers chained after the fold.

@@ -105,9 +105,13 @@ fn parse_route_source(source: &str) -> Vec<ParsedRoute> {
     out
 }
 
-/// Scan for the next `.route(` that is outside strings and comments.
+/// Scan for the next `.route(` that is outside strings, comments, and
+/// `.nest(...)` blocks. Routes nested under a mount-path prefix are NOT
+/// full paths — their effective URL is `<prefix>/<sub>` and the full path
+/// is expected to be carried by `preserved_route_catalog()` instead.
 fn find_next_route_call(bytes: &[u8], start: usize) -> Option<usize> {
     let pat = b".route(";
+    let nest_pat = b".nest(";
     let n = bytes.len();
     let mut i = start;
     let mut in_line_comment = false;
@@ -193,6 +197,19 @@ fn find_next_route_call(bytes: &[u8], start: usize) -> Option<usize> {
                 raw_hashes = hashes;
                 i = j + 1;
                 continue;
+            }
+        }
+        if b == b'.' && i + nest_pat.len() <= n && &bytes[i..i + nest_pat.len()] == nest_pat {
+            // Skip the entire balanced body of this `.nest(` call. Any
+            // `.route(` inside registers a SUB-path under a mount prefix;
+            // the full path belongs to `preserved_route_catalog()`.
+            let open_paren = i + nest_pat.len() - 1; // points at `(`
+            if let Some((_, _, after)) = balanced_close(bytes, open_paren + 1) {
+                i = after;
+                continue;
+            } else {
+                // Unterminated `.nest(` — bail out defensively.
+                return None;
             }
         }
         if b == b'.' && i + pat.len() <= n && &bytes[i..i + pat.len()] == pat {
@@ -605,6 +622,27 @@ mod tests {
         let parsed = parse_route_source(src);
         assert_eq!(parsed.len(), 1);
         assert_eq!(parsed[0].path, "/kept");
+    }
+
+    #[test]
+    fn skips_routes_inside_nest_blocks() {
+        // `.nest("/prefix", { ... .route("/sub", ...) ... })` — the
+        // inner `.route("/sub")` is a sub-path under the nest prefix, not a
+        // top-level route. Must be skipped; the full path
+        // `/prefix/sub` is supposed to live in preserved_route_catalog().
+        let src = r#"
+            x.nest("/v1/decisions", {
+                axum::Router::new()
+                    .route("/", get(h))
+                    .route("/:id", get(h))
+                    .route("/cache", get(h))
+            })
+            .route("/v1/real", post(h))
+        "#;
+        let parsed = parse_route_source(src);
+        assert_eq!(parsed.len(), 1, "got {:?}", parsed);
+        assert_eq!(parsed[0].path, "/v1/real");
+        assert_eq!(parsed[0].method, "POST");
     }
 
     #[test]
