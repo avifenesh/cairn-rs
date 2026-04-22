@@ -374,13 +374,35 @@ pub(crate) async fn metrics_handler(State(state): State<Arc<AppState>>) -> impl 
     refresh_activity_metrics(state.as_ref()).await;
     #[cfg(feature = "metrics-core")]
     crate::middleware::refresh_scrape_metrics(state.as_ref()).await;
+
+    // Base text: cairn's own metrics.
+    let mut body = state.metrics.render_prometheus();
+
+    // Append FF's metrics when FabricServices is wired. FF exposes its
+    // own `prometheus::Registry` via `ff_observability::Metrics::render`,
+    // which returns Prometheus text-exposition format — identical wire
+    // shape to cairn's own renderer, so concatenation is safe. Metric
+    // names are `ff_*`-prefixed (see ff-observability 0.3.2 `real.rs`
+    // `mod name`) so there is no collision with cairn's namespace. When
+    // `state.fabric` is `None` (e.g. in-memory dev mode, unit tests),
+    // there is no FF runtime and nothing to render.
+    if let Some(fabric) = state.fabric.as_ref() {
+        let ff_text = fabric.runtime.ff_metrics.render();
+        if !ff_text.is_empty() {
+            if !body.ends_with('\n') {
+                body.push('\n');
+            }
+            body.push_str(&ff_text);
+        }
+    }
+
     (
         StatusCode::OK,
         [(
             header::CONTENT_TYPE,
             "text/plain; version=0.0.4; charset=utf-8",
         )],
-        state.metrics.render_prometheus(),
+        body,
     )
 }
 

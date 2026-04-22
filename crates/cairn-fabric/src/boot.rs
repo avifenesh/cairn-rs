@@ -16,6 +16,14 @@ pub struct FabricRuntime {
     pub engine: Engine,
     pub partition_config: PartitionConfig,
     pub config: Arc<FabricConfig>,
+    /// Shared FF observability handle. Constructed once at
+    /// `FabricRuntime::start` and cloned into the `Engine` — so the
+    /// counters/histograms the engine records into at runtime are the
+    /// same ones rendered here. `Metrics` is internally `Arc`-based; the
+    /// explicit `Arc` here matches the engine's expected ownership and
+    /// lets cairn-app append FF's Prometheus text to its `/metrics`
+    /// response without threading a second handle through startup.
+    pub ff_metrics: Arc<ff_observability::Metrics>,
 }
 
 const CONNECT_MAX_ATTEMPTS: u32 = 3;
@@ -199,10 +207,16 @@ impl FabricRuntime {
         // honour `scanner_filter` so every execution-shaped scan
         // (lease_expiry, attempt_timeout, etc.) skips foreign
         // candidates before the scanner FCALL hot path.
+        // Build the shared FF metrics registry once. The engine
+        // records into this same `Arc<Metrics>` the /metrics handler
+        // later renders — cloning the Arc is how FF's own crates share
+        // the registry across threads (see ff-observability 0.3.2
+        // `real.rs`: every instrument handle is itself `Arc`-backed).
+        let ff_metrics = std::sync::Arc::new(ff_observability::Metrics::new());
         let engine = Engine::start_with_completions(
             engine_config,
             client.clone(),
-            std::sync::Arc::new(ff_observability::Metrics::new()),
+            std::sync::Arc::clone(&ff_metrics),
             completion_stream,
         );
         tracing::info!("fabric runtime started");
@@ -212,6 +226,7 @@ impl FabricRuntime {
             engine,
             partition_config,
             config: Arc::new(config),
+            ff_metrics,
         })
     }
 
