@@ -1243,14 +1243,90 @@ mod sqlite_parity {
 
         assert_eq!(row.0, "Round-trip Policy");
         assert_eq!(row.1, "tenant_rt");
-        // Mirrors PG: the projection hardcodes enabled = TRUE at insert
-        // regardless of the event's `enabled` field. Asserting against
-        // the backend-observable value rather than the event value keeps
-        // this test faithful to the PG projection shape.
-        assert_eq!(row.3, 1, "enabled is hardcoded to 1 (PG parity)");
+        // `enabled` is projected from the event's `enabled` field.
+        // Symmetric with PG BOOLEAN column. Here the source event set
+        // enabled = true, so the row must materialise 1.
+        assert_eq!(row.3, 1, "enabled must mirror the event's enabled=true");
 
         let parsed: Vec<RoutePolicyRule> = serde_json::from_str(&row.2).unwrap();
         assert_eq!(parsed, rules, "rules must round-trip verbatim");
+    }
+
+    /// `RoutePolicyCreated { enabled: false }` must persist as `enabled = 0`
+    /// in the SQLite projection — the event's `enabled` field is the sole
+    /// source of truth for the column, not a hardcoded literal.
+    #[tokio::test]
+    async fn route_policy_disabled_round_trips_through_sqlite() {
+        use cairn_domain::events::RoutePolicyCreated;
+        use cairn_store::sqlite::{SqliteAdapter, SqliteEventLog};
+
+        let adapter = SqliteAdapter::in_memory().await.unwrap();
+        let event_log = SqliteEventLog::new(adapter.pool().clone());
+
+        let event = make_envelope(RuntimeEvent::RoutePolicyCreated(RoutePolicyCreated {
+            tenant_id: TenantId::new("tenant_off"),
+            policy_id: "pol_off".to_owned(),
+            name: "Disabled Policy".to_owned(),
+            rules: vec![],
+            enabled: false,
+        }));
+
+        event_log.append(&[event]).await.unwrap();
+
+        let row: (i64,) = sqlx::query_as("SELECT enabled FROM route_policies WHERE policy_id = ?")
+            .bind("pol_off")
+            .fetch_one(adapter.pool())
+            .await
+            .unwrap();
+
+        assert_eq!(row.0, 0, "disabled policy must persist as enabled = 0");
+    }
+
+    /// Toggling `enabled` via upsert must take effect. Mirrors the PG
+    /// `ON CONFLICT DO UPDATE SET enabled = EXCLUDED.enabled` path.
+    #[tokio::test]
+    async fn route_policy_upsert_toggles_enabled() {
+        use cairn_domain::events::RoutePolicyCreated;
+        use cairn_store::sqlite::{SqliteAdapter, SqliteEventLog};
+
+        let adapter = SqliteAdapter::in_memory().await.unwrap();
+        let event_log = SqliteEventLog::new(adapter.pool().clone());
+
+        // First: create enabled.
+        let first = make_envelope(RuntimeEvent::RoutePolicyCreated(RoutePolicyCreated {
+            tenant_id: TenantId::new("tenant_tog"),
+            policy_id: "pol_tog".to_owned(),
+            name: "Toggle".to_owned(),
+            rules: vec![],
+            enabled: true,
+        }));
+        event_log.append(&[first]).await.unwrap();
+
+        let initial: (i64,) =
+            sqlx::query_as("SELECT enabled FROM route_policies WHERE policy_id = ?")
+                .bind("pol_tog")
+                .fetch_one(adapter.pool())
+                .await
+                .unwrap();
+        assert_eq!(initial.0, 1, "initial enabled state must be 1");
+
+        // Second: same policy_id, disabled.
+        let second = make_envelope(RuntimeEvent::RoutePolicyCreated(RoutePolicyCreated {
+            tenant_id: TenantId::new("tenant_tog"),
+            policy_id: "pol_tog".to_owned(),
+            name: "Toggle".to_owned(),
+            rules: vec![],
+            enabled: false,
+        }));
+        event_log.append(&[second]).await.unwrap();
+
+        let after: (i64,) =
+            sqlx::query_as("SELECT enabled FROM route_policies WHERE policy_id = ?")
+                .bind("pol_tog")
+                .fetch_one(adapter.pool())
+                .await
+                .unwrap();
+        assert_eq!(after.0, 0, "upsert must flip enabled to 0");
     }
 
     /// A second RoutePolicyCreated with the same policy_id must upsert,

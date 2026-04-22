@@ -448,14 +448,18 @@ impl PgSyncProjection {
                     .map_err(|err| StoreError::Serialization(err.to_string()))?;
                 sqlx::query(
                     "INSERT INTO route_policies (policy_id, tenant_id, name, rules, enabled, created_at, updated_at)
-                     VALUES ($1, $2, $3, $4, TRUE, $5, $5)
+                     VALUES ($1, $2, $3, $4, $5, $6, $6)
                      ON CONFLICT (policy_id) DO UPDATE
-                     SET name = EXCLUDED.name, rules = EXCLUDED.rules, updated_at = EXCLUDED.updated_at",
+                     SET name = EXCLUDED.name,
+                         rules = EXCLUDED.rules,
+                         enabled = EXCLUDED.enabled,
+                         updated_at = EXCLUDED.updated_at",
                 )
                 .bind(&e.policy_id)
                 .bind(e.tenant_id.as_str())
                 .bind(&e.name)
                 .bind(rules)
+                .bind(e.enabled)
                 .bind(now)
                 .execute(&mut **tx)
                 .await
