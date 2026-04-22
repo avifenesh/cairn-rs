@@ -465,7 +465,9 @@ impl<P: GraphProjection> EventProjector<P> {
             // RFC 020 decision-cache survival: durable for startup replay,
             // does not feed the graph projection.
             | RuntimeEvent::DecisionRecorded(_)
-            | RuntimeEvent::DecisionCacheWarmup(_) => {}
+            | RuntimeEvent::DecisionCacheWarmup(_)
+            // RFC 020 Track 4: boot-level recovery audit event.
+            | RuntimeEvent::RecoverySummaryEmitted(_) => {}
 
             RuntimeEvent::EvalRunStarted(e) => {
                 self.add_node(

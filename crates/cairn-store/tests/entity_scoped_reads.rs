@@ -540,6 +540,9 @@ async fn entity_ref_matching_all_types() {
                     checkpoint_id: checkpoint_id("x"),
                     disposition: CheckpointDisposition::Latest,
                     data: None,
+                    kind: None,
+                    message_history_size: None,
+                    tool_call_ids: Vec::new(),
                 }),
             ),
         ])

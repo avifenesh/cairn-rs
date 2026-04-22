@@ -575,6 +575,10 @@ fn assert_all_variants_covered(event: &RuntimeEvent) {
             assert_eq!(proj.tenant_id.as_str(), "_system");
             assert!(eref.is_none());
         }
+        // RFC 020 Track 4 — boot-level recovery audit event.
+        RuntimeEvent::RecoverySummaryEmitted(_) => {
+            assert_eq!(eref, None);
+        }
     }
 }
 
@@ -666,6 +670,9 @@ fn all_variants() -> Vec<RuntimeEvent> {
             checkpoint_id: CheckpointId::new("cp1"),
             disposition: cairn_domain::lifecycle::CheckpointDisposition::Latest,
             data: None,
+            kind: None,
+            message_history_size: None,
+            tool_call_ids: Vec::new(),
         }),
         RuntimeEvent::CheckpointRestored(CheckpointRestored {
             project: p(),
@@ -1617,6 +1624,26 @@ fn all_variants() -> Vec<RuntimeEvent> {
             expired_and_dropped: 1,
             warmed_at: ts,
         }),
+        // RFC 020 Track 4 — boot-level recovery audit event.
+        RuntimeEvent::RecoverySummaryEmitted(cairn_domain::RecoverySummaryEmitted {
+            sentinel_project: p(),
+            boot_id: "boot_test".to_owned(),
+            recovered_runs: 0,
+            recovered_tasks: 0,
+            recovered_sandboxes: 0,
+            preserved_sandboxes: 0,
+            orphaned_sandboxes_cleaned: 0,
+            decision_cache_entries: 0,
+            stale_pending_cleared: 0,
+            tool_result_cache_entries: 0,
+            memory_projection_entries: 0,
+            graph_nodes_recovered: 0,
+            graph_edges_recovered: 0,
+            webhook_dedup_entries: 0,
+            trigger_projections: 0,
+            startup_ms: 0,
+            summary_at_ms: ts,
+        }),
     ]
 }
 
@@ -1625,13 +1652,14 @@ fn all_variants() -> Vec<RuntimeEvent> {
 #[test]
 fn all_runtime_event_variants_covered_count() {
     let variants = all_variants();
-    // 134 variants in the RuntimeEvent enum (130 baseline + RFC 020 Track 3:
+    // 135 variants in the RuntimeEvent enum (130 baseline + RFC 020 Track 3:
     // ToolInvocationCacheHit, ToolRecoveryPaused + RFC 020 decision-cache
-    // survival pair: DecisionRecorded, DecisionCacheWarmup).
+    // survival pair from PR #85: DecisionRecorded, DecisionCacheWarmup +
+    // RFC 020 Track 4: RecoverySummaryEmitted).
     assert_eq!(
         variants.len(),
-        134,
-        "all_variants() must construct exactly 134 RuntimeEvent instances"
+        135,
+        "all_variants() must construct exactly 135 RuntimeEvent instances"
     );
 }
 

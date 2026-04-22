@@ -26,10 +26,10 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use async_trait::async_trait;
 use cairn_domain::{
     ApprovalDecision, ApprovalId, ApprovalRequested, ApprovalRequirement, BootId, FailureClass,
-    ResumeTrigger, RunRecoveryOutcome, RunRecoverySummary, RunState, RunStateChanged, RuntimeEvent,
-    StateTransition,
+    ProjectKey, ResumeTrigger, RunRecoveryOutcome, RunRecoverySummary, RunState, RunStateChanged,
+    RuntimeEvent, StateTransition,
 };
-use cairn_domain::{RecoveryAttempted, RecoveryCompleted};
+use cairn_domain::{RecoveryAttempted, RecoveryCompleted, RecoverySummaryEmitted};
 use cairn_store::projections::{
     ApprovalReadModel, CheckpointReadModel, CheckpointRecord, RunReadModel, RunRecord,
 };
@@ -160,6 +160,8 @@ where
         sandbox_lost_runs: &[SandboxLostRun],
         allowlist_revoked_runs: &[AllowlistRevokedRun],
     ) -> Result<RunRecoverySummary, RuntimeError> {
+        // RFC 020 Track 4 — timer for the per-boot RecoverySummary audit event.
+        let sweep_started_ms = current_unix_ms();
         let mut summary = RunRecoverySummary {
             boot_id: Some(boot_id.as_str().to_owned()),
             ..Default::default()
@@ -409,6 +411,37 @@ where
         if !all_events.is_empty() {
             self.store.append(&all_events).await?;
         }
+
+        // RFC 020 Track 4 — emit the once-per-boot `RecoverySummary` audit
+        // event. Branch counts Track 4 cannot populate directly (sandboxes,
+        // graph, memory, trigger, webhook dedup) default to 0; sibling
+        // recovery services (task #163 sandbox_lost, task #166 decision
+        // cache) populate their own counters when they land. This emission
+        // provides the audit-trail anchor operators correlate with
+        // `RecoveryAttempted`/`RecoveryCompleted` pairs for this `boot_id`.
+        let now_ms = current_unix_ms();
+        let summary_event = RuntimeEvent::RecoverySummaryEmitted(RecoverySummaryEmitted {
+            sentinel_project: ProjectKey::new("_system", "_recovery", "_boot"),
+            boot_id: boot_id.as_str().to_owned(),
+            recovered_runs: summary.recovered_runs,
+            // Track 4 only observes runs directly. Tasks, sandboxes, etc.
+            // are owned by sibling services; fill their counts as they land.
+            recovered_tasks: 0,
+            recovered_sandboxes: 0,
+            preserved_sandboxes: 0,
+            orphaned_sandboxes_cleaned: 0,
+            decision_cache_entries: 0,
+            stale_pending_cleared: 0,
+            tool_result_cache_entries: 0,
+            memory_projection_entries: 0,
+            graph_nodes_recovered: 0,
+            graph_edges_recovered: 0,
+            webhook_dedup_entries: 0,
+            trigger_projections: 0,
+            startup_ms: now_ms.saturating_sub(sweep_started_ms),
+            summary_at_ms: now_ms,
+        });
+        self.store.append(&[make_envelope(summary_event)]).await?;
 
         Ok(summary)
     }

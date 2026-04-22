@@ -117,6 +117,10 @@ pub enum RuntimeEvent {
     SubagentSpawned(SubagentSpawned),
     RecoveryAttempted(RecoveryAttempted),
     RecoveryCompleted(RecoveryCompleted),
+    /// RFC 020 Track 4: once-per-boot aggregate summary of the recovery
+    /// sweep. Emitted at the end of `RecoveryService::recover_all` with
+    /// per-branch counts (runs, sandboxes, cache entries, …).
+    RecoverySummaryEmitted(RecoverySummaryEmitted),
     UserMessageAppended(UserMessageAppended),
     IngestJobStarted(IngestJobStarted),
     IngestJobCompleted(IngestJobCompleted),
@@ -276,6 +280,7 @@ impl RuntimeEvent {
             RuntimeEvent::SubagentSpawned(event) => &event.project,
             RuntimeEvent::RecoveryAttempted(event) => &event.project,
             RuntimeEvent::RecoveryCompleted(event) => &event.project,
+            RuntimeEvent::RecoverySummaryEmitted(event) => &event.sentinel_project,
             RuntimeEvent::UserMessageAppended(event) => &event.project,
             RuntimeEvent::IngestJobStarted(event) => &event.project,
             RuntimeEvent::IngestJobCompleted(event) => &event.project,
@@ -626,6 +631,7 @@ impl RuntimeEvent {
             | RuntimeEvent::TaskLeaseExpired(_)
             | RuntimeEvent::TaskPriorityChanged(_)
             | RuntimeEvent::ToolInvocationProgressUpdated(_)
+            | RuntimeEvent::RecoverySummaryEmitted(_)
             | RuntimeEvent::ScheduledTaskCreated(_)
             | RuntimeEvent::DecisionRecorded(_)
             | RuntimeEvent::DecisionCacheWarmup(_) => None,
@@ -747,6 +753,24 @@ pub struct CheckpointRecorded {
     pub checkpoint_id: CheckpointId,
     pub disposition: CheckpointDisposition,
     pub data: Option<serde_json::Value>,
+    /// RFC 020 Track 4: dual checkpoint — `Intent` captures the decide
+    /// output + planned tool-call IDs before execute; `Result` captures the
+    /// post-execute message history after the iteration settles. `None` for
+    /// legacy (pre-Track-4) checkpoints.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<crate::recovery::CheckpointKind>,
+    /// RFC 020 Track 4: size (bytes) of the serialized message history at
+    /// the moment this checkpoint was recorded. Populated for observability
+    /// so operators can monitor checkpoint body cost and decide when (if
+    /// ever) to add diff-based compaction (Gap 3 — deferred to Track 4b).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub message_history_size: Option<u32>,
+    /// RFC 020 Track 4: deterministic `ToolCallId`s planned at this
+    /// checkpoint. Populated on `Intent`; empty on `Result` (the Intent
+    /// checkpoint already carries the full planned list; duplicating on
+    /// the Result checkpoint would only inflate the event body).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tool_call_ids: Vec<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -990,6 +1014,42 @@ impl RecoveryCompleted {
     pub fn has_target(&self) -> bool {
         self.run_id.is_some() || self.task_id.is_some()
     }
+}
+
+/// RFC 020 Track 4 — once-per-boot recovery audit summary.
+///
+/// Emitted exactly once at the end of `RecoveryService::recover_all` with
+/// per-branch counts. The `boot_id` correlates this summary with the
+/// `RecoveryAttempted`/`RecoveryCompleted` pairs emitted during the same
+/// sweep, giving operators a single wire event to observe startup recovery
+/// cost without re-aggregating the stream.
+///
+/// Branch counts that Track 4 cannot populate directly (sandbox, graph,
+/// memory, trigger, webhook dedup — each owned by a sibling recovery
+/// service) default to 0 and will be filled in by their respective tracks.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RecoverySummaryEmitted {
+    /// Tenant-scoped sentinel project (no per-project recovery summary in v1).
+    pub sentinel_project: ProjectKey,
+    /// Unique identifier for this cairn-app boot.
+    pub boot_id: String,
+    pub recovered_runs: u32,
+    pub recovered_tasks: u32,
+    pub recovered_sandboxes: u32,
+    pub preserved_sandboxes: u32,
+    pub orphaned_sandboxes_cleaned: u32,
+    pub decision_cache_entries: u32,
+    pub stale_pending_cleared: u32,
+    pub tool_result_cache_entries: u32,
+    pub memory_projection_entries: u32,
+    pub graph_nodes_recovered: u32,
+    pub graph_edges_recovered: u32,
+    pub webhook_dedup_entries: u32,
+    pub trigger_projections: u32,
+    /// Wall-clock ms from process start to recovery completion.
+    pub startup_ms: u64,
+    /// Unix-ms timestamp when the summary was emitted.
+    pub summary_at_ms: u64,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
