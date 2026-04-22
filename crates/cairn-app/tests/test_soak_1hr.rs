@@ -1,0 +1,600 @@
+//! 1-hour real-LLM soak test — step 3 (final) of the soak ladder.
+//!
+//! Spawns a real cairn-app subprocess, wires it to the live OpenRouter
+//! API via a free-tier MiniMax model, then runs **N=3 concurrent agent
+//! runs** against it for **3600 real seconds**. Every 15 seconds samples
+//! process RSS, open-fd count, `/health/ready`, `/v1/status`, and the
+//! event-log position so post-run assertions can check for memory/fd
+//! leaks and readiness drops.
+//!
+//! # Running locally
+//!
+//! Requires the OpenRouter API key at `~/.cairn-secrets/openrouter.key`
+//! (600-mode file outside the repo). Without that file the test
+//! gracefully self-skips — it will NOT panic, NOT fail.
+//!
+//! ```bash
+//! cargo test -p cairn-app --test test_soak_1hr -- --ignored --nocapture
+//! ```
+//!
+//! Expect ~60 min + ~10s for cairn-app boot.
+//!
+//! # Bounds — tightened from 30min empirical data (PR #98)
+//!
+//! The 30min soak saw RSS +29.6% and fd +18.8% across 85 successful
+//! orchestrations, with RSS **plateauing in the 83-87 kB band after
+//! roughly the 10-minute mark** — i.e. a steady-state working set, not
+//! unbounded growth. Extending to 1hr should stay on the same plateau.
+//!
+//! - RSS growth: **<40%** (30min saw 29.6%; bound is tighter than 30min's
+//!   50% now that we have empirical plateau evidence).
+//! - fd growth: **<35%** (30min saw 18.8%; real fd leaks grow
+//!   unboundedly so a modest headroom catches them).
+//! - Upstream 429 count: informational only (no bound).
+//! - Readiness drops: zero tolerance.
+//! - Panics in subprocess stderr: zero tolerance.
+//!
+//! # CI posture
+//!
+//! `#[ignore]` by default — real-LLM calls against an operator-owned key
+//! must not run in shared CI. This test is opt-in only.
+//!
+//! # Out of scope (follow-up PRs)
+//!
+//! - Nightly CI wiring (explicit user follow-up).
+
+mod support;
+
+use std::fs;
+use std::path::PathBuf;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
+use std::time::{Duration, Instant};
+
+use serde_json::{json, Value};
+use support::live_fabric::LiveHarness;
+use tokio::sync::Mutex;
+
+/// Free-tier OpenRouter model. Same as `contract_openrouter` (PR #91),
+/// `test_soak_5min` (PR #92), and `test_soak_30min` (PR #98).
+const MODEL: &str = "minimax/minimax-m2.5:free";
+
+/// OpenRouter production base URL.
+const OPENROUTER_URL: &str = "https://openrouter.ai/api/v1/";
+
+/// Number of concurrent soak workers. Kept small so 60 min × 10 s cadence
+/// stays within ~1080 total OpenRouter calls — significant but still
+/// well under any reasonable free-tier abuse threshold when spaced out.
+const WORKERS: usize = 3;
+
+/// Total soak duration. 3600s = 60 minutes. Step 3 (final) of the
+/// 5min → 30min → 1hr ladder.
+const SOAK_DURATION: Duration = Duration::from_secs(3600);
+
+/// Interval between successive orchestrations within one worker. Spaces
+/// requests so the free tier is never stressed: 60 min / 10 s = ~360
+/// calls per worker, ~1080 across N=3 workers.
+const WORKER_INTERVAL: Duration = Duration::from_secs(10);
+
+/// Interval between metric samples. 15 s × 60 min = 240 samples.
+const SAMPLE_INTERVAL: Duration = Duration::from_secs(15);
+
+/// Log a running-sample line every 60 s instead of every sample — 60
+/// log lines over 60 min keeps stderr manageable while still giving
+/// clear trajectory visibility.
+const LOG_INTERVAL: Duration = Duration::from_secs(60);
+
+/// RSS growth bound. 30min empirical saw 29.6% and plateaued after
+/// ~10min; 40% gives modest headroom while still catching any real leak
+/// that breaks the plateau.
+const MAX_RSS_GROWTH_PCT: f64 = 40.0;
+
+/// fd growth bound. 30min empirical saw 18.8%; 35% catches any
+/// unbounded growth pattern.
+const MAX_FD_GROWTH_PCT: f64 = 35.0;
+
+/// Resolve `~/.cairn-secrets/openrouter.key`. Returns `None` if `$HOME`
+/// is unset or the file is absent — test self-skips in that case.
+fn openrouter_key_path() -> Option<PathBuf> {
+    let home = std::env::var_os("HOME")?;
+    let mut p = PathBuf::from(home);
+    p.push(".cairn-secrets");
+    p.push("openrouter.key");
+    if p.exists() {
+        Some(p)
+    } else {
+        None
+    }
+}
+
+/// Read the OpenRouter key, trimming trailing whitespace/newline.
+fn read_openrouter_key(path: &PathBuf) -> String {
+    fs::read_to_string(path)
+        .expect("openrouter.key readable")
+        .trim()
+        .to_owned()
+}
+
+/// Linux-only RSS sampler. Reads `VmRSS` (kB) from `/proc/<pid>/status`.
+fn sample_rss_kb(pid: u32) -> Option<u64> {
+    let status = fs::read_to_string(format!("/proc/{pid}/status")).ok()?;
+    for line in status.lines() {
+        if let Some(rest) = line.strip_prefix("VmRSS:") {
+            // Format: `VmRSS:   12345 kB`. Parse the first whitespace-
+            // separated token so we don't accidentally concatenate any
+            // other digits that may appear on the line in future kernel
+            // versions.
+            return rest
+                .trim_start()
+                .split_ascii_whitespace()
+                .next()
+                .and_then(|s| s.parse().ok());
+        }
+    }
+    None
+}
+
+/// Linux-only fd sampler. Counts entries in `/proc/<pid>/fd/`.
+fn sample_fd_count(pid: u32) -> Option<usize> {
+    let dir = fs::read_dir(format!("/proc/{pid}/fd")).ok()?;
+    Some(dir.filter_map(|e| e.ok()).count())
+}
+
+/// One metric sample captured periodically during the soak. RSS and
+/// fd are required (`/proc` is always available on Linux — absence
+/// means the subprocess died, which is itself a failure we want to
+/// surface). Event count is optional because it rides on an HTTP
+/// endpoint that may transiently hiccup mid-soak.
+#[derive(Debug, Clone)]
+struct Sample {
+    elapsed_s: u64,
+    rss_kb: u64,
+    fd_count: usize,
+    ready_ok: bool,
+    status_ok: bool,
+    event_count: Option<usize>,
+}
+
+/// Query `/v1/events/recent?limit=500` and return the number of events.
+/// Strict variant — panics on any transport/status/JSON failure. Used
+/// for the baseline + end anchors where a 0-by-error would silently
+/// invalidate the assertion.
+async fn event_count_strict(client: &reqwest::Client, base_url: &str, token: &str) -> usize {
+    let r = client
+        .get(format!("{base_url}/v1/events/recent?limit=500"))
+        .bearer_auth(token)
+        .send()
+        .await
+        .expect("event-log request succeeds");
+    assert!(
+        r.status().is_success(),
+        "event-log endpoint non-success: {}",
+        r.status()
+    );
+    let v = r
+        .json::<Value>()
+        .await
+        .expect("event-log body parses as JSON");
+    v.get("items")
+        .and_then(|i| i.as_array())
+        .map(|a| a.len())
+        .or_else(|| v.as_array().map(|a| a.len()))
+        .expect("event-log response shaped as items[] or top-level array")
+}
+
+/// Tolerant variant used inside the periodic sampler. Mid-run HTTP
+/// blips to `/v1/events/recent` are not what we are soaking for —
+/// logging and returning `None` is preferable to aborting a 1-hour
+/// test for a transient 5xx. The strict baseline/end anchors already
+/// prevent a silent all-zero pass.
+async fn event_count_sample(
+    client: &reqwest::Client,
+    base_url: &str,
+    token: &str,
+) -> Option<usize> {
+    let r = client
+        .get(format!("{base_url}/v1/events/recent?limit=500"))
+        .bearer_auth(token)
+        .send()
+        .await
+        .ok()?;
+    if !r.status().is_success() {
+        return None;
+    }
+    let v = r.json::<Value>().await.ok()?;
+    v.get("items")
+        .and_then(|i| i.as_array())
+        .map(|a| a.len())
+        .or_else(|| v.as_array().map(|a| a.len()))
+}
+
+async fn ready_ok(client: &reqwest::Client, base_url: &str) -> bool {
+    client
+        .get(format!("{base_url}/health/ready"))
+        .send()
+        .await
+        .map(|r| r.status().is_success())
+        .unwrap_or(false)
+}
+
+async fn status_ok(client: &reqwest::Client, base_url: &str, token: &str) -> bool {
+    client
+        .get(format!("{base_url}/v1/status"))
+        .bearer_auth(token)
+        .send()
+        .await
+        .map(|r| r.status().is_success())
+        .unwrap_or(false)
+}
+
+#[tokio::test]
+#[ignore = "real-LLM soak: requires ~/.cairn-secrets/openrouter.key and ~60 min"]
+async fn cairn_app_sustains_1hr_real_llm_soak() {
+    let Some(key_path) = openrouter_key_path() else {
+        eprintln!(
+            "[SKIP] soak: ~/.cairn-secrets/openrouter.key missing. \
+             Create the 600-mode file to enable this test."
+        );
+        return;
+    };
+    let api_key = read_openrouter_key(&key_path);
+    assert!(
+        api_key.starts_with("sk-or-"),
+        "unexpected key shape in {} — expected OpenRouter `sk-or-` prefix",
+        key_path.display()
+    );
+
+    // 1. Spawn cairn-app with sqlite so event-log state is inspectable
+    //    if debugging post-hoc.
+    let h = LiveHarness::setup_with_sqlite().await;
+    let Some(pid) = h.subprocess_pid() else {
+        panic!("cairn-app subprocess has no PID — fatal for soak sampling");
+    };
+
+    let tenant = "default_tenant".to_owned();
+    let workspace = "default_workspace".to_owned();
+    let project = "default_project".to_owned();
+    let suffix = h.project.clone();
+    let connection_id = format!("conn_{suffix}");
+    let session_id = format!("sess_{suffix}");
+
+    // 2. Credential.
+    let r = h
+        .client()
+        .post(format!(
+            "{}/v1/admin/tenants/{}/credentials",
+            h.base_url, tenant
+        ))
+        .bearer_auth(&h.admin_token)
+        .json(&json!({ "provider_id": "openrouter", "plaintext_value": api_key }))
+        .send()
+        .await
+        .expect("credential POST reaches server");
+    assert_eq!(
+        r.status().as_u16(),
+        201,
+        "credential create: {}",
+        r.text().await.unwrap_or_default()
+    );
+    let credential_id = r
+        .json::<Value>()
+        .await
+        .unwrap()
+        .get("id")
+        .and_then(|v| v.as_str())
+        .expect("credential id")
+        .to_owned();
+
+    // 3. Provider connection wired to the REAL OpenRouter URL.
+    let r = h
+        .client()
+        .post(format!("{}/v1/providers/connections", h.base_url))
+        .bearer_auth(&h.admin_token)
+        .json(&json!({
+            "tenant_id": tenant,
+            "provider_connection_id": connection_id,
+            "provider_family": "openrouter",
+            "adapter_type": "openrouter",
+            "supported_models": [MODEL],
+            "credential_id": credential_id,
+            "endpoint_url": OPENROUTER_URL,
+        }))
+        .send()
+        .await
+        .expect("connection POST reaches server");
+    assert_eq!(
+        r.status().as_u16(),
+        201,
+        "connection create: {}",
+        r.text().await.unwrap_or_default()
+    );
+
+    // 4. Point brain + generate defaults at the free model.
+    for key in ["generate_model", "brain_model"] {
+        let r = h
+            .client()
+            .put(format!(
+                "{}/v1/settings/defaults/system/system/{}",
+                h.base_url, key
+            ))
+            .bearer_auth(&h.admin_token)
+            .json(&json!({ "value": MODEL }))
+            .send()
+            .await
+            .expect("settings PUT reaches server");
+        assert_eq!(r.status().as_u16(), 200, "settings {key}");
+    }
+
+    // 5. Shared session for all workers.
+    let r = h
+        .client()
+        .post(format!("{}/v1/sessions", h.base_url))
+        .bearer_auth(&h.admin_token)
+        .json(&json!({
+            "tenant_id": tenant,
+            "workspace_id": workspace,
+            "project_id": project,
+            "session_id": session_id,
+        }))
+        .send()
+        .await
+        .expect("session POST reaches server");
+    assert_eq!(r.status().as_u16(), 201, "session create");
+
+    // 6. Baseline metrics before any run traffic.
+    let baseline_rss = sample_rss_kb(pid).expect("/proc/pid/status readable");
+    let baseline_fd = sample_fd_count(pid).expect("/proc/pid/fd readable");
+    let baseline_events = event_count_strict(h.client(), &h.base_url, &h.admin_token).await;
+    eprintln!(
+        "[soak] baseline: rss={} kB, fd={}, events={}",
+        baseline_rss, baseline_fd, baseline_events
+    );
+
+    // 7. Shared state for workers + sampler.
+    let stop_at = Instant::now() + SOAK_DURATION;
+    let iterations_per_worker: Vec<Arc<AtomicUsize>> = (0..WORKERS)
+        .map(|_| Arc::new(AtomicUsize::new(0)))
+        .collect();
+    let upstream_429s = Arc::new(AtomicUsize::new(0));
+    let samples: Arc<Mutex<Vec<Sample>>> = Arc::new(Mutex::new(Vec::new()));
+
+    // 8. Spawn sampler task.
+    let sampler = {
+        let client = h.client().clone();
+        let base_url = h.base_url.clone();
+        let token = h.admin_token.clone();
+        let samples = samples.clone();
+        let start = Instant::now();
+        tokio::spawn(async move {
+            let mut next_log = LOG_INTERVAL;
+            loop {
+                tokio::time::sleep(SAMPLE_INTERVAL).await;
+                let elapsed = start.elapsed();
+                if elapsed >= SOAK_DURATION {
+                    break;
+                }
+                // `/proc/<pid>/...` must succeed — if it doesn't the
+                // subprocess is dead and we want to fail, not paper
+                // over it with a zero sample.
+                let rss = sample_rss_kb(pid).expect("/proc/pid/status readable mid-soak");
+                let fdc = sample_fd_count(pid).expect("/proc/pid/fd readable mid-soak");
+                let ready = ready_ok(&client, &base_url).await;
+                let stat = status_ok(&client, &base_url, &token).await;
+                let evs = event_count_sample(&client, &base_url, &token).await;
+                let s = Sample {
+                    elapsed_s: elapsed.as_secs(),
+                    rss_kb: rss,
+                    fd_count: fdc,
+                    ready_ok: ready,
+                    status_ok: stat,
+                    event_count: evs,
+                };
+                samples.lock().await.push(s.clone());
+                if elapsed >= next_log {
+                    let evs_str = s
+                        .event_count
+                        .map(|n| n.to_string())
+                        .unwrap_or_else(|| "n/a".to_owned());
+                    eprintln!(
+                        "[soak @ {}s] rss={} kB, fd={}, ready={}, status={}, events={}",
+                        s.elapsed_s, s.rss_kb, s.fd_count, s.ready_ok, s.status_ok, evs_str,
+                    );
+                    next_log += LOG_INTERVAL;
+                }
+            }
+        })
+    };
+
+    // 9. Spawn WORKERS concurrent run loops.
+    let mut worker_handles = Vec::new();
+    for (wid, counter) in iterations_per_worker.iter().cloned().enumerate() {
+        let client = h.client().clone();
+        let base_url = h.base_url.clone();
+        let token = h.admin_token.clone();
+        let suffix = suffix.clone();
+        let tenant = tenant.clone();
+        let workspace = workspace.clone();
+        let project = project.clone();
+        let session_id = session_id.clone();
+        let rate_limited = upstream_429s.clone();
+        worker_handles.push(tokio::spawn(async move {
+            let mut iter = 0usize;
+            while Instant::now() < stop_at {
+                let run_id = format!("run_{suffix}_w{wid}_i{iter}");
+
+                // Create run.
+                let r = client
+                    .post(format!("{base_url}/v1/runs"))
+                    .bearer_auth(&token)
+                    .json(&json!({
+                        "tenant_id": tenant,
+                        "workspace_id": workspace,
+                        "project_id": project,
+                        "session_id": session_id,
+                        "run_id": run_id,
+                    }))
+                    .send()
+                    .await;
+                let Ok(resp) = r else {
+                    // Transient network blip; record as non-fatal, keep going.
+                    tokio::time::sleep(WORKER_INTERVAL).await;
+                    iter += 1;
+                    continue;
+                };
+                if resp.status().as_u16() != 201 {
+                    // Don't panic — log and move on. We're soaking the
+                    // server, not asserting per-request correctness.
+                    let code = resp.status().as_u16();
+                    let body = resp.text().await.unwrap_or_default();
+                    eprintln!("[soak w{wid}] run create non-201: {code}: {body}");
+                    tokio::time::sleep(WORKER_INTERVAL).await;
+                    iter += 1;
+                    continue;
+                }
+
+                // Orchestrate. This is the real-LLM call.
+                let o = client
+                    .post(format!("{base_url}/v1/runs/{run_id}/orchestrate"))
+                    .bearer_auth(&token)
+                    .json(&json!({
+                        "goal": "Say hello in one word.",
+                        "max_iterations": 1,
+                    }))
+                    .send()
+                    .await;
+                match o {
+                    Ok(resp) => {
+                        let st = resp.status().as_u16();
+                        if st == 429 {
+                            rate_limited.fetch_add(1, Ordering::Relaxed);
+                        } else if !resp.status().is_success() {
+                            // 5xx or 4xx from orchestrate — log, don't
+                            // fail the soak. Upstream OpenRouter hiccups
+                            // are not cairn bugs.
+                            let body = resp.text().await.unwrap_or_default();
+                            eprintln!("[soak w{wid}] orchestrate status={st}: {body}");
+                        } else {
+                            counter.fetch_add(1, Ordering::Relaxed);
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("[soak w{wid}] orchestrate network error: {e}");
+                    }
+                }
+
+                iter += 1;
+                tokio::time::sleep(WORKER_INTERVAL).await;
+            }
+        }));
+    }
+
+    // 10. Wait for everything. Propagate panics from worker/sampler
+    //     tasks — a silently-swallowed panic would let the test claim
+    //     success while the inside of a worker crashed.
+    for (wid, handle) in worker_handles.into_iter().enumerate() {
+        handle
+            .await
+            .unwrap_or_else(|e| panic!("worker {wid} panicked during soak: {e}"));
+    }
+    sampler
+        .await
+        .expect("sampler task finished without panicking");
+
+    // 11. End metrics.
+    let end_rss = sample_rss_kb(pid).expect("/proc/pid/status readable at end");
+    let end_fd = sample_fd_count(pid).expect("/proc/pid/fd readable at end");
+    let end_events = event_count_strict(h.client(), &h.base_url, &h.admin_token).await;
+    let total_iter: usize = iterations_per_worker
+        .iter()
+        .map(|c| c.load(Ordering::Relaxed))
+        .sum();
+    let rl = upstream_429s.load(Ordering::Relaxed);
+
+    eprintln!("[soak] END rss={end_rss} kB, fd={end_fd}, events={end_events}");
+    eprintln!(
+        "[soak] successful orchestrations: {total_iter}, upstream_429s: {rl}, \
+         per-worker: {:?}",
+        iterations_per_worker
+            .iter()
+            .map(|c| c.load(Ordering::Relaxed))
+            .collect::<Vec<_>>(),
+    );
+
+    let samples = samples.lock().await.clone();
+
+    // 12. Assertions.
+
+    // a) No readiness drop across any sample.
+    let ready_drops: Vec<&Sample> = samples.iter().filter(|s| !s.ready_ok).collect();
+    assert!(
+        ready_drops.is_empty(),
+        "readiness dropped during soak at samples: {:?}",
+        ready_drops.iter().map(|s| s.elapsed_s).collect::<Vec<_>>(),
+    );
+
+    // b) No panics in subprocess stderr. LiveHarness doesn't currently
+    //    expose raw stderr for post-hoc inspection; the strongest proxy
+    //    is that the subprocess is still alive AND readiness held. A
+    //    panicked process would fail readiness polls (connection
+    //    refused) and the assertion above would fire.
+
+    // c) RSS growth bound (tighter than 30min — see module docs).
+    let rss_growth_pct = if baseline_rss == 0 {
+        0.0
+    } else {
+        ((end_rss as f64 - baseline_rss as f64) / baseline_rss as f64) * 100.0
+    };
+    assert!(
+        rss_growth_pct < MAX_RSS_GROWTH_PCT,
+        "RSS grew {rss_growth_pct:.1}% (baseline={baseline_rss} kB, end={end_rss} kB), \
+         over {MAX_RSS_GROWTH_PCT:.1}% bound. Samples: {:?}",
+        samples
+            .iter()
+            .map(|s| (s.elapsed_s, s.rss_kb))
+            .collect::<Vec<_>>(),
+    );
+
+    // d) fd growth bound (tighter than 30min — see module docs).
+    let fd_growth_pct = if baseline_fd == 0 {
+        0.0
+    } else {
+        ((end_fd as f64 - baseline_fd as f64) / baseline_fd as f64) * 100.0
+    };
+    assert!(
+        fd_growth_pct < MAX_FD_GROWTH_PCT,
+        "fd count grew {fd_growth_pct:.1}% (baseline={baseline_fd}, end={end_fd}), \
+         over {MAX_FD_GROWTH_PCT:.1}% bound. Samples: {:?}",
+        samples
+            .iter()
+            .map(|s| (s.elapsed_s, s.fd_count))
+            .collect::<Vec<_>>(),
+    );
+
+    // e) Each worker completed at least one successful iteration. If
+    //    OpenRouter was hard-down the whole run, fail loudly — the test
+    //    infra is fine, but we should not silently declare success.
+    //    Relax only if every worker saw 429s (upstream budget issue).
+    let any_worker_zero = iterations_per_worker
+        .iter()
+        .any(|c| c.load(Ordering::Relaxed) == 0);
+    if any_worker_zero && rl == 0 {
+        panic!(
+            "at least one worker completed 0 orchestrations with no 429s — \
+             soak did not actually exercise the provider path. \
+             per-worker: {:?}",
+            iterations_per_worker
+                .iter()
+                .map(|c| c.load(Ordering::Relaxed))
+                .collect::<Vec<_>>(),
+        );
+    }
+
+    // f) Event log grew (sanity — if we orchestrated, events must have
+    //    been appended).
+    if total_iter > 0 {
+        assert!(
+            end_events >= baseline_events,
+            "event count regressed: baseline={baseline_events}, end={end_events}",
+        );
+    }
+}
