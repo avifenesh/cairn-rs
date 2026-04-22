@@ -24,6 +24,32 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- **Engine trait decoupling — Phase D PR 1 (control-plane FCALLs +
+  worker registry).** The FCALL-shaped control-plane operations
+  (budget create / spend / release / status, quota create / admission
+  check, waitpoint HMAC rotation) now flow through a new
+  `ControlPlaneBackend` trait instead of importing FF key builders +
+  partition helpers directly. The Valkey-backed impl lives in
+  `engine/valkey_control_plane_impl.rs` and shares one
+  `Arc<ValkeyEngine>` with the existing `Engine` trait (one struct,
+  two traits). Cairn-native mirror types (`BudgetSpendOutcome`,
+  `QuotaAdmission`, `BudgetStatusSnapshot`, `RotationOutcome`,
+  `RotationFailure`, `WorkerRegistration`) sit on the trait boundary
+  so FF wire enums (`ff_core::contracts::ReportUsageResult`, etc.)
+  no longer leak through service signatures. Worker registry
+  (register / heartbeat / mark-dead) folds into the existing `Engine`
+  trait since the ops are HSET / SADD / PEXPIRE-shaped, consistent
+  with Phase C's tag-write methods. `FabricBudgetService`,
+  `FabricQuotaService`, `FabricRotationService`, and
+  `FabricWorkerService` are now thin shims that delegate to the
+  traits — 12 `ff_core::{keys,partition,contracts}` + `ff_sdk::task`
+  imports removed from `crates/cairn-fabric/src/services/`. No
+  caller-facing API change. Service-level type aliases
+  (`BudgetStatus`, `AdmissionResult`, `RotateOutcome`, …) preserved
+  so downstream imports keep working. PR 2 extends the same pattern
+  to run/task/session lifecycle services (split along the natural
+  fault line: FCALL-shaped vs. lifecycle-tangled with shared
+  `claim_common.rs` helpers).
 - **Engine trait decoupling — Phase C (tag writes).** Cairn services
   no longer call `ferriskey::Client::hset` on FF-owned hashes
   directly. Three new trait methods own the `cairn.*` namespace on

@@ -15,23 +15,31 @@ use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use ff_core::keys::{ExecKeyContext, FlowKeyContext};
+use ff_core::keys::{self, ExecKeyContext, FlowKeyContext};
 use ff_core::partition::{execution_partition, flow_partition};
 use ff_core::types::{
     AttemptId, AttemptIndex, EdgeId, ExecutionId, FlowId, LeaseEpoch, LeaseId, Namespace,
-    TimestampMs, WaitpointId,
+    TimestampMs, WaitpointId, WorkerId, WorkerInstanceId,
 };
 
 use crate::boot::FabricRuntime;
 use crate::error::FabricError;
-use crate::helpers::parse_string_array;
+use crate::helpers::{now_ms, parse_string_array};
 
+use super::control_plane_types::WorkerRegistration;
 use super::snapshots::{
     AttemptSummary, EdgeSnapshot, EdgeState, ExecutionSnapshot, FlowSnapshot, LeaseSummary,
 };
 use super::Engine;
 
 /// [`Engine`] implementation that reads FF state directly from Valkey.
+///
+/// Also carries the [`ControlPlaneBackend`] impl (see
+/// [`super::valkey_control_plane_impl`]) — one struct, two traits, so
+/// callers can hold a single `Arc<ValkeyEngine>` and cast it to either
+/// trait object.
+///
+/// [`ControlPlaneBackend`]: super::control_plane::ControlPlaneBackend
 pub struct ValkeyEngine {
     runtime: Arc<FabricRuntime>,
 }
@@ -39,6 +47,12 @@ pub struct ValkeyEngine {
 impl ValkeyEngine {
     pub fn new(runtime: Arc<FabricRuntime>) -> Self {
         Self { runtime }
+    }
+
+    /// Internal accessor for [`super::valkey_control_plane_impl`].
+    /// Not exposed outside the engine module.
+    pub(super) fn runtime(&self) -> &Arc<FabricRuntime> {
+        &self.runtime
     }
 }
 
@@ -259,6 +273,121 @@ impl Engine for ValkeyEngine {
         cmd.execute::<i64>().await.map_err(|e| {
             FabricError::Internal(format!("valkey HSET flow_core (bulk {}): {e}", tags.len()))
         })?;
+        Ok(())
+    }
+
+    // ── Worker registry (Phase D PR 1) ──────────────────────────────────
+
+    async fn register_worker(
+        &self,
+        worker_id: &WorkerId,
+        instance_id: &WorkerInstanceId,
+        capabilities: &[String],
+    ) -> Result<WorkerRegistration, FabricError> {
+        let worker_key = keys::worker_key(instance_id);
+        let now = now_ms();
+        let now_str = now.to_string();
+
+        self.runtime
+            .client
+            .cmd("HSET")
+            .arg(&worker_key)
+            .arg("worker_id")
+            .arg(worker_id.to_string())
+            .arg("instance_id")
+            .arg(instance_id.to_string())
+            .arg("capabilities")
+            .arg(capabilities.join(","))
+            .arg("last_heartbeat_ms")
+            .arg(&now_str)
+            .arg("is_alive")
+            .arg("true")
+            .arg("registered_at_ms")
+            .arg(&now_str)
+            .execute::<u64>()
+            .await
+            .map_err(|e| FabricError::Valkey(format!("HSET {worker_key}: {e}")))?;
+
+        // TTL-based expiry: dead workers auto-expire if heartbeats stop.
+        // `mark_worker_dead` is the explicit opt-out; this is the safety net.
+        let ttl_ms = self.runtime.config.lease_ttl_ms * 3;
+        // Valkey's PEXPIRE returns 1 (true) on success, 0 (false) when
+        // the key does not exist. ferriskey typechecks the reply as
+        // boolean — not u64 — so we must decode into `bool` here.
+        let _: bool = self
+            .runtime
+            .client
+            .cmd("PEXPIRE")
+            .arg(&worker_key)
+            .arg(ttl_ms.to_string())
+            .execute()
+            .await
+            .map_err(|e| FabricError::Valkey(format!("PEXPIRE {worker_key}: {e}")))?;
+
+        let workers_index = keys::workers_index_key();
+        self.runtime
+            .client
+            .cmd("SADD")
+            .arg(workers_index)
+            .arg(instance_id.to_string())
+            .execute::<u64>()
+            .await
+            .map_err(|e| FabricError::Valkey(format!("SADD workers index: {e}")))?;
+
+        for cap in capabilities {
+            if let Some((k, v)) = cap.split_once('=') {
+                let cap_key = keys::workers_capability_key(k, v);
+                self.runtime
+                    .client
+                    .cmd("SADD")
+                    .arg(cap_key)
+                    .arg(instance_id.to_string())
+                    .execute::<u64>()
+                    .await
+                    .map_err(|e| FabricError::Valkey(format!("SADD cap index: {e}")))?;
+            }
+        }
+
+        Ok(WorkerRegistration {
+            worker_id: worker_id.clone(),
+            instance_id: instance_id.clone(),
+            capabilities: capabilities.to_vec(),
+            registered_at_ms: now,
+        })
+    }
+
+    async fn heartbeat_worker(&self, instance_id: &WorkerInstanceId) -> Result<(), FabricError> {
+        let worker_key = keys::worker_key(instance_id);
+        let now = now_ms().to_string();
+        let _: i64 = self
+            .runtime
+            .client
+            .hset(&worker_key, "last_heartbeat_ms", &now)
+            .await
+            .map_err(|e| FabricError::Valkey(format!("HSET heartbeat: {e}")))?;
+
+        let ttl_ms = self.runtime.config.lease_ttl_ms * 3;
+        let _: bool = self
+            .runtime
+            .client
+            .cmd("PEXPIRE")
+            .arg(&worker_key)
+            .arg(ttl_ms.to_string())
+            .execute()
+            .await
+            .map_err(|e| FabricError::Valkey(format!("PEXPIRE heartbeat: {e}")))?;
+
+        Ok(())
+    }
+
+    async fn mark_worker_dead(&self, instance_id: &WorkerInstanceId) -> Result<(), FabricError> {
+        let worker_key = keys::worker_key(instance_id);
+        let _: i64 = self
+            .runtime
+            .client
+            .hset(&worker_key, "is_alive", "false")
+            .await
+            .map_err(|e| FabricError::Valkey(format!("HSET is_alive: {e}")))?;
         Ok(())
     }
 }

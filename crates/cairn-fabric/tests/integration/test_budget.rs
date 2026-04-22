@@ -1,6 +1,6 @@
 use cairn_domain::RunId;
 
-use ff_core::contracts::ReportUsageResult;
+use cairn_fabric::engine::BudgetSpendOutcome;
 use ff_core::types::{ExecutionId, LaneId};
 
 use crate::TestHarness;
@@ -42,7 +42,7 @@ async fn test_budget_hard_limit() {
         .await
         .expect("spend failed");
 
-    assert_eq!(spend_ok, ReportUsageResult::Ok);
+    assert_eq!(spend_ok, BudgetSpendOutcome::Ok);
 
     let eid_b = test_eid(&h, "hard_limit_b");
     let spend_breach = h
@@ -53,7 +53,7 @@ async fn test_budget_hard_limit() {
         .expect("spend failed");
 
     assert!(
-        matches!(spend_breach, ReportUsageResult::HardBreach { ref dimension, .. } if dimension == "tokens"),
+        matches!(spend_breach, BudgetSpendOutcome::HardBreach { ref dimension, .. } if dimension == "tokens"),
         "expected HardBreach on tokens, got {spend_breach:?}"
     );
 
@@ -126,7 +126,7 @@ async fn test_budget_release_resets_usage() {
         .await
         .expect("spend after release failed");
 
-    assert_eq!(after, ReportUsageResult::Ok);
+    assert_eq!(after, BudgetSpendOutcome::Ok);
 
     h.teardown().await;
 }
@@ -165,7 +165,7 @@ async fn test_budget_spend_dedup_returns_already_applied() {
         .expect("first spend failed");
     assert_eq!(
         first,
-        ReportUsageResult::Ok,
+        BudgetSpendOutcome::Ok,
         "first spend must land fresh, got {first:?}"
     );
 
@@ -177,7 +177,7 @@ async fn test_budget_spend_dedup_returns_already_applied() {
         .expect("second spend failed");
     assert_eq!(
         second,
-        ReportUsageResult::AlreadyApplied,
+        BudgetSpendOutcome::AlreadyApplied,
         "second spend with same (budget, execution, deltas) must hit dedup, got {second:?}",
     );
 

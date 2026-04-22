@@ -6,7 +6,7 @@ use tokio::task::JoinHandle;
 
 use crate::boot::FabricRuntime;
 use crate::config::FabricConfig;
-use crate::engine::{Engine, ValkeyEngine};
+use crate::engine::{ControlPlaneBackend, Engine, ValkeyEngine};
 use crate::error::FabricError;
 use crate::event_bridge::EventBridge;
 use crate::lease_history_subscriber::LeaseHistorySubscriber;
@@ -77,12 +77,20 @@ impl FabricServices {
             )
         });
 
-        let engine: Arc<dyn Engine> = Arc::new(ValkeyEngine::new(runtime.clone()));
+        // One concrete [`ValkeyEngine`] impl backs both the [`Engine`]
+        // read/tag trait AND the [`ControlPlaneBackend`] FCALL trait.
+        // Hold it as a concrete Arc first, then cast to each trait
+        // object — avoids spinning up two independent handles that
+        // would each open their own partition-config clones.
+        let valkey_engine = Arc::new(ValkeyEngine::new(runtime.clone()));
+        let engine: Arc<dyn Engine> = valkey_engine.clone();
+        let control_plane: Arc<dyn ControlPlaneBackend> = valkey_engine;
 
         let result = Self::build_services(
             runtime.clone(),
             bridge.clone(),
             engine,
+            control_plane,
             bridge_handle,
             lease_history,
         );
@@ -101,10 +109,12 @@ impl FabricServices {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn build_services(
         runtime: Arc<FabricRuntime>,
         bridge: Arc<EventBridge>,
         engine: Arc<dyn Engine>,
+        control_plane: Arc<dyn ControlPlaneBackend>,
         bridge_handle: JoinHandle<()>,
         lease_history: Option<LeaseHistorySubscriber>,
     ) -> Result<Self, (FabricError, JoinHandle<()>)> {
@@ -112,10 +122,10 @@ impl FabricServices {
         let tasks = FabricTaskService::new(runtime.clone(), bridge.clone(), engine.clone());
         let sessions = FabricSessionService::new(runtime.clone(), bridge.clone(), engine.clone());
         let scheduler = FabricSchedulerService::new(&runtime);
-        let worker = FabricWorkerService::new(runtime.clone());
-        let budgets = FabricBudgetService::new(runtime.clone());
-        let quotas = FabricQuotaService::new(runtime.clone());
-        let rotation = FabricRotationService::new(runtime.clone());
+        let worker = FabricWorkerService::new(engine.clone());
+        let budgets = FabricBudgetService::new(control_plane.clone());
+        let quotas = FabricQuotaService::new(control_plane.clone(), runtime.clone());
+        let rotation = FabricRotationService::new(control_plane);
         let signals = SignalBridge::new(&runtime);
 
         Ok(Self {
