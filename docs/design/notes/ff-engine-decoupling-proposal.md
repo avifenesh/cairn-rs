@@ -108,24 +108,69 @@ leak lines in:
   - `services/rotation_service.rs`
   - `services/worker_service.rs`
 
-### Phase D PR 2 — run/task/session lifecycle + FCALL ARGV pre-reads (not started)
+### Phase D PR 2a — run / session / claim lifecycle (shipped)
 
-Run, task, and session services share a pool of FCALL helpers in
-`services/claim_common.rs` that the PR 1 split can't fold cleanly.
-PR 2 extends `ControlPlaneBackend` (or introduces a sibling
-`ExecutionLifecycleBackend` — judgment call at implementation time)
-with the lifecycle FCALLs, migrates the services, and absorbs the
-remaining ~12 `hget ctx.core(), "current_attempt_id"`-style ARGV
-pre-reads into a read-side trait method
-(`engine.read_current_attempt(&ExecutionId)` or similar). Scheduler
-`claim_for_worker` + `ClaimGrant` plumbing lands here too.
+Extends `ControlPlaneBackend` with 11 run/session/claim FCALL methods
+(`create_run_execution`, `complete_run_execution`, `fail_run_execution`,
+`cancel_run_execution`, `suspend_run_execution`, `resume_run_execution`,
+`deliver_approval_signal`, `create_flow`, `cancel_flow`,
+`issue_grant_and_claim`). Added cairn-native mirrors:
+`ExecutionCreated`, `FailExecutionOutcome`, `FlowCancelOutcome`,
+`ClaimGrantOutcome`, plus the typed request structs
+(`CreateRunExecutionInput`, `SuspendRunInput`, `ExecutionLeaseContext`,
+etc.). One concrete `ValkeyEngine` now backs three traits (`Engine`
+for reads/tag-writes, `ControlPlaneBackend` for all FCALLs).
 
-Services deferred to PR 2:
-  - `services/run_service.rs`
-  - `services/task_service.rs`
-  - `services/session_service.rs`
-  - `services/claim_common.rs` (shared helpers)
-  - `services/scheduler_service.rs` (`ClaimGrant` plumbing)
+Services migrated:
+  - `services/run_service.rs` (8 lifecycle methods — start /
+    complete / fail / cancel / pause / resume /
+    enter_waiting_approval / resolve_approval / claim). Pre-read
+    path routes through `engine.describe_execution`, eliminating
+    every `hget ctx.core(), "current_attempt_id"` call in this
+    service. The `SuspendRunInput.resume_condition_json` +
+    `resume_policy_json` JSON assembly stays service-side — only
+    the FCALL dispatch moves to the backend.
+  - `services/session_service.rs` (`create` + `archive`).
+  - `services/claim_common.rs` (now a ~50-line shim over
+    `ControlPlaneBackend::issue_grant_and_claim`; the dispatch to
+    `ff_claim_resumed_execution` for attempt-interrupted executions
+    lives in the backend impl where it belongs).
+
+Audit: `git grep -nE '^use ff_core::(keys|partition)::' crates/cairn-fabric/src/services/{run_service,session_service,claim_common}.rs`
+returns zero hits.
+
+### Phase D PR 2b — task lifecycle (deferred)
+
+`services/task_service.rs` (11 lifecycle methods) still imports
+`ff_core::keys::{ExecKeyContext, IndexKeys}` + `ff_core::partition::
+execution_partition`. The service hasn't migrated yet because it
+carries behaviour that deserves its own scope audit:
+  - `declare_dependency` retry loop (5 attempts on
+    `stale_graph_revision`, with `stage_dependency_edge` +
+    `apply_dependency_to_child` fan-out).
+  - `check_dependencies` envelope walk across
+    `list_incoming_edges` + per-edge `evaluate_flow_eligibility`.
+  - `submit` / `complete` / `fail` / `cancel` / `claim` / `renew` /
+    `heartbeat` lifecycle ops that share ARGV pre-read patterns
+    with run_service but operate on flow-scoped edge state.
+
+PR 2b will apply the same trait-delegation pattern, adding ~10
+more methods to `ControlPlaneBackend` (or, if the audit shows it,
+carving a `TaskDependencyBackend` sibling for the edge-shaped
+ops). `claim_common::issue_grant_and_claim` is already PR-2a-ready
+— task_service only needs to pass `&self.control_plane` there
+(already done in 2a).
+
+### Phase D exception — `scheduler_service.rs`
+
+`FabricSchedulerService` continues to import `ff_scheduler::claim::
+{Scheduler, ClaimGrant}` directly. `ClaimGrant` is a wire-contract
+type shared with ff-sdk workers — mirroring it cairn-side adds a
+conversion hop without real hiding because both cairn AND ff-sdk
+workers must agree on the layout. The exception is documented at
+the top of the file. Phase E / F may revisit if cairn eventually
+runs its own scheduling loop against `ControlPlaneBackend`
+directly.
 
 ## Phase E — typed error model (not started)
 

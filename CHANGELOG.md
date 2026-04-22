@@ -35,6 +35,32 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   throughout. One source of truth for tool names across cairn and
   harness-tools upstream.
 
+- **Phase D PR 2a — run / session / claim FF leaks closed via
+  `ControlPlaneBackend`.** Extended the trait with 11 new methods
+  (`create_run_execution`, `complete_run_execution`,
+  `fail_run_execution`, `cancel_run_execution`, `suspend_run_execution`,
+  `resume_run_execution`, `deliver_approval_signal`, `create_flow`,
+  `cancel_flow`, `issue_grant_and_claim`) plus the
+  `FlowCancelOutcome` / `FailExecutionOutcome` / `ExecutionCreated`
+  mirror types and the `ExecutionLeaseContext` / `SuspendRunInput` /
+  `CreateRunExecutionInput` / etc. request structs. `FabricRunService`
+  (8 lifecycle methods), `FabricSessionService::create` + `::archive`,
+  and `services::claim_common::issue_grant_and_claim` now delegate
+  through the trait instead of reaching into `ff_core::keys::*` /
+  `ff_core::partition::*` directly. Service-side grep audit
+  (`git grep -nE '^use ff_core::(keys|partition)::' crates/cairn-fabric/src/services/{run_service,session_service,claim_common}.rs`)
+  returns zero hits. `FabricSchedulerService` stays an intentional
+  exception — `ClaimGrant` is a wire-contract type shared with
+  ff-sdk workers and mirroring it cairn-side adds a conversion hop
+  without real hiding; the exception is documented at the top of
+  the file. `FabricTaskService` (11 methods, includes
+  `declare_dependency` retry loop + `check_dependencies` envelope
+  walk) is deferred to PR 2b to keep this PR's scope audit tight.
+  Behaviour unchanged at every migrated call site, including the
+  approval-waitpoint `signal_match_mode="any"` semantics that
+  differ from the pause path's `len > 1 ? "all" : "any"` rule
+  (regression pinned by `test_signal_delivery_resumes_waiter`).
+
 ### Added
 
 - **Integration test coverage for `ff_renew_lease` (task heartbeat).**

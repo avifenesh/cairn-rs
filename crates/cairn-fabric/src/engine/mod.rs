@@ -65,8 +65,11 @@ use crate::error::FabricError;
 
 pub use control_plane::ControlPlaneBackend;
 pub use control_plane_types::{
-    BudgetSpendOutcome, BudgetStatusSnapshot, QuotaAdmission, RotationFailure, RotationOutcome,
-    WorkerRegistration,
+    BudgetSpendOutcome, BudgetStatusSnapshot, CancelFlowInput, CancelRunInput, ClaimGrantOutcome,
+    CompleteRunInput, CreateFlowInput, CreateRunExecutionInput, DeliverApprovalSignalInput,
+    ExecutionCreated, ExecutionLeaseContext, FailExecutionOutcome, FailRunInput,
+    FlowCancelOutcome, IssueGrantAndClaimInput, QuotaAdmission, ResumeRunInput, RotationFailure,
+    RotationOutcome, SuspendRunInput, WorkerRegistration,
 };
 pub use snapshots::{
     AttemptSummary, EdgeSnapshot, EdgeState, ExecutionSnapshot, FlowSnapshot, LeaseSummary,

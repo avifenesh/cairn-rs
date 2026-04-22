@@ -17,8 +17,10 @@
 //! [`ControlPlaneBackend`]: cairn_fabric::engine::ControlPlaneBackend
 //! [`Engine`]: cairn_fabric::engine::Engine
 
-use cairn_fabric::engine::{BudgetSpendOutcome, QuotaAdmission};
-use ff_core::types::{BudgetId, ExecutionId, LaneId, WorkerId, WorkerInstanceId};
+use cairn_fabric::engine::{
+    BudgetSpendOutcome, CancelFlowInput, CreateFlowInput, FlowCancelOutcome, QuotaAdmission,
+};
+use ff_core::types::{BudgetId, ExecutionId, FlowId, LaneId, Namespace, WorkerId, WorkerInstanceId};
 
 use crate::TestHarness;
 
@@ -227,6 +229,81 @@ async fn control_plane_rotation_noop_on_seeded_secret() {
 }
 
 // ── Worker registry via Engine ──────────────────────────────────────────
+
+// ── Run / session lifecycle via ControlPlaneBackend (Phase D PR 2a) ─────
+//
+// The fabric-service-level tests in test_run_lifecycle.rs and
+// test_session.rs exercise the same trait through the service shim;
+// these tests hit the trait directly so a regression in the trait
+// impl's FCALL dispatch is caught without the service layer masking
+// it.
+
+#[tokio::test]
+async fn control_plane_create_and_cancel_flow_roundtrip() {
+    let h = TestHarness::setup().await;
+    let flow_id = FlowId::from_uuid(uuid::Uuid::new_v4());
+    let namespace = Namespace::new("cp_flow_ns");
+
+    h.fabric
+        .control_plane
+        .create_flow(CreateFlowInput {
+            flow_id: flow_id.clone(),
+            flow_kind: "cairn_session".to_owned(),
+            namespace: namespace.clone(),
+        })
+        .await
+        .expect("create_flow");
+
+    // Idempotent re-create must NOT error (FF replies ok_already_satisfied).
+    h.fabric
+        .control_plane
+        .create_flow(CreateFlowInput {
+            flow_id: flow_id.clone(),
+            flow_kind: "cairn_session".to_owned(),
+            namespace,
+        })
+        .await
+        .expect("create_flow idempotent");
+
+    // First cancel must land as Cancelled.
+    let first = h
+        .fabric
+        .control_plane
+        .cancel_flow(CancelFlowInput {
+            flow_id: flow_id.clone(),
+            reason: "test".to_owned(),
+            cancel_mode: "cancel_all".to_owned(),
+        })
+        .await
+        .expect("cancel_flow first");
+    assert_eq!(first, FlowCancelOutcome::Cancelled);
+
+    // Re-cancel on a terminal flow must surface the typed
+    // AlreadyTerminal variant — services depend on this for
+    // idempotent archive semantics.
+    let second = h
+        .fabric
+        .control_plane
+        .cancel_flow(CancelFlowInput {
+            flow_id,
+            reason: "test".to_owned(),
+            cancel_mode: "cancel_all".to_owned(),
+        })
+        .await
+        .expect("cancel_flow second");
+    assert_eq!(second, FlowCancelOutcome::AlreadyTerminal);
+
+    h.teardown().await;
+}
+
+// Note: `issue_grant_and_claim`, `create_run_execution`,
+// `complete_run_execution`, `fail_run_execution`, `cancel_run_execution`,
+// `suspend_run_execution`, `resume_run_execution`, and
+// `deliver_approval_signal` are exercised end-to-end by
+// `test_run_lifecycle`, `test_suspension`, and `test_session` through
+// the service shims that delegate to this trait. Direct-trait tests
+// would duplicate those paths — the service-level assertions catch
+// regressions closer to where operators actually see the behaviour.
 
 #[tokio::test]
 async fn engine_register_heartbeat_mark_dead_roundtrip() {

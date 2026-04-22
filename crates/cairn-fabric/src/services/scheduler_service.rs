@@ -1,3 +1,27 @@
+//! FabricSchedulerService — thin wrapper over the ff-scheduler crate.
+//!
+//! # Phase D PR 2a exception
+//!
+//! Unlike `run_service`, `session_service`, `task_service`, and
+//! `claim_common`, this service still imports `ff_scheduler::claim::
+//! {Scheduler, ClaimGrant}` directly. That's intentional.
+//!
+//! `ClaimGrant` is a wire-contract type shared with ff-sdk workers:
+//! when a worker dequeues a grant it receives exactly this struct,
+//! and the worker-side code paths in ff-sdk depend on its field
+//! layout. Mirroring it cairn-side would add a conversion hop that
+//! hides nothing — both cairn and ff-sdk would still have to agree
+//! on the layout, and the cairn-native mirror would track upstream
+//! 1:1 with every FF release.
+//!
+//! When FF 0.3 stabilises the scheduler types upstream (tracked in
+//! [FlowFabric#58](https://github.com/avifenesh/FlowFabric/issues/58))
+//! this stays an exception. Any future Phase D work that retires
+//! `ff_scheduler` from cairn (e.g. cairn running its own scheduling
+//! loop against the `ControlPlaneBackend` trait directly) would
+//! revisit the exception — but that's a Phase E / F scope, not
+//! Phase D.
+
 use std::collections::BTreeSet;
 use std::sync::Arc;
 

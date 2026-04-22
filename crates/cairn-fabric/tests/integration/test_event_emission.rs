@@ -158,6 +158,7 @@ async fn task_complete_emits_when_claim_and_complete_use_distinct_services() {
         h.fabric.runtime.clone(),
         h.fabric.bridge.clone(),
         h.fabric.engine.clone(),
+            h.fabric.control_plane.clone(),
     );
 
     // 3. Complete through the fresh instance. FF sees the transition;
@@ -220,6 +221,7 @@ async fn task_cancel_emits_when_called_from_registry_less_service() {
         h.fabric.runtime.clone(),
         h.fabric.bridge.clone(),
         h.fabric.engine.clone(),
+            h.fabric.control_plane.clone(),
     );
     let record = fresh_tasks
         .cancel(&h.project, Some(&session_id), &task_id)
@@ -280,6 +282,7 @@ async fn task_terminal_fail_emits_when_called_from_registry_less_service() {
             h.fabric.runtime.clone(),
             h.fabric.bridge.clone(),
             h.fabric.engine.clone(),
+            h.fabric.control_plane.clone(),
         );
         fresh_tasks
             .claim(
@@ -296,6 +299,7 @@ async fn task_terminal_fail_emits_when_called_from_registry_less_service() {
             h.fabric.runtime.clone(),
             h.fabric.bridge.clone(),
             h.fabric.engine.clone(),
+            h.fabric.control_plane.clone(),
         );
         let record = fresh_fail
             .fail(

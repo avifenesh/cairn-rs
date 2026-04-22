@@ -25,6 +25,11 @@ pub struct FabricServices {
     /// today ([`ValkeyEngine`]); swappable when FF 0.3 ships the
     /// upstream `describe_*` primitives (FlowFabric#58).
     pub engine: Arc<dyn Engine>,
+    /// FCALL-shaped control-plane backend. Exposed alongside
+    /// [`Self::engine`] so tests + callers that build fresh service
+    /// instances on the same runtime (e.g. simulating a process
+    /// restart between FCALLs) can pass it into the constructor.
+    pub control_plane: Arc<dyn ControlPlaneBackend>,
     pub runs: FabricRunService,
     pub tasks: FabricTaskService,
     pub sessions: FabricSessionService,
@@ -118,20 +123,36 @@ impl FabricServices {
         bridge_handle: JoinHandle<()>,
         lease_history: Option<LeaseHistorySubscriber>,
     ) -> Result<Self, (FabricError, JoinHandle<()>)> {
-        let runs = FabricRunService::new(runtime.clone(), bridge.clone(), engine.clone());
-        let tasks = FabricTaskService::new(runtime.clone(), bridge.clone(), engine.clone());
-        let sessions = FabricSessionService::new(runtime.clone(), bridge.clone(), engine.clone());
+        let runs = FabricRunService::new(
+            runtime.clone(),
+            bridge.clone(),
+            engine.clone(),
+            control_plane.clone(),
+        );
+        let tasks = FabricTaskService::new(
+            runtime.clone(),
+            bridge.clone(),
+            engine.clone(),
+            control_plane.clone(),
+        );
+        let sessions = FabricSessionService::new(
+            runtime.clone(),
+            bridge.clone(),
+            engine.clone(),
+            control_plane.clone(),
+        );
         let scheduler = FabricSchedulerService::new(&runtime);
         let worker = FabricWorkerService::new(engine.clone());
         let budgets = FabricBudgetService::new(control_plane.clone());
         let quotas = FabricQuotaService::new(control_plane.clone(), runtime.clone());
-        let rotation = FabricRotationService::new(control_plane);
+        let rotation = FabricRotationService::new(control_plane.clone());
         let signals = SignalBridge::new(&runtime);
 
         Ok(Self {
             runtime,
             bridge,
             engine,
+            control_plane,
             runs,
             tasks,
             sessions,
@@ -151,6 +172,7 @@ impl FabricServices {
             runtime,
             bridge,
             engine: _,
+            control_plane: _,
             runs: _,
             tasks: _,
             sessions: _,
