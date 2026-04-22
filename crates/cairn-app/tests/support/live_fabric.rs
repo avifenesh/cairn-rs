@@ -167,6 +167,13 @@ impl LiveHarness {
         &self.client
     }
 
+    /// OS PID of the cairn-app subprocess, if still alive. Used by soak
+    /// tests to sample `/proc/<pid>/status` + `/proc/<pid>/fd/` for RSS
+    /// and open-fd counts.
+    pub fn subprocess_pid(&self) -> Option<u32> {
+        self.child.as_ref().and_then(|c| c.id())
+    }
+
     /// Standard headers for a test request: bearer + scope.
     pub fn scope_headers(&self) -> Vec<(&'static str, String)> {
         vec![
