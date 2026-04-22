@@ -16,6 +16,7 @@ import { clsx } from "clsx";
 import { sectionLabel } from "../lib/design-system";
 import { ErrorFallback } from "../components/ErrorFallback";
 import { StatCard } from "../components/StatCard";
+import { useToast } from "../components/Toast";
 import { MiniChart } from "../components/MiniChart";
 import { BarChart } from "../components/BarChart";
 import { defaultApi } from "../lib/api";
@@ -309,6 +310,7 @@ export function EvalsPage() {
   const [newEvalType, setNewEvalType]   = useState<string>(EVALUATOR_TYPES[0]);
   const [newSubject, setNewSubject]     = useState<string>(SUBJECT_KINDS[0]);
   const qc = useQueryClient();
+  const toast = useToast();
 
   const { data, isLoading, isError, error, refetch, isFetching } = useQuery({
     queryKey: ["evals"],
@@ -329,6 +331,8 @@ export function EvalsPage() {
       qc.invalidateQueries({ queryKey: ["evals"] });
       setShowNewForm(false);
     },
+    onError: (e: unknown) =>
+      toast.error(`Failed to create eval run: ${e instanceof Error ? e.message : String(e)}`),
   });
 
   const runs = data?.items ?? [];

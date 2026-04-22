@@ -9,6 +9,61 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- **UI: global 401 interceptor.** When an operator's token is rotated
+  (via `POST /v1/admin/rotate-token`) or expires mid-session, the app
+  used to turn into a wall of red error badges on every page because
+  the token check only ran once on mount. A new `QueryCache` /
+  `MutationCache` `onError` observer in `main.tsx` inspects every
+  TanStack Query and mutation failure: on `ApiError.status === 401`
+  it clears the stored token and dispatches a `cairn:auth-expired`
+  event that the App shell listens for to bounce the operator back
+  to the LoginPage. One rotated-token = one trip through login, not
+  dozens of failed polls.
+- **UI: SessionsPage rows are now clickable.** The list rendered a
+  `ChevronRight` drill-in affordance but had no `onRowClick` wired —
+  operators could not navigate to session detail from the table.
+  Matches the `window.location.hash = 'session/<id>'` pattern RunsPage
+  already uses.
+- **UI: DecisionsPage bulk-invalidate hit the wrong endpoint.** The
+  page fired `POST /v1/decisions/cache/invalidate-all`, which does
+  not exist in the router; the real endpoint is
+  `POST /v1/decisions/invalidate`. Worse, the raw `fetch` call never
+  checked `res.ok`, so a 404 still triggered the "All cache entries
+  invalidated" success toast. Both raw-fetch mutations now wrap the
+  response in an `assertOk` helper that throws on non-2xx, surface
+  the failure through a toast via `onError`, and normalize list
+  responses through a local `unwrapList` helper (mirrors
+  `api.ts::getList`).
+- **UI: ApiDocsPage documented a nonexistent SSE path.** `GET
+  /v1/events/stream` does not exist — the canonical runtime SSE
+  path is `GET /v1/stream` (see `crates/cairn-app/src/router.rs:369`).
+  Doc entry corrected.
+- **UI: RunDetailPage plan-review mutations now invalidate the event
+  timeline and the approvals list.** Previously `approvePlan` /
+  `rejectPlan` / `revisePlan` only invalidated `["run-plan", runId]`
+  and `["runs"]`, so the timeline tab and the Approvals tab stayed
+  stale until the next 15s poll. Both keys now invalidate on success.
+- **UI: TasksPage claim/release mutations now invalidate the per-run
+  task list.** The `RowActions` claim/release only invalidated
+  `["tasks"]`; RunDetailPage's `["run-tasks"]` list showed stale
+  worker/lease state until reload. Both keys now invalidate.
+- **UI: missing `onError` handlers across Plugins, Evals, and export
+  buttons.** The four `CatalogCard` mutations (install / verify /
+  enable / disable) and `EvalsPage::createEval` silently swallowed
+  failures. `RunDetailPage::exportRun` and
+  `SessionDetailPage::exportSession` called `.then(...)` with no
+  `.catch(...)`, so a failed export logged to console and never
+  reached the operator. Every site now surfaces a toast on failure.
+- **UI: Prometheus parser dual-matches `cairn_`-prefixed histograms.**
+  The `http_requests_total` match already accepted the `cairn_`
+  prefix but the duration histogram, bucket, and gauge matches did
+  not. If the backend ever uniformly prefixes metrics, p50/p95/p99
+  silently showed 0. Same dual-match now applied to
+  `http_request_duration_ms_{sum,count,bucket}` and to
+  `active_runs_total` / `active_tasks_total`.
+
 ### Security
 
 - Removed the dev-admin-token one-click hint from the login page now

@@ -447,15 +447,25 @@ function RowActions({ task }: { task: TaskRecord }) {
   const qc    = useQueryClient();
   const toast = useToast();
 
+  // Also invalidate `run-tasks` so RunDetailPage's per-run task list reflects
+  // the new worker/lease state immediately instead of polling stale values.
   const claim = useMutation({
     mutationFn: () => defaultApi.claimTask(task.task_id, "operator", 60_000),
-    onSuccess: () => { toast.success("Task claimed."); void qc.invalidateQueries({ queryKey: ["tasks"] }); },
+    onSuccess: () => {
+      toast.success("Task claimed.");
+      void qc.invalidateQueries({ queryKey: ["tasks"] });
+      void qc.invalidateQueries({ queryKey: ["run-tasks"] });
+    },
     onError:   () => toast.error("Failed to claim task."),
   });
 
   const release = useMutation({
     mutationFn: () => defaultApi.releaseLease(task.task_id),
-    onSuccess: () => { toast.success("Lease released."); void qc.invalidateQueries({ queryKey: ["tasks"] }); },
+    onSuccess: () => {
+      toast.success("Lease released.");
+      void qc.invalidateQueries({ queryKey: ["tasks"] });
+      void qc.invalidateQueries({ queryKey: ["run-tasks"] });
+    },
     onError:   () => toast.error("Failed to release lease."),
   });
 

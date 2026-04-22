@@ -163,6 +163,7 @@ export function SessionsPage() {
       ) : (
         <DataTable<SessionRecord>
           data={list}
+          onRowClick={r => { window.location.hash = `session/${r.session_id}`; }}
           columns={[
             { key: 'arrow',      header: '',           render: _r => <ChevronRight size={13} className="text-gray-300 dark:text-zinc-600" /> },
             { key: 'session_id', header: 'Session ID', render: r => <span className="font-mono text-xs text-gray-800 dark:text-zinc-200 whitespace-nowrap" title={r.session_id}>{mono(r.session_id, 22)}</span>, sortValue: r => r.session_id },

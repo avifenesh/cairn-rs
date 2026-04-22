@@ -46,7 +46,7 @@ const ProfilePage          = lazy(() => import('./pages/ProfilePage').then(m => 
 const AgentTemplatesPage   = lazy(() => import('./pages/AgentTemplatesPage').then(m => ({ default: m.AgentTemplatesPage })));
 import { NotFoundPage } from './pages/NotFoundPage';
 
-import { defaultApi, getStoredToken, clearStoredToken, ApiError } from './lib/api';
+import { defaultApi, getStoredToken, clearStoredToken, ApiError, AUTH_EXPIRED_EVENT } from './lib/api';
 import type { NavPage } from './components/Sidebar';
 import type { Route } from './components/Layout';
 
@@ -217,6 +217,18 @@ export default function App() {
         }
       });
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Listen for auth-expired events fired by the global 401 interceptor in
+  // main.tsx. When the operator's token is rotated or expires mid-session,
+  // every subsequent query 401s; the interceptor clears the stored token
+  // and fires this event so we route back to the LoginPage.
+  useEffect(() => {
+    function onExpired() {
+      setAuthState('unauthenticated');
+    }
+    window.addEventListener(AUTH_EXPIRED_EVENT, onExpired);
+    return () => window.removeEventListener(AUTH_EXPIRED_EVENT, onExpired);
+  }, []);
 
   function handleLogout() {
     clearStoredToken();

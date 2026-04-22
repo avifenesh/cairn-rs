@@ -200,17 +200,20 @@ function parsePrometheusMetrics(text: string): {
     }
 
     // http_request_duration_ms_sum{method,path}
-    if (metricName === 'http_request_duration_ms_sum') {
+    // Also accept the `cairn_`-prefixed form so percentiles keep working if
+    // the backend uniformly namespaces metrics (parallels the dual-match on
+    // `http_requests_total` / `cairn_http_requests_total` above).
+    if (metricName === 'http_request_duration_ms_sum' || metricName === 'cairn_http_request_duration_ms_sum') {
       globalDurationSum += value;
     }
 
     // http_request_duration_ms_count{method,path}
-    if (metricName === 'http_request_duration_ms_count') {
+    if (metricName === 'http_request_duration_ms_count' || metricName === 'cairn_http_request_duration_ms_count') {
       globalDurationCount += value;
     }
 
     // http_request_duration_ms_bucket{method,path,le}
-    if (metricName === 'http_request_duration_ms_bucket' && labels.le) {
+    if ((metricName === 'http_request_duration_ms_bucket' || metricName === 'cairn_http_request_duration_ms_bucket') && labels.le) {
       const pathKey = labels.path ?? '_all';
       if (!bucketsByPath[pathKey]) bucketsByPath[pathKey] = [];
       const le = labels.le === '+Inf' ? Infinity : parseFloat(labels.le);
@@ -218,10 +221,10 @@ function parsePrometheusMetrics(text: string): {
     }
 
     // active_runs_total / active_tasks_total — gauges (no labels).
-    if (metricName === 'active_runs_total') {
+    if (metricName === 'active_runs_total' || metricName === 'cairn_active_runs_total') {
       requestsByPath['active_runs (gauge)'] = value;
     }
-    if (metricName === 'active_tasks_total') {
+    if (metricName === 'active_tasks_total' || metricName === 'cairn_active_tasks_total') {
       requestsByPath['active_tasks (gauge)'] = value;
     }
   }
@@ -1167,6 +1170,15 @@ export interface GitHubQueueEntry {
 // ── Token persistence ─────────────────────────────────────────────────────────
 
 export const TOKEN_KEY = 'cairn_token';
+
+/**
+ * Custom-event name dispatched on `window` by the global 401 interceptor
+ * (see `main.tsx`) when a query or mutation fails with status 401. The App
+ * shell listens for this and transitions auth state back to `unauthenticated`
+ * so the operator is routed to the LoginPage instead of staring at a red
+ * error badge on every page.
+ */
+export const AUTH_EXPIRED_EVENT = 'cairn:auth-expired';
 
 export function getStoredToken(): string {
   return localStorage.getItem(TOKEN_KEY) ?? import.meta.env.VITE_API_TOKEN ?? '';
