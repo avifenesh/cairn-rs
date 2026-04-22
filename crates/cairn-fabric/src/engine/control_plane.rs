@@ -202,8 +202,7 @@ pub trait ControlPlaneBackend: Send + Sync {
 
     /// Cancel (archive) a flow. Returns `AlreadyTerminal` when FF's
     /// Lua replies `flow_already_terminal` — idempotent re-archive.
-    async fn cancel_flow(&self, input: CancelFlowInput)
-        -> Result<FlowCancelOutcome, FabricError>;
+    async fn cancel_flow(&self, input: CancelFlowInput) -> Result<FlowCancelOutcome, FabricError>;
 
     // ── Claim (Phase D PR 2a) ───────────────────────────────────────────
 

@@ -65,7 +65,11 @@ impl HarnessTool for HarnessWebFetch {
         RetrySafety::IdempotentSafe
     }
 
-    fn build_session(_ctx: &ToolContext, _project: &ProjectKey, hook: PermissionHook) -> Self::Session {
+    fn build_session(
+        _ctx: &ToolContext,
+        _project: &ProjectKey,
+        hook: PermissionHook,
+    ) -> Self::Session {
         let inner = PermissionPolicy {
             roots: Vec::new(),
             sensitive_patterns: default_sensitive_patterns(),
@@ -93,7 +97,11 @@ impl HarnessTool for HarnessWebFetch {
                     "log_path": ok.log_path,
                     "byte_cap": ok.byte_cap,
                 });
-                Ok(if truncated { ToolResult::truncated(v) } else { ToolResult::ok(v) })
+                Ok(if truncated {
+                    ToolResult::truncated(v)
+                } else {
+                    ToolResult::ok(v)
+                })
             }
             WebFetchResult::RedirectLoop(r) => Ok(ToolResult::ok(json!({
                 "kind": "redirect_loop",

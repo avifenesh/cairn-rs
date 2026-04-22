@@ -68,7 +68,11 @@ pub trait HarnessTool: Send + Sync + 'static {
     }
 
     /// Build a session config from cairn's execution context.
-    fn build_session(ctx: &ToolContext, project: &ProjectKey, hook: PermissionHook) -> Self::Session;
+    fn build_session(
+        ctx: &ToolContext,
+        project: &ProjectKey,
+        hook: PermissionHook,
+    ) -> Self::Session;
 
     /// Invoke the upstream async entrypoint.
     async fn call(args: Value, session: &Self::Session) -> Self::Result;

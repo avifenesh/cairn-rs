@@ -63,7 +63,11 @@ impl HarnessTool for HarnessGrep {
         RetrySafety::IdempotentSafe
     }
 
-    fn build_session(ctx: &ToolContext, _project: &ProjectKey, hook: PermissionHook) -> Self::Session {
+    fn build_session(
+        ctx: &ToolContext,
+        _project: &ProjectKey,
+        hook: PermissionHook,
+    ) -> Self::Session {
         let cwd = ctx.working_dir.to_string_lossy().into_owned();
         let perms = PermissionPolicy {
             roots: vec![cwd.clone()],
@@ -89,7 +93,11 @@ impl HarnessTool for HarnessGrep {
             GrepResult::Content(r) => {
                 let truncated = r.meta.byte_cap;
                 let v = json!({ "kind": "content", "output": r.output, "meta": r.meta });
-                Ok(if truncated { ToolResult::truncated(v) } else { ToolResult::ok(v) })
+                Ok(if truncated {
+                    ToolResult::truncated(v)
+                } else {
+                    ToolResult::ok(v)
+                })
             }
             GrepResult::Count(r) => Ok(ToolResult::ok(json!({
                 "kind": "count",

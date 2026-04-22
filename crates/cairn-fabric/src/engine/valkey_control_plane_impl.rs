@@ -32,7 +32,9 @@ use ff_sdk::task::parse_report_usage_result;
 
 use crate::error::FabricError;
 use crate::fcall;
-use crate::helpers::{check_fcall_success, fcall_error_code, is_duplicate_result, parse_fail_outcome, FailOutcome};
+use crate::helpers::{
+    check_fcall_success, fcall_error_code, is_duplicate_result, parse_fail_outcome, FailOutcome,
+};
 
 use super::control_plane::ControlPlaneBackend;
 use super::control_plane_types::{
@@ -761,10 +763,7 @@ impl ControlPlaneBackend for ValkeyEngine {
         Ok(())
     }
 
-    async fn cancel_flow(
-        &self,
-        input: CancelFlowInput,
-    ) -> Result<FlowCancelOutcome, FabricError> {
+    async fn cancel_flow(&self, input: CancelFlowInput) -> Result<FlowCancelOutcome, FabricError> {
         let partition = flow_partition(&input.flow_id, &self.runtime().partition_config);
         let fctx = FlowKeyContext::new(&partition, &input.flow_id);
         let now = TimestampMs::now();
@@ -915,7 +914,13 @@ impl ControlPlaneBackend for ValkeyEngine {
         // consumption, so we do NOT re-issue it.
         if fcall_error_code(&raw_claim).as_deref() == Some(USE_CLAIM_RESUMED_EXECUTION) {
             return self
-                .claim_resumed_execution(&ctx, &idx, &input.execution_id, &input.lane_id, input.lease_duration_ms)
+                .claim_resumed_execution(
+                    &ctx,
+                    &idx,
+                    &input.execution_id,
+                    &input.lane_id,
+                    input.lease_duration_ms,
+                )
                 .await;
         }
 
@@ -992,7 +997,11 @@ impl ValkeyEngine {
 
         let raw: ferriskey::Value = self
             .runtime()
-            .fcall(fcall::names::FF_CLAIM_RESUMED_EXECUTION, &key_refs, &arg_refs)
+            .fcall(
+                fcall::names::FF_CLAIM_RESUMED_EXECUTION,
+                &key_refs,
+                &arg_refs,
+            )
             .await
             .map_err(|e| FabricError::Internal(format!("ff_claim_resumed_execution: {e}")))?;
         check_fcall_success(&raw, fcall::names::FF_CLAIM_RESUMED_EXECUTION)?;
@@ -1010,7 +1019,9 @@ impl ValkeyEngine {
 /// `{1, "OK", <lease_id>, <lease_epoch>}`. Previously lived inside
 /// `services::claim_common`; lifted here with the rest of the claim
 /// machinery.
-fn parse_claim_lease_epoch(raw: &ferriskey::Value) -> Result<ff_core::types::LeaseEpoch, FabricError> {
+fn parse_claim_lease_epoch(
+    raw: &ferriskey::Value,
+) -> Result<ff_core::types::LeaseEpoch, FabricError> {
     if let ferriskey::Value::Array(arr) = raw {
         if let Some(Ok(ferriskey::Value::BulkString(b))) = arr.get(3) {
             if let Ok(n) = String::from_utf8_lossy(b).parse::<u64>() {

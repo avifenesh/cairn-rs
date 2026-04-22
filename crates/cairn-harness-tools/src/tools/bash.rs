@@ -75,7 +75,11 @@ impl HarnessTool for HarnessBash {
         RetrySafety::DangerousPause
     }
 
-    fn build_session(ctx: &ToolContext, _project: &ProjectKey, hook: PermissionHook) -> Self::Session {
+    fn build_session(
+        ctx: &ToolContext,
+        _project: &ProjectKey,
+        hook: PermissionHook,
+    ) -> Self::Session {
         build_bash_session(ctx, hook)
     }
 
@@ -97,7 +101,11 @@ impl HarnessTool for HarnessBash {
                     "log_path": ok.log_path,
                     "byte_cap": ok.byte_cap,
                 });
-                Ok(if truncated { ToolResult::truncated(v) } else { ToolResult::ok(v) })
+                Ok(if truncated {
+                    ToolResult::truncated(v)
+                } else {
+                    ToolResult::ok(v)
+                })
             }
             BashResult::NonzeroExit(nz) => {
                 let truncated = nz.byte_cap;
@@ -111,7 +119,11 @@ impl HarnessTool for HarnessBash {
                     "log_path": nz.log_path,
                     "byte_cap": nz.byte_cap,
                 });
-                Ok(if truncated { ToolResult::truncated(v) } else { ToolResult::ok(v) })
+                Ok(if truncated {
+                    ToolResult::truncated(v)
+                } else {
+                    ToolResult::ok(v)
+                })
             }
             BashResult::Timeout(_t) => Err(ToolError::TimedOut),
             BashResult::BackgroundStarted(bg) => Ok(ToolResult::ok(json!({
@@ -163,7 +175,11 @@ impl HarnessTool for HarnessBashOutput {
         ToolEffect::Observational
     }
 
-    fn build_session(ctx: &ToolContext, _project: &ProjectKey, hook: PermissionHook) -> Self::Session {
+    fn build_session(
+        ctx: &ToolContext,
+        _project: &ProjectKey,
+        hook: PermissionHook,
+    ) -> Self::Session {
         build_bash_session(ctx, hook)
     }
 
@@ -236,7 +252,11 @@ impl HarnessTool for HarnessBashKill {
         ToolEffect::External
     }
 
-    fn build_session(ctx: &ToolContext, _project: &ProjectKey, hook: PermissionHook) -> Self::Session {
+    fn build_session(
+        ctx: &ToolContext,
+        _project: &ProjectKey,
+        hook: PermissionHook,
+    ) -> Self::Session {
         build_bash_session(ctx, hook)
     }
 
@@ -246,7 +266,11 @@ impl HarnessTool for HarnessBashKill {
 
     fn result_to_tool_result(result: Self::Result) -> Result<ToolResult, ToolError> {
         match result {
-            BashKillResult::Killed { output, job_id, signal } => Ok(ToolResult::ok(json!({
+            BashKillResult::Killed {
+                output,
+                job_id,
+                signal,
+            } => Ok(ToolResult::ok(json!({
                 "kind": "killed",
                 "output": output,
                 "job_id": job_id,

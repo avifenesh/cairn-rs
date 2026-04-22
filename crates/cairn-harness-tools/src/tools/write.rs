@@ -101,7 +101,11 @@ impl HarnessTool for HarnessWrite {
         RetrySafety::DangerousPause
     }
 
-    fn build_session(ctx: &ToolContext, _project: &ProjectKey, hook: PermissionHook) -> Self::Session {
+    fn build_session(
+        ctx: &ToolContext,
+        _project: &ProjectKey,
+        hook: PermissionHook,
+    ) -> Self::Session {
         build_write_session(ctx, hook)
     }
 
@@ -165,7 +169,11 @@ impl HarnessTool for HarnessEdit {
         RetrySafety::DangerousPause
     }
 
-    fn build_session(ctx: &ToolContext, _project: &ProjectKey, hook: PermissionHook) -> Self::Session {
+    fn build_session(
+        ctx: &ToolContext,
+        _project: &ProjectKey,
+        hook: PermissionHook,
+    ) -> Self::Session {
         build_write_session(ctx, hook)
     }
 
@@ -244,7 +252,11 @@ impl HarnessTool for HarnessMultiEdit {
         RetrySafety::DangerousPause
     }
 
-    fn build_session(ctx: &ToolContext, _project: &ProjectKey, hook: PermissionHook) -> Self::Session {
+    fn build_session(
+        ctx: &ToolContext,
+        _project: &ProjectKey,
+        hook: PermissionHook,
+    ) -> Self::Session {
         build_write_session(ctx, hook)
     }
 

@@ -41,8 +41,7 @@ async fn bash_echo_succeeds() {
         .expect("bash echo should succeed");
     // output shape: { kind: "ok", exit_code: 0, stdout: "...hello..." }
     assert_eq!(res.output["exit_code"], 0);
-    assert!(res
-        .output["stdout"]
+    assert!(res.output["stdout"]
         .as_str()
         .unwrap_or("")
         .contains("hello"));
@@ -64,7 +63,10 @@ async fn read_returns_text_for_existing_file() {
         .await
         .expect("read should succeed");
     assert_eq!(res.output["kind"], "text");
-    assert!(res.output["output"].as_str().unwrap_or("").contains("line 2"));
+    assert!(res.output["output"]
+        .as_str()
+        .unwrap_or("")
+        .contains("line 2"));
 }
 
 #[tokio::test]
@@ -80,7 +82,10 @@ async fn glob_finds_created_file() {
         .expect("glob should succeed");
     assert_eq!(res.output["kind"], "paths");
     let paths = res.output["paths"].as_array().expect("paths array");
-    assert!(paths.len() >= 2, "expected >= 2 matched paths, got {paths:?}");
+    assert!(
+        paths.len() >= 2,
+        "expected >= 2 matched paths, got {paths:?}"
+    );
 }
 
 #[tokio::test]
@@ -99,7 +104,10 @@ async fn grep_finds_pattern_in_file() {
         .expect("grep should succeed");
     // content mode returns kind=content with at least one match in output
     assert_eq!(res.output["kind"], "content");
-    assert!(res.output["output"].as_str().unwrap_or("").contains("alpha"));
+    assert!(res.output["output"]
+        .as_str()
+        .unwrap_or("")
+        .contains("alpha"));
 }
 
 #[tokio::test]
@@ -216,8 +224,18 @@ fn smoke_registry_descriptors_include_all_harness_tools() {
         .register(Arc::new(HarnessBuiltin::<HarnessMultiEdit>::new()))
         .register(Arc::new(HarnessBuiltin::<HarnessWebFetch>::new()));
     assert_eq!(reg.len(), 10, "expected all 10 harness tools registered");
-    for name in ["bash", "bash_output", "bash_kill", "read", "grep", "glob",
-                 "write", "edit", "multiedit", "webfetch"] {
+    for name in [
+        "bash",
+        "bash_output",
+        "bash_kill",
+        "read",
+        "grep",
+        "glob",
+        "write",
+        "edit",
+        "multiedit",
+        "webfetch",
+    ] {
         assert!(reg.get(name).is_some(), "missing tool: {name}");
     }
 }

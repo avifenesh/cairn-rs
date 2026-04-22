@@ -54,7 +54,11 @@ impl HarnessTool for HarnessGlob {
         RetrySafety::IdempotentSafe
     }
 
-    fn build_session(ctx: &ToolContext, _project: &ProjectKey, hook: PermissionHook) -> Self::Session {
+    fn build_session(
+        ctx: &ToolContext,
+        _project: &ProjectKey,
+        hook: PermissionHook,
+    ) -> Self::Session {
         let cwd = ctx.working_dir.to_string_lossy().into_owned();
         let perms = PermissionPolicy {
             roots: vec![cwd.clone()],

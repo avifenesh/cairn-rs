@@ -1432,13 +1432,13 @@ mod tests {
         // Build a registry with both Observational and External tools.
         let registry = std::sync::Arc::new(
             cairn_tools::builtins::BuiltinToolRegistry::new()
-                .register(std::sync::Arc::new(
-                    cairn_harness_tools::HarnessBuiltin::<cairn_harness_tools::HarnessGrep>::new(),
-                )) // Observational
+                .register(std::sync::Arc::new(cairn_harness_tools::HarnessBuiltin::<
+                    cairn_harness_tools::HarnessGrep,
+                >::new())) // Observational
                 .register(std::sync::Arc::new(cairn_tools::CalculateTool)) // Observational
-                .register(std::sync::Arc::new(
-                    cairn_harness_tools::HarnessBuiltin::<cairn_harness_tools::HarnessBash>::new(),
-                )), // External
+                .register(std::sync::Arc::new(cairn_harness_tools::HarnessBuiltin::<
+                    cairn_harness_tools::HarnessBash,
+                >::new())), // External
         );
 
         let phase = LlmDecidePhase::new(
@@ -1748,8 +1748,9 @@ mod tests {
             }
         }
 
-        let registry =
-            Arc::new(BuiltinToolRegistry::new().register(Arc::new(cairn_harness_tools::HarnessBuiltin::<cairn_harness_tools::HarnessGrep>::new())));
+        let registry = Arc::new(BuiltinToolRegistry::new().register(Arc::new(
+            cairn_harness_tools::HarnessBuiltin::<cairn_harness_tools::HarnessGrep>::new(),
+        )));
         let phase =
             LlmDecidePhase::new(Arc::new(NativeToolProvider), "test-model").with_tools(registry);
         let out = phase.decide(&ctx(), &empty_gather()).await.unwrap();
@@ -1773,8 +1774,9 @@ mod tests {
         let mock = Arc::new(MockProvider {
             response: r#"[{"action_type":"complete_run","description":"done","confidence":0.9,"requires_approval":false}]"#.to_owned(),
         });
-        let registry =
-            Arc::new(BuiltinToolRegistry::new().register(Arc::new(cairn_harness_tools::HarnessBuiltin::<cairn_harness_tools::HarnessGrep>::new())));
+        let registry = Arc::new(BuiltinToolRegistry::new().register(Arc::new(
+            cairn_harness_tools::HarnessBuiltin::<cairn_harness_tools::HarnessGrep>::new(),
+        )));
         let phase = LlmDecidePhase::new(mock, "test-model").with_tools(registry);
         let out = phase.decide(&ctx(), &empty_gather()).await.unwrap();
 

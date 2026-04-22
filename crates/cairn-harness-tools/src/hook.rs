@@ -15,7 +15,5 @@ use harness_core::{PermissionDecision, PermissionHook};
 /// Build an allow-all hook. The closure is cheap to clone into any number
 /// of session configs.
 pub fn build_cairn_hook() -> PermissionHook {
-    Arc::new(|_query: PermissionQuery| {
-        Box::pin(async move { PermissionDecision::Allow })
-    })
+    Arc::new(|_query: PermissionQuery| Box::pin(async move { PermissionDecision::Allow }))
 }

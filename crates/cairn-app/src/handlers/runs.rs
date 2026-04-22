@@ -1623,16 +1623,16 @@ pub(crate) async fn orchestrate_run_handler(
     Json(body): Json<OrchestrateRequest>,
 ) -> impl IntoResponse {
     use cairn_domain::RunId;
+    use cairn_harness_tools::{
+        HarnessBash, HarnessBashKill, HarnessBashOutput, HarnessBuiltin, HarnessEdit, HarnessGlob,
+        HarnessGrep, HarnessMultiEdit, HarnessRead, HarnessWebFetch, HarnessWrite,
+    };
     use cairn_orchestrator::{
         LlmDecidePhase, LoopConfig, LoopTermination, OrchestrationContext, OrchestratorLoop,
         RuntimeExecutePhase, StandardGatherPhase,
     };
     use cairn_runtime::services::{
         ApprovalServiceImpl, CheckpointServiceImpl, MailboxServiceImpl, ToolInvocationServiceImpl,
-    };
-    use cairn_harness_tools::{
-        HarnessBash, HarnessBashKill, HarnessBashOutput, HarnessBuiltin, HarnessEdit, HarnessGlob,
-        HarnessGrep, HarnessMultiEdit, HarnessRead, HarnessWebFetch, HarnessWrite,
     };
     use cairn_tools::{
         BuiltinToolRegistry, CalculateTool, CancelTaskTool, CreateTaskTool, GetApprovalsTool,
