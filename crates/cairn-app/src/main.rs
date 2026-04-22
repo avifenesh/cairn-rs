@@ -172,6 +172,10 @@ fn parse_args_from(args: &[String]) -> BootstrapConfig {
         if matches!(config.encryption_key, EncryptionKeySource::LocalAuto) {
             config.encryption_key = EncryptionKeySource::None;
         }
+        // RFC 020 team-mode storage invariant is enforced in `parse_args`
+        // AFTER `resolve_storage_from_env` runs, so the `DATABASE_URL` path
+        // is covered as well as the `--db` CLI path. Not enforced here so
+        // the invariant can't be silently bypassed by choosing env vars.
     }
 
     config
@@ -203,6 +207,12 @@ fn parse_args() -> BootstrapConfig {
     let args: Vec<String> = std::env::args().collect();
     let mut config = parse_args_from(&args);
     resolve_storage_from_env(&mut config);
+    // Enforce the RFC 020 team-mode storage invariant AFTER env-var
+    // resolution so a `DATABASE_URL=sqlite:/path/prod.db` footgun is
+    // caught the same as a `--db /path/prod.db` one. This was gemini-
+    // code-assist high-priority finding on PR #77 and is the correct
+    // refusal point.
+    cairn_app::bootstrap::enforce_team_mode_storage_invariant(&config);
     config
 }
 
