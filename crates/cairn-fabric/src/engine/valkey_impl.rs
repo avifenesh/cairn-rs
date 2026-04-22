@@ -390,6 +390,91 @@ impl Engine for ValkeyEngine {
             .map_err(|e| FabricError::Valkey(format!("HSET is_alive: {e}")))?;
         Ok(())
     }
+
+    async fn list_expired_leases(
+        &self,
+        now_ms: u64,
+        limit: usize,
+    ) -> Result<Vec<super::control_plane_types::ExpiredLease>, FabricError> {
+        use ff_core::keys::IndexKeys;
+        use ff_core::partition::{Partition, PartitionFamily};
+
+        // Exec and flow share a slot under the `num_flow_partitions`
+        // budget post-RFC-011; the execution lease_expiry index is
+        // stamped on the flow-partition fan-out.
+        let num_partitions = self.runtime.partition_config.num_flow_partitions;
+        let mut out: Vec<super::control_plane_types::ExpiredLease> = Vec::new();
+        let remaining_limit = limit;
+        let score_max = now_ms.to_string();
+
+        for index in 0..num_partitions {
+            if out.len() >= remaining_limit {
+                break;
+            }
+            let partition = Partition {
+                family: PartitionFamily::Execution,
+                index,
+            };
+            let idx = IndexKeys::new(&partition);
+            let zset_key = idx.lease_expiry();
+            let batch_cap = (remaining_limit - out.len()).min(512);
+
+            // ZRANGEBYSCORE <key> 0 <now_ms> WITHSCORES LIMIT 0 <cap>
+            let raw: ferriskey::Value = self
+                .runtime
+                .client
+                .cmd("ZRANGEBYSCORE")
+                .arg(zset_key.as_str())
+                .arg("0")
+                .arg(score_max.as_str())
+                .arg("WITHSCORES")
+                .arg("LIMIT")
+                .arg("0")
+                .arg(batch_cap.to_string().as_str())
+                .execute()
+                .await
+                .map_err(|e| FabricError::Valkey(format!("ZRANGEBYSCORE lease_expiry: {e}")))?;
+
+            // Reply shape: Array of alternating [member, score, member, score, ...].
+            if let ferriskey::Value::Array(items) = raw {
+                let mut it = items.into_iter();
+                while let (Some(m), Some(s)) = (it.next(), it.next()) {
+                    let Ok(m) = m else { continue };
+                    let Ok(s) = s else { continue };
+                    let Some(member) = crate::helpers::value_to_string(&m) else {
+                        continue;
+                    };
+                    let Some(score) = crate::helpers::value_to_string(&s) else {
+                        continue;
+                    };
+                    let Ok(eid) = ExecutionId::parse(&member) else {
+                        // Malformed member — skip rather than fail the whole scan.
+                        continue;
+                    };
+                    // Skip malformed scores rather than coercing to 0: a 0
+                    // fallback would surface the row as "expired at epoch",
+                    // a false-positive that would confuse operator dashboards.
+                    let Ok(expires_at_ms) = score.parse::<u64>() else {
+                        tracing::warn!(
+                            execution_id = %eid,
+                            raw_score = %score,
+                            "lease_expiry score unparseable; skipping row",
+                        );
+                        continue;
+                    };
+                    out.push(super::control_plane_types::ExpiredLease {
+                        execution_id: eid,
+                        expires_at_ms,
+                    });
+                    if out.len() >= remaining_limit {
+                        break;
+                    }
+                }
+            }
+        }
+
+        Ok(out)
+    }
 }
 
 /// Namespace guard for cairn tag writes.

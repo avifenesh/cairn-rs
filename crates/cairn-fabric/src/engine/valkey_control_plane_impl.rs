@@ -18,7 +18,7 @@ use async_trait::async_trait;
 use ff_core::contracts::ReportUsageResult;
 use ff_core::keys::{
     budget_policies_index, budget_resets_key, quota_policies_index, usage_dedup_key,
-    BudgetKeyContext, ExecKeyContext, FlowKeyContext, IndexKeys, QuotaKeyContext,
+    BudgetKeyContext, ExecKeyContext, FlowIndexKeys, FlowKeyContext, IndexKeys, QuotaKeyContext,
 };
 use ff_core::partition::{
     budget_partition, execution_partition, flow_partition, quota_partition, Partition,
@@ -33,16 +33,18 @@ use ff_sdk::task::parse_report_usage_result;
 use crate::error::FabricError;
 use crate::fcall;
 use crate::helpers::{
-    check_fcall_success, fcall_error_code, is_duplicate_result, parse_fail_outcome, FailOutcome,
+    check_fcall_success, fcall_error_code, is_duplicate_result, parse_eligibility_result,
+    parse_fail_outcome, parse_stage_result_revision, FailOutcome,
 };
 
 use super::control_plane::ControlPlaneBackend;
 use super::control_plane_types::{
-    BudgetSpendOutcome, BudgetStatusSnapshot, CancelFlowInput, CancelRunInput, ClaimGrantOutcome,
-    CompleteRunInput, CreateFlowInput, CreateRunExecutionInput, DeliverApprovalSignalInput,
-    ExecutionCreated, FailExecutionOutcome, FailRunInput, FlowCancelOutcome,
-    IssueGrantAndClaimInput, QuotaAdmission, ResumeRunInput, RotationFailure, RotationOutcome,
-    SuspendRunInput,
+    AddExecutionToFlowInput, ApplyDependencyToChildInput, BudgetSpendOutcome, BudgetStatusSnapshot,
+    CancelFlowInput, CancelRunInput, ClaimGrantOutcome, CompleteRunInput, CreateFlowInput,
+    CreateRunExecutionInput, DeliverApprovalSignalInput, EligibilityResult, ExecutionCreated,
+    FailExecutionOutcome, FailRunInput, FlowCancelOutcome, IssueGrantAndClaimInput, QuotaAdmission,
+    RenewLeaseInput, ResumeRunInput, RotationFailure, RotationOutcome, StageDependencyEdgeInput,
+    StageDependencyOutcome, SubmitTaskInput, SuspendRunInput,
 };
 use super::valkey_impl::ValkeyEngine;
 
@@ -932,6 +934,290 @@ impl ControlPlaneBackend for ValkeyEngine {
             lease_epoch,
             attempt_index: att_idx,
         })
+    }
+
+    // ── Task lifecycle (Phase D PR 2b) ──────────────────────────────────
+
+    async fn submit_task_execution(
+        &self,
+        input: SubmitTaskInput,
+    ) -> Result<ExecutionCreated, FabricError> {
+        let partition = execution_partition(&input.execution_id, &self.runtime().partition_config);
+        let ctx = ExecKeyContext::new(&partition, &input.execution_id);
+        let idx = IndexKeys::new(&partition);
+
+        let tags_json = serde_json::to_string(&input.tags).unwrap_or_else(|_| "{}".to_owned());
+
+        // Historical default retry policy. Callers may override by
+        // passing a non-empty `policy_json`.
+        let policy_json = if input.policy_json.is_empty() {
+            serde_json::json!({
+                "max_retries": 2,
+                "backoff": {
+                    "type": "exponential",
+                    "initial_delay_ms": 1000,
+                    "max_delay_ms": 30000,
+                    "multiplier": 2
+                }
+            })
+            .to_string()
+        } else {
+            input.policy_json.clone()
+        };
+
+        let priority_str = input.priority.to_string();
+        let (keys, args) = fcall::execution::build_create_execution(
+            &ctx,
+            &idx,
+            &input.lane_id,
+            &input.execution_id,
+            &input.namespace,
+            crate::constants::EXECUTION_KIND_TASK,
+            &priority_str,
+            &policy_json,
+            &tags_json,
+            partition.index,
+        );
+        let key_refs: Vec<&str> = keys.iter().map(|s| s.as_str()).collect();
+        let arg_refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
+
+        let raw: ferriskey::Value = self
+            .runtime()
+            .fcall(fcall::names::FF_CREATE_EXECUTION, &key_refs, &arg_refs)
+            .await
+            .map_err(|e| FabricError::Internal(format!("ff_create_execution: {e}")))?;
+
+        let duplicate = is_duplicate_result(&raw);
+        if !duplicate {
+            check_fcall_success(&raw, fcall::names::FF_CREATE_EXECUTION)?;
+        }
+        Ok(ExecutionCreated {
+            newly_created: !duplicate,
+        })
+    }
+
+    async fn add_execution_to_flow(
+        &self,
+        input: AddExecutionToFlowInput,
+    ) -> Result<(), FabricError> {
+        let flow_partition = flow_partition(&input.flow_id, &self.runtime().partition_config);
+        let fctx = FlowKeyContext::new(&flow_partition, &input.flow_id);
+        let flow_idx = FlowIndexKeys::new(&flow_partition);
+        let exec_partition =
+            execution_partition(&input.execution_id, &self.runtime().partition_config);
+        let exec_ctx = ExecKeyContext::new(&exec_partition, &input.execution_id);
+
+        let now = TimestampMs::now();
+
+        // 1. Ensure the flow exists. Idempotent — FF replies
+        // `ok_already_satisfied` on duplicate.
+        let (create_keys, create_args) = fcall::session::build_create_flow(
+            &fctx,
+            &flow_partition,
+            &input.flow_id,
+            &input.flow_kind,
+            &input.namespace,
+            now,
+        );
+        let create_key_refs: Vec<&str> = create_keys.iter().map(|s| s.as_str()).collect();
+        let create_arg_refs: Vec<&str> = create_args.iter().map(|s| s.as_str()).collect();
+        let create_raw: ferriskey::Value = self
+            .runtime()
+            .fcall(
+                fcall::names::FF_CREATE_FLOW,
+                &create_key_refs,
+                &create_arg_refs,
+            )
+            .await
+            .map_err(|e| FabricError::Internal(format!("ff_create_flow: {e}")))?;
+        check_fcall_success(&create_raw, fcall::names::FF_CREATE_FLOW)?;
+
+        // 2. Bind the execution as a flow member.
+        let now_ms = now.0 as u64;
+        let (keys, args) = fcall::flow_edges::build_add_execution_to_flow(
+            &fctx,
+            &flow_idx,
+            &exec_ctx,
+            &input.flow_id,
+            &input.execution_id,
+            now_ms,
+        );
+        let key_refs: Vec<&str> = keys.iter().map(|s| s.as_str()).collect();
+        let arg_refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
+
+        let raw: ferriskey::Value = self
+            .runtime()
+            .fcall(fcall::names::FF_ADD_EXECUTION_TO_FLOW, &key_refs, &arg_refs)
+            .await
+            .map_err(|e| FabricError::Internal(format!("ff_add_execution_to_flow: {e}")))?;
+        check_fcall_success(&raw, fcall::names::FF_ADD_EXECUTION_TO_FLOW)?;
+        Ok(())
+    }
+
+    async fn stage_dependency_edge(
+        &self,
+        input: StageDependencyEdgeInput,
+    ) -> Result<StageDependencyOutcome, FabricError> {
+        let partition = flow_partition(&input.flow_id, &self.runtime().partition_config);
+        let fctx = FlowKeyContext::new(&partition, &input.flow_id);
+        let now_ms = TimestampMs::now().0 as u64;
+
+        let (keys, args) = fcall::flow_edges::build_stage_dependency_edge(
+            &fctx,
+            &input.flow_id,
+            &input.edge_id,
+            &input.upstream_execution_id,
+            &input.downstream_execution_id,
+            &input.dependency_kind,
+            &input.data_passing_ref,
+            input.expected_graph_revision,
+            now_ms,
+        );
+        let key_refs: Vec<&str> = keys.iter().map(|s| s.as_str()).collect();
+        let arg_refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
+
+        let raw: ferriskey::Value = self
+            .runtime()
+            .fcall(fcall::names::FF_STAGE_DEPENDENCY_EDGE, &key_refs, &arg_refs)
+            .await
+            .map_err(|e| FabricError::Internal(format!("ff_stage_dependency_edge: {e}")))?;
+
+        // Typed-code dispatch. Any code not matched below falls
+        // through to `check_fcall_success` which surfaces it as
+        // `FabricError::Internal` — services see a hard error rather
+        // than a silent "unknown variant" outcome.
+        if let Some(code) = fcall_error_code(&raw) {
+            return Ok(match code.as_str() {
+                "stale_graph_revision" => StageDependencyOutcome::StaleGraphRevision,
+                "cycle_detected" => StageDependencyOutcome::Cycle,
+                "self_referencing_edge" => StageDependencyOutcome::SelfReferencing,
+                "dependency_already_exists" => StageDependencyOutcome::AlreadyExists,
+                "flow_not_found" => StageDependencyOutcome::FlowNotFound,
+                "flow_already_terminal" => StageDependencyOutcome::FlowAlreadyTerminal,
+                "execution_not_in_flow" => StageDependencyOutcome::ExecutionNotInFlow,
+                _ => {
+                    return Err(FabricError::Internal(format!(
+                        "ff_stage_dependency_edge rejected: {code}"
+                    )));
+                }
+            });
+        }
+
+        let new_graph_revision = parse_stage_result_revision(&raw).ok_or_else(|| {
+            FabricError::Internal("ff_stage_dependency_edge: malformed OK envelope".into())
+        })?;
+        Ok(StageDependencyOutcome::Staged { new_graph_revision })
+    }
+
+    async fn apply_dependency_to_child(
+        &self,
+        input: ApplyDependencyToChildInput,
+    ) -> Result<(), FabricError> {
+        let child_partition = execution_partition(
+            &input.downstream_execution_id,
+            &self.runtime().partition_config,
+        );
+        let child_exec_ctx = ExecKeyContext::new(&child_partition, &input.downstream_execution_id);
+        let child_idx = IndexKeys::new(&child_partition);
+        let now_ms = TimestampMs::now().0 as u64;
+
+        let (keys, args) = fcall::flow_edges::build_apply_dependency_to_child(
+            &child_exec_ctx,
+            &child_idx.lane_eligible(&input.lane_id),
+            &child_idx.lane_blocked_dependencies(&input.lane_id),
+            &input.edge_id,
+            &input.flow_id,
+            &input.upstream_execution_id,
+            input.graph_revision,
+            &input.dependency_kind,
+            &input.data_passing_ref,
+            now_ms,
+        );
+        let key_refs: Vec<&str> = keys.iter().map(|s| s.as_str()).collect();
+        let arg_refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
+
+        let raw: ferriskey::Value = self
+            .runtime()
+            .fcall(
+                fcall::names::FF_APPLY_DEPENDENCY_TO_CHILD,
+                &key_refs,
+                &arg_refs,
+            )
+            .await
+            .map_err(|e| FabricError::Internal(format!("ff_apply_dependency_to_child: {e}")))?;
+        check_fcall_success(&raw, fcall::names::FF_APPLY_DEPENDENCY_TO_CHILD)?;
+        Ok(())
+    }
+
+    async fn evaluate_flow_eligibility(
+        &self,
+        execution_id: &ExecutionId,
+    ) -> Result<EligibilityResult, FabricError> {
+        let partition = execution_partition(execution_id, &self.runtime().partition_config);
+        let ctx = ExecKeyContext::new(&partition, execution_id);
+
+        let (keys, args) = fcall::flow_edges::build_evaluate_flow_eligibility(&ctx);
+        let key_refs: Vec<&str> = keys.iter().map(|s| s.as_str()).collect();
+        let arg_refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
+
+        let raw: ferriskey::Value = self
+            .runtime()
+            .fcall(
+                fcall::names::FF_EVALUATE_FLOW_ELIGIBILITY,
+                &key_refs,
+                &arg_refs,
+            )
+            .await
+            .map_err(|e| FabricError::Internal(format!("ff_evaluate_flow_eligibility: {e}")))?;
+
+        // Guard against typed Lua error codes (e.g. `execution_not_found`).
+        // Without this, `parse_eligibility_result` would extract the error
+        // code slot as if it were an eligibility state string and silently
+        // return "Other(execution_not_found)" — masking the real failure.
+        check_fcall_success(&raw, fcall::names::FF_EVALUATE_FLOW_ELIGIBILITY)?;
+
+        let state = parse_eligibility_result(&raw).ok_or_else(|| {
+            FabricError::Internal("ff_evaluate_flow_eligibility: malformed OK envelope".into())
+        })?;
+
+        Ok(match state.as_str() {
+            "eligible" => EligibilityResult::Eligible,
+            "blocked_by_dependencies" => EligibilityResult::BlockedByDependencies,
+            other => EligibilityResult::Other(other.to_owned()),
+        })
+    }
+
+    async fn renew_task_lease(&self, input: RenewLeaseInput) -> Result<(), FabricError> {
+        let partition = execution_partition(&input.execution_id, &self.runtime().partition_config);
+        let ctx = ExecKeyContext::new(&partition, &input.execution_id);
+        let idx = IndexKeys::new(&partition);
+
+        let keys: Vec<String> = vec![
+            ctx.core(),
+            ctx.lease_current(),
+            ctx.lease_history(),
+            idx.lease_expiry(),
+        ];
+        let args: Vec<String> = vec![
+            input.execution_id.to_string(),
+            input.lease.attempt_index.to_string(),
+            input.lease.attempt_id.clone(),
+            input.lease.lease_id.clone(),
+            input.lease.lease_epoch.clone(),
+            input.lease_extension_ms.to_string(),
+            crate::constants::DEFAULT_LEASE_HISTORY_GRACE_MS.to_owned(),
+        ];
+
+        let key_refs: Vec<&str> = keys.iter().map(|s| s.as_str()).collect();
+        let arg_refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
+
+        let raw: ferriskey::Value = self
+            .runtime()
+            .fcall(fcall::names::FF_RENEW_LEASE, &key_refs, &arg_refs)
+            .await
+            .map_err(|e| FabricError::Internal(format!("ff_renew_lease: {e}")))?;
+        check_fcall_success(&raw, fcall::names::FF_RENEW_LEASE)?;
+        Ok(())
     }
 }
 

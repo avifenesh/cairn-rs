@@ -17,11 +17,15 @@
 //! [`ControlPlaneBackend`]: cairn_fabric::engine::ControlPlaneBackend
 //! [`Engine`]: cairn_fabric::engine::Engine
 
+use std::collections::HashMap;
+
 use cairn_fabric::engine::{
-    BudgetSpendOutcome, CancelFlowInput, CreateFlowInput, FlowCancelOutcome, QuotaAdmission,
+    AddExecutionToFlowInput, ApplyDependencyToChildInput, BudgetSpendOutcome, CancelFlowInput,
+    CreateFlowInput, EligibilityResult, FlowCancelOutcome, QuotaAdmission,
+    StageDependencyEdgeInput, StageDependencyOutcome, SubmitTaskInput,
 };
 use ff_core::types::{
-    BudgetId, ExecutionId, FlowId, LaneId, Namespace, WorkerId, WorkerInstanceId,
+    BudgetId, EdgeId, ExecutionId, FlowId, LaneId, Namespace, WorkerId, WorkerInstanceId,
 };
 
 use crate::TestHarness;
@@ -342,6 +346,353 @@ async fn engine_register_heartbeat_mark_dead_roundtrip() {
         .mark_worker_dead(&iid)
         .await
         .expect("mark_worker_dead");
+
+    h.teardown().await;
+}
+
+// ── Phase D PR 2b: task lifecycle through ControlPlaneBackend ───────────
+
+#[tokio::test]
+async fn control_plane_submit_task_is_idempotent() {
+    let h = TestHarness::setup().await;
+    let task_id = cairn_domain::TaskId::new(format!("cp_task_{}", uuid::Uuid::new_v4()));
+    let eid =
+        cairn_fabric::id_map::task_to_execution_id(&h.project, &task_id, h.partition_config());
+    let namespace = cairn_fabric::id_map::tenant_to_namespace(&h.project.tenant_id);
+    let lane = cairn_fabric::id_map::project_to_lane(&h.project);
+
+    let mut tags = HashMap::new();
+    tags.insert("cairn.task_id".to_owned(), task_id.as_str().to_owned());
+    tags.insert(
+        "cairn.project".to_owned(),
+        format!(
+            "{}/{}/{}",
+            h.project.tenant_id, h.project.workspace_id, h.project.project_id
+        ),
+    );
+
+    let first = h
+        .fabric
+        .control_plane
+        .submit_task_execution(SubmitTaskInput {
+            execution_id: eid.clone(),
+            namespace: namespace.clone(),
+            lane_id: lane.clone(),
+            priority: 7,
+            tags: tags.clone(),
+            policy_json: String::new(),
+        })
+        .await
+        .expect("submit_task_execution");
+    assert!(
+        first.newly_created,
+        "first submit must report newly_created"
+    );
+
+    // Idempotent replay: same ExecutionId must return newly_created=false
+    // and NOT error — projections rely on this to skip the second emit.
+    let second = h
+        .fabric
+        .control_plane
+        .submit_task_execution(SubmitTaskInput {
+            execution_id: eid,
+            namespace,
+            lane_id: lane,
+            priority: 7,
+            tags,
+            policy_json: String::new(),
+        })
+        .await
+        .expect("submit_task_execution idempotent");
+    assert!(
+        !second.newly_created,
+        "idempotent submit must report !newly_created"
+    );
+
+    h.teardown().await;
+}
+
+#[tokio::test]
+async fn control_plane_add_execution_to_flow_is_idempotent() {
+    let h = TestHarness::setup().await;
+    let session_id = h.unique_session_id();
+    let task_id = cairn_domain::TaskId::new(format!("cp_flow_task_{}", uuid::Uuid::new_v4()));
+    let fid = cairn_fabric::id_map::session_to_flow_id(&h.project, &session_id);
+    let eid = cairn_fabric::id_map::session_task_to_execution_id(
+        &h.project,
+        &session_id,
+        &task_id,
+        h.partition_config(),
+    );
+    let namespace = cairn_fabric::id_map::tenant_to_namespace(&h.project.tenant_id);
+
+    // First submit the task so it exists, then bind.
+    let mut tags = HashMap::new();
+    tags.insert("cairn.task_id".to_owned(), task_id.as_str().to_owned());
+    tags.insert(
+        "cairn.session_id".to_owned(),
+        session_id.as_str().to_owned(),
+    );
+    h.fabric
+        .control_plane
+        .submit_task_execution(SubmitTaskInput {
+            execution_id: eid.clone(),
+            namespace: namespace.clone(),
+            lane_id: cairn_fabric::id_map::project_to_lane(&h.project),
+            priority: 0,
+            tags,
+            policy_json: String::new(),
+        })
+        .await
+        .expect("submit_task_execution");
+
+    // First bind — creates flow + adds member.
+    h.fabric
+        .control_plane
+        .add_execution_to_flow(AddExecutionToFlowInput {
+            flow_id: fid.clone(),
+            execution_id: eid.clone(),
+            namespace: namespace.clone(),
+            flow_kind: "cairn_session".to_owned(),
+        })
+        .await
+        .expect("add_execution_to_flow");
+
+    // Idempotent replay — must not error.
+    h.fabric
+        .control_plane
+        .add_execution_to_flow(AddExecutionToFlowInput {
+            flow_id: fid,
+            execution_id: eid,
+            namespace,
+            flow_kind: "cairn_session".to_owned(),
+        })
+        .await
+        .expect("add_execution_to_flow idempotent");
+
+    h.teardown().await;
+}
+
+#[tokio::test]
+async fn control_plane_stage_dependency_already_exists_on_replay() {
+    let h = TestHarness::setup().await;
+    let session_id = h.unique_session_id();
+    let task_a = h.unique_task_id();
+    let task_b = h.unique_task_id();
+
+    // Submit both tasks via the service (which also binds them to the flow).
+    h.fabric
+        .tasks
+        .submit(&h.project, task_a.clone(), None, None, 0, Some(&session_id))
+        .await
+        .expect("submit A");
+    h.fabric
+        .tasks
+        .submit(&h.project, task_b.clone(), None, None, 0, Some(&session_id))
+        .await
+        .expect("submit B");
+
+    let fid = cairn_fabric::id_map::session_to_flow_id(&h.project, &session_id);
+    let pre_eid = cairn_fabric::id_map::session_task_to_execution_id(
+        &h.project,
+        &session_id,
+        &task_a,
+        h.partition_config(),
+    );
+    let dep_eid = cairn_fabric::id_map::session_task_to_execution_id(
+        &h.project,
+        &session_id,
+        &task_b,
+        h.partition_config(),
+    );
+    let edge_id = cairn_fabric::id_map::dependency_edge_id(&fid, &pre_eid, &dep_eid);
+
+    // Read current graph_revision so the first stage lands clean.
+    let current_rev = h
+        .fabric
+        .engine
+        .describe_flow(&fid)
+        .await
+        .expect("describe_flow")
+        .map(|s| s.graph_revision)
+        .unwrap_or(0);
+
+    let first = h
+        .fabric
+        .control_plane
+        .stage_dependency_edge(StageDependencyEdgeInput {
+            flow_id: fid.clone(),
+            edge_id: edge_id.clone(),
+            upstream_execution_id: pre_eid.clone(),
+            downstream_execution_id: dep_eid.clone(),
+            dependency_kind: "success_only".to_owned(),
+            data_passing_ref: String::new(),
+            expected_graph_revision: current_rev,
+        })
+        .await
+        .expect("stage first");
+    let new_rev = match first {
+        StageDependencyOutcome::Staged { new_graph_revision } => new_graph_revision,
+        other => panic!("expected Staged, got {other:?}"),
+    };
+    assert!(new_rev > current_rev, "graph_revision must advance");
+
+    // Apply to child so the edge reaches its terminal shape.
+    h.fabric
+        .control_plane
+        .apply_dependency_to_child(ApplyDependencyToChildInput {
+            downstream_execution_id: dep_eid.clone(),
+            flow_id: fid.clone(),
+            upstream_execution_id: pre_eid.clone(),
+            edge_id: edge_id.clone(),
+            lane_id: cairn_fabric::id_map::project_to_lane(&h.project),
+            graph_revision: new_rev,
+            dependency_kind: "success_only".to_owned(),
+            data_passing_ref: String::new(),
+        })
+        .await
+        .expect("apply first");
+
+    // Replay stage must surface AlreadyExists (service uses this to
+    // trigger describe_edge reconcile).
+    let second = h
+        .fabric
+        .control_plane
+        .stage_dependency_edge(StageDependencyEdgeInput {
+            flow_id: fid,
+            edge_id,
+            upstream_execution_id: pre_eid,
+            downstream_execution_id: dep_eid,
+            dependency_kind: "success_only".to_owned(),
+            data_passing_ref: String::new(),
+            expected_graph_revision: new_rev,
+        })
+        .await
+        .expect("stage replay");
+    assert!(
+        matches!(second, StageDependencyOutcome::AlreadyExists),
+        "replay must surface AlreadyExists, got {second:?}"
+    );
+
+    h.teardown().await;
+}
+
+#[tokio::test]
+async fn control_plane_stage_dependency_self_referencing_is_typed() {
+    let h = TestHarness::setup().await;
+    let session_id = h.unique_session_id();
+    let task_a = h.unique_task_id();
+
+    h.fabric
+        .tasks
+        .submit(&h.project, task_a.clone(), None, None, 0, Some(&session_id))
+        .await
+        .expect("submit A");
+
+    let fid = cairn_fabric::id_map::session_to_flow_id(&h.project, &session_id);
+    let a_eid = cairn_fabric::id_map::session_task_to_execution_id(
+        &h.project,
+        &session_id,
+        &task_a,
+        h.partition_config(),
+    );
+    // Intentionally build a self-referencing edge id (upstream==downstream).
+    let edge_id = EdgeId::new();
+
+    let outcome = h
+        .fabric
+        .control_plane
+        .stage_dependency_edge(StageDependencyEdgeInput {
+            flow_id: fid,
+            edge_id,
+            upstream_execution_id: a_eid.clone(),
+            downstream_execution_id: a_eid,
+            dependency_kind: "success_only".to_owned(),
+            data_passing_ref: String::new(),
+            expected_graph_revision: 0,
+        })
+        .await
+        .expect("stage self-ref");
+    assert!(
+        matches!(outcome, StageDependencyOutcome::SelfReferencing),
+        "self-ref must surface as typed variant, got {outcome:?}"
+    );
+
+    h.teardown().await;
+}
+
+#[tokio::test]
+async fn control_plane_evaluate_flow_eligibility_blocks_when_dep_present() {
+    let h = TestHarness::setup().await;
+    let session_id = h.unique_session_id();
+    let task_a = h.unique_task_id();
+    let task_b = h.unique_task_id();
+
+    h.fabric
+        .tasks
+        .submit(&h.project, task_a.clone(), None, None, 0, Some(&session_id))
+        .await
+        .expect("submit A");
+    h.fabric
+        .tasks
+        .submit(&h.project, task_b.clone(), None, None, 0, Some(&session_id))
+        .await
+        .expect("submit B");
+
+    // Declare B depends on A via the service (exercises the full
+    // retry loop + apply path).
+    h.fabric
+        .tasks
+        .declare_dependency(
+            &h.project,
+            &session_id,
+            &task_b,
+            &task_a,
+            cairn_domain::DependencyKind::SuccessOnly,
+            None,
+        )
+        .await
+        .expect("declare");
+
+    // B's partition should report blocked_by_dependencies through the
+    // trait surface.
+    let b_eid = cairn_fabric::id_map::session_task_to_execution_id(
+        &h.project,
+        &session_id,
+        &task_b,
+        h.partition_config(),
+    );
+    let result = h
+        .fabric
+        .control_plane
+        .evaluate_flow_eligibility(&b_eid)
+        .await
+        .expect("evaluate_flow_eligibility");
+    assert_eq!(
+        result,
+        EligibilityResult::BlockedByDependencies,
+        "B must report BlockedByDependencies"
+    );
+
+    h.teardown().await;
+}
+
+#[tokio::test]
+async fn engine_list_expired_leases_returns_empty_when_none_present() {
+    let h = TestHarness::setup().await;
+    // Pick a near-zero `now_ms` so the ZRANGEBYSCORE window is empty
+    // regardless of whether sibling tests populated lease_expiry keys.
+    let expired = h
+        .fabric
+        .engine
+        .list_expired_leases(0, 16)
+        .await
+        .expect("list_expired_leases");
+    assert!(
+        expired.is_empty(),
+        "zero-upper-bound scan must return empty, got {} rows",
+        expired.len()
+    );
 
     h.teardown().await;
 }

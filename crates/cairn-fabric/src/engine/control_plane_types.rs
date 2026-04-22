@@ -300,3 +300,141 @@ pub struct IssueGrantAndClaimInput {
     pub lane_id: ff_core::types::LaneId,
     pub lease_duration_ms: u64,
 }
+
+// ── Phase D PR 2b: task lifecycle mirrors ───────────────────────────────
+
+/// Input to `submit_task_execution`.
+///
+/// Mirrors the `ff_create_execution` ARGV layout for cairn tasks.
+/// Unlike [`CreateRunExecutionInput`], tasks carry an operator-supplied
+/// `priority` (routed to FF's lane scheduling) and a deterministic
+/// `policy_json` retry policy — if the caller leaves `policy_json`
+/// empty, the impl applies the historical default
+/// (`max_retries=2`, exponential backoff). Keeping the field explicit
+/// here (rather than hard-coding in the backend) lets cairn evolve
+/// the policy per-tenant later without trait churn.
+#[derive(Clone, Debug)]
+pub struct SubmitTaskInput {
+    pub execution_id: ff_core::types::ExecutionId,
+    pub namespace: ff_core::types::Namespace,
+    pub lane_id: ff_core::types::LaneId,
+    pub priority: u32,
+    /// `cairn.*` tags. Caller supplies the full set
+    /// (`cairn.task_id`, `cairn.project`, `cairn.instance_id`, and
+    /// the optional `cairn.session_id` / `cairn.parent_run_id` /
+    /// `cairn.parent_task_id` binding tags).
+    pub tags: std::collections::HashMap<String, String>,
+    /// JSON-encoded retry policy. Empty string means "use default".
+    pub policy_json: String,
+}
+
+/// Input to `add_execution_to_flow`.
+///
+/// Encapsulates the "ensure flow exists, then bind execution" pair
+/// (`ff_create_flow` idempotent + `ff_add_execution_to_flow`) as one
+/// trait call. Both FCALLs land on the flow partition; the impl owns
+/// the key-building.
+#[derive(Clone, Debug)]
+pub struct AddExecutionToFlowInput {
+    pub flow_id: ff_core::types::FlowId,
+    pub execution_id: ff_core::types::ExecutionId,
+    pub namespace: ff_core::types::Namespace,
+    /// Flow kind stamped by the create step. Cairn uses
+    /// `"cairn_session"`.
+    pub flow_kind: String,
+}
+
+/// Input to `stage_dependency_edge`.
+#[derive(Clone, Debug)]
+pub struct StageDependencyEdgeInput {
+    pub flow_id: ff_core::types::FlowId,
+    pub edge_id: ff_core::types::EdgeId,
+    pub upstream_execution_id: ff_core::types::ExecutionId,
+    pub downstream_execution_id: ff_core::types::ExecutionId,
+    /// FF edge kind. Currently always `"success_only"`.
+    pub dependency_kind: String,
+    /// Caller-supplied opaque ref. Empty means "no data passing ref".
+    pub data_passing_ref: String,
+    /// Expected graph revision read from `flow_core` just before the
+    /// FCALL. Mismatches return
+    /// [`StageDependencyOutcome::StaleGraphRevision`] and the service
+    /// retries with a fresh read.
+    pub expected_graph_revision: u64,
+}
+
+/// Outcome of [`ControlPlaneBackend::stage_dependency_edge`].
+///
+/// One variant per FF typed Lua error code the caller cares about.
+/// Other typed errors surface through [`FabricError`] so they don't
+/// silently degrade to a wrong-variant match.
+#[derive(Clone, Debug)]
+pub enum StageDependencyOutcome {
+    /// Edge staged fresh. `new_graph_revision` is the post-FCALL
+    /// `graph_revision` — callers pipe it into
+    /// [`ApplyDependencyToChildInput::graph_revision`].
+    Staged { new_graph_revision: u64 },
+    /// `graph_revision` raced with a concurrent declarer. Service
+    /// retries with exponential backoff.
+    StaleGraphRevision,
+    /// Cycle detected — caller maps to `FabricError::Validation`.
+    Cycle,
+    /// FF rejected on self-referencing (caller should have guarded
+    /// client-side).
+    SelfReferencing,
+    /// Edge already staged. Caller reconciles via
+    /// `Engine::describe_edge` and returns either the existing
+    /// record (on match) or `DependencyConflict` (on mismatch).
+    AlreadyExists,
+    /// Flow doesn't exist — caller maps to `FabricError::NotFound`.
+    FlowNotFound,
+    /// Flow is already terminal — no new edges permitted.
+    FlowAlreadyTerminal,
+    /// One of the endpoints isn't a member of the flow.
+    ExecutionNotInFlow,
+}
+
+/// Input to `apply_dependency_to_child`.
+#[derive(Clone, Debug)]
+pub struct ApplyDependencyToChildInput {
+    pub downstream_execution_id: ff_core::types::ExecutionId,
+    pub flow_id: ff_core::types::FlowId,
+    pub upstream_execution_id: ff_core::types::ExecutionId,
+    pub edge_id: ff_core::types::EdgeId,
+    pub lane_id: ff_core::types::LaneId,
+    pub graph_revision: u64,
+    pub dependency_kind: String,
+    pub data_passing_ref: String,
+}
+
+/// Result of [`ControlPlaneBackend::evaluate_flow_eligibility`].
+///
+/// Mirror of the FF Lua return values. Only `BlockedByDependencies`
+/// prompts the caller to enumerate incoming edges; other variants
+/// are short-circuit "no blockers" replies.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum EligibilityResult {
+    Eligible,
+    BlockedByDependencies,
+    /// Any other FF-reported state (`running`, `terminal`, `impossible`,
+    /// `unknown`) — callers treat as "no current blockers to report".
+    Other(String),
+}
+
+/// Input to `renew_task_lease`.
+#[derive(Clone, Debug)]
+pub struct RenewLeaseInput {
+    pub execution_id: ff_core::types::ExecutionId,
+    pub lease: ExecutionLeaseContext,
+    pub lease_extension_ms: u64,
+}
+
+/// Row returned by [`super::Engine::list_expired_leases`].
+///
+/// Minimal mirror: cairn currently only needs `execution_id` +
+/// `expires_at_ms` to build a projection of timed-out tasks (FF's
+/// lease_expiry scanner handles reclaim server-side).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ExpiredLease {
+    pub execution_id: ff_core::types::ExecutionId,
+    pub expires_at_ms: u64,
+}
