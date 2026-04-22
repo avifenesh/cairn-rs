@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use cairn_domain::lifecycle::SessionState;
@@ -17,7 +18,6 @@ use crate::id_map;
 pub struct FabricSessionService {
     runtime: Arc<FabricRuntime>,
     bridge: Arc<EventBridge>,
-    #[allow(dead_code)] // wired-in for the B-phase ports
     engine: Arc<dyn crate::engine::Engine>,
 }
 
@@ -92,18 +92,19 @@ impl FabricSessionService {
 
         crate::helpers::check_fcall_success(&raw, crate::fcall::names::FF_CREATE_FLOW)?;
 
-        let _: i64 = self
-            .runtime
-            .client
-            .hset(&fctx.core(), "cairn.project", &project_str)
-            .await
-            .map_err(|e| FabricError::Internal(format!("hset cairn.project: {e}")))?;
-        let _: i64 = self
-            .runtime
-            .client
-            .hset(&fctx.core(), "cairn.session_id", session_id.as_str())
-            .await
-            .map_err(|e| FabricError::Internal(format!("hset cairn.session_id: {e}")))?;
+        // Stamp the cairn-scoped flow tags in one round-trip via the
+        // engine abstraction. Replaces two sequential direct HSETs
+        // on `fctx.core()` — same observable semantics (both tags
+        // written before the bridge event fires), one fewer Valkey
+        // round-trip, and no direct Valkey layout knowledge in the
+        // service layer.
+        let mut cairn_tags: BTreeMap<String, String> = BTreeMap::new();
+        cairn_tags.insert("cairn.project".to_owned(), project_str);
+        cairn_tags.insert(
+            "cairn.session_id".to_owned(),
+            session_id.as_str().to_owned(),
+        );
+        self.engine.set_flow_tags(&fid, &cairn_tags).await?;
 
         // Emit the bridge event unconditionally so the cairn-store
         // `SessionReadModel` projection gets a record even when FF
@@ -210,12 +211,14 @@ impl FabricSessionService {
             }
         }
 
-        let _: i64 = self
-            .runtime
-            .client
-            .hset(&fctx.core(), "cairn.archived", "true")
-            .await
-            .map_err(|e| FabricError::Internal(format!("hset cairn.archived: {e}")))?;
+        // Route the archive-flag write through the engine
+        // abstraction instead of reaching into `fctx.core()`
+        // directly. Same observable semantics — `cairn.archived` is
+        // written on the flow-core hash before the
+        // `SessionArchived` bridge event fires.
+        self.engine
+            .set_flow_tag(&fid, "cairn.archived", "true")
+            .await?;
 
         match self.read_session_record(project, session_id).await? {
             Some(record) => {

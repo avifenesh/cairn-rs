@@ -192,6 +192,127 @@ impl Engine for ValkeyEngine {
             .map_err(|e| FabricError::Internal(format!("valkey HGET exec_tags.{key}: {e}")))?;
         Ok(value.filter(|s| !s.is_empty()))
     }
+
+    async fn set_execution_tag(
+        &self,
+        id: &ExecutionId,
+        key: &str,
+        value: &str,
+    ) -> Result<(), FabricError> {
+        validate_tag_namespace(key)?;
+        let partition = execution_partition(id, &self.runtime.partition_config);
+        let ctx = ExecKeyContext::new(&partition, id);
+        let _: i64 = self
+            .runtime
+            .client
+            .hset(&ctx.tags(), key, value)
+            .await
+            .map_err(|e| FabricError::Internal(format!("valkey HSET exec_tags.{key}: {e}")))?;
+        Ok(())
+    }
+
+    async fn set_flow_tag(
+        &self,
+        id: &FlowId,
+        key: &str,
+        value: &str,
+    ) -> Result<(), FabricError> {
+        validate_tag_namespace(key)?;
+        let partition = flow_partition(id, &self.runtime.partition_config);
+        let fctx = FlowKeyContext::new(&partition, id);
+        let _: i64 = self
+            .runtime
+            .client
+            .hset(&fctx.core(), key, value)
+            .await
+            .map_err(|e| FabricError::Internal(format!("valkey HSET flow_core.{key}: {e}")))?;
+        Ok(())
+    }
+
+    async fn set_flow_tags(
+        &self,
+        id: &FlowId,
+        tags: &BTreeMap<String, String>,
+    ) -> Result<(), FabricError> {
+        if tags.is_empty() {
+            return Ok(());
+        }
+        // All-or-nothing validation: reject the whole batch if any
+        // key is malformed. Matches the "no partial writes" contract
+        // the trait docs promise — session creation depends on both
+        // `cairn.project` and `cairn.session_id` being present
+        // before the `SessionCreated` bridge event fires.
+        for key in tags.keys() {
+            validate_tag_namespace(key)?;
+        }
+
+        let partition = flow_partition(id, &self.runtime.partition_config);
+        let fctx = FlowKeyContext::new(&partition, id);
+        let flow_core = fctx.core();
+
+        // Variadic HSET: one round-trip for the whole batch.
+        // Redis ≥ 4.0 / Valkey support `HSET key field value
+        // [field value ...]`. ferriskey's typed `.hset()` helper is
+        // single-pair only, so we drop to the raw `CommandBuilder`
+        // to pass the full batch in one command. `CommandBuilder`
+        // is a consuming builder (`fn arg(mut self, …) -> Self`),
+        // so we re-bind on each iteration.
+        let mut cmd = self.runtime.client.cmd("HSET").arg(flow_core.as_str());
+        for (k, v) in tags {
+            cmd = cmd.arg(k.as_str()).arg(v.as_str());
+        }
+        cmd.execute::<i64>().await.map_err(|e| {
+            FabricError::Internal(format!("valkey HSET flow_core (bulk {}): {e}", tags.len()))
+        })?;
+        Ok(())
+    }
+}
+
+/// Namespace guard for cairn tag writes.
+///
+/// Rejects keys that don't match `^[a-z][a-z0-9_]*\.` (one lowercase
+/// alpha-underscore segment followed by a `.`). Cairn writes
+/// `cairn.*`; FF's own hash fields have no `.`, so this rule keeps
+/// the two namespaces from colliding without needing a closed list
+/// of allowed prefixes.
+fn validate_tag_namespace(key: &str) -> Result<(), FabricError> {
+    let (prefix, rest) = match key.split_once('.') {
+        Some((p, r)) => (p, r),
+        None => {
+            return Err(FabricError::Validation {
+                reason: format!(
+                    "tag key {key:?} is missing a namespace prefix (expected `<ns>.<field>`)"
+                ),
+            });
+        }
+    };
+    if prefix.is_empty() {
+        return Err(FabricError::Validation {
+            reason: format!("tag key {key:?} has an empty namespace prefix"),
+        });
+    }
+    let mut chars = prefix.chars();
+    let first = chars.next().unwrap();
+    if !first.is_ascii_lowercase() {
+        return Err(FabricError::Validation {
+            reason: format!(
+                "tag key {key:?} namespace prefix must start with a lowercase ASCII letter"
+            ),
+        });
+    }
+    for c in chars {
+        if !(c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_') {
+            return Err(FabricError::Validation {
+                reason: format!("tag key {key:?} namespace prefix must match [a-z][a-z0-9_]*"),
+            });
+        }
+    }
+    // `rest` (everything after the first `.`) is intentionally
+    // unconstrained — callers use dotted sub-paths
+    // (`cairn.task_id`, `cairn.run.parent_id`) and the namespace
+    // guard only needs to prove the prefix is cairn-owned.
+    let _ = rest;
+    Ok(())
 }
 
 // ─── Parsers ─────────────────────────────────────────────────────────────
@@ -464,4 +585,48 @@ fn parse_edge_snapshot(
         state,
         created_at,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::validate_tag_namespace;
+
+    #[test]
+    fn accepts_cairn_namespace() {
+        validate_tag_namespace("cairn.project").expect("cairn.project");
+        validate_tag_namespace("cairn.session_id").expect("cairn.session_id");
+        validate_tag_namespace("cairn.run.parent_id").expect("dotted sub-path ok");
+        validate_tag_namespace("a1.x").expect("alnum prefix ok");
+        validate_tag_namespace("ns_with_underscore.field").expect("underscore ok");
+    }
+
+    #[test]
+    fn rejects_missing_dot() {
+        let err = validate_tag_namespace("notanamespace").unwrap_err();
+        assert!(format!("{err:?}").contains("missing a namespace prefix"));
+    }
+
+    #[test]
+    fn rejects_uppercase_prefix() {
+        let err = validate_tag_namespace("Cairn.foo").unwrap_err();
+        assert!(format!("{err:?}").contains("lowercase"));
+    }
+
+    #[test]
+    fn rejects_leading_digit() {
+        let err = validate_tag_namespace("1cairn.foo").unwrap_err();
+        assert!(format!("{err:?}").contains("lowercase"));
+    }
+
+    #[test]
+    fn rejects_empty_prefix() {
+        let err = validate_tag_namespace(".field").unwrap_err();
+        assert!(format!("{err:?}").contains("empty namespace"));
+    }
+
+    #[test]
+    fn rejects_hyphen_in_prefix() {
+        let err = validate_tag_namespace("cairn-scope.foo").unwrap_err();
+        assert!(format!("{err:?}").contains("[a-z][a-z0-9_]*"));
+    }
 }

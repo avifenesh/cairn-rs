@@ -10,8 +10,11 @@
 //! surface the silent drift (blanks / zeros where real values should
 //! be).
 
+use std::collections::BTreeMap;
+
 use cairn_domain::FailureClass;
 use cairn_fabric::engine::EdgeState;
+use cairn_fabric::FabricError;
 
 use crate::TestHarness;
 
@@ -129,9 +132,9 @@ async fn describe_flow_on_fresh_session_returns_typed_snapshot() {
     );
     // graph_revision starts at 0 on a fresh flow per FF's ff_create_flow Lua.
     assert_eq!(snap.graph_revision, 0);
-    // Tags populated by sessions.create (cairn.project + cairn.session_id
-    // are HSET post-create today — will move to engine.set_flow_tag in
-    // Phase C).
+    // Tags populated by sessions.create via engine.set_flow_tags
+    // (cairn.project + cairn.session_id are stamped on the flow
+    // core hash by the Phase C tag-write API).
     assert_eq!(
         snap.tags.get("cairn.session_id").map(String::as_str),
         Some(session_id.as_str()),
@@ -295,6 +298,246 @@ async fn describe_execution_after_claim_surfaces_lease_summary() {
     // Sanity: clean up so the shared Valkey doesn't keep the leased
     // state around (other tests see it via different ProjectKeys so
     // no contamination, but the fail path clears it anyway).
+    let _ = h
+        .fabric
+        .tasks
+        .fail(
+            &h.project,
+            Some(&session_id),
+            &task_id,
+            FailureClass::ExecutionError,
+        )
+        .await;
+
+    h.teardown().await;
+}
+
+// ─── Phase C: tag write API ─────────────────────────────────────────────
+
+#[tokio::test]
+async fn set_flow_tag_roundtrips_via_describe_flow() {
+    let h = TestHarness::setup().await;
+    let session_id = h.unique_session_id();
+    h.fabric
+        .sessions
+        .create(&h.project, session_id.clone())
+        .await
+        .expect("session create");
+
+    let fid = cairn_fabric::id_map::session_to_flow_id(&h.project, &session_id);
+
+    h.fabric
+        .engine
+        .set_flow_tag(&fid, "cairn.custom_label", "engine-phase-c")
+        .await
+        .expect("set_flow_tag");
+
+    let snap = h
+        .fabric
+        .engine
+        .describe_flow(&fid)
+        .await
+        .expect("describe_flow")
+        .expect("flow exists");
+    assert_eq!(
+        snap.tags.get("cairn.custom_label").map(String::as_str),
+        Some("engine-phase-c"),
+        "tag written via set_flow_tag round-trips through describe_flow",
+    );
+
+    h.teardown().await;
+}
+
+#[tokio::test]
+async fn set_flow_tags_bulk_roundtrips() {
+    let h = TestHarness::setup().await;
+    let session_id = h.unique_session_id();
+    h.fabric
+        .sessions
+        .create(&h.project, session_id.clone())
+        .await
+        .expect("session create");
+
+    let fid = cairn_fabric::id_map::session_to_flow_id(&h.project, &session_id);
+
+    let mut tags = BTreeMap::new();
+    tags.insert("cairn.bulk_a".to_owned(), "alpha".to_owned());
+    tags.insert("cairn.bulk_b".to_owned(), "beta".to_owned());
+    tags.insert("cairn.bulk_c".to_owned(), String::new());
+    h.fabric
+        .engine
+        .set_flow_tags(&fid, &tags)
+        .await
+        .expect("set_flow_tags");
+
+    let snap = h
+        .fabric
+        .engine
+        .describe_flow(&fid)
+        .await
+        .expect("describe_flow")
+        .expect("flow exists");
+    assert_eq!(
+        snap.tags.get("cairn.bulk_a").map(String::as_str),
+        Some("alpha")
+    );
+    assert_eq!(
+        snap.tags.get("cairn.bulk_b").map(String::as_str),
+        Some("beta")
+    );
+    // Empty string is a legitimate stored value — we don't filter
+    // in the write path.
+    assert_eq!(snap.tags.get("cairn.bulk_c").map(String::as_str), Some(""));
+
+    h.teardown().await;
+}
+
+#[tokio::test]
+async fn set_flow_tags_empty_map_is_noop() {
+    let h = TestHarness::setup().await;
+    let session_id = h.unique_session_id();
+    h.fabric
+        .sessions
+        .create(&h.project, session_id.clone())
+        .await
+        .expect("session create");
+
+    let fid = cairn_fabric::id_map::session_to_flow_id(&h.project, &session_id);
+    let empty: BTreeMap<String, String> = BTreeMap::new();
+    h.fabric
+        .engine
+        .set_flow_tags(&fid, &empty)
+        .await
+        .expect("empty map must be a no-op, not an error");
+
+    h.teardown().await;
+}
+
+#[tokio::test]
+async fn set_flow_tag_rejects_invalid_namespace() {
+    let h = TestHarness::setup().await;
+    let session_id = h.unique_session_id();
+    h.fabric
+        .sessions
+        .create(&h.project, session_id.clone())
+        .await
+        .expect("session create");
+
+    let fid = cairn_fabric::id_map::session_to_flow_id(&h.project, &session_id);
+
+    let err = h
+        .fabric
+        .engine
+        .set_flow_tag(&fid, "not_a_namespace", "value")
+        .await
+        .expect_err("must reject keys without a `.` prefix");
+    assert!(
+        matches!(err, FabricError::Validation { .. }),
+        "expected Validation, got {err:?}"
+    );
+
+    h.teardown().await;
+}
+
+#[tokio::test]
+async fn set_flow_tags_rejects_bulk_all_or_nothing() {
+    let h = TestHarness::setup().await;
+    let session_id = h.unique_session_id();
+    h.fabric
+        .sessions
+        .create(&h.project, session_id.clone())
+        .await
+        .expect("session create");
+
+    let fid = cairn_fabric::id_map::session_to_flow_id(&h.project, &session_id);
+
+    // Bulk variant: all-or-nothing — one bad key rejects the batch
+    // and the good keys in the rejected batch must NOT have been
+    // written. This is the "no partial writes" guarantee cairn's
+    // session creation path depends on.
+    let mut batch = BTreeMap::new();
+    batch.insert("cairn.partial_ok".to_owned(), "a".to_owned());
+    batch.insert("BadKey.nope".to_owned(), "b".to_owned());
+    let bulk_err = h
+        .fabric
+        .engine
+        .set_flow_tags(&fid, &batch)
+        .await
+        .expect_err("bulk must reject if any key invalid");
+    assert!(
+        matches!(bulk_err, FabricError::Validation { .. }),
+        "expected Validation, got {bulk_err:?}"
+    );
+
+    let snap = h
+        .fabric
+        .engine
+        .describe_flow(&fid)
+        .await
+        .expect("describe_flow")
+        .expect("flow exists");
+    assert!(
+        !snap.tags.contains_key("cairn.partial_ok"),
+        "rejected batch must not partially write",
+    );
+
+    h.teardown().await;
+}
+
+#[tokio::test]
+async fn set_execution_tag_roundtrips_via_describe_execution() {
+    let h = TestHarness::setup().await;
+    let session_id = h.unique_session_id();
+    let task_id = h.unique_task_id();
+
+    h.fabric
+        .tasks
+        .submit(
+            &h.project,
+            task_id.clone(),
+            None,
+            None,
+            0,
+            Some(&session_id),
+        )
+        .await
+        .expect("submit task");
+
+    let eid = cairn_fabric::id_map::session_task_to_execution_id(
+        &h.project,
+        &session_id,
+        &task_id,
+        h.partition_config(),
+    );
+
+    h.fabric
+        .engine
+        .set_execution_tag(&eid, "cairn.custom_exec", "engine-phase-c")
+        .await
+        .expect("set_execution_tag");
+
+    let got = h
+        .fabric
+        .engine
+        .get_execution_tag(&eid, "cairn.custom_exec")
+        .await
+        .expect("get_execution_tag");
+    assert_eq!(got.as_deref(), Some("engine-phase-c"));
+
+    // Reject path: same invariants as flow-tag.
+    let err = h
+        .fabric
+        .engine
+        .set_execution_tag(&eid, "no_dot_here", "x")
+        .await
+        .expect_err("must reject missing namespace prefix");
+    assert!(
+        matches!(err, FabricError::Validation { .. }),
+        "expected Validation, got {err:?}"
+    );
+
+    // Cleanup the execution so subsequent test harness shutdown
+    // doesn't leave an active claim against the shared Valkey.
     let _ = h
         .fabric
         .tasks
