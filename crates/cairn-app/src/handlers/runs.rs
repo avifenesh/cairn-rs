@@ -1631,12 +1631,12 @@ pub(crate) async fn orchestrate_run_handler(
         ApprovalServiceImpl, CheckpointServiceImpl, MailboxServiceImpl, ToolInvocationServiceImpl,
     };
     use cairn_tools::{
-        BuiltinToolRegistry, CalculateTool, CancelTaskTool, CreateTaskTool, FileReadTool,
-        FileWriteTool, GetApprovalsTool, GetRunTool, GetTaskTool, GitOperationsTool, GlobFindTool,
-        GraphQueryTool, GrepSearchTool, HttpRequestTool, JsonExtractTool, ListRunsTool,
-        MemorySearchTool, MemoryStoreTool, NotificationSink, NotifyOperatorTool,
-        ResolveApprovalTool, ScheduleTaskTool, ScratchPadTool, SearchEventsTool, ShellExecTool,
-        SummarizeTextTool, ToolSearchTool, WaitForTaskTool, WebFetchTool,
+        BashTool, BuiltinToolRegistry, CalculateTool, CancelTaskTool, CreateTaskTool, FileReadTool,
+        FileWriteTool, GetApprovalsTool, GetRunTool, GetTaskTool, GlobFindTool, GraphQueryTool,
+        GrepSearchTool, HttpRequestTool, JsonExtractTool, ListRunsTool, MemorySearchTool,
+        MemoryStoreTool, NotificationSink, NotifyOperatorTool, ResolveApprovalTool,
+        ScheduleTaskTool, ScratchPadTool, SearchEventsTool, SummarizeTextTool, ToolSearchTool,
+        WaitForTaskTool, WebFetchTool,
     };
 
     let run_id = RunId::new(run_id_str);
@@ -1910,28 +1910,16 @@ pub(crate) async fn orchestrate_run_handler(
             std::sync::Arc::new(SummarizeTextTool::new(brain.clone(), model_id.clone()));
 
         // ── External tools ──────────────────────────────────────────────────
-        let shell_exec: std::sync::Arc<dyn cairn_tools::ToolHandler> =
-            std::sync::Arc::new(ShellExecTool);
+        let bash: std::sync::Arc<dyn cairn_tools::ToolHandler> = std::sync::Arc::new(BashTool);
         let http_request: std::sync::Arc<dyn cairn_tools::ToolHandler> =
             std::sync::Arc::new(HttpRequestTool);
-        let git_operations: std::sync::Arc<dyn cairn_tools::ToolHandler> =
-            std::sync::Arc::new(GitOperationsTool::new(workspace_root));
+        // git / gh CLI access goes through `bash` — no dedicated wrappers.
         let resolve_approval: std::sync::Arc<dyn cairn_tools::ToolHandler> =
             std::sync::Arc::new(ResolveApprovalTool::new(approval_svc));
         let schedule_task: std::sync::Arc<dyn cairn_tools::ToolHandler> =
             std::sync::Arc::new(ScheduleTaskTool::new(store_ref.clone()));
         let score_tool: std::sync::Arc<dyn cairn_tools::ToolHandler> =
             std::sync::Arc::new(cairn_tools::EvalScoreTool::new(store_ref));
-
-        // GitHub tools (Deferred -- discovered via tool_search)
-        let gh_list: std::sync::Arc<dyn cairn_tools::ToolHandler> =
-            std::sync::Arc::new(cairn_tools::GhListIssuesTool);
-        let gh_get: std::sync::Arc<dyn cairn_tools::ToolHandler> =
-            std::sync::Arc::new(cairn_tools::GhGetIssueTool);
-        let gh_comment: std::sync::Arc<dyn cairn_tools::ToolHandler> =
-            std::sync::Arc::new(cairn_tools::GhCreateCommentTool);
-        let gh_search: std::sync::Arc<dyn cairn_tools::ToolHandler> =
-            std::sync::Arc::new(cairn_tools::GhSearchCodeTool);
 
         // Helper: register all tools in a registry builder.
         let register_all = |reg: BuiltinToolRegistry| -> BuiltinToolRegistry {
@@ -1959,24 +1947,18 @@ pub(crate) async fn orchestrate_run_handler(
                 .register(cancel_task.clone())
                 .register(summarize_text.clone())
                 // External
-                .register(shell_exec.clone())
+                .register(bash.clone())
                 .register(std::sync::Arc::new(NotifyOperatorTool::new(
                     Some(mailbox_svc.clone()),
                     sse_sink.clone(),
                 )))
                 .register(http_request.clone())
-                .register(git_operations.clone())
                 .register(resolve_approval.clone())
                 .register(schedule_task.clone())
                 .register(score_tool.clone())
-                // GitHub (Deferred)
-                .register(gh_list.clone())
-                .register(gh_get.clone())
-                .register(gh_comment.clone())
-                .register(gh_search.clone())
         };
 
-        // Build inner registry for ToolSearchTool (includes deferred GH tools).
+        // Build inner registry for ToolSearchTool.
         let inner = std::sync::Arc::new(register_all(BuiltinToolRegistry::new()));
 
         // Full registry with ToolSearchTool that can search the deferred tier.

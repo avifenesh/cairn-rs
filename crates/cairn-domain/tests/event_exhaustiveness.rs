@@ -741,7 +741,7 @@ fn all_variants() -> Vec<RuntimeEvent> {
             project: p(),
             run_id: run(),
             task_id: None,
-            tool_name: "shell_exec".to_owned(),
+            tool_name: "bash".to_owned(),
             tool_call_id: "tc_00000001".to_owned(),
             reason: "DangerousPause".to_owned(),
             paused_at_ms: ts,

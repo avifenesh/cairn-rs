@@ -58,7 +58,7 @@ The following were resolved during the question-by-question pass and are baked i
 
 ### The gap this closes
 
-Cairn today has no isolated execution area for runs. When an agent needs to run a shell command, the `shell_exec` tool runs it in the cairn-app process's own environment, with the cairn-app's own current directory, file permissions, and environment variables. This is fine for read-only tools (grep, web fetch) and for self-contained calculations. It is not fine for:
+Cairn today has no isolated execution area for runs. When an agent needs to run a shell command, the `bash` tool runs it in the cairn-app process's own environment, with the cairn-app's own current directory, file permissions, and environment variables. This is fine for read-only tools (grep, web fetch) and for self-contained calculations. It is not fine for:
 
 - a research agent that needs to write scratch files without contaminating other runs' scratch files
 - a data extraction agent that clones a source repository and munges it

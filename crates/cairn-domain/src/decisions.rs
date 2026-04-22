@@ -58,8 +58,7 @@ pub enum ToolEffect {
     /// Touches systems outside cairn's boundary — outbound API calls, shell
     /// execution, notifications to humans, writes to shared resources.
     ///
-    /// Examples: `shell_exec`, `http_request`, `notify_operator`,
-    /// `git_operations`, `gh_create_comment`.
+    /// Examples: `bash`, `http_request`, `notify_operator`.
     External,
 }
 
@@ -555,7 +554,7 @@ mod tests {
     #[test]
     fn decision_kind_tool_invocation_serde() {
         let kind = DecisionKind::ToolInvocation {
-            tool_name: "shell_exec".into(),
+            tool_name: "bash".into(),
             effect: ToolEffect::External,
         };
         let json = serde_json::to_string(&kind).unwrap();
@@ -606,14 +605,14 @@ mod tests {
     fn sample_request() -> DecisionRequest {
         DecisionRequest {
             kind: DecisionKind::ToolInvocation {
-                tool_name: "shell_exec".into(),
+                tool_name: "bash".into(),
                 effect: ToolEffect::External,
             },
             principal: Principal::Run {
                 run_id: RunId::new("run_1"),
             },
             subject: DecisionSubject::ToolCall {
-                tool_name: "shell_exec".into(),
+                tool_name: "bash".into(),
                 args: serde_json::json!({"command": "ls"}),
             },
             scope: ProjectKey::new("t", "w", "p"),

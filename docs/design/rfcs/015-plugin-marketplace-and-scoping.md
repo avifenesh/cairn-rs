@@ -291,7 +291,7 @@ impl ToolSearchTool {
 
 Both `prompt_tools_for` and `ToolSearchTool::search` share the identical `is_visible_in_context` predicate, so a plugin tool is either visible everywhere its project allows or nowhere. There is no asymmetry between "in the prompt" and "findable via search".
 
-Built-in cairn tools (file_read, grep_search, shell_exec, etc.) are **always visible** — they are product-core, not plugin-provided. Visibility scoping applies only to tools registered from plugins.
+Built-in cairn tools (file_read, grep_search, bash, etc.) are **always visible** — they are product-core, not plugin-provided. Visibility scoping applies only to tools registered from plugins.
 
 **This is how "agents should not be aware of tools not relevant to them" is enforced**: at prompt assembly time, before the LLM ever sees the tool catalogue, and at tool-search time, before the LLM can even discover a tool by name.
 
@@ -653,7 +653,7 @@ Proceed assuming:
 - per-run tool visibility composes with the existing `ToolTier` system via a `VisibilityContext`, and the same filter applies to `tool_search` against the Deferred-tier inner registry
 - signal knowledge capture runs asynchronously off the durable signal event spine: graph projection default on, memory ingestion default off per plugin-declared hint, both overridable per project
 - the first plugin in the bundled catalog is GitHub (RFC 017), used to prove the marketplace flow end-to-end
-- built-in cairn tools (file_read, grep_search, shell_exec, etc.) are always visible and are not subject to marketplace scoping
+- built-in cairn tools (file_read, grep_search, bash, etc.) are always visible and are not subject to marketplace scoping
 - `PluginCapability::EvalScorer` is reserved but not implemented in v1; manifests declaring it are rejected at install time
 - plugin network egress hints are declared and displayed in v1 but not enforced; enforcement is deferred to a future RFC
 - marketplace events flow through the existing event log with no separate audit path

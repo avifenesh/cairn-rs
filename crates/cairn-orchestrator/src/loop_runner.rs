@@ -1725,7 +1725,7 @@ mod tests {
                 status: ActionStatus::Succeeded,
                 tool_output: Some(serde_json::json!({
                     "matches": [
-                        { "name": "shell_exec",   "description": "run shell commands" },
+                        { "name": "bash",   "description": "run shell commands" },
                         { "name": "graph_query",  "description": "query the graph" },
                     ],
                     "total": 2,
@@ -1738,7 +1738,7 @@ mod tests {
 
         let discovered = extract_tool_search_discoveries(&outcome);
         assert_eq!(discovered.len(), 2);
-        assert!(discovered.contains(&"shell_exec".to_owned()));
+        assert!(discovered.contains(&"bash".to_owned()));
         assert!(discovered.contains(&"graph_query".to_owned()));
     }
 
@@ -1872,7 +1872,7 @@ mod tests {
                     (
                         LoopSignal::Continue,
                         Some(serde_json::json!({
-                            "matches": [{"name":"shell_exec","description":"run shell"}],
+                            "matches": [{"name":"bash","description":"run shell"}],
                             "total": 1,
                         })),
                     )
@@ -1925,10 +1925,10 @@ mod tests {
             snapshots[0].is_empty(),
             "iteration 0 must have no discovered tools yet"
         );
-        // Second decide: shell_exec must be in discovered_tool_names
+        // Second decide: bash must be in discovered_tool_names
         assert!(
-            snapshots[1].contains(&"shell_exec".to_owned()),
-            "iteration 1 must see shell_exec from prior tool_search result"
+            snapshots[1].contains(&"bash".to_owned()),
+            "iteration 1 must see bash from prior tool_search result"
         );
     }
 

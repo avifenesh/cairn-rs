@@ -963,7 +963,7 @@ fn tool_args_with_working_dir(
     args: Option<serde_json::Value>,
 ) -> serde_json::Value {
     let mut args = args.unwrap_or(serde_json::Value::Null);
-    if tool_name != "shell_exec" {
+    if tool_name != "bash" {
         return args;
     }
 

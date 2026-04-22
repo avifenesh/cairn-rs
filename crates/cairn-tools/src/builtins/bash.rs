@@ -1,4 +1,6 @@
-//! shell_exec — Run a shell command in a subprocess.
+//! bash — Run a shell command via /bin/sh -c in a subprocess.
+//!
+//! Name matches harness-tools upstream convention — battle-tested name wins.
 //!
 //! **ExecutionClass::Sensitive** — the orchestrator MUST gate every invocation
 //! through `ApprovalService` before the command is dispatched.
@@ -33,18 +35,18 @@ const DEFAULT_TIMEOUT_MS: u64 = 30_000;
 ///
 /// Runs via `/bin/sh -c <command>` so shell operators (`&&`, `|`, `;`) work.
 /// Tagged `Sensitive` — approval required before dispatch.
-pub struct ShellExecTool;
+pub struct BashTool;
 
-impl Default for ShellExecTool {
+impl Default for BashTool {
     fn default() -> Self {
         Self
     }
 }
 
 #[async_trait]
-impl ToolHandler for ShellExecTool {
+impl ToolHandler for BashTool {
     fn name(&self) -> &str {
-        "shell_exec"
+        "bash"
     }
 
     fn tier(&self) -> ToolTier {
@@ -170,22 +172,22 @@ mod tests {
 
     #[test]
     fn name_tier() {
-        assert_eq!(ShellExecTool.name(), "shell_exec");
-        assert_eq!(ShellExecTool.tier(), ToolTier::Registered);
+        assert_eq!(BashTool.name(), "bash");
+        assert_eq!(BashTool.tier(), ToolTier::Registered);
     }
 
     #[test]
     fn execution_class_is_sensitive() {
         assert_eq!(
-            ShellExecTool.execution_class(),
+            BashTool.execution_class(),
             ExecutionClass::Sensitive,
-            "shell_exec must be Sensitive so the orchestrator gates via approval"
+            "bash must be Sensitive so the orchestrator gates via approval"
         );
     }
 
     #[test]
     fn schema_requires_command() {
-        let req = ShellExecTool.parameters_schema()["required"]
+        let req = BashTool.parameters_schema()["required"]
             .as_array()
             .unwrap()
             .clone();
@@ -196,7 +198,7 @@ mod tests {
 
     #[tokio::test]
     async fn missing_command_is_invalid_args() {
-        let err = ShellExecTool
+        let err = BashTool
             .execute(&project(), serde_json::json!({}))
             .await
             .unwrap_err();
@@ -205,7 +207,7 @@ mod tests {
 
     #[tokio::test]
     async fn empty_command_is_invalid_args() {
-        let err = ShellExecTool
+        let err = BashTool
             .execute(&project(), serde_json::json!({"command": "  "}))
             .await
             .unwrap_err();
@@ -216,7 +218,7 @@ mod tests {
 
     #[tokio::test]
     async fn echo_captures_stdout() {
-        let result = ShellExecTool
+        let result = BashTool
             .execute(&project(), serde_json::json!({"command": "echo hello"}))
             .await
             .unwrap();
@@ -230,7 +232,7 @@ mod tests {
 
     #[tokio::test]
     async fn nonzero_exit_code_captured() {
-        let result = ShellExecTool
+        let result = BashTool
             .execute(&project(), serde_json::json!({"command": "exit 42"}))
             .await
             .unwrap();
@@ -239,7 +241,7 @@ mod tests {
 
     #[tokio::test]
     async fn stderr_captured() {
-        let result = ShellExecTool
+        let result = BashTool
             .execute(&project(), serde_json::json!({"command": "echo err >&2"}))
             .await
             .unwrap();
@@ -251,7 +253,7 @@ mod tests {
 
     #[tokio::test]
     async fn timeout_returns_timed_out_true() {
-        let result = ShellExecTool
+        let result = BashTool
             .execute(
                 &project(),
                 serde_json::json!({"command": "sleep 60", "timeout_ms": 50}),
@@ -263,7 +265,7 @@ mod tests {
 
     #[tokio::test]
     async fn pipeline_operators_work() {
-        let result = ShellExecTool
+        let result = BashTool
             .execute(
                 &project(),
                 serde_json::json!({"command": "echo hello | tr a-z A-Z"}),

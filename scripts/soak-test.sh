@@ -146,7 +146,7 @@ while true; do
     -d "{\"session_id\":\"${SID}\",\"run_id\":\"${ORCH_RID}\",\"tenant_id\":\"default\",\"workspace_id\":\"default\",\"project_id\":\"default\"}" \
     "${BASE}/v1/runs" >/dev/null 2>&1
   ORCH_RESP=$(curl -s -w '\n%{http_code}' -X POST -H "Authorization: Bearer ${TOKEN}" -H "Content-Type: application/json" \
-    -d "{\"goal\":\"Use the gh_get_issue tool with repo=${DOGFOOD_REPO} and number=${ISSUE_NUM} to read the issue. Summarize what it asks for in under 50 words.\",\"model_id\":\"${DOGFOOD_MODEL}\",\"max_iterations\":3,\"timeout_ms\":60000}" \
+    -d "{\"goal\":\"Use the bash tool to run 'gh issue view ${ISSUE_NUM} --repo ${DOGFOOD_REPO}' and read the issue. Summarize what it asks for in under 50 words.\",\"model_id\":\"${DOGFOOD_MODEL}\",\"max_iterations\":3,\"timeout_ms\":60000}" \
     "${BASE}/v1/runs/${ORCH_RID}/orchestrate" 2>/dev/null)
   ORCH_HTTP=$(echo "$ORCH_RESP" | tail -1)
   ORCH_TERM=$(echo "$ORCH_RESP" | sed '$d' | python3 -c "import sys,json; print(json.load(sys.stdin).get('termination','?'))" 2>/dev/null || echo "?")

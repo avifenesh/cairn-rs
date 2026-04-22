@@ -9,6 +9,32 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Removed
+
+- Built-in `git_operations` tool and the four `gh_*` CLI-wrapper tools
+  (`gh_list_issues`, `gh_get_issue`, `gh_create_comment`, `gh_search_code`).
+  Agents now invoke `git` and `gh` CLI directly through the renamed
+  `bash` tool — more flexible, zero tool-schema bloat, no wrapper code to
+  maintain. The `code-reviewer` agent template's `default_tools` now
+  lists `bash` in place of `git_operations`.
+- **Unaffected**: `github_api.*` tools (`gh_api_read_file`,
+  `gh_api_write_file`, `gh_api_create_branch`, `gh_api_create_pr`,
+  `gh_api_merge_pr`, `gh_api_list_contents`) remain — they wrap the
+  GitHub App installation-token auth flow used by
+  `cairn-integrations::prepare_tool_registry` for per-installation
+  token scoping, which the `gh` CLI cannot replicate.
+
+### Changed
+
+- **Renamed `shell_exec` tool → `bash`.** Aligns with harness-tools
+  upstream naming (battle-tested name wins). No alias retained; this
+  is a clean rename. The built-in file moves from
+  `crates/cairn-tools/src/builtins/shell_exec.rs` →
+  `.../builtins/bash.rs`, and the Rust type renames from `ShellExecTool`
+  → `BashTool`. Agents, prompts, and RFC documentation updated
+  throughout. One source of truth for tool names across cairn and
+  harness-tools upstream.
+
 ### Added
 
 - **Integration test coverage for `ff_renew_lease` (task heartbeat).**

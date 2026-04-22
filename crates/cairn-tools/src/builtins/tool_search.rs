@@ -15,7 +15,7 @@
 //! {
 //!   "action_type": "invoke_tool",
 //!   "tool_name": "tool_search",
-//!   "tool_args": { "query": "execute shell commands", "namespace": "cairn" }
+//!   "tool_args": { "query": "execute shell commands" }
 //! }
 //! ```
 //!
@@ -24,7 +24,7 @@
 //! {
 //!   "matches": [
 //!     {
-//!       "name":        "shell_exec",
+//!       "name":        "bash",
 //!       "description": "Run a shell command …",
 //!       "parameters_schema": { … }
 //!     }
@@ -93,8 +93,10 @@ impl ToolHandler for ToolSearchTool {
                 },
                 "namespace": {
                     "type": "string",
-                    "description": "Optional namespace prefix to narrow results, \
-                                    e.g. 'cairn', 'mcp', 'plugin'"
+                    "description": "Optional tool-name prefix to narrow results. \
+                                    Matches tools whose name starts with this string, \
+                                    e.g. 'web' to surface web_fetch, or 'mcp.' to surface \
+                                    MCP-provided tools when registered under that prefix."
                 }
             }
         })
@@ -165,11 +167,11 @@ mod tests {
 
     // ── Deferred test tool ────────────────────────────────────────────────────
 
-    struct ShellExecStub;
+    struct BashStub;
     #[async_trait]
-    impl ToolHandler for ShellExecStub {
+    impl ToolHandler for BashStub {
         fn name(&self) -> &str {
-            "shell_exec"
+            "bash"
         }
         fn tier(&self) -> ToolTier {
             ToolTier::Deferred
@@ -208,7 +210,7 @@ mod tests {
     fn make_registry() -> Arc<BuiltinToolRegistry> {
         Arc::new(
             BuiltinToolRegistry::new()
-                .register(Arc::new(ShellExecStub))
+                .register(Arc::new(BashStub))
                 .register(Arc::new(WebFetchStub)),
         )
     }
@@ -251,15 +253,12 @@ mod tests {
             .unwrap();
 
         let matches = res.output["matches"].as_array().unwrap();
-        assert!(!matches.is_empty(), "should find shell_exec");
+        assert!(!matches.is_empty(), "should find bash");
         let names: Vec<&str> = matches
             .iter()
             .map(|m| m["name"].as_str().unwrap())
             .collect();
-        assert!(
-            names.contains(&"shell_exec"),
-            "shell_exec must be in results"
-        );
+        assert!(names.contains(&"bash"), "bash must be in results");
     }
 
     #[tokio::test]
@@ -326,14 +325,15 @@ mod tests {
     async fn namespace_filter_narrows_results() {
         let tool = make_tool();
 
-        // Both tools match "fetch" broadly, but namespace=shell narrows to none
-        // because neither starts with "shell_" — shell_exec starts with "shell"
+        // Fixture has two tools: `bash` and `web_fetch`. Filter on
+        // namespace="web" narrows the result set to tools whose name starts
+        // with "web_" (i.e. `web_fetch`); `bash` is excluded.
         let res = tool
             .execute(
                 &project(),
                 serde_json::json!({
-                    "query": "execute",
-                    "namespace": "shell"
+                    "query": "fetch",
+                    "namespace": "web"
                 }),
             )
             .await
@@ -345,10 +345,13 @@ mod tests {
             .iter()
             .map(|m| m["name"].as_str().unwrap())
             .collect();
-        // "shell_exec" starts with "shell" so should be included
         assert!(
-            names.iter().all(|n| n.starts_with("shell")),
-            "namespace filter must only return tools starting with 'shell'"
+            names.iter().all(|n| n.starts_with("web")),
+            "namespace filter must only return tools starting with 'web'"
+        );
+        assert!(
+            names.contains(&"web_fetch"),
+            "web_fetch must be in the filtered result"
         );
     }
 
@@ -426,7 +429,7 @@ mod tests {
         use crate::builtins::MemorySearchTool;
         let registry = Arc::new(
             BuiltinToolRegistry::new()
-                .register(Arc::new(ShellExecStub)) // Deferred
+                .register(Arc::new(BashStub)) // Deferred
                 .register(Arc::new(MemorySearchTool::new())), // Core
         );
         let tool = ToolSearchTool::new(registry);

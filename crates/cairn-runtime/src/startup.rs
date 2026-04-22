@@ -668,15 +668,15 @@ mod tests {
 
     #[test]
     fn tool_call_id_differs_on_step() {
-        let id1 = ToolCallId::derive("run-1", 0, 0, "shell_exec", r#"{"cmd":"ls"}"#);
-        let id2 = ToolCallId::derive("run-1", 1, 0, "shell_exec", r#"{"cmd":"ls"}"#);
+        let id1 = ToolCallId::derive("run-1", 0, 0, "bash", r#"{"command":"ls"}"#);
+        let id2 = ToolCallId::derive("run-1", 1, 0, "bash", r#"{"command":"ls"}"#);
         assert_ne!(id1, id2);
     }
 
     #[test]
     fn tool_call_id_differs_on_run() {
-        let id1 = ToolCallId::derive("run-1", 0, 0, "shell_exec", r#"{"cmd":"ls"}"#);
-        let id2 = ToolCallId::derive("run-2", 0, 0, "shell_exec", r#"{"cmd":"ls"}"#);
+        let id1 = ToolCallId::derive("run-1", 0, 0, "bash", r#"{"command":"ls"}"#);
+        let id2 = ToolCallId::derive("run-2", 0, 0, "bash", r#"{"command":"ls"}"#);
         assert_ne!(id1, id2);
     }
 
@@ -809,31 +809,21 @@ mod tests {
     #[test]
     fn recovery_dispatch_dangerous_pause_pauses() {
         let cache = ToolCallResultCache::new();
-        let tcid = ToolCallId::derive("run-1", 0, 0, "shell_exec", "{}");
+        let tcid = ToolCallId::derive("run-1", 0, 0, "bash", "{}");
 
-        let decision = recovery_dispatch_decision(
-            &cache,
-            &tcid,
-            "shell_exec",
-            RetrySafety::DangerousPause,
-            true,
-        );
+        let decision =
+            recovery_dispatch_decision(&cache, &tcid, "bash", RetrySafety::DangerousPause, true);
         assert!(matches!(decision, RecoveryDispatchDecision::Pause { .. }));
     }
 
     #[test]
     fn non_recovery_always_dispatches() {
         let cache = ToolCallResultCache::new();
-        let tcid = ToolCallId::derive("run-1", 0, 0, "shell_exec", "{}");
+        let tcid = ToolCallId::derive("run-1", 0, 0, "bash", "{}");
 
         // Even DangerousPause dispatches when not in recovery
-        let decision = recovery_dispatch_decision(
-            &cache,
-            &tcid,
-            "shell_exec",
-            RetrySafety::DangerousPause,
-            false,
-        );
+        let decision =
+            recovery_dispatch_decision(&cache, &tcid, "bash", RetrySafety::DangerousPause, false);
         assert_eq!(decision, RecoveryDispatchDecision::Dispatch);
     }
 

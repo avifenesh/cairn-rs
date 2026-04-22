@@ -11,11 +11,11 @@ use crate::{IntegrationError, IntegrationRegistry};
 /// Per-integration tool set configuration.
 ///
 /// Operators can customize which tools an agent receives for each integration:
-/// - `include_core: true` — include Core tier tools (file_read, shell_exec, git, etc.)
+/// - `include_core: true` — include Core tier tools (file_read, bash, git, etc.)
 /// - `add` — additional tool names to include beyond defaults
 /// - `remove` — tool names to exclude from the default set
 ///
-/// Example: a read-only reviewer agent might use `remove: ["file_write", "shell_exec"]`.
+/// Example: a read-only reviewer agent might use `remove: ["file_write", "bash"]`.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ToolConfig {
     /// Include Core tier tools (default: true).
@@ -337,12 +337,12 @@ mod tests {
         let json = serde_json::json!({
             "include_core": true,
             "add": ["github_api.create_pr"],
-            "remove": ["shell_exec"]
+            "remove": ["bash"]
         });
         let tc: ToolConfig = serde_json::from_value(json).unwrap();
         assert!(tc.include_core);
         assert_eq!(tc.add, vec!["github_api.create_pr"]);
-        assert_eq!(tc.remove, vec!["shell_exec"]);
+        assert_eq!(tc.remove, vec!["bash"]);
     }
 
     #[test]
@@ -429,7 +429,7 @@ mod tests {
                     tools: Some(ToolConfig {
                         include_core: false,
                         add: vec!["from_override".into()],
-                        remove: vec!["shell_exec".into()],
+                        remove: vec!["bash".into()],
                     }),
                     ..Default::default()
                 },
@@ -438,6 +438,6 @@ mod tests {
         let tc = registry.effective_tool_config("test-override").await;
         assert!(!tc.include_core);
         assert_eq!(tc.add, vec!["from_override"]);
-        assert_eq!(tc.remove, vec!["shell_exec"]);
+        assert_eq!(tc.remove, vec!["bash"]);
     }
 }

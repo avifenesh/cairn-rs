@@ -1011,11 +1011,11 @@ Include a full worked example showing a real issue being solved:
 [Step 2] read_file("src/main.rs", lines=1-50) -> reads entry point
 [Step 3] search_files("parse_config") -> finds relevant function
 [Step 4] read_file("src/config.rs", lines=120-160) -> reads the buggy code
-[Step 5] shell_exec("git checkout -b fix/issue-42-config-parse")
+[Step 5] bash("git checkout -b fix/issue-42-config-parse")
 [Step 6] edit_file("src/config.rs", ...) -> applies the fix
-[Step 7] shell_exec("cargo test") -> tests pass
-[Step 8] shell_exec("git add -A && git commit -m 'fix: handle empty config'")
-[Step 9] shell_exec("git push -u origin fix/issue-42-config-parse")
+[Step 7] bash("cargo test") -> tests pass
+[Step 8] bash("git add -A && git commit -m 'fix: handle empty config'")
+[Step 9] bash("git push -u origin fix/issue-42-config-parse")
 [Step 10] open_pr(title="fix: handle empty config", body="Fixes #42...")
 [Step 11] complete_run(summary="Opened PR #43 fixing issue #42...")
 --- END OF DEMONSTRATION ---

@@ -385,7 +385,7 @@ Per-tool classification (aligned with sealed RFC 018's tool enumeration):
 |---|---|
 | **IdempotentSafe** | memory_search, web_fetch, grep_search, file_read, glob_find, json_extract, calculate, graph_query, get_run, get_task, get_approvals, list_runs, search_events, wait_for_task, tool_search, summarize_text, scratch_pad |
 | **AuthorResponsible** | memory_store (upsert-by-document_id), update_memory, delete_memory, file_write (sandbox-scoped, filesystem idempotent), create_task (idempotent-if-task-exists), cancel_task |
-| **DangerousPause** | shell_exec, http_request, notify_operator, git_operations, resolve_approval, schedule_task, eval_score |
+| **DangerousPause** | bash, http_request, notify_operator, resolve_approval, schedule_task, eval_score |
 
 Plugin tools declare `RetrySafety` in their manifest (parallel to `ToolEffect` from RFC 018). The GitHub plugin's tools from sealed RFC 017: read-only tools are `IdempotentSafe`; `github.comment_on_issue` and `github.create_pull_request` are `AuthorResponsible` (GitHub supports idempotency via request dedup); `github.merge_pull_request` is `DangerousPause` (merges are not idempotent and cannot be undone).
 
@@ -569,7 +569,7 @@ Proceed assuming:
 10. **Recovery is idempotent**: run `recover_all()` twice programmatically; confirm the second run produces no new events and no state changes
 11. **`RecoverySummary` emitted**: exactly one `RecoverySummary` event is emitted per cairn-app boot with accurate counts
 12. **Postgres required for team mode**: attempt to start cairn-app in team mode with a SQLite DB; confirm startup **refuses** with a clear error message (not just a warning)
-13a. **DangerousPause recovery**: a run executing `shell_exec` (DangerousPause) crashes with no cached result; on restart, the run transitions to `WaitingApproval` with a synthesized approval asking "did this tool execute?"; `ToolRecoveryPaused` event emitted
+13a. **DangerousPause recovery**: a run executing `bash` (DangerousPause) crashes with no cached result; on restart, the run transitions to `WaitingApproval` with a synthesized approval asking "did this tool execute?"; `ToolRecoveryPaused` event emitted
 13b. **AuthorResponsible recovery**: a run executing `memory_store` (AuthorResponsible) crashes with no cached result; on restart, the tool is re-dispatched with the same `tool_call_id`; the tool's upsert-by-document-id handles the dedup
 13c. **Batched append coherence**: kill cairn-app between a `memory_store` invoke and ToolInvocationCompleted; on restart, verify either (a) both the memory chunk AND the cache entry exist (batch was durable) OR (b) neither exists (batch was not durable and the tool re-executes cleanly). NEVER: chunk exists but cache entry does not.
 14. **Dual checkpoint**: verify both Intent and Result checkpoints are written per iteration; a crash during execute recovers from the Intent checkpoint; a crash during gather recovers from the Result checkpoint
