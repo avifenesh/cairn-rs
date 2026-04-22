@@ -568,6 +568,7 @@ dependencies = [
  "cairn-orchestrator",
  "cairn-store",
  "ferriskey",
+ "ff-backend-valkey",
  "ff-core",
  "ff-engine",
  "ff-scheduler",
@@ -1198,9 +1199,8 @@ checksum = "9f1f227452a390804cdb637b74a86990f2a7d7ba4b7d5693aac9b4dd6defd8d6"
 
 [[package]]
 name = "ferriskey"
-version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4dd0db4e1acf5593f4c4962d3ed8871a33b69d92c36ac5f4b5e23226a1dde055"
+version = "0.3.0"
+source = "git+https://github.com/avifenesh/FlowFabric.git?rev=81e08dc#81e08dcb9668033a1ac37fa7345fbdf09a019ca7"
 dependencies = [
  "arc-swap",
  "async-trait",
@@ -1242,11 +1242,23 @@ dependencies = [
 ]
 
 [[package]]
-name = "ff-core"
-version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cfcc8f4046489a7f49d479ed5bf1d3a6045e4cffbe548f4633263a904575686a"
+name = "ff-backend-valkey"
+version = "0.3.0"
+source = "git+https://github.com/avifenesh/FlowFabric.git?rev=81e08dc#81e08dcb9668033a1ac37fa7345fbdf09a019ca7"
 dependencies = [
+ "async-trait",
+ "ferriskey",
+ "ff-core",
+ "ff-script",
+ "tracing",
+]
+
+[[package]]
+name = "ff-core"
+version = "0.3.0"
+source = "git+https://github.com/avifenesh/FlowFabric.git?rev=81e08dc#81e08dcb9668033a1ac37fa7345fbdf09a019ca7"
+dependencies = [
+ "async-trait",
  "crc16",
  "serde",
  "serde_json",
@@ -1256,9 +1268,8 @@ dependencies = [
 
 [[package]]
 name = "ff-engine"
-version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ac500dfee3db3a9d3d1f24a292fa40600e162bd823f6dd80986a4f9a616aa496"
+version = "0.3.0"
+source = "git+https://github.com/avifenesh/FlowFabric.git?rev=81e08dc#81e08dcb9668033a1ac37fa7345fbdf09a019ca7"
 dependencies = [
  "ferriskey",
  "ff-core",
@@ -1271,9 +1282,8 @@ dependencies = [
 
 [[package]]
 name = "ff-scheduler"
-version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ad3c5f37038bca1917068e726ee498335be7668b4e0272906d2f7c464e409f1e"
+version = "0.3.0"
+source = "git+https://github.com/avifenesh/FlowFabric.git?rev=81e08dc#81e08dcb9668033a1ac37fa7345fbdf09a019ca7"
 dependencies = [
  "ferriskey",
  "ff-core",
@@ -1284,9 +1294,8 @@ dependencies = [
 
 [[package]]
 name = "ff-script"
-version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b4f768189ef131f8510af70a1bd21ad8ce88d0f75409bcb701c3ab6bbd61a6b3"
+version = "0.3.0"
+source = "git+https://github.com/avifenesh/FlowFabric.git?rev=81e08dc#81e08dcb9668033a1ac37fa7345fbdf09a019ca7"
 dependencies = [
  "ferriskey",
  "ff-core",
@@ -1298,9 +1307,8 @@ dependencies = [
 
 [[package]]
 name = "ff-sdk"
-version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e8b8523644466111ed403aa879e2decb4bd8632c56526fdd26582fe3ff7edb95"
+version = "0.3.0"
+source = "git+https://github.com/avifenesh/FlowFabric.git?rev=81e08dc#81e08dcb9668033a1ac37fa7345fbdf09a019ca7"
 dependencies = [
  "ferriskey",
  "ff-core",
@@ -4761,7 +4769,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.48.0",
 ]
 
 [[package]]

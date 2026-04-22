@@ -21,12 +21,20 @@ test-harness = ["dep:testcontainers", "dep:url"]
 # semver break is `ScriptError` gaining `#[non_exhaustive]`, which cairn
 # never matches exhaustively. Edition bumped to 2024 in FF; cairn
 # builds under edition 2021 unaffected.
-ff-core = "0.2"
-ff-sdk = "0.2"
-ff-engine = "0.2"
-ff-scheduler = "0.2"
-ff-script = "0.2"
-ferriskey = "0.2"
+# Pinned to FF rev 81e08dc (RFC-012 Stage 1a: EngineBackend trait + EngineError
+# crate-move). Using git deps because FF#129 blocks the full 0.3.0 family
+# publish — only ff-core and ff-script are on crates.io at 0.3.0 today. When
+# FF#129 resolves, each `git = ..., rev = ...` line flips back to
+# `version = "0.3"`. Do NOT merge this prep branch before that happens.
+ff-core = { git = "https://github.com/avifenesh/FlowFabric.git", rev = "81e08dc" }
+ff-sdk = { git = "https://github.com/avifenesh/FlowFabric.git", rev = "81e08dc" }
+ff-engine = { git = "https://github.com/avifenesh/FlowFabric.git", rev = "81e08dc" }
+ff-scheduler = { git = "https://github.com/avifenesh/FlowFabric.git", rev = "81e08dc" }
+ff-script = { git = "https://github.com/avifenesh/FlowFabric.git", rev = "81e08dc" }
+ff-backend-valkey = { git = "https://github.com/avifenesh/FlowFabric.git", rev = "81e08dc" }
+# ferriskey 0.3 ships inside FF at rev 81e08dc. Must share a single
+# version with FF crates to avoid duplicate-crate type mismatches.
+ferriskey = { git = "https://github.com/avifenesh/FlowFabric.git", rev = "81e08dc" }
 
 # Cairn crates
 cairn-domain = { path = "../cairn-domain" }
