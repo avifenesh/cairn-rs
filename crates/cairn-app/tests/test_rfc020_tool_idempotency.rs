@@ -233,7 +233,11 @@ async fn cache_hit_on_resume_skips_invocation() {
             _ => None,
         })
         .collect();
-    assert_eq!(completions.len(), 2, "two completion events (first + cache-hit)");
+    assert_eq!(
+        completions.len(),
+        2,
+        "two completion events (first + cache-hit)"
+    );
     assert_eq!(
         completions[0].tool_call_id, completions[1].tool_call_id,
         "both completions must carry the same tool_call_id"
@@ -419,7 +423,10 @@ async fn dangerous_pause_pauses_recovery() {
         }
         _ => panic!("expected AwaitingApproval"),
     };
-    let out2 = execute.execute(&ctx, &decide).await.expect("second dispatch");
+    let out2 = execute
+        .execute(&ctx, &decide)
+        .await
+        .expect("second dispatch");
     let second_approval = match &out2.results[0].status {
         cairn_orchestrator::context::ActionStatus::AwaitingApproval { approval_id } => {
             approval_id.as_str().to_owned()

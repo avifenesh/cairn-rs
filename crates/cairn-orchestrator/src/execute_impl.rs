@@ -26,8 +26,6 @@ use cairn_domain::{
     ActionType, ApprovalId, CheckpointId, ExecutionClass, RuntimeEvent, SessionId, TaskId,
     ToolInvocationCacheHit, ToolInvocationId, ToolRecoveryPaused,
 };
-#[allow(unused_imports)]
-use cairn_tools::builtins::ToolHandler;
 use cairn_runtime::{
     decisions::DecisionService,
     mailbox::MailboxService,
@@ -36,6 +34,8 @@ use cairn_runtime::{
     ApprovalService, CheckpointService, RunService, TaskService,
 };
 use cairn_tools::builtins::BuiltinToolRegistry;
+#[allow(unused_imports)]
+use cairn_tools::builtins::ToolHandler;
 use std::sync::Mutex;
 
 use crate::context::{
@@ -425,10 +425,18 @@ impl RuntimeExecutePhase {
                             );
                             (Some(id), normalized, handler.retry_safety())
                         } else {
-                            (None, String::new(), cairn_domain::recovery::RetrySafety::DangerousPause)
+                            (
+                                None,
+                                String::new(),
+                                cairn_domain::recovery::RetrySafety::DangerousPause,
+                            )
                         }
                     } else {
-                        (None, String::new(), cairn_domain::recovery::RetrySafety::DangerousPause)
+                        (
+                            None,
+                            String::new(),
+                            cairn_domain::recovery::RetrySafety::DangerousPause,
+                        )
                     };
                 let _ = normalized_args; // reserved for future audit emission
 
@@ -445,8 +453,8 @@ impl RuntimeExecutePhase {
                         // so the invocation lifecycle closes cleanly (the
                         // earlier `record_start` left it `Started`).
                         let now = now_ms_u64();
-                        let cache_event = RuntimeEvent::ToolInvocationCacheHit(
-                            ToolInvocationCacheHit {
+                        let cache_event =
+                            RuntimeEvent::ToolInvocationCacheHit(ToolInvocationCacheHit {
                                 project: ctx.project.clone(),
                                 invocation_id: inv_id.clone(),
                                 run_id: Some(ctx.run_id.clone()),
@@ -455,8 +463,7 @@ impl RuntimeExecutePhase {
                                 tool_call_id: id.as_str().to_owned(),
                                 original_completed_at_ms: cached.completed_at,
                                 served_at_ms: now,
-                            },
-                        );
+                            });
                         // Persist the cached tool_call_id + result_json on
                         // the new ToolInvocationCompleted too. Downstream
                         // projections (including the next boot's
@@ -508,8 +515,8 @@ impl RuntimeExecutePhase {
                                 // Fall through to fresh dispatch below.
                             }
                             RecoveryDispatchDecision::Pause { reason, .. } => {
-                                let paused_event = RuntimeEvent::ToolRecoveryPaused(
-                                    ToolRecoveryPaused {
+                                let paused_event =
+                                    RuntimeEvent::ToolRecoveryPaused(ToolRecoveryPaused {
                                         project: ctx.project.clone(),
                                         run_id: ctx.run_id.clone(),
                                         task_id: ctx.task_id.clone(),
@@ -517,8 +524,7 @@ impl RuntimeExecutePhase {
                                         tool_call_id: id.as_str().to_owned(),
                                         reason: reason.clone(),
                                         paused_at_ms: now_ms_u64(),
-                                    },
-                                );
+                                    });
                                 self.tool_invocation_service
                                     .record_failed(
                                         &ctx.project,
@@ -538,10 +544,8 @@ impl RuntimeExecutePhase {
                                 // restart, which would silently duplicate
                                 // the pending approval on every boot of a
                                 // wedged run.
-                                let approval_id = ApprovalId::new(format!(
-                                    "appr_recovery_{}",
-                                    id.as_str()
-                                ));
+                                let approval_id =
+                                    ApprovalId::new(format!("appr_recovery_{}", id.as_str()));
                                 // Append the pause audit event. Best-effort;
                                 // approval request below records the primary
                                 // transition.
@@ -643,8 +647,7 @@ impl RuntimeExecutePhase {
                         if let (Some(id), Some(cache_arc)) =
                             (&tool_call_id, &self.tool_result_cache)
                         {
-                            let mut guard =
-                                cache_arc.lock().unwrap_or_else(|e| e.into_inner());
+                            let mut guard = cache_arc.lock().unwrap_or_else(|e| e.into_inner());
                             guard.insert(CachedToolResult {
                                 tool_call_id: id.clone(),
                                 tool_name: tool_name.clone(),

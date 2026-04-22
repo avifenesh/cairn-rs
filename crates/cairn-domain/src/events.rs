@@ -440,11 +440,9 @@ impl RuntimeEvent {
             RuntimeEvent::ToolInvocationFailed(event) => Some(RuntimeEntityRef::ToolInvocation {
                 invocation_id: event.invocation_id.clone(),
             }),
-            RuntimeEvent::ToolInvocationCacheHit(event) => {
-                Some(RuntimeEntityRef::ToolInvocation {
-                    invocation_id: event.invocation_id.clone(),
-                })
-            }
+            RuntimeEvent::ToolInvocationCacheHit(event) => Some(RuntimeEntityRef::ToolInvocation {
+                invocation_id: event.invocation_id.clone(),
+            }),
             RuntimeEvent::ToolRecoveryPaused(event) => Some(RuntimeEntityRef::Run {
                 run_id: event.run_id.clone(),
             }),

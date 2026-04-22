@@ -184,10 +184,7 @@ where
         Ok(())
     }
 
-    async fn append_audit_events(
-        &self,
-        events: &[RuntimeEvent],
-    ) -> Result<(), RuntimeError> {
+    async fn append_audit_events(&self, events: &[RuntimeEvent]) -> Result<(), RuntimeError> {
         if events.is_empty() {
             return Ok(());
         }

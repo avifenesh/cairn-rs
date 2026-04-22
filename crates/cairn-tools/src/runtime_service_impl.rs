@@ -91,7 +91,9 @@ where
                                 request.invocation_id.clone(),
                                 request.task_id.clone(),
                                 tool_name.clone(),
-                                &[], None, None,
+                                &[],
+                                None,
+                                None,
                             )
                             .await
                             .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> {

@@ -446,8 +446,8 @@ mod sqlite_parity {
                 tool_name: "fs.read".to_owned(),
                 finished_at_ms: 150,
                 outcome: ToolInvocationOutcomeKind::Success,
-            tool_call_id: None,
-            result_json: None,
+                tool_call_id: None,
+                result_json: None,
             },
         ))])
         .await
@@ -961,8 +961,8 @@ mod sqlite_parity {
                     tool_name: "fs.read".to_owned(),
                     finished_at_ms: 200,
                     outcome: ToolInvocationOutcomeKind::Success,
-            tool_call_id: None,
-            result_json: None,
+                    tool_call_id: None,
+                    result_json: None,
                 },
             )),
             // Canceled tool invocation (recently added path).

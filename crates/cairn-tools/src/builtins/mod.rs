@@ -326,8 +326,14 @@ impl From<&str> for ToolError {
 pub fn default_normalize_for_cache(args: &Value) -> String {
     /// Fields stripped during default normalization. Tools whose arguments
     /// legitimately include these names should override `normalize_for_cache`.
-    const TEMPORAL_FIELDS: &[&str] =
-        &["timestamp", "timestamp_ms", "request_id", "idempotency_key", "nonce", "_at"];
+    const TEMPORAL_FIELDS: &[&str] = &[
+        "timestamp",
+        "timestamp_ms",
+        "request_id",
+        "idempotency_key",
+        "nonce",
+        "_at",
+    ];
 
     fn strip(v: Value) -> Value {
         match v {

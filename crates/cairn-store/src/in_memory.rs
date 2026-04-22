@@ -5456,8 +5456,8 @@ mod tests {
                         tool_name: "fs.read".to_owned(),
                         finished_at_ms: 105,
                         outcome: ToolInvocationOutcomeKind::Success,
-            tool_call_id: None,
-            result_json: None,
+                        tool_call_id: None,
+                        result_json: None,
                     },
                 )),
             ])

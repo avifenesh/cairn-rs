@@ -317,8 +317,7 @@ pub struct AppState {
     /// and incrementally on each completion thereafter. Wrapped in
     /// `Arc<Mutex<_>>` because both the orchestrator (hot path on each
     /// tool call) and the startup replay share ownership.
-    pub tool_result_cache:
-        Arc<std::sync::Mutex<cairn_runtime::startup::ToolCallResultCache>>,
+    pub tool_result_cache: Arc<std::sync::Mutex<cairn_runtime::startup::ToolCallResultCache>>,
     /// Background task that derives lifecycle metrics from the event
     /// log broadcast. Kept on `AppState` so its lifetime tracks the
     /// process; drop/cancel is managed by shutdown paths.
