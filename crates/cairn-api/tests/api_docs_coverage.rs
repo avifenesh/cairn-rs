@@ -43,8 +43,8 @@ fn read_doc_routes() -> BTreeMap<(String, String), Vec<String>> {
     let dir = repo_file("docs/api");
     let mut out: BTreeMap<(String, String), Vec<String>> = BTreeMap::new();
 
-    let entries = fs::read_dir(&dir)
-        .unwrap_or_else(|e| panic!("failed to read {}: {e}", dir.display()));
+    let entries =
+        fs::read_dir(&dir).unwrap_or_else(|e| panic!("failed to read {}: {e}", dir.display()));
 
     for entry in entries {
         let entry = entry.expect("dir entry");
