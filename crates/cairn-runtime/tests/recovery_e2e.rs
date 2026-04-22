@@ -1,29 +1,34 @@
 //! Pure-type unit tests for RFC 020 recovery primitives — **not compliance proof.**
 //!
-//! # Footgun
+//! # Scope
 //!
 //! Tests in this file exercise `cairn_runtime::startup` types
 //! (`ToolCallId`, `ReadinessState`) and the pure
 //! `recovery_dispatch_decision()` function **in isolation**. They never
 //! boot `cairn-app`, never crash it, and never replay an event log.
 //!
+//! # Footgun
+//!
 //! Do NOT cite a passing test from this file as evidence that an RFC
-//! 020 durability invariant holds. Post-Track-4, all mock-based
-//! integration tests that previously lived here have been migrated to
-//! LiveHarness-based tests in `crates/cairn-app/tests/`. The
-//! authoritative compliance evidence for RFC 020 now lives in:
+//! 020 durability invariant holds. A durability claim requires a
+//! LiveHarness-based integration test that exercises a real event log
+//! across crash and restart. The authoritative RFC 020 compliance
+//! evidence lives under `crates/cairn-app/tests/`:
 //!
-//! - `crates/cairn-app/tests/test_rfc020_dual_checkpoint.rs` — Invariants
-//!   #5/#11/#14 (dual checkpoints + RecoverySummary emission).
-//! - `crates/cairn-app/tests/test_rfc020_tool_idempotency.rs` —
-//!   Invariants #6 and #11 (ToolCallId determinism + cache re-hydration).
-//! - `crates/cairn-app/tests/test_rfc020_recovery.rs` — end-to-end
-//!   crash-restart coverage via LiveHarness.
+//! - `test_rfc020_dual_checkpoint.rs` — Invariants #5/#11/#14 (dual
+//!   checkpoints + `RecoverySummaryEmitted` audit event).
+//! - `test_rfc020_tool_idempotency.rs` — Invariants #6 and #11
+//!   (`ToolCallId` determinism + tool-result-cache re-hydration).
+//! - `test_rfc020_recovery.rs` — end-to-end crash/restart coverage via
+//!   LiveHarness.
 //!
-//! This file now holds only pure-type unit tests that act as fast
-//! regression guards for the underlying type invariants (seconds to run;
-//! catch obvious breakage before the multi-minute LiveHarness suite is
-//! worth spinning up).
+//! # Role
+//!
+//! These tests are fast regression guards for the underlying type
+//! invariants: deterministic ID derivation, pure dispatch-decision
+//! classification, and `ReadinessState` lifecycle transitions. They
+//! fail in milliseconds on obvious breakage and keep the multi-minute
+//! LiveHarness suite from having to catch trivial type regressions.
 
 use cairn_domain::recovery::RetrySafety;
 use cairn_runtime::startup::{
