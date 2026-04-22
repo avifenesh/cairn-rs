@@ -227,29 +227,23 @@ pub(crate) async fn health_handler(State(state): State<Arc<AppState>>) -> impl I
     (status, Json(report))
 }
 
-/// GET /health/ready — readiness probe (RFC 020).
+/// GET /health/ready — readiness probe (RFC 020 §"Startup order").
 ///
 /// Returns 503 with startup progress JSON during recovery.
-/// Returns 200 once all projections are warmed and recovery completes.
-pub(crate) async fn health_ready_handler(State(_state): State<Arc<AppState>>) -> impl IntoResponse {
-    // For v1, cairn-app is always ready immediately (no async startup graph yet).
-    // When the full startup dependency graph is wired, this will check
-    // ReadinessState::is_ready() and return the progress body.
-    (
-        StatusCode::OK,
-        Json(serde_json::json!({
-            "status": "ready",
-            "step": "6",
-            "branches": {
-                "event_log": { "state": "complete" },
-                "tool_result_cache": { "state": "complete" },
-                "decision_cache": { "state": "complete" },
-                "providers": { "state": "complete" },
-                "runs": { "state": "complete" },
-            },
-        })),
-    )
-        .into_response()
+/// Returns 200 with the same progress JSON shape (all branches `complete`)
+/// once the startup graph completes.
+///
+/// Unlike `/health` (liveness, always 200 once HTTP is bound), this endpoint
+/// gates readiness on the `ReadinessState` in `AppState`, which the startup
+/// sequence in `main.rs` flips branch-by-branch until all are `Complete`.
+pub(crate) async fn health_ready_handler(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+    let progress = state.readiness.progress();
+    let status = if state.readiness.is_ready() {
+        StatusCode::OK
+    } else {
+        StatusCode::SERVICE_UNAVAILABLE
+    };
+    (status, Json(progress)).into_response()
 }
 
 pub(crate) async fn system_status_handler(State(state): State<Arc<AppState>>) -> impl IntoResponse {

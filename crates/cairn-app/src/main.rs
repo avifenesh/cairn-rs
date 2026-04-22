@@ -1054,6 +1054,25 @@ async fn main() {
         seed_demo_data(&state).await;
     }
 
+    // ── RFC 020 readiness: branch flips ──────────────────────────────────────
+    // The `ReadinessState` on `lib_state` starts with every branch `Pending`.
+    // We flip each branch to `Complete` as the corresponding startup work
+    // finishes. Branches whose real per-branch recovery hasn't landed yet
+    // (run recovery, tool cache warmup, decision cache warmup, etc.) flip
+    // with `count = 0` — "nothing to recover yet, so complete" — and will
+    // be re-wired by later RFC 020 tracks (#149, #151, #152). The final
+    // `mark_ready` flip happens after the HTTP listener binds so that the
+    // readiness gate + `/health/ready` are observable during recovery.
+    use cairn_runtime::startup::BranchStatus;
+
+    // Step 2-ish: event log is reachable since we completed replays' prep
+    // and the store has been opened. For now "event_log" = the store-side
+    // event stream we just prepared above.
+    lib_state.readiness.update_branch("2", |b| {
+        b.event_log = BranchStatus::complete(0);
+    });
+
+    // Step 4a: sandbox reconciliation.
     match lib_state.sandbox_service.recover_all().await {
         Ok(summary) => {
             if summary.reconnected > 0 || summary.preserved > 0 || summary.failed > 0 {
@@ -1062,8 +1081,17 @@ async fn main() {
                     summary.reconnected, summary.preserved, summary.failed
                 );
             }
+            let count = (summary.reconnected as u64).saturating_add(summary.preserved as u64);
+            lib_state.readiness.update_branch("4a", |b| {
+                b.sandboxes = BranchStatus::complete(count);
+            });
         }
-        Err(error) => eprintln!("sandbox recovery failed: {error}"),
+        Err(error) => {
+            eprintln!("sandbox recovery failed: {error}");
+            lib_state.readiness.update_branch("4a", |b| {
+                b.sandboxes = BranchStatus::failed(error.to_string());
+            });
+        }
     }
 
     // Recovery sweeps (lease expiry, interrupted runs, stale dependencies)
@@ -1081,6 +1109,25 @@ async fn main() {
     lib_state.replay_evals().await;
     lib_state.replay_triggers().await;
     lib_state.runtime.store.reset_usage_counters();
+
+    // Flip the remaining RFC 020 readiness branches. Each represents a
+    // startup concern whose real per-branch recovery is handled by a
+    // later track. Marking them `complete` with `count = 0` means
+    // "nothing to recover here yet" — the branch exists in the progress
+    // JSON so clients see the complete contract.
+    lib_state.readiness.update_branch("5", |b| {
+        b.graph = BranchStatus::complete(0);
+        b.memory = BranchStatus::complete(0);
+        b.evals = BranchStatus::complete(0);
+        b.repo_store = BranchStatus::complete(0);
+        b.plugin_host = BranchStatus::complete(0);
+        b.providers = BranchStatus::complete(0);
+        b.tool_result_cache = BranchStatus::complete(0);
+        b.decision_cache = BranchStatus::complete(0);
+        b.webhook_dedup = BranchStatus::complete(0);
+        b.triggers = BranchStatus::complete(0);
+        b.runs = BranchStatus::complete(0);
+    });
 
     eprintln!("cairn-app starting with role: {}", config.process_role);
 
@@ -1102,6 +1149,31 @@ async fn main() {
             .local_addr()
             .unwrap_or_else(|e| panic!("failed to read bound addr: {e}"));
         eprintln!("cairn-app listening on http://{bound}");
+
+        // RFC 020 §"Startup order" step 6: flip readiness to ready in a
+        // background task so the HTTP listener is already accepting
+        // connections (liveness + `/health/ready` responding 503 with the
+        // progress JSON) by the time the final flip happens. In normal
+        // production this races the first client request and wins; under
+        // `CAIRN_TEST_STARTUP_DELAY_MS` (dev/test builds only) we sleep
+        // first so integration tests can observe the 503-with-progress
+        // response the RFC 020 contract promises.
+        let readiness_for_flip = lib_state.readiness.clone();
+        tokio::spawn(async move {
+            #[cfg(debug_assertions)]
+            if let Ok(ms) = std::env::var("CAIRN_TEST_STARTUP_DELAY_MS") {
+                if let Ok(delay) = ms.parse::<u64>() {
+                    tracing::warn!(
+                        delay_ms = delay,
+                        "CAIRN_TEST_STARTUP_DELAY_MS set — delaying readiness flip \
+                         (debug build only; release strips this hook)"
+                    );
+                    tokio::time::sleep(std::time::Duration::from_millis(delay)).await;
+                }
+            }
+            readiness_for_flip.mark_ready();
+            tracing::info!("cairn-app readiness: /health/ready now returns 200");
+        });
 
         // ── Graceful shutdown wiring ─────────────────────────────────────────
         let (signal_tx, signal_rx) = tokio::sync::watch::channel(false);
