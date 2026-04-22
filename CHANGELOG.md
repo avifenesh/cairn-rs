@@ -9,6 +9,19 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- **FF metrics surfaced on `/metrics`.** `cairn-fabric` now compiles
+  `ff-observability` with the `enabled` feature (real OTEL → Prometheus
+  exporter) and retains the shared `Arc<ff_observability::Metrics>` on
+  `FabricRuntime`. `cairn-app`'s `/metrics` handler appends FF's
+  Prometheus text-exposition to its own, so names like
+  `ff_scanner_cycle_total`, `ff_scanner_cycle_duration_seconds`,
+  `ff_cancel_backlog_depth`, `ff_lease_renewal_total`,
+  `ff_claim_from_grant_duration_seconds`, and `ff_http_request_duration_seconds`
+  now appear alongside cairn's metrics on the single scrape endpoint.
+  See `docs/operations/metrics.md`. Closes the PR #117 follow-up.
+
 ### Changed
 
 - **FlowFabric bumped to 0.3.2.** Closes #129 (FlowFabric family publish).

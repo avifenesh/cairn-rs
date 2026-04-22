@@ -32,7 +32,13 @@ ff-backend-valkey = "0.3"
 # `Arc<ff_observability::Metrics>`. ff-engine does NOT re-export the
 # type; pulled in at the same version to stay lock-step with FF's
 # internal minor-version churn.
-ff-observability = "0.3"
+#
+# `enabled` turns on the real OTEL → Prometheus exporter. Without
+# this feature `Metrics::render()` returns an empty string (shim),
+# and no FF metrics surface on cairn-app's `/metrics` endpoint. The
+# shim exists for no-observability embedded builds; cairn is never
+# that, so we always want the real backend. See PR #117 follow-up.
+ff-observability = { version = "0.3", features = ["enabled"] }
 # ferriskey 0.3 ships alongside FF 0.3 family. Must share a single
 # version with FF crates to avoid duplicate-crate type mismatches.
 ferriskey = "0.3"
