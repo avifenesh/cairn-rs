@@ -26,6 +26,14 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- **FlowFabric 0.3.2 → 0.3.4 lockfile refresh.** Workspace pins remain
+  at the `"0.3"` caret (unchanged), only `Cargo.lock` moves. Picks up
+  upstream hotfix for `FlowFabricWorker::connect_with` null
+  `completion_backend_handle`; cairn still uses
+  `FlowFabricWorker::connect(config)` (URL path) so the fix doesn't
+  bite today, but cairn now carries it for the day it does. Build,
+  clippy, and test baselines are clean.
+
 - **Renamed `shell_exec` tool → `bash`.** Aligns with harness-tools
   upstream naming (battle-tested name wins). No alias retained; this
   is a clean rename. The built-in file moves from
