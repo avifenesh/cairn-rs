@@ -72,6 +72,8 @@ The database is created and migrated automatically on first start.
 | `CAIRN_PORT` | `3000` | HTTP listen port (also settable with `--port`). |
 | `CAIRN_DB` | `memory` | Documentation-only. Pass the storage backend via `--db` flag. |
 | `CAIRN_MODE` | `local` | Documentation-only. Pass via `--mode local\|team`. |
+| `CAIRN_FABRIC_HOST` | `localhost` (bare binary) / `valkey` (compose) | Valkey hostname FlowFabric connects to for lease / lifecycle / eligibility state. |
+| `CAIRN_FABRIC_PORT` | `6379` | Valkey port. |
 | `CAIRN_FABRIC_WAITPOINT_HMAC_SECRET` | **required** when Fabric is enabled | 32-byte hex secret seeded into every FlowFabric execution partition. Boot fails loud when unset. Rotate at runtime via `POST /v1/admin/rotate-waitpoint-hmac`. See [SECURITY.md](../SECURITY.md). |
 | `CAIRN_FABRIC_INSTANCE_ID` | auto-UUID persisted to `/tmp` | Distinguishes this cairn-app process from others sharing the same Valkey. See [operations/cross-instance-isolation.md](./operations/cross-instance-isolation.md). |
 | `CAIRN_BACKFILL_INSTANCE_TAG` | unset | When `1`, runs a one-shot boot-time backfill that stamps `cairn.instance_id` onto pre-existing exec-tag hashes that lack it. Only needed for in-place binary swaps with in-flight runs that predate the isolation filter. |

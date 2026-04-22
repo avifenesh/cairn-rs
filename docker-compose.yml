@@ -82,7 +82,12 @@ services:
       # ── FlowFabric (Valkey) ────────────────────────────────────────────────
       CAIRN_FABRIC_HOST: "${CAIRN_FABRIC_HOST:-valkey}"
       CAIRN_FABRIC_PORT: "${CAIRN_FABRIC_PORT:-6379}"
-      CAIRN_FABRIC_WAITPOINT_HMAC_SECRET: "${CAIRN_FABRIC_WAITPOINT_HMAC_SECRET:-}"
+      # Dev-only HMAC secret (64 hex chars = 32 bytes). Production operators
+      # MUST override via .env with `openssl rand -hex 32`; rotate at runtime
+      # via `POST /v1/admin/rotate-waitpoint-hmac`. Leaving the default in
+      # production signs waitpoint tokens with a public test key — anyone
+      # with the image can forge them.
+      CAIRN_FABRIC_WAITPOINT_HMAC_SECRET: "${CAIRN_FABRIC_WAITPOINT_HMAC_SECRET:-00000000000000000000000000000000000000000000000000000000000000aa}"
 
       # ── Auth ───────────────────────────────────────────────────────────────
       CAIRN_ADMIN_TOKEN: "${CAIRN_ADMIN_TOKEN:-dev-admin-token}"
