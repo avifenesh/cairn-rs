@@ -121,7 +121,7 @@ GET	/v1/decisions	preserve	query: scope?, kind?, outcome?	{ items }
 GET	/v1/decisions/:id	preserve	-	full decision with reasoning chain
 GET	/v1/decisions/cache	preserve	-	{ items } active cached decisions
 POST	/v1/decisions/:id/invalidate	preserve	body: { reason }	invalidate one cached decision
-POST	/v1/decisions/evaluate	preserve	body: { kind, principal?, subject?, tenant_id?, workspace_id?, project_id?, correlation_id? }	{ decision_id, outcome, source, cached } via RFC 019 pipeline
+POST	/v1/decisions/evaluate	preserve	body: { kind, principal?, subject?, tenant_id?, workspace_id?, project_id?, correlation_id? }	{ decision_id, outcome, source, cached, cache_hit, original_decision_id } via RFC 019 pipeline
 POST	/v1/decisions/invalidate	preserve	body: { scope, kind }	bulk invalidation
 POST	/v1/decisions/invalidate-by-rule	preserve	body: { rule_id }	selective invalidation via rule
 POST	/v1/runs/:id/approve	preserve	body: { reviewer_comments? }	approve plan run
