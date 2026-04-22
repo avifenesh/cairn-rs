@@ -160,11 +160,25 @@ fn regenerate_http_routes_tsv() {
     let tsv_path = repo_file("tests/compat/http_routes.tsv");
     let existing_rows = read_tsv("tests/compat/http_routes.tsv", 5);
 
+    /// Preserved columns for a route row: everything beyond `(method, path)`.
+    struct RowMetadata {
+        classification: String,
+        detail: String,
+        contract: String,
+    }
+
     // Key existing rows by (method, path) so we can reuse their metadata.
-    let mut existing: BTreeMap<(String, String), (String, String, String)> = BTreeMap::new();
+    let mut existing: BTreeMap<(String, String), RowMetadata> = BTreeMap::new();
     for row in existing_rows {
         let key = (row[0].clone(), row[1].clone());
-        existing.insert(key, (row[2].clone(), row[3].clone(), row[4].clone()));
+        existing.insert(
+            key,
+            RowMetadata {
+                classification: row[2].clone(),
+                detail: row[3].clone(),
+                contract: row[4].clone(),
+            },
+        );
     }
 
     // Classification for catalog entries comes from the code, so prefer that
@@ -184,12 +198,12 @@ fn regenerate_http_routes_tsv() {
     for (method, path) in &real {
         let key = (method.clone(), path.clone());
         let (classification, detail, contract) = match existing.get(&key) {
-            Some((cls, d, c)) => {
+            Some(row) => {
                 let cls = classification_override
                     .get(&key)
                     .cloned()
-                    .unwrap_or_else(|| cls.clone());
-                (cls, d.clone(), c.clone())
+                    .unwrap_or_else(|| row.classification.clone());
+                (cls, row.detail.clone(), row.contract.clone())
             }
             None => {
                 let cls = classification_override
@@ -205,11 +219,7 @@ fn regenerate_http_routes_tsv() {
     }
 
     write_atomically(&tsv_path, &out);
-    eprintln!(
-        "wrote {} routes to {}",
-        real.len(),
-        tsv_path.display()
-    );
+    eprintln!("wrote {} routes to {}", real.len(), tsv_path.display());
 }
 
 fn write_atomically(path: &Path, contents: &str) {

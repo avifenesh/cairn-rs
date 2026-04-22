@@ -275,33 +275,71 @@ fn balanced_close(bytes: &[u8], open_paren: usize) -> Option<(usize, usize, usiz
 
 /// Extract HTTP method identifiers (`get`, `post`, ...) used at the top
 /// level of the route body. Does NOT descend into inner parens — that
-/// correctly skips handler arguments like `with_state(foo.bar())`.
+/// correctly skips handler arguments like `with_state(foo.bar())`. Skips
+/// string literals and `// ... ` / `/* ... */` comments.
 fn extract_top_level_methods(body: &str) -> Vec<String> {
     let bytes = body.as_bytes();
     let n = bytes.len();
     let mut methods = Vec::new();
     let mut depth = 0i32;
     let mut i = 0usize;
+
+    // Skip a line-comment starting at `i` (assumes `//`). Returns new index.
+    fn skip_line_comment(bytes: &[u8], mut i: usize) -> usize {
+        while i < bytes.len() && bytes[i] != b'\n' {
+            i += 1;
+        }
+        i
+    }
+    // Skip a block-comment starting at `i` (assumes `/*`). Returns index
+    // just past the closing `*/`, or `bytes.len()` if unterminated.
+    fn skip_block_comment(bytes: &[u8], mut i: usize) -> usize {
+        // `i` points at `/`, step past `/*`
+        i += 2;
+        while i + 1 < bytes.len() {
+            if bytes[i] == b'*' && bytes[i + 1] == b'/' {
+                return i + 2;
+            }
+            i += 1;
+        }
+        bytes.len()
+    }
+    // Skip a double-quoted string literal starting at `i` (assumes `"`).
+    fn skip_string(bytes: &[u8], mut i: usize) -> usize {
+        i += 1;
+        while i < bytes.len() {
+            if bytes[i] == b'\\' && i + 1 < bytes.len() {
+                i += 2;
+                continue;
+            }
+            if bytes[i] == b'"' {
+                return i + 1;
+            }
+            i += 1;
+        }
+        bytes.len()
+    }
+
     // Skip over the first argument (the path literal / `&path`) up to the
     // first top-level `,`.
     while i < n {
         let b = bytes[i];
+        if b == b'/' && i + 1 < n && bytes[i + 1] == b'/' {
+            i = skip_line_comment(bytes, i);
+            continue;
+        }
+        if b == b'/' && i + 1 < n && bytes[i + 1] == b'*' {
+            i = skip_block_comment(bytes, i);
+            continue;
+        }
+        if b == b'"' {
+            i = skip_string(bytes, i);
+            continue;
+        }
         if b == b'(' || b == b'[' || b == b'{' {
             depth += 1;
         } else if b == b')' || b == b']' || b == b'}' {
             depth -= 1;
-        } else if b == b'"' {
-            i += 1;
-            while i < n {
-                if bytes[i] == b'\\' {
-                    i += 2;
-                    continue;
-                }
-                if bytes[i] == b'"' {
-                    break;
-                }
-                i += 1;
-            }
         } else if b == b',' && depth == 0 {
             i += 1;
             break;
@@ -312,6 +350,18 @@ fn extract_top_level_methods(body: &str) -> Vec<String> {
     // Now walk the handler expression looking for top-level `method(`.
     while i < n {
         let b = bytes[i];
+        if b == b'/' && i + 1 < n && bytes[i + 1] == b'/' {
+            i = skip_line_comment(bytes, i);
+            continue;
+        }
+        if b == b'/' && i + 1 < n && bytes[i + 1] == b'*' {
+            i = skip_block_comment(bytes, i);
+            continue;
+        }
+        if b == b'"' {
+            i = skip_string(bytes, i);
+            continue;
+        }
         if b == b'(' || b == b'[' || b == b'{' {
             depth += 1;
             i += 1;
@@ -322,26 +372,9 @@ fn extract_top_level_methods(body: &str) -> Vec<String> {
             i += 1;
             continue;
         }
-        if b == b'"' {
-            i += 1;
-            while i < n {
-                if bytes[i] == b'\\' {
-                    i += 2;
-                    continue;
-                }
-                if bytes[i] == b'"' {
-                    i += 1;
-                    break;
-                }
-                i += 1;
-            }
-            continue;
-        }
-        // At depth 0 (the top level of the handler-args slot) OR depth 1
-        // inside the chain `get(...).post(...)` — chained method calls sit
-        // at the same nesting as the first, because `.post(` opens a new
-        // paren after the previous `)`. So we track depth==0 identifiers
-        // only.
+        // Track depth==0 identifiers. Chained method calls like
+        // `get(...).post(...)` sit at depth 0 because `.post(` opens a new
+        // paren after the previous `)` closes.
         if depth == 0 && is_ident_start(b) {
             let start = i;
             while i < n && is_ident_cont(bytes[i]) {
@@ -389,22 +422,26 @@ fn is_ident_cont(b: u8) -> bool {
     b.is_ascii_alphanumeric() || b == b'_'
 }
 
-/// Returns true if the `.route(` call starting at `route_idx` is preceded
-/// (on a prior line, ignoring intermediate whitespace/comments) by a
-/// `#[cfg(...)]` attribute that guards its containing `let` binding.
+/// Returns true if the `.route(` call starting at `route_idx` belongs to a
+/// statement guarded by `#[cfg(...)]`.
 ///
-/// Heuristic: scan back at most ~3 non-blank lines for a line whose first
-/// non-whitespace token is `#[cfg`.
+/// Walks back over the run of contiguous attribute lines (`#[...]`) that sit
+/// directly above the `.route` call's statement. Returns true if any of them
+/// is `#[cfg`. A non-attribute, non-blank line ends the run — this avoids
+/// false positives from unrelated `#[cfg]` lines further up.
 fn preceding_line_is_cfg_gated(bytes: &[u8], route_idx: usize) -> bool {
     // Move back to the start of the current line.
     let mut i = route_idx;
     while i > 0 && bytes[i - 1] != b'\n' {
         i -= 1;
     }
-    // Check only the immediately preceding non-blank line. An attribute
-    // on a `let` binding must sit directly above the statement it gates.
-    while i > 0 {
-        i = i.saturating_sub(1);
+    // Walk back over contiguous `#[...]` attribute lines (skipping blanks).
+    // Any `#[cfg(...)]` in the run gates this route.
+    loop {
+        if i == 0 {
+            return false;
+        }
+        i -= 1; // skip the '\n' that ended the previous line
         let line_end = i;
         while i > 0 && bytes[i - 1] != b'\n' {
             i -= 1;
@@ -414,9 +451,16 @@ fn preceding_line_is_cfg_gated(bytes: &[u8], route_idx: usize) -> bool {
         if trimmed.is_empty() {
             continue;
         }
-        return trimmed.starts_with(b"#[cfg");
+        if trimmed.starts_with(b"#[cfg") {
+            return true;
+        }
+        if trimmed.starts_with(b"#[") {
+            // Some other attribute (e.g. `#[must_use]`). Keep walking — a
+            // subsequent line might hold the `#[cfg]`.
+            continue;
+        }
+        return false;
     }
-    false
 }
 
 fn trim_ascii(s: &[u8]) -> &[u8] {
@@ -510,6 +554,53 @@ mod tests {
             #[cfg(feature = \"debug-endpoints\")]
             let router = router.route(\"/gated\", get(h));
             let other = x.route(\"/kept\", post(h));
+        ";
+        let parsed = parse_route_source(src);
+        assert_eq!(parsed.len(), 1);
+        assert_eq!(parsed[0].path, "/kept");
+    }
+
+    #[test]
+    fn skips_methods_inside_comments_within_route_body() {
+        // The classic false-positive: an HTTP method ident sits inside an
+        // inline comment. We must not count it.
+        let src = r#".route("/path", /* get(h) */ post(h2))"#;
+        let parsed = parse_route_source(src);
+        assert_eq!(parsed.len(), 1);
+        assert_eq!(parsed[0].method, "POST");
+    }
+
+    #[test]
+    fn skips_methods_inside_line_comment_within_route_body() {
+        let src = "
+            .route(\"/p\", // get(ignored)
+                post(h))
+        ";
+        let parsed = parse_route_source(src);
+        assert_eq!(parsed.len(), 1);
+        assert_eq!(parsed[0].method, "POST");
+    }
+
+    #[test]
+    fn cfg_gate_walks_back_over_stacked_attributes() {
+        // `#[cfg]` stacked under another attribute still gates the route.
+        let src = "
+            #[cfg(feature = \"x\")]
+            #[must_use]
+            let r = x.route(\"/gated\", get(h));
+        ";
+        let parsed = parse_route_source(src);
+        assert!(parsed.is_empty(), "stacked-attr cfg gate not detected");
+    }
+
+    #[test]
+    fn cfg_gate_does_not_leak_across_unrelated_statements() {
+        // An unrelated `#[cfg]` two statements back must not gate a later
+        // non-attributed route.
+        let src = "
+            #[cfg(feature = \"x\")]
+            fn f() {}
+            let r = x.route(\"/kept\", post(h));
         ";
         let parsed = parse_route_source(src);
         assert_eq!(parsed.len(), 1);
