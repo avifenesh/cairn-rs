@@ -1179,7 +1179,10 @@ async fn main() {
         b.repo_store = BranchStatus::complete(0);
         b.plugin_host = BranchStatus::complete(0);
         b.providers = BranchStatus::complete(0);
-        b.tool_result_cache = BranchStatus::complete(0);
+        // `tool_result_cache` is intentionally NOT re-set here — Track 3
+        // already set it above with the real `cache_populated` count from
+        // `replay_tool_result_cache`. Overwriting it with 0 here would
+        // mask the count operators need to see on `/health/ready`.
         b.decision_cache = BranchStatus::complete(0);
         b.webhook_dedup = BranchStatus::complete(0);
         b.triggers = BranchStatus::complete(0);
