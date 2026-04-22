@@ -1,4 +1,4 @@
-# cairn-rs — production-ready deployment with Postgres
+# cairn-rs — production-ready deployment with Postgres + Valkey
 #
 # Quick start:
 #   docker compose up --build
@@ -48,6 +48,25 @@ services:
       retries: 5
       start_period: 10s
 
+  # ── Valkey (FlowFabric state) ────────────────────────────────────────────────
+  # cairn-app uses FlowFabric (ferriskey + Valkey Functions API) for lease /
+  # lifecycle / eligibility state. Valkey 7.0+ is a hard requirement (Functions
+  # API); 8.x is recommended for the Lua-sandbox CVE patches FF's CI validates
+  # against. See crates/cairn-fabric/src/version_check.rs for the gate.
+  valkey:
+    image: valkey/valkey:8-alpine
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - valkey_data:/data
+    healthcheck:
+      test: ["CMD", "valkey-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+
   # ── Cairn control plane ──────────────────────────────────────────────────────
   cairn:
     build:
@@ -59,6 +78,16 @@ services:
     environment:
       # ── Database ───────────────────────────────────────────────────────────
       DATABASE_URL: "postgres://cairn:${POSTGRES_PASSWORD:-cairn-dev-password}@postgres:5432/cairn"
+
+      # ── FlowFabric (Valkey) ────────────────────────────────────────────────
+      CAIRN_FABRIC_HOST: "${CAIRN_FABRIC_HOST:-valkey}"
+      CAIRN_FABRIC_PORT: "${CAIRN_FABRIC_PORT:-6379}"
+      # Dev-only HMAC secret (64 hex chars = 32 bytes). Production operators
+      # MUST override via .env with `openssl rand -hex 32`; rotate at runtime
+      # via `POST /v1/admin/rotate-waitpoint-hmac`. Leaving the default in
+      # production signs waitpoint tokens with a public test key — anyone
+      # with the image can forge them.
+      CAIRN_FABRIC_WAITPOINT_HMAC_SECRET: "${CAIRN_FABRIC_WAITPOINT_HMAC_SECRET:-00000000000000000000000000000000000000000000000000000000000000aa}"
 
       # ── Auth ───────────────────────────────────────────────────────────────
       CAIRN_ADMIN_TOKEN: "${CAIRN_ADMIN_TOKEN:-dev-admin-token}"
@@ -82,6 +111,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      valkey:
+        condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS http://localhost:3000/health || exit 1"]
       interval: 15s
@@ -91,4 +122,6 @@ services:
 
 volumes:
   pg_data:
+    driver: local
+  valkey_data:
     driver: local
