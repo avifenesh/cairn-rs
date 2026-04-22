@@ -1671,7 +1671,15 @@ impl AppBootstrap {
             .layer(from_fn(request_id_middleware))
             .layer(DefaultBodyLimit::max(10 * 1024 * 1024))
             .layer(from_fn_with_state(state.clone(), rate_limit_middleware))
-            .layer(from_fn_with_state(state, observability_middleware))
+            .layer(from_fn_with_state(state.clone(), observability_middleware))
+            // RFC 020 readiness gate. Outermost layer — Tower runs layers
+            // outside-in on the request path, so this fires FIRST on every
+            // request. Non-exempt routes short-circuit with 503 during
+            // recovery before touching auth, rate-limit, or any handler
+            // state that might still be warming. Exempt paths
+            // (`/health`, `/health/ready`, SPA assets) continue through
+            // the stack so operators and probes stay observable.
+            .layer(from_fn_with_state(state, readiness_middleware))
     }
 
     /// Build the complete router: catalog routes + fallback + state + middleware.

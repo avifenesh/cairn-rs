@@ -47,6 +47,7 @@ use cairn_memory::in_memory::{InMemoryDocumentStore, InMemoryRetrieval};
 use cairn_memory::ingest::SourceType;
 use cairn_memory::pipeline::{IngestPipeline, ParagraphChunker};
 
+use cairn_runtime::startup::ReadinessState;
 use cairn_runtime::{
     InMemoryServices, LicenseService, MarketplaceService, ModelRegistry, ProjectService,
     TenantService, TriggerService, WorkspaceService,
@@ -305,6 +306,11 @@ pub struct AppState {
     /// through this field to `FabricServices::budgets`, `quotas`,
     /// `scheduler`, `signals` which aren't on the core trait surface.
     pub fabric: Option<Arc<cairn_fabric::FabricServices>>,
+    /// RFC 020 §"Startup order": shared readiness state that the startup
+    /// sequence mutates and the `/health/ready` handler + readiness
+    /// middleware read. Starts with all branches `Pending`; flipped to
+    /// `ready` once the startup graph completes (see `main.rs`).
+    pub readiness: ReadinessState,
     /// Background task that derives lifecycle metrics from the event
     /// log broadcast. Kept on `AppState` so its lifetime tracks the
     /// process; drop/cancel is managed by shutdown paths.
@@ -953,6 +959,7 @@ impl AppState {
             model_registry: ModelRegistry::with_bundled()
                 .unwrap_or_else(|_| ModelRegistry::empty()),
             fabric,
+            readiness: ReadinessState::new(),
             #[cfg(any(feature = "metrics-core", feature = "metrics-providers"))]
             metrics_tap: None,
         };

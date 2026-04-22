@@ -238,6 +238,85 @@ pub(crate) async fn request_id_middleware(mut request: Request, next: Next) -> R
     response
 }
 
+// ── Readiness gate (RFC 020 §"Startup order") ───────────────────────────────
+
+/// Conservative retry hint (seconds) returned in the 503 body while the
+/// readiness graph is still flipping branches. The real startup budget is
+/// typically under 10s on dev hardware; cluster orchestrators use this as
+/// a floor for re-probe scheduling.
+const READINESS_RETRY_AFTER_SECONDS: u64 = 10;
+
+/// Paths that must respond even while the readiness graph is incomplete.
+/// - `/health` and `/healthz` stay up immediately (liveness, k8s probes).
+/// - `/health/ready` is the readiness probe itself; it reports 503 with
+///   the progress body during startup. If we blocked it here, clients
+///   couldn't observe progress.
+/// - Static SPA assets + client-side routes are served so the React
+///   LoginPage can render while cairn-app finishes recovering.
+fn readiness_exempt(path: &str, method: &axum::http::Method) -> bool {
+    let normalized = path.to_ascii_lowercase();
+    let normalized = normalized.as_str();
+
+    if matches!(
+        normalized,
+        "/health" | "/healthz" | "/health/ready" | "/ready" | "/metrics" | "/version"
+    ) {
+        return true;
+    }
+
+    // SPA static assets + index fallback — mirrors `auth_exempt_path_method`
+    // so the login UI can render before the readiness graph completes.
+    if method != axum::http::Method::GET {
+        return false;
+    }
+    if matches!(
+        normalized,
+        "/" | "/index.html"
+            | "/favicon.svg"
+            | "/favicon.ico"
+            | "/robots.txt"
+            | "/.well-known/agent.json"
+    ) || normalized.starts_with("/assets/")
+    {
+        return true;
+    }
+    // SPA client-side routes (anything not under `/v1/`) fall through to
+    // the embedded frontend so React Router can navigate while cairn
+    // recovers. The LoginPage itself just renders a form; it only calls
+    // `/v1/*` after the user submits a token, at which point readiness
+    // will have flipped.
+    !normalized.starts_with("/v1/")
+}
+
+/// RFC 020 readiness gate. Returns 503 with a compact JSON body for any
+/// non-exempt route while `state.readiness.is_ready()` is `false`.
+///
+/// Non-exempt means "anything that could touch event-sourced state" —
+/// the startup graph must finish before a client can write events or
+/// read projections that may still be warming.
+pub(crate) async fn readiness_middleware(
+    State(state): State<Arc<AppState>>,
+    request: Request,
+    next: Next,
+) -> Response {
+    if state.readiness.is_ready() || readiness_exempt(request.uri().path(), request.method()) {
+        return next.run(request).await;
+    }
+
+    let mut response = (
+        StatusCode::SERVICE_UNAVAILABLE,
+        axum::Json(serde_json::json!({
+            "status": "recovering",
+            "retry_after_seconds": READINESS_RETRY_AFTER_SECONDS,
+        })),
+    )
+        .into_response();
+    if let Ok(v) = HeaderValue::from_str(&READINESS_RETRY_AFTER_SECONDS.to_string()) {
+        response.headers_mut().insert(header::RETRY_AFTER, v);
+    }
+    response
+}
+
 // ── Auth helpers ────────────────────────────────────────────────────────────
 
 #[allow(dead_code)] // retained for test coverage; production uses the method variant
