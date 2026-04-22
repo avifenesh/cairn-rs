@@ -116,19 +116,38 @@ where
         summary.scanned_runs = runs.len() as u32;
         let now_ms = current_unix_ms();
 
+        // Per-project cache of resolved approvals, lazily populated when the
+        // first WaitingApproval run in a given project needs it. Avoids the
+        // obvious N+1 of calling `ApprovalReadModel::list_all(project, …)`
+        // once per run. `ApprovalReadModel` does not expose a by-run list
+        // method and adding one here would pull an otherwise-unrelated
+        // projection change into this PR; the per-project cache has
+        // equivalent behaviour without touching the store trait.
+        let mut resolved_approvals_by_project: std::collections::HashMap<
+            cairn_domain::ProjectKey,
+            Vec<cairn_store::projections::ApprovalRecord>,
+        > = std::collections::HashMap::new();
+
+        // Accumulate every planned event into one buffer and append the
+        // lot in a single `EventLog::append`. On a boot with thousands of
+        // non-terminal runs this turns what would be N round-trips to
+        // Postgres/SQLite into one atomic append, bounding startup latency.
+        let mut all_events = Vec::new();
         for run in runs {
-            let events = self.plan_for_run(&run, boot_id, now_ms).await?;
-            let outcome = events.outcome;
-            let to_append = events.events;
-            if !to_append.is_empty() {
-                self.store.append(&to_append).await?;
-            }
-            match &outcome {
+            let plan = self
+                .plan_for_run(&run, boot_id, now_ms, &mut resolved_approvals_by_project)
+                .await?;
+            all_events.extend(plan.events);
+            match &plan.outcome {
                 RunRecoveryOutcome::Recovered { .. } => summary.recovered_runs += 1,
                 RunRecoveryOutcome::Advanced { .. } => summary.advanced_runs += 1,
                 RunRecoveryOutcome::Failed { .. } => summary.failed_runs += 1,
             }
-            summary.outcomes.push(outcome);
+            summary.outcomes.push(plan.outcome);
+        }
+
+        if !all_events.is_empty() {
+            self.store.append(&all_events).await?;
         }
 
         Ok(summary)
@@ -152,6 +171,10 @@ where
         run: &RunRecord,
         boot_id: &BootId,
         now_ms: u64,
+        resolved_approvals_by_project: &mut std::collections::HashMap<
+            cairn_domain::ProjectKey,
+            Vec<cairn_store::projections::ApprovalRecord>,
+        >,
     ) -> Result<RunRecoveryPlan, RuntimeError> {
         let latest_checkpoint =
             CheckpointReadModel::latest_for_run(self.store.as_ref(), &run.run_id).await?;
@@ -163,7 +186,12 @@ where
                 .await
                 .map(Ok)?,
             RunState::WaitingApproval => self
-                .plan_waiting_approval(run, boot_id_str, latest_checkpoint)
+                .plan_waiting_approval(
+                    run,
+                    boot_id_str,
+                    latest_checkpoint,
+                    resolved_approvals_by_project,
+                )
                 .await
                 .map(Ok)?,
             RunState::Paused | RunState::WaitingDependency => Ok(plan_unchanged(
@@ -259,6 +287,10 @@ where
         run: &RunRecord,
         boot_id_str: String,
         latest_checkpoint: Option<CheckpointRecord>,
+        resolved_approvals_by_project: &mut std::collections::HashMap<
+            cairn_domain::ProjectKey,
+            Vec<cairn_store::projections::ApprovalRecord>,
+        >,
     ) -> Result<RunRecoveryPlan, RuntimeError> {
         // RFC 020 Gap 11: an approval may have resolved in the event log
         // *after* the run transitioned to `WaitingApproval` but *before*
@@ -280,17 +312,22 @@ where
 
         // No pending approval but the run is still `WaitingApproval` — look
         // at the most recent resolved approval for this run and derive the
-        // follow-up transition. Bounded scan to avoid loading the whole
-        // approval history; recent approvals land last in the `list_all`
-        // result, but the projection isn't guaranteed to order by decision
-        // time so we sort.
-        let project = run.project.clone();
-        let all_approvals =
-            ApprovalReadModel::list_all(self.store.as_ref(), &project, 500, 0).await?;
+        // follow-up transition. We look up approvals project-wide and cache
+        // the result so a boot with many WaitingApproval runs in the same
+        // project hits the store once, not once per run.
+        if !resolved_approvals_by_project.contains_key(&run.project) {
+            let fetched =
+                ApprovalReadModel::list_all(self.store.as_ref(), &run.project, 500, 0).await?;
+            resolved_approvals_by_project.insert(run.project.clone(), fetched);
+        }
+        let all_approvals = resolved_approvals_by_project
+            .get(&run.project)
+            .expect("just inserted");
         let latest_resolved = all_approvals
-            .into_iter()
+            .iter()
             .filter(|a| a.run_id.as_ref() == Some(&run.run_id) && a.decision.is_some())
-            .max_by_key(|a| a.updated_at);
+            .max_by_key(|a| a.updated_at)
+            .cloned();
 
         let mut events = Vec::with_capacity(3);
         events.push(make_envelope(RuntimeEvent::RecoveryAttempted(
