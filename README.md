@@ -329,6 +329,8 @@ docs/
   design/rfcs/     RFC specifications (001–023)
   api-reference.md Full endpoint reference
   deployment.md    Docker, Postgres, TLS, production hardening
+  operations/
+    rfc020-recovery.md  Readiness endpoints and crash-recovery behaviour
 ```
 
 ### RFC compliance
