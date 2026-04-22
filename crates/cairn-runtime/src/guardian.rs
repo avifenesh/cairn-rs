@@ -202,15 +202,15 @@ mod tests {
     fn sample_request() -> DecisionRequest {
         DecisionRequest {
             kind: DecisionKind::ToolInvocation {
-                tool_name: "gh_create_comment".into(),
+                tool_name: "shell_exec".into(),
                 effect: ToolEffect::External,
             },
             principal: Principal::Run {
                 run_id: RunId::new("run_1"),
             },
             subject: DecisionSubject::ToolCall {
-                tool_name: "gh_create_comment".into(),
-                args: serde_json::json!({"repo": "org/repo", "body": "LGTM"}),
+                tool_name: "shell_exec".into(),
+                args: serde_json::json!({"command": "gh issue comment 1 --repo org/repo --body LGTM"}),
             },
             scope: ProjectKey::new("t", "w", "p"),
             cost_estimate: None,

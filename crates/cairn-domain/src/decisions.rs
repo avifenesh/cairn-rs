@@ -58,8 +58,7 @@ pub enum ToolEffect {
     /// Touches systems outside cairn's boundary — outbound API calls, shell
     /// execution, notifications to humans, writes to shared resources.
     ///
-    /// Examples: `shell_exec`, `http_request`, `notify_operator`,
-    /// `git_operations`, `gh_create_comment`.
+    /// Examples: `shell_exec`, `http_request`, `notify_operator`.
     External,
 }
 

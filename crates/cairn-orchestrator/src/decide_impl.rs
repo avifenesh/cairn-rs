@@ -788,9 +788,6 @@ fn is_safe_read_action(proposal: &ActionProposal) -> bool {
                     | "file_read"
                     | "graph_query"
                     | "search_events"
-                    | "gh_list_issues"
-                    | "gh_get_issue"
-                    | "gh_search_code"
                     | "tool_search"
             )
         }

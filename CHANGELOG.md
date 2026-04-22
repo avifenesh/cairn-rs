@@ -9,6 +9,21 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Removed
+
+- Built-in `git_operations` tool and the four `gh_*` CLI-wrapper tools
+  (`gh_list_issues`, `gh_get_issue`, `gh_create_comment`, `gh_search_code`).
+  Agents now invoke `git` and `gh` CLI directly through `shell_exec` — more
+  flexible, zero tool-schema bloat, no wrapper code to maintain. The
+  `code-reviewer` agent template's `default_tools` now lists `shell_exec`
+  in place of `git_operations`.
+- **Unaffected**: `github_api.*` tools (`gh_api_read_file`,
+  `gh_api_write_file`, `gh_api_create_branch`, `gh_api_create_pr`,
+  `gh_api_merge_pr`, `gh_api_list_contents`) remain — they wrap the
+  GitHub App installation-token auth flow used by
+  `cairn-integrations::prepare_tool_registry` for per-installation
+  token scoping, which the `gh` CLI cannot replicate.
+
 ### Added
 
 - **FF metrics surfaced on `/metrics`.** `cairn-fabric` now compiles

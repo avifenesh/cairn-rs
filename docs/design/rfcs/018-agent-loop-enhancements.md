@@ -483,7 +483,6 @@ Before Plan mode ships, the following tools **must** be wired into the orchestra
 | `shell_exec` | builtins/shell_exec.rs (already wired) |
 | `notify_operator` | builtins/notify_operator.rs (already wired) |
 | `http_request` | builtins/http_request.rs |
-| `git_operations` | builtins/git_operations.rs |
 | `resolve_approval` | builtins/resolve_approval.rs |
 | `schedule_task` | builtins/schedule_task.rs |
 | `eval_score` | builtins/eval_score.rs |

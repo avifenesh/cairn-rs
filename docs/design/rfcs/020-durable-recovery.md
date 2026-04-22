@@ -385,7 +385,7 @@ Per-tool classification (aligned with sealed RFC 018's tool enumeration):
 |---|---|
 | **IdempotentSafe** | memory_search, web_fetch, grep_search, file_read, glob_find, json_extract, calculate, graph_query, get_run, get_task, get_approvals, list_runs, search_events, wait_for_task, tool_search, summarize_text, scratch_pad |
 | **AuthorResponsible** | memory_store (upsert-by-document_id), update_memory, delete_memory, file_write (sandbox-scoped, filesystem idempotent), create_task (idempotent-if-task-exists), cancel_task |
-| **DangerousPause** | shell_exec, http_request, notify_operator, git_operations, resolve_approval, schedule_task, eval_score |
+| **DangerousPause** | shell_exec, http_request, notify_operator, resolve_approval, schedule_task, eval_score |
 
 Plugin tools declare `RetrySafety` in their manifest (parallel to `ToolEffect` from RFC 018). The GitHub plugin's tools from sealed RFC 017: read-only tools are `IdempotentSafe`; `github.comment_on_issue` and `github.create_pull_request` are `AuthorResponsible` (GitHub supports idempotency via request dedup); `github.merge_pull_request` is `DangerousPause` (merges are not idempotent and cannot be undone).
 
