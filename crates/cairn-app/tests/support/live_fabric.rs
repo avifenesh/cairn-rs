@@ -29,9 +29,11 @@
 //! assert!(res.status().is_success());
 //! ```
 
+use std::path::PathBuf;
 use std::process::Stdio;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
+use reqwest::StatusCode;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::{Child, Command};
 use tokio::time::timeout;
@@ -39,6 +41,28 @@ use tokio::time::timeout;
 /// Bounded wait for the startup banner. 30 s is generous — local dev
 /// boots in <2 s, CI cold-starts around 10 s.
 const STARTUP_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// Storage backend for a harness subprocess. InMemory is the fast default
+/// used by the vast majority of tests; SQLite is opt-in for tests that
+/// need DB state to survive a subprocess restart (e.g. the sigkill+restart
+/// meta-test).
+#[derive(Clone)]
+enum HarnessStorage {
+    InMemory,
+    Sqlite(PathBuf),
+}
+
+impl HarnessStorage {
+    fn db_arg(&self) -> String {
+        match self {
+            HarnessStorage::InMemory => "memory".to_owned(),
+            // `?mode=rwc` = read+write+create: sqlx won't create the file
+            // by default, so we need this for first-boot. On restart the
+            // file already exists and rwc still works (no truncation).
+            HarnessStorage::Sqlite(path) => format!("sqlite:{}?mode=rwc", path.display()),
+        }
+    }
+}
 
 /// One cairn-app subprocess driving a uuid-scoped tenant/workspace/project
 /// against the shared Valkey testcontainer.
@@ -50,10 +74,31 @@ pub struct LiveHarness {
     pub project: String,
     child: Option<Child>,
     client: reqwest::Client,
+    // Fields captured at setup() so restart() can re-spawn with the same
+    // config without re-deriving any of it.
+    port: u16,
+    suffix: String,
+    valkey_host: String,
+    valkey_port: u16,
+    storage: HarnessStorage,
 }
 
 impl LiveHarness {
     pub async fn setup() -> Self {
+        Self::setup_with_storage(HarnessStorage::InMemory).await
+    }
+
+    /// Variant that persists the event log to a per-harness SQLite file so
+    /// projections survive a subprocess restart. Used by the sigkill+restart
+    /// meta-test to prove DB state outlives the subprocess.
+    pub async fn setup_with_sqlite() -> Self {
+        let suffix_hint = uuid::Uuid::new_v4().simple().to_string()[..8].to_owned();
+        let mut path = std::env::temp_dir();
+        path.push(format!("cairn-liveharness-{suffix_hint}.db"));
+        Self::setup_with_storage(HarnessStorage::Sqlite(path)).await
+    }
+
+    async fn setup_with_storage(storage: HarnessStorage) -> Self {
         // 1. Shared Valkey endpoint (first caller boots the container).
         let (valkey_host, valkey_port) = cairn_fabric::test_harness::valkey_endpoint().await;
 
@@ -69,61 +114,19 @@ impl LiveHarness {
         let seed_admin = format!("seed-admin-{suffix}-padding");
         let final_admin = format!("test-admin-{suffix}-{}", uuid::Uuid::new_v4().simple());
 
-        // 4. Spawn the real binary. `CARGO_BIN_EXE_cairn-app` resolves to
-        //    the compiled binary in target/; cargo guarantees it exists
-        //    when integration tests run.
-        let bin = env!("CARGO_BIN_EXE_cairn-app");
-        let mut cmd = Command::new(bin);
-        cmd.arg("--mode")
-            .arg("team")
-            .arg("--port")
-            .arg("0")
-            .arg("--addr")
-            .arg("127.0.0.1")
-            .arg("--db")
-            .arg("memory")
-            .env("CAIRN_FABRIC_HOST", &valkey_host)
-            .env("CAIRN_FABRIC_PORT", valkey_port.to_string())
-            // Unique FF lane so this test's worker queues don't pick up
-            // tasks from sibling tests.
-            .env("CAIRN_FABRIC_LANE", format!("test-{suffix}"))
-            .env("CAIRN_FABRIC_WORKER_ID", format!("worker-{suffix}"))
-            .env("CAIRN_FABRIC_INSTANCE_ID", format!("instance-{suffix}"))
-            .env("CAIRN_ADMIN_TOKEN", &seed_admin)
-            // Waitpoint HMAC: required by FabricConfig to avoid shipping a
-            // runtime that would reject every ff_suspend_execution.
-            .env(
-                "CAIRN_FABRIC_WAITPOINT_HMAC_SECRET",
-                "00000000000000000000000000000000000000000000000000000000000000aa",
-            )
-            .env("CAIRN_FABRIC_WAITPOINT_HMAC_KID", "cairn-test-k1")
-            // Silence noisy tracing so stderr is dominated by structured
-            // startup lines; integration tests don't need debug spam.
-            .env("RUST_LOG", "warn,cairn_app=info")
-            // Avoid inheriting the parent test process's log-dir setting.
-            .env_remove("CAIRN_LOG_DIR")
-            .stdout(Stdio::null())
-            .stderr(Stdio::piped())
-            .kill_on_drop(true);
-
-        let mut child = cmd
-            .spawn()
-            .expect("failed to spawn cairn-app binary — did cargo build it?");
-
-        // 5. Scrape bound port off stderr banner: `cairn-app listening on http://127.0.0.1:<port>`.
-        let stderr = child.stderr.take().expect("piped stderr present");
-        let bound_url = timeout(STARTUP_TIMEOUT, wait_for_listening(stderr))
-            .await
-            .expect("cairn-app did not print listening banner within timeout")
-            .expect("cairn-app exited before printing listening banner");
+        // 4. Spawn the real binary on port 0 (OS-assigned).
+        let child =
+            spawn_subprocess_internal(0, &seed_admin, &suffix, &valkey_host, valkey_port, &storage);
+        let (child, bound_url) = read_listening_banner(child).await;
 
         // Team mode forces the listener to bind 0.0.0.0 so tests can't dial
         // that directly on every platform. Rewrite to loopback for client
         // requests — same port, always routable.
         let base_url = bound_url.replace("0.0.0.0", "127.0.0.1");
+        let port = parse_port(&base_url);
 
-        // 6. Rotate admin token. This both exercises the real operator
-        //    flow and narrows the window in which the seed token exists.
+        // 5. Rotate admin token. Both exercises the real operator flow and
+        //    narrows the window in which the seed token exists.
         let client = reqwest::Client::builder()
             .timeout(Duration::from_secs(10))
             .build()
@@ -151,6 +154,11 @@ impl LiveHarness {
             project,
             child: Some(child),
             client,
+            port,
+            suffix,
+            valkey_host,
+            valkey_port,
+            storage,
         }
     }
 
@@ -167,6 +175,102 @@ impl LiveHarness {
             ("X-Cairn-Project", self.project.clone()),
         ]
     }
+
+    /// Send SIGKILL to the subprocess and wait for exit. The harness's
+    /// port/token/scope fields are intentionally NOT cleared — `restart()`
+    /// uses them to re-spawn. Panics if the child doesn't exit within 5 s,
+    /// since a process that refuses SIGKILL is a bug we want to surface
+    /// loudly rather than paper over.
+    pub async fn sigkill(&mut self) -> std::io::Result<()> {
+        let Some(mut child) = self.child.take() else {
+            return Ok(());
+        };
+        child.start_kill()?;
+        match timeout(Duration::from_secs(5), child.wait()).await {
+            Ok(res) => {
+                res?;
+                Ok(())
+            }
+            Err(_) => panic!("cairn-app subprocess did not exit within 5s of SIGKILL"),
+        }
+    }
+
+    /// Spawn a fresh cairn-app subprocess bound to the SAME port, scope,
+    /// Valkey, and SQLite file as the original. Seeds `CAIRN_ADMIN_TOKEN`
+    /// with the already-rotated token so `self.admin_token` remains valid
+    /// without needing another rotation round-trip.
+    ///
+    /// The OS may hold the previous listener's port in TIME_WAIT briefly;
+    /// we spin on connect for up to 3 s waiting for the new subprocess to
+    /// bind, then panic if it still isn't ready.
+    pub async fn restart(&mut self) -> std::io::Result<()> {
+        let child = spawn_subprocess_internal(
+            self.port,
+            // The new subprocess starts with the already-rotated token as
+            // its admin token. No re-rotation needed.
+            &self.admin_token,
+            &self.suffix,
+            &self.valkey_host,
+            self.valkey_port,
+            &self.storage,
+        );
+        let (child, bound_url) = read_listening_banner(child).await;
+        let base_url = bound_url.replace("0.0.0.0", "127.0.0.1");
+        assert_eq!(
+            parse_port(&base_url),
+            self.port,
+            "restart bound to unexpected port: {base_url} (expected {})",
+            self.port,
+        );
+        self.child = Some(child);
+
+        // Spin on `/health/ready` (not `/health`) so we wait for the full
+        // init graph — event-log replay, FF engine startup, etc. — rather
+        // than just the HTTP listener.
+        if !self
+            .poll_readiness_until_ready(Duration::from_secs(3))
+            .await
+        {
+            panic!("restarted cairn-app did not become ready within 3s");
+        }
+        Ok(())
+    }
+
+    /// Convenience: `sigkill()` followed by `restart()`.
+    pub async fn sigkill_and_restart(&mut self) -> std::io::Result<()> {
+        self.sigkill().await?;
+        self.restart().await
+    }
+
+    /// Poll `url` every 100 ms until the response status equals
+    /// `expected_status` or `timeout_dur` expires. Returns `true` on match.
+    pub async fn poll_status_until(
+        &self,
+        url: &str,
+        expected_status: StatusCode,
+        timeout_dur: Duration,
+    ) -> bool {
+        let deadline = Instant::now() + timeout_dur;
+        while Instant::now() < deadline {
+            if let Ok(res) = self.client.get(url).send().await {
+                if res.status() == expected_status {
+                    return true;
+                }
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+        false
+    }
+
+    /// Convenience: poll `/health/ready` expecting 200.
+    pub async fn poll_readiness_until_ready(&self, timeout_dur: Duration) -> bool {
+        self.poll_status_until(
+            &format!("{}/health/ready", self.base_url),
+            StatusCode::OK,
+            timeout_dur,
+        )
+        .await
+    }
 }
 
 impl Drop for LiveHarness {
@@ -174,7 +278,79 @@ impl Drop for LiveHarness {
         // `kill_on_drop(true)` already handles the SIGKILL; taking the
         // child here prevents the default `Drop` from double-logging.
         drop(self.child.take());
+        // Best-effort SQLite temp-file cleanup. Ignore errors — the file
+        // may already be gone or the OS may be holding it. Use `OsString`
+        // append rather than `path.display()` so non-UTF8 paths (rare on
+        // Linux test runners but possible anywhere) still clean up.
+        if let HarnessStorage::Sqlite(path) = &self.storage {
+            let _ = std::fs::remove_file(path);
+            for suffix in ["-wal", "-shm"] {
+                let mut sidecar = path.as_os_str().to_os_string();
+                sidecar.push(suffix);
+                let _ = std::fs::remove_file(std::path::PathBuf::from(sidecar));
+            }
+        }
     }
+}
+
+/// Spawn a cairn-app subprocess with the given port and config. Returns
+/// a live `Child` with `stderr` piped — caller must drain stderr via
+/// [`read_listening_banner`] to extract the bound URL.
+fn spawn_subprocess_internal(
+    port: u16,
+    admin_token: &str,
+    suffix: &str,
+    valkey_host: &str,
+    valkey_port: u16,
+    storage: &HarnessStorage,
+) -> Child {
+    let bin = env!("CARGO_BIN_EXE_cairn-app");
+    let mut cmd = Command::new(bin);
+    cmd.arg("--mode")
+        .arg("team")
+        .arg("--port")
+        .arg(port.to_string())
+        .arg("--addr")
+        .arg("127.0.0.1")
+        .arg("--db")
+        .arg(storage.db_arg())
+        .env("CAIRN_FABRIC_HOST", valkey_host)
+        .env("CAIRN_FABRIC_PORT", valkey_port.to_string())
+        // Unique FF lane so this test's worker queues don't pick up
+        // tasks from sibling tests.
+        .env("CAIRN_FABRIC_LANE", format!("test-{suffix}"))
+        .env("CAIRN_FABRIC_WORKER_ID", format!("worker-{suffix}"))
+        .env("CAIRN_FABRIC_INSTANCE_ID", format!("instance-{suffix}"))
+        .env("CAIRN_ADMIN_TOKEN", admin_token)
+        // Waitpoint HMAC: required by FabricConfig to avoid shipping a
+        // runtime that would reject every ff_suspend_execution.
+        .env(
+            "CAIRN_FABRIC_WAITPOINT_HMAC_SECRET",
+            "00000000000000000000000000000000000000000000000000000000000000aa",
+        )
+        .env("CAIRN_FABRIC_WAITPOINT_HMAC_KID", "cairn-test-k1")
+        // Silence noisy tracing so stderr is dominated by structured
+        // startup lines; integration tests don't need debug spam.
+        .env("RUST_LOG", "warn,cairn_app=info")
+        // Avoid inheriting the parent test process's log-dir setting.
+        .env_remove("CAIRN_LOG_DIR")
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .kill_on_drop(true);
+
+    cmd.spawn()
+        .expect("failed to spawn cairn-app binary — did cargo build it?")
+}
+
+/// Take `stderr` off the child, scan for the listening banner, return the
+/// child (with its stderr now background-drained) plus the bound URL.
+async fn read_listening_banner(mut child: Child) -> (Child, String) {
+    let stderr = child.stderr.take().expect("piped stderr present");
+    let bound_url = timeout(STARTUP_TIMEOUT, wait_for_listening(stderr))
+        .await
+        .expect("cairn-app did not print listening banner within timeout")
+        .expect("cairn-app exited before printing listening banner");
+    (child, bound_url)
 }
 
 /// Read stderr line-by-line until we see the cairn-app startup banner.
@@ -202,4 +378,13 @@ async fn wait_for_listening(stderr: tokio::process::ChildStderr) -> Option<Strin
         }
     }
     None
+}
+
+/// Extract the port from a base URL of the form `http://host:port`.
+fn parse_port(base_url: &str) -> u16 {
+    base_url
+        .rsplit(':')
+        .next()
+        .and_then(|s| s.trim_end_matches('/').parse().ok())
+        .unwrap_or_else(|| panic!("could not parse port from base_url: {base_url}"))
 }
