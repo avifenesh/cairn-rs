@@ -83,11 +83,10 @@ pub(crate) fn default_project_scope(params: &HashMap<String, String>) -> cairn_d
 /// The response is `{ "decision_id": ..., "outcome": ..., "source": ..., "cached": bool }`.
 pub(crate) async fn evaluate_decision_handler(
     State(state): State<Arc<AppState>>,
+    Extension(principal_auth): Extension<AuthPrincipal>,
     Json(body): Json<serde_json::Value>,
 ) -> impl IntoResponse {
-    use cairn_domain::decisions::{
-        DecisionKind, DecisionRequest, DecisionSource, DecisionSubject, Principal, ToolEffect,
-    };
+    use cairn_domain::decisions::{DecisionKind, DecisionRequest, DecisionSubject, Principal};
     use cairn_domain::ids::CorrelationId;
 
     // ── kind (required) ──────────────────────────────────────────────────
@@ -136,13 +135,23 @@ pub(crate) async fn evaluate_decision_handler(
         _ => return bad_request_response("'kind' must be a string or object"),
     };
 
-    // ── principal (optional, default System) ─────────────────────────────
+    // ── principal ────────────────────────────────────────────────────────
+    // Caller-supplied principal is allowed for backwards-compatibility
+    // (e.g. the orchestrator re-POSTing its own `Principal::Run` from a
+    // host-internal call), but when omitted we derive it from the
+    // authenticated `AuthPrincipal` so operator calls are not silently
+    // recorded as `Principal::System`.
     let principal: Principal = match body.get("principal") {
         Some(p) => match serde_json::from_value(p.clone()) {
             Ok(p) => p,
             Err(e) => return bad_request_response(format!("invalid 'principal': {e}")),
         },
-        None => Principal::System,
+        None => match &principal_auth {
+            AuthPrincipal::Operator { operator_id, .. } => Principal::Operator {
+                operator_id: operator_id.clone(),
+            },
+            AuthPrincipal::ServiceAccount { .. } | AuthPrincipal::System => Principal::System,
+        },
     };
 
     // ── subject (optional, derive from kind when absent) ─────────────────
@@ -167,6 +176,12 @@ pub(crate) async fn evaluate_decision_handler(
     };
 
     // ── scope ────────────────────────────────────────────────────────────
+    // RFC 008 scope ownership: the request's tenant/workspace/project MUST
+    // match the authenticated principal's tenant. Anything else would let
+    // a caller write cached decisions under another tenant's scope —
+    // cross-tenant cache pollution. System principal (no tenant binding)
+    // is allowed to target any tenant — it's the runtime itself, not a
+    // user-driven request.
     let params: HashMap<String, String> = body
         .as_object()
         .map(|o| {
@@ -176,6 +191,20 @@ pub(crate) async fn evaluate_decision_handler(
         })
         .unwrap_or_default();
     let scope = default_project_scope(&params);
+    if let Some(tenant) = principal_auth.tenant() {
+        if scope.tenant_id.as_str() != tenant.tenant_id.as_str() {
+            return AppApiError::new(
+                StatusCode::FORBIDDEN,
+                "scope_forbidden",
+                format!(
+                    "caller tenant '{}' cannot evaluate decisions under tenant '{}'",
+                    tenant.tenant_id,
+                    scope.tenant_id.as_str()
+                ),
+            )
+            .into_response();
+        }
+    }
 
     // ── correlation_id ───────────────────────────────────────────────────
     let correlation_id = body
@@ -191,10 +220,6 @@ pub(crate) async fn evaluate_decision_handler(
                     .unwrap_or(0)
             ))
         });
-
-    // Default sensible tool_name for observational tool calls so policy
-    // lookup hits `tool_invocation:observational` (AlwaysCache).
-    let _ = ToolEffect::Observational;
 
     let request = DecisionRequest {
         kind,
@@ -246,10 +271,7 @@ pub(crate) async fn evaluate_decision_handler(
             )
                 .into_response()
         }
-        Err(e) => {
-            let _ = DecisionSource::FreshEvaluation;
-            decision_error_response(e)
-        }
+        Err(e) => decision_error_response(e),
     }
 }
 
