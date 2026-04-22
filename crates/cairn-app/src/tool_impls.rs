@@ -455,23 +455,29 @@ pub fn build_full_tool_registry(
     base: &BuiltinToolRegistry,
     working_dir: std::path::PathBuf,
 ) -> BuiltinToolRegistry {
-    use cairn_tools::builtins::{
-        BashTool, FileReadTool, FileWriteTool, GlobFindTool, GrepSearchTool, ScratchPadTool,
-        ToolSearchTool, WebFetchTool,
+    use cairn_harness_tools::{
+        HarnessBash, HarnessBashKill, HarnessBashOutput, HarnessBuiltin, HarnessEdit, HarnessGlob,
+        HarnessGrep, HarnessMultiEdit, HarnessRead, HarnessWebFetch, HarnessWrite,
     };
+    use cairn_tools::builtins::{ScratchPadTool, ToolSearchTool};
+    let _ = working_dir; // harness tools use ToolContext.working_dir at exec time.
 
     // Inner registry: all Core tools (listed upfront in prompt).
     let inner = Arc::new(
         BuiltinToolRegistry::from_existing(base)
-            // File operations
-            .register(Arc::new(FileReadTool::new(working_dir.clone())))
-            .register(Arc::new(FileWriteTool::new(working_dir)))
-            .register(Arc::new(GlobFindTool))
-            .register(Arc::new(GrepSearchTool))
-            // Shell — agents invoke git/gh CLI through bash
-            .register(Arc::new(BashTool))
-            // Utilities
-            .register(Arc::new(WebFetchTool::default()))
+            // File operations — backed by @agent-sh/harness-*.
+            .register(Arc::new(HarnessBuiltin::<HarnessRead>::new()))
+            .register(Arc::new(HarnessBuiltin::<HarnessWrite>::new()))
+            .register(Arc::new(HarnessBuiltin::<HarnessEdit>::new()))
+            .register(Arc::new(HarnessBuiltin::<HarnessMultiEdit>::new()))
+            .register(Arc::new(HarnessBuiltin::<HarnessGlob>::new()))
+            .register(Arc::new(HarnessBuiltin::<HarnessGrep>::new()))
+            // Shell — agents invoke git/gh CLI through bash.
+            .register(Arc::new(HarnessBuiltin::<HarnessBash>::new()))
+            .register(Arc::new(HarnessBuiltin::<HarnessBashOutput>::new()))
+            .register(Arc::new(HarnessBuiltin::<HarnessBashKill>::new()))
+            // Utilities.
+            .register(Arc::new(HarnessBuiltin::<HarnessWebFetch>::new()))
             .register(Arc::new(ScratchPadTool::new())),
     );
 

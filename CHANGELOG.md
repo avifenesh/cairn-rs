@@ -9,8 +9,32 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- **`cairn-harness-tools` crate** — adapter bridging the `@agent-sh/harness-*`
+  Rust crates into cairn's `ToolHandler` surface. Ten built-in tools are
+  now backed by the upstream harness implementations:
+  `bash`, `bash_output`, `bash_kill` (from `harness-bash`);
+  `read` (from `harness-read`); `grep` (from `harness-grep`);
+  `glob` (from `harness-glob`); `write`, `edit`, `multiedit`
+  (from `harness-write`); and `webfetch` (from `harness-webfetch`).
+  This replaces cairn's in-house implementations of file I/O, shell
+  exec, search, and web fetch with battle-tested upstream code while
+  keeping cairn's permission / approval / RFC-018 classification pipeline
+  intact.
+- `ToolError::HarnessError { code, message, meta }` variant — structured
+  pass-through for `harness_core::ToolErrorCode` (37 stable codes) so
+  orchestrator retry / cache logic can pattern-match on the failure
+  reason rather than string-parse the message.
+
 ### Removed
 
+- **Replaced by harness-tools**: `cairn_tools::FileReadTool`,
+  `FileWriteTool`, `GrepSearchTool`, `GlobFindTool`, `WebFetchTool`,
+  `BashTool`. Callers should use
+  `cairn_harness_tools::HarnessBuiltin::<cairn_harness_tools::HarnessX>::new()`
+  instead. `HttpRequestTool` is preserved — its shape (arbitrary
+  methods, JSON bodies) differs enough from `webfetch` to keep both.
 - Built-in `git_operations` tool and the four `gh_*` CLI-wrapper tools
   (`gh_list_issues`, `gh_get_issue`, `gh_create_comment`, `gh_search_code`).
   Agents now invoke `git` and `gh` CLI directly through the renamed

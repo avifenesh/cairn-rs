@@ -13,20 +13,17 @@
 //! the result is a list of Deferred descriptors that get injected into the
 //! *next* iteration's prompt.
 
-pub mod bash;
+// Note: bash, file_read, file_write, glob_find, grep_search, web_fetch
+// were removed in favor of cairn-harness-tools (PR #C).
 pub mod calculate;
 pub mod cancel_task;
 pub mod create_task;
 pub mod eval_score;
-pub mod file_read;
-pub mod file_write;
 pub mod get_approvals;
 pub mod get_run;
 pub mod get_task;
 pub mod github_api;
-pub mod glob_find;
 pub mod graph_query;
-pub mod grep_search;
 pub mod http_request;
 pub mod json_extract;
 pub mod list_runs;
@@ -41,7 +38,6 @@ pub mod summarize_text;
 pub mod tool_search;
 pub mod update_memory;
 pub mod wait_for_task;
-pub mod web_fetch;
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -53,13 +49,10 @@ use cairn_domain::{policy::ExecutionClass, ProjectKey, RuntimeEvent};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-pub use bash::BashTool;
 pub use calculate::CalculateTool;
 pub use cancel_task::CancelTaskTool;
 pub use create_task::CreateTaskTool;
 pub use eval_score::EvalScoreTool;
-pub use file_read::FileReadTool;
-pub use file_write::FileWriteTool;
 pub use get_approvals::GetApprovalsTool;
 pub use get_run::GetRunTool;
 pub use get_task::GetTaskTool;
@@ -67,9 +60,7 @@ pub use github_api::{
     GhApiCreateBranchTool, GhApiCreatePrTool, GhApiListContentsTool, GhApiMergePrTool,
     GhApiReadFileTool, GhApiWriteFileTool, GitHubClientProvider,
 };
-pub use glob_find::GlobFindTool;
 pub use graph_query::GraphQueryTool;
-pub use grep_search::GrepSearchTool;
 pub use http_request::HttpRequestTool;
 pub use json_extract::JsonExtractTool;
 pub use list_runs::ListRunsTool;
@@ -84,7 +75,6 @@ pub use summarize_text::SummarizeTextTool;
 pub use tool_search::ToolSearchTool;
 pub use update_memory::{DeleteFn, DeleteMemoryTool, ReingestFn, UpdateMemoryTool};
 pub use wait_for_task::WaitForTaskTool;
-pub use web_fetch::WebFetchTool;
 
 // ── ToolTier ──────────────────────────────────────────────────────────────────
 
@@ -281,6 +271,17 @@ pub enum ToolError {
     Cancelled,
     /// Tool exceeded its wall-clock budget.
     TimedOut,
+    /// Structured failure produced by a `@agent-sh/harness-*` tool.
+    ///
+    /// Introduced with the harness-tools adapter (PR #C). Carries the
+    /// harness stable error code and structured meta payload through the
+    /// orchestrator so retry / cache logic can pattern-match on
+    /// `ToolErrorCode` rather than string-parse the message.
+    HarnessError {
+        code: harness_core::ToolErrorCode,
+        message: String,
+        meta: Option<serde_json::Value>,
+    },
 }
 
 impl std::fmt::Display for ToolError {
@@ -293,6 +294,9 @@ impl std::fmt::Display for ToolError {
             ToolError::Permanent(m) => write!(f, "permanent error: {}", m),
             ToolError::Cancelled => write!(f, "cancelled"),
             ToolError::TimedOut => write!(f, "timed out"),
+            ToolError::HarnessError { code, message, .. } => {
+                write!(f, "Error [{}]: {}", code.as_str(), message)
+            }
         }
     }
 }

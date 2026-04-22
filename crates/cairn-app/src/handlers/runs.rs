@@ -1630,13 +1630,16 @@ pub(crate) async fn orchestrate_run_handler(
     use cairn_runtime::services::{
         ApprovalServiceImpl, CheckpointServiceImpl, MailboxServiceImpl, ToolInvocationServiceImpl,
     };
+    use cairn_harness_tools::{
+        HarnessBash, HarnessBashKill, HarnessBashOutput, HarnessBuiltin, HarnessEdit, HarnessGlob,
+        HarnessGrep, HarnessMultiEdit, HarnessRead, HarnessWebFetch, HarnessWrite,
+    };
     use cairn_tools::{
-        BashTool, BuiltinToolRegistry, CalculateTool, CancelTaskTool, CreateTaskTool, FileReadTool,
-        FileWriteTool, GetApprovalsTool, GetRunTool, GetTaskTool, GlobFindTool, GraphQueryTool,
-        GrepSearchTool, HttpRequestTool, JsonExtractTool, ListRunsTool, MemorySearchTool,
-        MemoryStoreTool, NotificationSink, NotifyOperatorTool, ResolveApprovalTool,
-        ScheduleTaskTool, ScratchPadTool, SearchEventsTool, SummarizeTextTool, ToolSearchTool,
-        WaitForTaskTool, WebFetchTool,
+        BuiltinToolRegistry, CalculateTool, CancelTaskTool, CreateTaskTool, GetApprovalsTool,
+        GetRunTool, GetTaskTool, GraphQueryTool, HttpRequestTool, JsonExtractTool, ListRunsTool,
+        MemorySearchTool, MemoryStoreTool, NotificationSink, NotifyOperatorTool,
+        ResolveApprovalTool, ScheduleTaskTool, ScratchPadTool, SearchEventsTool, SummarizeTextTool,
+        ToolSearchTool, WaitForTaskTool,
     };
 
     let run_id = RunId::new(run_id_str);
@@ -1870,14 +1873,15 @@ pub(crate) async fn orchestrate_run_handler(
             Arc::new(ApprovalServiceImpl::new(store_ref.clone()));
 
         // ── Observational tools ─────────────────────────────────────────────
+        let _ = &workspace_root; // harness tools use ToolContext.working_dir at exec time.
         let web_fetch: std::sync::Arc<dyn cairn_tools::ToolHandler> =
-            std::sync::Arc::new(WebFetchTool::default());
+            std::sync::Arc::new(HarnessBuiltin::<HarnessWebFetch>::new());
         let grep_search: std::sync::Arc<dyn cairn_tools::ToolHandler> =
-            std::sync::Arc::new(GrepSearchTool);
+            std::sync::Arc::new(HarnessBuiltin::<HarnessGrep>::new());
         let file_read: std::sync::Arc<dyn cairn_tools::ToolHandler> =
-            std::sync::Arc::new(FileReadTool::new(workspace_root.clone()));
+            std::sync::Arc::new(HarnessBuiltin::<HarnessRead>::new());
         let glob_find: std::sync::Arc<dyn cairn_tools::ToolHandler> =
-            std::sync::Arc::new(GlobFindTool);
+            std::sync::Arc::new(HarnessBuiltin::<HarnessGlob>::new());
         let json_extract: std::sync::Arc<dyn cairn_tools::ToolHandler> =
             std::sync::Arc::new(JsonExtractTool);
         let calculate: std::sync::Arc<dyn cairn_tools::ToolHandler> =
@@ -1901,7 +1905,11 @@ pub(crate) async fn orchestrate_run_handler(
         let scratch_pad: std::sync::Arc<dyn cairn_tools::ToolHandler> =
             std::sync::Arc::new(ScratchPadTool::new());
         let file_write: std::sync::Arc<dyn cairn_tools::ToolHandler> =
-            std::sync::Arc::new(FileWriteTool::new(workspace_root.clone()));
+            std::sync::Arc::new(HarnessBuiltin::<HarnessWrite>::new());
+        let edit_tool: std::sync::Arc<dyn cairn_tools::ToolHandler> =
+            std::sync::Arc::new(HarnessBuiltin::<HarnessEdit>::new());
+        let multi_edit_tool: std::sync::Arc<dyn cairn_tools::ToolHandler> =
+            std::sync::Arc::new(HarnessBuiltin::<HarnessMultiEdit>::new());
         let create_task: std::sync::Arc<dyn cairn_tools::ToolHandler> =
             std::sync::Arc::new(CreateTaskTool::new(task_svc.clone()));
         let cancel_task: std::sync::Arc<dyn cairn_tools::ToolHandler> =
@@ -1910,7 +1918,12 @@ pub(crate) async fn orchestrate_run_handler(
             std::sync::Arc::new(SummarizeTextTool::new(brain.clone(), model_id.clone()));
 
         // ── External tools ──────────────────────────────────────────────────
-        let bash: std::sync::Arc<dyn cairn_tools::ToolHandler> = std::sync::Arc::new(BashTool);
+        let bash: std::sync::Arc<dyn cairn_tools::ToolHandler> =
+            std::sync::Arc::new(HarnessBuiltin::<HarnessBash>::new());
+        let bash_output: std::sync::Arc<dyn cairn_tools::ToolHandler> =
+            std::sync::Arc::new(HarnessBuiltin::<HarnessBashOutput>::new());
+        let bash_kill: std::sync::Arc<dyn cairn_tools::ToolHandler> =
+            std::sync::Arc::new(HarnessBuiltin::<HarnessBashKill>::new());
         let http_request: std::sync::Arc<dyn cairn_tools::ToolHandler> =
             std::sync::Arc::new(HttpRequestTool);
         // git / gh CLI access goes through `bash` — no dedicated wrappers.
@@ -1943,11 +1956,15 @@ pub(crate) async fn orchestrate_run_handler(
                 // Internal
                 .register(scratch_pad.clone())
                 .register(file_write.clone())
+                .register(edit_tool.clone())
+                .register(multi_edit_tool.clone())
                 .register(create_task.clone())
                 .register(cancel_task.clone())
                 .register(summarize_text.clone())
                 // External
                 .register(bash.clone())
+                .register(bash_output.clone())
+                .register(bash_kill.clone())
                 .register(std::sync::Arc::new(NotifyOperatorTool::new(
                     Some(mailbox_svc.clone()),
                     sse_sink.clone(),
