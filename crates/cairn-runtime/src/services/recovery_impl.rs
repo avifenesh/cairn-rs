@@ -25,8 +25,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use async_trait::async_trait;
 use cairn_domain::{
-    ApprovalDecision, BootId, FailureClass, ResumeTrigger, RunRecoveryOutcome, RunRecoverySummary,
-    RunState, RunStateChanged, RuntimeEvent, StateTransition,
+    ApprovalDecision, ApprovalId, ApprovalRequested, ApprovalRequirement, BootId, FailureClass,
+    ResumeTrigger, RunRecoveryOutcome, RunRecoverySummary, RunState, RunStateChanged, RuntimeEvent,
+    StateTransition,
 };
 use cairn_domain::{RecoveryAttempted, RecoveryCompleted};
 use cairn_store::projections::{
@@ -83,6 +84,27 @@ const APPROVAL_SCAN_LIMIT: usize = 50_000;
 /// "Running / Sandbox missing".
 pub type SandboxLostRun = (cairn_domain::RunId, cairn_domain::ProjectKey);
 
+/// Runs whose bound sandbox is preserved because the project's repo
+/// allowlist no longer authorises the sandbox's repo.
+///
+/// Produced by `SandboxService::recover_all` (the workspace layer knows
+/// about allowlist state), consumed by [`RecoveryService::recover_all`]
+/// (the runtime layer synthesises the operator approval). Each entry MUST
+/// cause the run-recovery sweep to transition the bound run to
+/// `WaitingApproval` with a fresh `ApprovalRequested{requirement:Required}`
+/// asking the operator to re-grant or cancel, per RFC 020 §"Run recovery
+/// matrix" row "Running / Sandbox preserved: AllowlistRevoked".
+///
+/// The third element carries the canonical `owner/repo` string rather
+/// than a workspace-crate `RepoId` so this type stays a pure
+/// `cairn-runtime` concept; `cairn-app` passes it through without
+/// needing to import the workspace-scoped newtype here.
+pub type AllowlistRevokedRun = (
+    cairn_domain::RunId,
+    cairn_domain::ProjectKey,
+    /* repo_id = */ String,
+);
+
 #[async_trait]
 pub trait RecoveryService: Send + Sync {
     /// Sweep every non-terminal run and emit the appropriate recovery events.
@@ -97,10 +119,18 @@ pub trait RecoveryService: Send + Sync {
     /// sandboxes were detected as missing during the preceding sandbox
     /// recovery sweep. Default implementations MUST transition each such
     /// run to `Failed` with `reason: sandbox_lost` before returning.
+    ///
+    /// `allowlist_revoked_runs` carries `(run_id, project, repo_id)`
+    /// triples whose bound sandboxes are preserved because the project
+    /// allowlist no longer authorises the bound repo. Default
+    /// implementations MUST transition each such run to `WaitingApproval`
+    /// with a synthesized `ApprovalRequested{requirement:Required}`
+    /// asking the operator to re-grant or cancel.
     async fn recover_all(
         &self,
         boot_id: &BootId,
         sandbox_lost_runs: &[SandboxLostRun],
+        allowlist_revoked_runs: &[AllowlistRevokedRun],
     ) -> Result<RunRecoverySummary, RuntimeError>;
 }
 
@@ -128,6 +158,7 @@ where
         &self,
         boot_id: &BootId,
         sandbox_lost_runs: &[SandboxLostRun],
+        allowlist_revoked_runs: &[AllowlistRevokedRun],
     ) -> Result<RunRecoverySummary, RuntimeError> {
         let mut summary = RunRecoverySummary {
             boot_id: Some(boot_id.as_str().to_owned()),
@@ -203,6 +234,110 @@ where
             )));
         }
 
+        // RFC 020 §"Run recovery matrix" — `AllowlistRevoked` row. For
+        // each `(run, project, repo)` triple, emit:
+        //   1. `RecoveryAttempted{reason:"sandbox_allowlist_revoked"}`
+        //   2. `ApprovalRequested{requirement:Required}` synthesizing an
+        //      approval for the operator — the sandbox is preserved on
+        //      disk but the repo binding needs re-grant before the run
+        //      can resume.
+        //   3. `RunStateChanged(Running → WaitingApproval)` — only when
+        //      the run is currently Running (the state machine permits
+        //      this transition; see `can_transition_run_state`). A run
+        //      that is already Failed / terminal gets the audit trail
+        //      but not the transition.
+        //   4. `RecoveryCompleted{recovered:true}` — the sandbox is
+        //      preserved and the run is gated on operator action, which
+        //      is a well-defined state per the matrix.
+        //
+        // The approval_id is derived deterministically from `run_id` so
+        // that re-running recovery (e.g. a boot that crashed before its
+        // event append committed) does not synthesise a duplicate
+        // approval — the store's approval projection upserts on
+        // `approval_id`.
+        let mut allowlist_revoked_handled: std::collections::HashSet<cairn_domain::RunId> =
+            std::collections::HashSet::new();
+        for (run_id, project, repo_id) in allowlist_revoked_runs {
+            if !allowlist_revoked_handled.insert(run_id.clone()) {
+                continue;
+            }
+            // Guard against the same run appearing in both sandbox_lost
+            // and allowlist_revoked lists — only possible on a badly
+            // seeded test, but defend against it anyway. A run that is
+            // already being failed out for sandbox_lost must not also
+            // receive an approval for a repo it will never touch.
+            if sandbox_lost_handled.contains(run_id) {
+                continue;
+            }
+            let current = RunReadModel::get(self.store.as_ref(), run_id).await?;
+            let from_state = current.as_ref().map(|r| r.state);
+            sandbox_lost_events.push(make_envelope(RuntimeEvent::RecoveryAttempted(
+                RecoveryAttempted {
+                    project: project.clone(),
+                    run_id: Some(run_id.clone()),
+                    task_id: None,
+                    reason: format!(
+                        "sandbox_allowlist_revoked: repo {repo_id} no longer allowlisted; \
+                         synthesizing approval for operator re-grant",
+                    ),
+                    boot_id: Some(boot_id.as_str().to_owned()),
+                },
+            )));
+            // Synthesise the approval. The title/description explain the
+            // situation so the operator UI renders something actionable.
+            let approval_id =
+                ApprovalId::new(format!("approval-allowlist-revoked-{}", run_id.as_str()));
+            sandbox_lost_events.push(make_envelope(RuntimeEvent::ApprovalRequested(
+                ApprovalRequested {
+                    project: project.clone(),
+                    approval_id,
+                    run_id: Some(run_id.clone()),
+                    task_id: None,
+                    requirement: ApprovalRequirement::Required,
+                    title: Some(format!("Re-grant repo access: {repo_id}",)),
+                    description: Some(format!(
+                        "Run `{}` was paused at boot because its sandbox is bound to \
+                         repo `{}`, which is no longer on this project's allowlist. \
+                         Approve to re-grant and resume, or reject to cancel the run.",
+                        run_id.as_str(),
+                        repo_id,
+                    )),
+                },
+            )));
+            if let Some(from) = from_state {
+                if !from.is_terminal()
+                    && cairn_domain::can_transition_run_state(from, RunState::WaitingApproval)
+                {
+                    sandbox_lost_events.push(make_envelope(RuntimeEvent::RunStateChanged(
+                        RunStateChanged {
+                            project: project.clone(),
+                            run_id: run_id.clone(),
+                            transition: StateTransition {
+                                from: Some(from),
+                                to: RunState::WaitingApproval,
+                            },
+                            failure_class: None,
+                            pause_reason: None,
+                            resume_trigger: None,
+                        },
+                    )));
+                    summary.advanced_runs += 1;
+                    summary.outcomes.push(RunRecoveryOutcome::Advanced {
+                        run_id: run_id.clone(),
+                    });
+                }
+            }
+            sandbox_lost_events.push(make_envelope(RuntimeEvent::RecoveryCompleted(
+                RecoveryCompleted {
+                    project: project.clone(),
+                    run_id: Some(run_id.clone()),
+                    task_id: None,
+                    recovered: true,
+                    boot_id: Some(boot_id.as_str().to_owned()),
+                },
+            )));
+        }
+
         // Enumerate every non-terminal run state listed in RFC 020's matrix.
         // `Pending` is intentionally excluded — a run that never transitioned
         // out of Pending has no side-effects to reassert.
@@ -243,7 +378,10 @@ where
         // the projection `runs` vector still reflects pre-transition state.
         let runs: Vec<RunRecord> = runs
             .into_iter()
-            .filter(|r| !sandbox_lost_handled.contains(&r.run_id))
+            .filter(|r| {
+                !sandbox_lost_handled.contains(&r.run_id)
+                    && !allowlist_revoked_handled.contains(&r.run_id)
+            })
             .collect();
         summary.scanned_runs = (runs.len() as u32).saturating_add(summary.failed_runs);
         for run in runs {

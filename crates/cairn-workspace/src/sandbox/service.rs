@@ -6,14 +6,15 @@ use std::sync::{Arc, Mutex, RwLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use cairn_domain::{
-    CheckpointKind, DestroyReason, OnExhaustion, PreservationReason, ProjectKey, ResourceDimension,
-    RunId, TaskId,
+    CheckpointKind, DestroyReason, OnExhaustion, PreservationReason, ProjectKey, RepoAccessContext,
+    ResourceDimension, RunId, TaskId,
 };
 
 use crate::error::WorkspaceError;
 use crate::providers::SandboxProvider;
+use crate::repo_store::access_service::ProjectRepoAccessService;
 use crate::sandbox::{
-    DestroyResult, ProvisionedSandbox, SandboxCheckpoint, SandboxErrorKind, SandboxEvent,
+    DestroyResult, ProvisionedSandbox, RepoId, SandboxCheckpoint, SandboxErrorKind, SandboxEvent,
     SandboxMetadata, SandboxPolicy, SandboxState, SandboxStrategy, SandboxStrategyRequest,
 };
 
@@ -109,6 +110,17 @@ pub struct SandboxRecoverySummary {
     /// readiness reporting and is always equal to `lost_runs.len()`.
     pub lost: u32,
     pub lost_runs: Vec<(RunId, ProjectKey)>,
+    /// RFC 020 §"Run recovery matrix": registry entries for
+    /// `SandboxBase::Repo` sandboxes whose bound repo is no longer on the
+    /// project's allowlist at recovery time. `allowlist_revoked_runs`
+    /// carries `(run_id, project, repo_id)` so the run-level
+    /// `RecoveryService` can transition each bound run to
+    /// `WaitingApproval` with a synthesized approval asking the operator
+    /// to re-grant or cancel (per the `AllowlistRevoked` matrix row).
+    /// `preserved_allowlist_revoked` is always equal to
+    /// `allowlist_revoked_runs.len()`.
+    pub preserved_allowlist_revoked: u32,
+    pub allowlist_revoked_runs: Vec<(RunId, ProjectKey, RepoId)>,
 }
 
 /// Directory name (relative to `base_dir`) holding the recovery registry —
@@ -142,6 +154,26 @@ struct RegistryEntry {
     /// Unix-ms timestamp for operator forensics. Not consumed by the
     /// recovery matrix.
     registered_at: u64,
+    /// Bound repo for `SandboxBase::Repo` sandboxes. When `Some`, the
+    /// allowlist-revoked recovery sweep looks this repo up in
+    /// `ProjectRepoAccessService`; if the repo is no longer allowed
+    /// under `project`, the sweep emits `SandboxAllowlistRevoked` and
+    /// preserves the sandbox. `None` for `SandboxBase::Empty` and
+    /// `SandboxBase::Directory` — those bases have no allowlist semantics.
+    /// Backward-compat: older registry sidecars written before the
+    /// allowlist sweep existed deserialize to `None`, which disables the
+    /// check for them (indistinguishable from a non-repo base).
+    #[serde(default)]
+    repo_id: Option<RepoId>,
+    /// Tombstone flag: `true` once the allowlist-revoked sweep has emitted
+    /// `SandboxAllowlistRevoked` for this entry. Prevents re-emission
+    /// across subsequent boots — the sandbox is `Preserved` and the
+    /// operator-facing approval has been synthesized; firing the event
+    /// again would duplicate that approval. Operator must re-grant (which
+    /// happens via the HTTP repo-allow path and does not touch the
+    /// registry) or delete the sandbox (which removes the registry entry).
+    #[serde(default)]
+    allowlist_revoked_handled: bool,
 }
 
 pub struct SandboxService {
@@ -150,6 +182,14 @@ pub struct SandboxService {
     base_dir: PathBuf,
     clock: Arc<dyn Clock>,
     sessions: RwLock<HashMap<RunId, SandboxSession>>,
+    /// Allowlist source consulted during `recover_all` to decide whether a
+    /// `SandboxBase::Repo` sandbox's repo is still authorised under the
+    /// owning project. `None` disables the allowlist-revoked sweep
+    /// entirely (treat every recovered sandbox as still allowed) — used by
+    /// the workspace-layer unit tests which exercise the sweep directly
+    /// with seeded entries and would otherwise need to stand up the full
+    /// access service.
+    allowlist: Option<Arc<ProjectRepoAccessService>>,
 }
 
 impl SandboxService {
@@ -165,7 +205,17 @@ impl SandboxService {
             base_dir: base_dir.into(),
             clock,
             sessions: RwLock::new(HashMap::new()),
+            allowlist: None,
         }
+    }
+
+    /// Wire in the project-scoped repo allowlist. When set, `recover_all`
+    /// will emit `SandboxAllowlistRevoked` for any registry entry whose
+    /// bound repo is no longer allowed under the sandbox's project.
+    /// Without this, the allowlist-revoked sweep is a no-op.
+    pub fn with_allowlist(mut self, allowlist: Arc<ProjectRepoAccessService>) -> Self {
+        self.allowlist = Some(allowlist);
+        self
     }
 
     pub fn base_dir(&self) -> &PathBuf {
@@ -186,6 +236,24 @@ impl SandboxService {
         strategy: SandboxStrategy,
         path: PathBuf,
     ) -> Result<(), WorkspaceError> {
+        self.seed_registry_entry_for_test_with_repo(
+            sandbox_id, run_id, project, strategy, path, None,
+        )
+    }
+
+    /// Like `seed_registry_entry_for_test`, but captures the bound
+    /// `repo_id`. Used by the RFC 020 `allowlist_revoked` integration
+    /// test: the sandbox directory exists but the repo binding is
+    /// what the allowlist-revoked sweep keys off.
+    pub fn seed_registry_entry_for_test_with_repo(
+        &self,
+        sandbox_id: crate::sandbox::SandboxId,
+        run_id: RunId,
+        project: ProjectKey,
+        strategy: SandboxStrategy,
+        path: PathBuf,
+        repo_id: Option<RepoId>,
+    ) -> Result<(), WorkspaceError> {
         let entry = RegistryEntry {
             sandbox_id,
             run_id,
@@ -193,6 +261,8 @@ impl SandboxService {
             strategy,
             path,
             registered_at: self.clock.now_millis(),
+            repo_id,
+            allowlist_revoked_handled: false,
         };
         self.write_registry_entry(&entry)
     }
@@ -310,6 +380,8 @@ impl SandboxService {
                     strategy: sandbox.strategy,
                     path: sandbox.path.clone(),
                     registered_at: provisioned_at,
+                    repo_id: repo_id_for(&policy),
+                    allowlist_revoked_handled: false,
                 };
                 if let Err(error) = self.write_registry_entry(&registry_entry) {
                     let failed_at = self.clock.now_millis();
@@ -821,6 +893,53 @@ impl SandboxService {
             summary.lost_runs.push((entry.run_id, entry.project));
         }
         summary.lost = summary.lost_runs.len() as u32;
+
+        // RFC 020 §"Run recovery matrix" — `AllowlistRevoked` row. For
+        // every registry entry that survived the lost-sweep above and
+        // carries a bound `repo_id`, ask the project allowlist whether
+        // the repo is still authorised. If not → emit
+        // `SandboxAllowlistRevoked` and record the `(run, project, repo)`
+        // triple so the run-level recovery service can transition the
+        // bound run to `WaitingApproval` with a synthesized approval.
+        // Mark the entry as `allowlist_revoked_handled` so subsequent
+        // boots do not re-emit the same event / re-create the approval.
+        //
+        // No allowlist wired (`None`) → skip entirely. Workspace-layer
+        // unit tests exercise the sweep directly with seeded entries and
+        // would otherwise need to stand up the full access service.
+        if let Some(allowlist) = self.allowlist.clone() {
+            let entries = self.list_registry_entries()?;
+            for mut entry in entries {
+                if entry.allowlist_revoked_handled {
+                    continue;
+                }
+                let Some(repo_id) = entry.repo_id.clone() else {
+                    continue;
+                };
+                let ctx = RepoAccessContext {
+                    project: entry.project.clone(),
+                };
+                if allowlist.is_allowed(&ctx, &repo_id).await {
+                    continue;
+                }
+                let detected_at = self.clock.now_millis();
+                self.event_sink
+                    .publish(SandboxEvent::SandboxAllowlistRevoked {
+                        sandbox_id: entry.sandbox_id.clone(),
+                        run_id: entry.run_id.clone(),
+                        project: entry.project.clone(),
+                        repo_id: repo_id.clone(),
+                        revoked_at: detected_at,
+                        detected_at,
+                    });
+                entry.allowlist_revoked_handled = true;
+                self.write_registry_entry(&entry)?;
+                summary
+                    .allowlist_revoked_runs
+                    .push((entry.run_id, entry.project, repo_id));
+            }
+            summary.preserved_allowlist_revoked = summary.allowlist_revoked_runs.len() as u32;
+        }
 
         Ok(summary)
     }
@@ -1824,6 +1943,8 @@ mod tests {
             strategy: SandboxStrategy::Overlay,
             path: service.base_dir().join("sbx-run-lost-missing-root"),
             registered_at: 1_000,
+            repo_id: None,
+            allowlist_revoked_handled: false,
         };
         service
             .write_registry_entry(&entry)
@@ -1856,6 +1977,132 @@ mod tests {
         let second = service.recover_all().await.unwrap();
         assert_eq!(second.lost, 0);
         assert!(second.lost_runs.is_empty());
+    }
+
+    #[tokio::test]
+    async fn recover_all_emits_allowlist_revoked_when_repo_not_allowlisted() {
+        // RFC 020 §"Run recovery matrix" — AllowlistRevoked row.
+        // Seed a registry entry for a `SandboxBase::Repo` sandbox
+        // whose path exists on disk (so the lost-sweep skips it) but
+        // whose bound repo is NOT in the project allowlist. Recovery
+        // must emit `SandboxAllowlistRevoked` and surface the triple
+        // on `summary.allowlist_revoked_runs`.
+        use crate::repo_store::access_service::ProjectRepoAccessService;
+
+        let run = RunId::new("run-revoked");
+        let repo_id = crate::sandbox::RepoId::new("octocat/hello");
+        let provider = RecoveryProvider::new(SandboxStrategy::Overlay, Vec::new(), HashMap::new());
+        let allowlist = Arc::new(ProjectRepoAccessService::new());
+        let sink = Arc::new(BufferedSandboxEventSink::default());
+        let base_dir = unique_test_dir("allowlist-revoked");
+        let service = SandboxService::new(
+            HashMap::from([(
+                SandboxStrategy::Overlay,
+                Box::new(provider) as Box<dyn crate::providers::SandboxProvider>,
+            )]),
+            sink.clone(),
+            base_dir.clone(),
+            Arc::new(FixedClock::new(1_000)),
+        )
+        .with_allowlist(allowlist);
+
+        // Sandbox path exists → lost-sweep skips. Repo not in
+        // allowlist → allowlist-revoked sweep fires.
+        let sandbox_path = base_dir.join("sbx-run-revoked");
+        fs::create_dir_all(&sandbox_path).expect("create stub sandbox dir");
+        service
+            .seed_registry_entry_for_test_with_repo(
+                crate::sandbox::SandboxId::new("sbx-run-revoked"),
+                run.clone(),
+                project(),
+                SandboxStrategy::Overlay,
+                sandbox_path,
+                Some(repo_id.clone()),
+            )
+            .expect("seed registry entry");
+
+        let summary = service.recover_all().await.unwrap();
+
+        assert_eq!(summary.lost, 0);
+        assert_eq!(summary.preserved_allowlist_revoked, 1);
+        assert_eq!(summary.allowlist_revoked_runs.len(), 1);
+        assert_eq!(summary.allowlist_revoked_runs[0].0, run);
+        assert_eq!(summary.allowlist_revoked_runs[0].1, project());
+        assert_eq!(summary.allowlist_revoked_runs[0].2, repo_id);
+
+        let events = sink.drain();
+        assert_eq!(events.len(), 1, "expected exactly one event");
+        match &events[0] {
+            SandboxEvent::SandboxAllowlistRevoked {
+                run_id,
+                project: p,
+                repo_id: r,
+                ..
+            } => {
+                assert_eq!(run_id, &run);
+                assert_eq!(p, &project());
+                assert_eq!(r, &repo_id);
+            }
+            other => panic!("expected SandboxAllowlistRevoked, got {other:?}"),
+        }
+
+        // Idempotency: second sweep must not re-emit.
+        let second = service.recover_all().await.unwrap();
+        assert_eq!(second.preserved_allowlist_revoked, 0);
+        assert!(second.allowlist_revoked_runs.is_empty());
+        assert!(sink.drain().is_empty());
+    }
+
+    #[tokio::test]
+    async fn recover_all_skips_allowlist_revoked_when_repo_still_allowed() {
+        // Allowlisted repo → no emission.
+        use crate::repo_store::access_service::ProjectRepoAccessService;
+        use cairn_domain::{ActorRef, OperatorId, RepoAccessContext};
+
+        let run = RunId::new("run-still-allowed");
+        let repo_id = crate::sandbox::RepoId::new("octocat/hello");
+        let provider = RecoveryProvider::new(SandboxStrategy::Overlay, Vec::new(), HashMap::new());
+        let allowlist = Arc::new(ProjectRepoAccessService::new());
+        allowlist
+            .allow(
+                &RepoAccessContext { project: project() },
+                &repo_id,
+                ActorRef::Operator {
+                    operator_id: OperatorId::new("op"),
+                },
+            )
+            .await
+            .expect("allow repo");
+        let sink = Arc::new(BufferedSandboxEventSink::default());
+        let base_dir = unique_test_dir("allowlist-still-allowed");
+        let service = SandboxService::new(
+            HashMap::from([(
+                SandboxStrategy::Overlay,
+                Box::new(provider) as Box<dyn crate::providers::SandboxProvider>,
+            )]),
+            sink.clone(),
+            base_dir.clone(),
+            Arc::new(FixedClock::new(1_000)),
+        )
+        .with_allowlist(allowlist);
+
+        let sandbox_path = base_dir.join("sbx-run-still-allowed");
+        fs::create_dir_all(&sandbox_path).expect("create stub sandbox dir");
+        service
+            .seed_registry_entry_for_test_with_repo(
+                crate::sandbox::SandboxId::new("sbx-run-still-allowed"),
+                run.clone(),
+                project(),
+                SandboxStrategy::Overlay,
+                sandbox_path,
+                Some(repo_id),
+            )
+            .expect("seed registry entry");
+
+        let summary = service.recover_all().await.unwrap();
+        assert_eq!(summary.preserved_allowlist_revoked, 0);
+        assert!(summary.allowlist_revoked_runs.is_empty());
+        assert!(sink.drain().is_empty());
     }
 
     #[tokio::test]

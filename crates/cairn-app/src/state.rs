@@ -820,27 +820,35 @@ impl AppState {
             runtime.store.clone(),
             Arc::new(cairn_workspace::BufferedSandboxEventSink::default()),
         ));
-        let sandbox_service = Arc::new(cairn_workspace::SandboxService::new(
-            HashMap::from([
-                (
-                    cairn_workspace::SandboxStrategy::Overlay,
-                    Box::new(cairn_workspace::OverlayProvider::with_repo_source(
-                        default_sandbox_base_dir(),
-                        sandbox_repo_source.clone(),
-                    )) as Box<dyn cairn_workspace::SandboxProvider>,
-                ),
-                (
-                    cairn_workspace::SandboxStrategy::Reflink,
-                    Box::new(cairn_workspace::ReflinkProvider::with_repo_source(
-                        default_sandbox_base_dir(),
-                        sandbox_repo_source,
-                    )) as Box<dyn cairn_workspace::SandboxProvider>,
-                ),
-            ]),
-            sandbox_event_sink,
-            default_sandbox_base_dir(),
-            Arc::new(cairn_workspace::SystemClock),
-        ));
+        let sandbox_service = Arc::new(
+            cairn_workspace::SandboxService::new(
+                HashMap::from([
+                    (
+                        cairn_workspace::SandboxStrategy::Overlay,
+                        Box::new(cairn_workspace::OverlayProvider::with_repo_source(
+                            default_sandbox_base_dir(),
+                            sandbox_repo_source.clone(),
+                        )) as Box<dyn cairn_workspace::SandboxProvider>,
+                    ),
+                    (
+                        cairn_workspace::SandboxStrategy::Reflink,
+                        Box::new(cairn_workspace::ReflinkProvider::with_repo_source(
+                            default_sandbox_base_dir(),
+                            sandbox_repo_source,
+                        )) as Box<dyn cairn_workspace::SandboxProvider>,
+                    ),
+                ]),
+                sandbox_event_sink,
+                default_sandbox_base_dir(),
+                Arc::new(cairn_workspace::SystemClock),
+            )
+            // RFC 020 §"Run recovery matrix" — `AllowlistRevoked` row. Wire
+            // the project-scoped repo allowlist so the recovery sweep can
+            // detect repo bindings that are no longer authorised and emit
+            // `SandboxAllowlistRevoked` for the run-level recovery service
+            // to synthesize an operator approval against.
+            .with_allowlist(project_repo_access.clone()),
+        );
         // RFC 015: marketplace service wrapping the plugin host.
         let marketplace = {
             let mut svc = MarketplaceService::new(runtime.store.clone());
