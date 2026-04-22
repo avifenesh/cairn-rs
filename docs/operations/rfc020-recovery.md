@@ -13,10 +13,16 @@ projections and in-memory state from the log. The process exposes two health
 endpoints so orchestrators can distinguish "alive" from "accepting traffic"
 during recovery.
 
-Today, the readiness gate is wired (`GET /health/ready` with a progress-shaped
-body) and schema parity between Postgres and SQLite is audited by a dedicated
-test. Full run-level state recovery, tool-call idempotency, and dual
-checkpoints are on the roadmap — see [Roadmap](#roadmap) below.
+As of RFC 020 rev 3 (see
+[RFC 020](../design/rfcs/020-durable-recovery.md)), Tracks 1–4 are all live:
+the readiness gate (`GET /health/ready` with a progress-shaped body),
+run-level recovery via `RecoveryService`, tool-call idempotency with
+deterministic `ToolCallId`s and a consulted `ToolCallResultCache`, and dual
+checkpoint (`Intent` / `Result`) per orchestrator iteration. Decision cache
+entries now survive restart. Sandbox recovery emits
+`SandboxLost` / `SandboxAllowlistRevoked` / `SandboxBaseRevisionDrift`
+for the preserved scenarios. See [Live today](#live-today) for the mapping
+from behaviour to shipping PR.
 
 ## Health endpoints
 
@@ -85,12 +91,9 @@ branch finishes and records a branch-specific quantity (events replayed, chunks
 indexed, sandboxes reattached, etc.). Readiness flips to `200` only when every
 branch reports `complete`.
 
-**Note on the current build**: the `/health/ready` handler currently returns a
-simplified response with a subset of branches pre-marked `complete`, because
-the full startup dependency graph is not yet wired into `AppState`. The shape
-above is what operators will receive once Track 2 (see [Roadmap](#roadmap))
-lands the real `ReadinessState` read. Consumers parsing this endpoint should
-tolerate unknown branches and treat any non-`complete` state as not-ready.
+Consumers parsing this endpoint should tolerate unknown branches (future
+recovery steps may add new ones) and treat any non-`complete` state as
+not-ready.
 
 Response codes:
 
@@ -120,11 +123,11 @@ At a high level, cairn-app startup proceeds through the following phases:
    repo-clone cache, plugin host descriptor revalidation, provider pool warmup.
 4. Sandbox reconciliation — `SandboxService::recover_all` reattaches or prunes
    sandboxes against the now-known run state.
-5. Run-level recovery — reassert liveness of non-terminal runs, apply the
-   recovery matrix (RFC 020 §Run recovery matrix). *Coming in v1.x; see
-   [Roadmap](#roadmap).*
-6. Emit `RecoverySummary` event; flip `/health/ready` to 200; open non-health
-   routes.
+5. Run-level recovery — `RecoveryService` enumerates non-terminal runs and
+   applies the RFC 020 recovery matrix, emitting `RecoveryAttempted` /
+   `RecoveryCompleted` per run.
+6. Emit `RecoverySummary` event (one per boot, with aggregated counts);
+   flip `/health/ready` to 200; open non-health routes.
 
 Expected timing: sub-second for small deployments; seconds-to-minutes for large
 event logs. cairn-app logs a progress line every 5 seconds while recovery is in
@@ -212,44 +215,51 @@ build:
   path. If Valkey is lost, FF's scanners rebuild the operational state; cairn's
   durability guarantees do not depend on engine-backing-store survival.
 
-### What does not yet fully survive a crash
+### Tool-call side-effect contract
 
-- **In-flight run state between appended events.** If cairn-app crashes after
-  `RunMessageAppended` but before the next checkpoint, the run resumes from the
-  last event in the log without a dedicated checkpoint snapshot. Track 1 (below)
-  closes this by running a real recovery pass over non-terminal runs on startup.
-- **Tool-call results.** Today the orchestrator does not consult a tool-result
-  cache before dispatch, so a resumed run may re-dispatch a tool that was
-  mid-flight at crash. Track 3 (below) adds deterministic `ToolCallId`s, a
-  result cache consulted before every dispatch, and `RetrySafety` classification
-  so dangerous tools pause for operator confirmation instead of silently
-  re-executing.
+Side-effecting tools (shell commands, HTTP with side effects, git merges) are
+now classified by `RetrySafety`:
 
-Operators running workloads with side-effecting tools (shell commands, HTTP
-requests with side effects, git merges) should know: the at-most-once guarantee
-for those tools across crash is not live today. The mitigation is short runs
-and explicit approvals around dangerous operations; the full fix is on the
-roadmap.
+- `IdempotentSafe` — safe to re-dispatch on resume; the cache may also serve a
+  hit for free.
+- `AuthorResponsible` — re-dispatched with the same `ToolCallId`; the tool's
+  implementation is responsible for its own idempotency.
+- `DangerousPause` — the orchestrator pauses on resume and waits for operator
+  confirmation before re-dispatch. This replaces the pre-Track-3 risk of
+  silent double-execution.
 
-## Roadmap
+## Live today
 
-The following work is specified in [RFC 020](../design/rfcs/020-durable-recovery.md)
-and will land incrementally:
+Every item below corresponds to a shipped PR. Source of truth for the full
+contract is [RFC 020](../design/rfcs/020-durable-recovery.md) rev 3.
 
-- **Track 1 — RecoveryService (run-level recovery).** A startup pass that
-  enumerates non-terminal runs, applies the RFC 020 recovery matrix, and emits
-  `RunRecovered` or `RunRecoveryFailed` events before readiness flips to 200.
-- **Track 3 — Tool-call idempotency.** Deterministic `ToolCallId` derivation,
-  `ToolCallResultCache` projection consulted on every dispatch, and
-  `RetrySafety` handling (`IdempotentSafe` / `AuthorResponsible` /
-  `DangerousPause`) to prevent double-execution of side effects on resume.
-- **Track 4 — Dual checkpoint per iteration.** An `Intent` checkpoint before
-  tool dispatch and a `Result` checkpoint after, giving recovery a granular
-  rollback point and making message-history resume work without replaying every
-  event from run start.
+- **Track 1 — RecoveryService (run-level recovery).** Startup pass enumerates
+  non-terminal runs, applies the RFC 020 recovery matrix, and emits
+  `RecoveryAttempted` / `RecoveryCompleted` events before readiness flips to
+  200. (#75)
+- **Track 2 — Readiness gate.** `GET /health/ready` returns the progress
+  JSON shape above, flipping to 200 only when every branch is complete. (#73)
+- **Track 3 — Tool-call idempotency.** Deterministic `ToolCallId`,
+  `ToolCallResultCache` projection consulted on every dispatch, `RetrySafety`
+  three-tier enforcement, and atomic batched append of
+  `ToolInvocationRequested` + `ToolInvocationCompleted`. (#82)
+- **Track 4 — Dual checkpoint per iteration.** `Intent` checkpoint before
+  tool dispatch and `Result` after; `RecoverySummary` emitted once per boot
+  with recovered-run / recovered-task / preserved-sandbox / warmed-decision
+  counters. (#84)
+- **Decision cache durability.** Cached decisions survive restart without
+  re-approval via `DecisionEvent` projection replay. (#85)
+- **Sandbox recovery — preserved scenarios** emit distinct events so
+  operators can tell preservation cases apart from lost sandboxes:
+  `SandboxLost` (#83), `SandboxAllowlistRevoked` (#86), and
+  `SandboxBaseRevisionDrift` (#89).
+- **Schema parity check (CI).** `cargo test -p cairn-store --test schema_parity`
+  audits that Postgres and SQLite declare the same tables. Ignored today
+  because 10 Postgres-only tables are known drifts; becomes a fail-on-merge
+  gate when the gap closes. (#76)
 
-See RFC 020 for the full contract, including the `RecoveryEvent` enum, the
-durability invariants, and the compliance-proof integration tests (1–15).
+See RFC 020 rev 3 for the `RecoveryEvent` enum, the 12 durability
+invariants (all closed as of this session), and compliance tests 1–15.
 
 ## Operator playbook
 
@@ -316,16 +326,17 @@ readiness, not liveness, so traffic stops reaching it during the 503 window.
 
 ### "How do I tell whether cairn-app recovered cleanly?"
 
-When Track 1 lands, cairn emits a single `RecoverySummary` event per boot with
-counts (recovered runs, recovered tasks, preserved sandboxes, decision-cache
-entries warmed). Until then, the signals available are:
+Cairn emits a single `RecoverySummary` event per boot with counts (recovered
+runs, recovered tasks, preserved sandboxes, decision-cache entries warmed).
+Additional signals:
 
 - The `/health/ready` progress body transitioning from 503 with per-branch
   state to 200.
 - The startup log banner printing its `boot_id` (a UUID v7 minted per process
   start).
 - `SandboxService::recover_all` logs sandbox-level outcomes (reattached,
-  preserved, orphaned, pruned).
+  preserved with a `SandboxAllowlistRevoked` / `SandboxBaseRevisionDrift`
+  cause, orphaned as `SandboxLost`, or pruned).
 
 ## See also
 

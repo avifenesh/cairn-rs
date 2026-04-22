@@ -11,6 +11,94 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+#### Durability — RFC 020 Tracks 1–4
+
+- **Track 2 readiness gate** — `GET /health/ready` returns `503` with a
+  per-branch progress JSON while recovery is in flight, and flips to
+  `200` once every branch reports `complete`. Liveness (`/health`) stays
+  `200` throughout so orchestrators can keep the process running across
+  long replays. Shape documented in `docs/operations/rfc020-recovery.md`.
+  (#73)
+- **Track 1 RecoveryService** — startup pass enumerates non-terminal runs,
+  applies the RFC 020 recovery matrix, and emits `RecoveryAttempted` /
+  `RecoveryCompleted` events before readiness flips to `200`. Closes
+  durability invariants 3 (non-terminal runs recovered before readiness)
+  and 4 (recovery is idempotent). (#75)
+- **Track 3 tool-call idempotency** — deterministic `ToolCallId` derivation,
+  `ToolCallResultCache` projection consulted on every dispatch,
+  `RetrySafety` three-tier enforcement (`IdempotentSafe` /
+  `AuthorResponsible` / `DangerousPause`), and batched tool-event append
+  (atomic `ToolInvocationRequested` + `ToolInvocationCompleted`). Closes
+  invariants 6 (tool results cached) and 11 (batched append). (#82)
+- **Track 4 dual checkpoint per iteration** — `Intent` checkpoint before
+  tool dispatch and `Result` checkpoint after, plus `RecoverySummary`
+  emitted once per boot and `DecisionCacheWarmup` event at startup. Closes
+  invariant 5 (two checkpoints per iteration). (#84)
+
+#### Sandbox recovery tripwires
+
+- **`SandboxLost` emission** on recovery when the sandbox directory is
+  missing on disk. Un-ignores RFC 020 compliance test #4. (#83)
+- **`SandboxAllowlistRevoked` emission** on recovery when a sandbox's
+  origin repo has been dropped from the project access allowlist. Un-ignores
+  compliance test #3a. (#86)
+- **`SandboxBaseRevisionDrift` emission** on recovery when an overlay
+  sandbox's upper-layer base-revision has drifted from the clone cache's
+  current `HEAD`. Un-ignores compliance test #3b. (#89)
+- **Sandbox reattach test hook** — debug-gated `CAIRN_TEST_SEED_*`
+  environment hook exercises the overlay reattach path end-to-end against
+  a real sandbox fixture. Un-ignores compliance test #3. (#88)
+- **RFC 020 sandbox recovery compliance tests #3 / #3a / #3b / #4**
+  landed initially as tripwire `#[ignore]`d tests; each subsequent
+  emission PR flips one of them live. (#80)
+
+#### Decision cache durability
+
+- **Decision cache persistence via event log + startup replay** — cached
+  decisions survive a restart without re-approval. Closes invariant 9
+  (decisions survive) and un-ignores compliance test #7. (#85)
+
+#### Test infrastructure
+
+- **LiveHarness SIGKILL + restart** — `sigkill()`, `restart()`, and
+  `sigkill_and_restart()` helpers plus `setup_with_sqlite()` for
+  durable-state-across-restart integration tests. Required fixture for
+  every RFC 020 Track-3/4 compliance test. (#74)
+- **Schema parity check between Postgres and SQLite** — new
+  `cargo test -p cairn-store --test schema_parity` enumerates
+  `CREATE TABLE` statements from both backends and asserts the table
+  sets match. Currently ignored with 10 Postgres-only tables surfaced;
+  will become a fail-on-merge gate when the gap closes. (#76)
+- **RFC 020 compliance tests #7 (decision cache) and #12 (Postgres-only
+  team mode)** as independent integration tests against a live
+  cairn-app subprocess. (#77)
+- **recovery_e2e migration to LiveHarness — PR 1 of 3**: promotes tests
+  #6 (in-flight approval) and #11 (RecoverySummary emitted) from mocked
+  unit tests to real SIGKILL-and-restart integration tests; deletes three
+  unit-mocked tests whose contracts are now covered by the live suite.
+  (#81)
+- **recovery_e2e migration — PR 2 of 3**: deletes four additional
+  Track-3-duplicated mocked tests whose coverage now lives in the Track 3
+  LiveHarness suite. (#87)
+- **Provider contract test against real OpenRouter** — live-provider
+  chat-completion contract test against an OpenRouter free-tier model,
+  gated on `OPENROUTER_API_KEY` so CI without the key skips cleanly. (#90)
+- **OpenRouter fixture refresh** — refreshes the recorded fixture against
+  the real API and swaps to a stable free-tier model so the offline path
+  stays accurate. (#91)
+
+#### Operator documentation
+
+- **`docs/operations/rfc020-recovery.md`** — operator-facing guide to
+  readiness endpoints, startup sequence, store requirements, durability
+  of state across crashes, and runbook entries for recovery situations.
+  Summarises RFC 020; RFC is source of truth. (#78)
+- **RFC 020 rev 3** — recovery ownership split (FF-owned operational
+  state vs. cairn-owned run-level state), 15 gap resolutions, and the
+  new durability invariant #12 (storage-transparent durability). (#79)
+
+#### Pre-RFC-020 additions
+
 - **Task dependency declaration now accepts `dependency_kind` and
   `data_passing_ref`.** `POST /v1/tasks/{id}/dependencies` surfaces
   both fields from FF 0.2's flow-edge FCALLs:
