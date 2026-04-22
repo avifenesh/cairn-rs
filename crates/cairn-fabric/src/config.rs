@@ -228,12 +228,25 @@ impl FabricConfig {
         Ok(())
     }
 
-    pub fn valkey_url(&self) -> String {
-        // ferriskey's parse_redis_url accepts only `redis | rediss | redis+unix | unix`
-        // schemes; `valkey://` URLs are rejected with InvalidClientConfig. Using
-        // `redis://` is wire-compatible — Valkey speaks the Redis protocol.
-        let scheme = if self.tls { "rediss" } else { "redis" };
-        format!("{}://{}:{}", scheme, self.valkey_host, self.valkey_port)
+    /// Construct a ferriskey [`ClientBuilder`] pre-configured with this
+    /// fabric's host/port/TLS/cluster settings. Callers call `.build().await`
+    /// to get a connected `Client`.
+    ///
+    /// This replaces the previous `valkey_url()` URL-string path. The
+    /// `redis://` scheme was redundant (we never parse a URL — we build one
+    /// only to hand it back to ferriskey, which re-parses it) and would
+    /// break on non-Redis-cloud hosts that reject the `redis` scheme
+    /// prefix. The builder accepts a bare host + port and applies TLS as
+    /// an explicit flag, matching the ferriskey 0.2 public API.
+    pub fn valkey_client_builder(&self) -> ferriskey::ClientBuilder {
+        let mut builder = ferriskey::ClientBuilder::new().host(&self.valkey_host, self.valkey_port);
+        if self.tls {
+            builder = builder.tls();
+        }
+        if self.cluster {
+            builder = builder.cluster();
+        }
+        builder
     }
 }
 
@@ -281,7 +294,14 @@ mod tests {
     }
 
     #[test]
-    fn valkey_url_without_tls() {
+    fn valkey_client_builder_without_tls() {
+        // ferriskey's `ClientBuilder` does not expose public accessors on
+        // its internal `ConnectionRequest`, so we can only assert that the
+        // builder constructs without panicking and that `build_lazy()`
+        // (the synchronous validation path) accepts the address list.
+        // Full wire assertion requires an integration test against a real
+        // Valkey instance; those live under `tests/` and in the downstream
+        // `cairn-app` integration suite.
         let config = FabricConfig {
             valkey_host: "myhost".into(),
             valkey_port: 6380,
@@ -300,7 +320,31 @@ mod tests {
             waitpoint_hmac_secret: None,
             waitpoint_hmac_kid: None,
         };
-        assert_eq!(config.valkey_url(), "redis://myhost:6380");
+        // build_lazy validates the address list synchronously without
+        // establishing a TCP connection — any misconfiguration (empty
+        // addresses, bad protocol/push_sender combo) surfaces here.
+        assert!(config.valkey_client_builder().build_lazy().is_ok());
+    }
+
+    #[test]
+    fn client_builder_build_lazy_rejects_empty_addresses() {
+        // Confirms the synchronous validation path we rely on actually
+        // catches misconfiguration — otherwise the positive tests above
+        // would pass even if `build_lazy()` silently accepted garbage.
+        // `valkey_client_builder()` always pushes a host, so we build a
+        // bare `ClientBuilder` directly to exercise the empty-address
+        // rejection branch (see ferriskey ClientBuilder::build_lazy).
+        // `LazyClient` does not implement `Debug`, so we can't use
+        // `.expect_err(..)`. Match on the result directly.
+        match ferriskey::ClientBuilder::new().build_lazy() {
+            Ok(_) => panic!("empty-address builder must fail"),
+            Err(e) => {
+                assert!(
+                    e.to_string().to_lowercase().contains("address"),
+                    "expected empty-address error, got {e}"
+                );
+            }
+        }
     }
 
     fn test_config(
@@ -481,7 +525,10 @@ mod tests {
     }
 
     #[test]
-    fn valkey_url_with_tls() {
+    fn valkey_client_builder_with_tls() {
+        // Same limitation as `valkey_client_builder_without_tls`: no
+        // public accessors on `ClientBuilder`/`ConnectionRequest`. We
+        // assert synchronous validation passes with TLS toggled on.
         let config = FabricConfig {
             valkey_host: "secure.host".into(),
             valkey_port: 6379,
@@ -500,6 +547,6 @@ mod tests {
             waitpoint_hmac_secret: None,
             waitpoint_hmac_kid: None,
         };
-        assert_eq!(config.valkey_url(), "rediss://secure.host:6379");
+        assert!(config.valkey_client_builder().build_lazy().is_ok());
     }
 }

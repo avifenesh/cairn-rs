@@ -83,7 +83,7 @@ that requires Valkey at boot. To get a Fabric-backed deployment up:
    Omitting `CAIRN_FABRIC_WAITPOINT_HMAC_SECRET` (or supplying an invalid length / non-hex value) aborts `FabricServices::start` with a typed `FabricError::Config` — we do not ship a runtime that would reject every `ff_suspend_execution` with `hmac_secret_not_initialized` at runtime.
 5. Boot cairn-app. You should see:
    ```
-   INFO connecting to valkey url=redis://valkey.internal:6379
+   INFO connecting to valkey host=valkey.internal port=6379 tls=false cluster=false
    INFO seeded waitpoint HMAC secret kid=prod-2026-04 partitions=256
    INFO fabric runtime started
    ```
