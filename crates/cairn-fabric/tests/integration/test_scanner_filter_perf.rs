@@ -110,21 +110,22 @@ fn full_eid(partition: u16, bare_uuid: &str) -> String {
 /// Seed `n` exec-tag hashes with `cairn.instance_id = want_tag`.
 /// Returns the list of tag-hash keys in insertion order so the
 /// measurement loop can iterate a deterministic candidate set.
+///
+/// Batches the HSETs through `ferriskey::Client::pipeline()` so seeding
+/// N=10_000 is one round-trip group instead of 10_000 sequential
+/// HSETs. Seed wall-time is setup cost — measurement accuracy depends
+/// only on the MEASURED pass, never on the seed pass — but keeping
+/// setup fast shortens the CI job.
 async fn seed(client: &ferriskey::Client, n: usize, want_tag: &str) -> Vec<String> {
     let mut keys = Vec::with_capacity(n);
+    let mut pipe = client.pipeline();
     for _ in 0..n {
         let eid = full_eid(PARTITION, &uuid::Uuid::new_v4().to_string());
         let key = tags_key(PARTITION, &eid);
-        let _: i64 = client
-            .cmd("HSET")
-            .arg(&key)
-            .arg("cairn.instance_id")
-            .arg(want_tag)
-            .execute()
-            .await
-            .expect("HSET seed");
+        let _slot = pipe.hset(&key, "cairn.instance_id", want_tag);
         keys.push(key);
     }
+    pipe.execute().await.expect("pipelined HSET seed");
     keys
 }
 
@@ -171,16 +172,41 @@ async fn run_filter_off(client: &ferriskey::Client, keys: &[String]) -> Duration
 
 /// Filter-ON production config: one HGET per candidate. Mirrors
 /// `FilterGate::admits` exactly.
-async fn run_filter_on(client: &ferriskey::Client, keys: &[String]) -> Duration {
+///
+/// When `sample_sink.is_some()`, each per-call duration is recorded
+/// into the provided vec so the caller can compute p50/p95 without
+/// an extra N-round-trip sampling pass. `Instant::now()` overhead is
+/// ~30 ns on x86-64 / ~80 ns on ARM64 — negligible next to the
+/// 40-70 µs per-candidate Valkey RTT.
+async fn run_filter_on(
+    client: &ferriskey::Client,
+    keys: &[String],
+    sample_sink: Option<&mut Vec<Duration>>,
+) -> Duration {
     let t0 = Instant::now();
-    for key in keys {
-        let _: Option<String> = client
-            .cmd("HGET")
-            .arg(key)
-            .arg("cairn.instance_id")
-            .execute()
-            .await
-            .expect("HGET filter-on");
+    if let Some(sink) = sample_sink {
+        sink.reserve(keys.len());
+        for key in keys {
+            let t = Instant::now();
+            let _: Option<String> = client
+                .cmd("HGET")
+                .arg(key)
+                .arg("cairn.instance_id")
+                .execute()
+                .await
+                .expect("HGET filter-on");
+            sink.push(t.elapsed());
+        }
+    } else {
+        for key in keys {
+            let _: Option<String> = client
+                .cmd("HGET")
+                .arg(key)
+                .arg("cairn.instance_id")
+                .execute()
+                .await
+                .expect("HGET filter-on");
+        }
     }
     t0.elapsed()
 }
@@ -233,32 +259,24 @@ async fn scanner_filter_cost_bench() {
         // ferriskey's connection pipelining state, and Linux page
         // cache for the tags-hash memory.
         let _ = run_filter_off(&client, &keys).await;
-        let _ = run_filter_on(&client, &keys).await;
+        let _ = run_filter_on(&client, &keys, None).await;
 
-        // Measured runs.
+        // Measured runs. Per-candidate samples are collected during
+        // the FIRST filter-ON run (saves an extra N-round-trip pass —
+        // Instant::now() overhead is negligible next to the per-call
+        // RTT). Subsequent runs stay sample-free so the aggregate
+        // timing stays clean of measurement jitter.
         let mut offs = Vec::with_capacity(RUNS_PER_CONFIG);
         let mut ons = Vec::with_capacity(RUNS_PER_CONFIG);
-        for _ in 0..RUNS_PER_CONFIG {
+        let mut per_call: Vec<Duration> = Vec::with_capacity(n);
+        for run_idx in 0..RUNS_PER_CONFIG {
             offs.push(run_filter_off(&client, &keys).await);
-            ons.push(run_filter_on(&client, &keys).await);
-        }
-
-        // For p50/p95 we need per-candidate samples. Do one more
-        // filter-ON pass recording each HGET's wall time. Keeps the
-        // aggregate timing above (used for totals) free of the
-        // per-iteration Instant::now() overhead, which is small but
-        // non-zero.
-        let mut per_call = Vec::with_capacity(n);
-        for key in &keys {
-            let t = Instant::now();
-            let _: Option<String> = client
-                .cmd("HGET")
-                .arg(key)
-                .arg("cairn.instance_id")
-                .execute()
-                .await
-                .expect("HGET sample");
-            per_call.push(t.elapsed());
+            let sink = if run_idx == 0 {
+                Some(&mut per_call)
+            } else {
+                None
+            };
+            ons.push(run_filter_on(&client, &keys, sink).await);
         }
         per_call.sort();
         let p50 = percentile(&per_call, 0.50);
