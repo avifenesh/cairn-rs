@@ -116,9 +116,16 @@ pub fn parse_args_from(args: &[String]) -> BootstrapConfig {
         }
         if let StorageBackend::Sqlite { path } = &config.storage {
             if path.ends_with(".sqlite") || path.ends_with(".db") {
+                // RFC 020 §"Postgres as Production Target": team mode requires
+                // Postgres for crash-durability and multi-process coordination.
+                // SQLite's single-writer model does not hold the durability
+                // invariants team-mode deployments assume. This is a startup
+                // refusal (not a warning) so operators can't accidentally ship
+                // a team deployment on SQLite.
                 fatal_cli(format!(
-                    "SQLite is not supported in self-hosted team mode: {}",
-                    path
+                    "SQLite is not supported in self-hosted team mode: {path}. \
+                     Team mode requires Postgres. Pass --db postgres://... or \
+                     set DATABASE_URL. See RFC 020 for rationale."
                 ));
             }
         }

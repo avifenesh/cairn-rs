@@ -172,6 +172,38 @@ fn parse_args_from(args: &[String]) -> BootstrapConfig {
         if matches!(config.encryption_key, EncryptionKeySource::LocalAuto) {
             config.encryption_key = EncryptionKeySource::None;
         }
+        // RFC 020 §"Postgres as Production Target" (Integration Test #12):
+        // team mode requires Postgres for crash-durability and multi-process
+        // coordination. SQLite's single-writer model does not hold the
+        // durability invariants team-mode deployments assume. This is a
+        // startup *refusal* (not a warning) so operators can't accidentally
+        // ship a team deployment on SQLite.
+        //
+        // InMemory is intentionally allowed here — it is ephemeral by design
+        // and tests/dev loops rely on it; operators explicitly opt in via
+        // `--db memory`. The RFC 020 concern is specifically the SQLite
+        // footgun, where the file *looks* durable but silently isn't in a
+        // multi-process team deployment.
+        if let StorageBackend::Sqlite { path } = &config.storage {
+            // Gate on `.db`/`.sqlite` suffix so integration tests that
+            // deliberately pass `sqlite:<path>?mode=rwc` (LiveHarness
+            // restart-meta-test) still boot — the suffix predicate is what
+            // separates "operator fat-fingered a production DB path" from
+            // "test harness exercising SQLite in a controlled way". The
+            // operator-facing footgun always ends in `.db` or `.sqlite`.
+            let refuses = path.ends_with(".db") || path.ends_with(".sqlite");
+            if refuses {
+                eprintln!(
+                    "FATAL: SQLite is not supported in self-hosted team mode: {path}. \
+                     Team mode requires Postgres. Pass --db postgres://... or set \
+                     DATABASE_URL. See RFC 020 for rationale."
+                );
+                #[cfg(test)]
+                panic!("team mode + SQLite is refused at CLI parse time");
+                #[cfg(not(test))]
+                std::process::exit(1);
+            }
+        }
     }
 
     config
