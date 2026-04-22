@@ -54,7 +54,10 @@ fn extract_table_names(source: &str) -> BTreeSet<String> {
             break;
         };
         let start = i + rel;
-        // Require that "create" is not part of a longer word.
+        // Require that "create" is a whole word: not preceded by an
+        // identifier character and not followed by one either. The
+        // left-boundary check is manual; the right-boundary check is
+        // delegated to `matches_keyword`.
         if start > 0 {
             let prev = bytes[start - 1];
             if prev.is_ascii_alphanumeric() || prev == b'_' {
@@ -62,8 +65,11 @@ fn extract_table_names(source: &str) -> BTreeSet<String> {
                 continue;
             }
         }
-        let mut cursor = start + "create".len();
-        cursor = skip_ws(bytes, cursor);
+        if !matches_keyword(bytes, start, b"create") {
+            i = start + 6;
+            continue;
+        }
+        let mut cursor = skip_ws(bytes, start + "create".len());
 
         // Skip an optional `VIRTUAL` keyword so we can reject virtual tables.
         let mut is_virtual = false;
@@ -99,12 +105,16 @@ fn extract_table_names(source: &str) -> BTreeSet<String> {
         if let Some(name) = name {
             if !is_virtual {
                 // Strip schema prefix if present: `public.foo` -> `foo`.
+                // Guard against pathological inputs like `public.` that
+                // would produce an empty trailing segment.
                 let bare = name
                     .rsplit('.')
                     .next()
                     .unwrap_or(&name)
                     .to_ascii_lowercase();
-                tables.insert(bare);
+                if !bare.is_empty() {
+                    tables.insert(bare);
+                }
             }
             i = next;
         } else {
@@ -139,39 +149,79 @@ fn matches_keyword(bytes: &[u8], i: usize, kw: &[u8]) -> bool {
     !(c.is_ascii_alphanumeric() || c == b'_')
 }
 
-/// Read an identifier starting at `i` (possibly containing a single `.`
-/// for schema-prefix). Returns the identifier and the cursor just past it.
+/// Read a (possibly schema-qualified) SQL identifier starting at `start`
+/// and return the concatenated identifier text plus the cursor just past
+/// it. Each segment may be unquoted (ASCII alphanumeric + `_`) or double-
+/// quoted (any character other than `"`), and segments are joined with a
+/// literal `.` so `"public"."users"` round-trips as `public.users`.
 fn read_identifier(bytes: &[u8], start: usize) -> (Option<String>, usize) {
-    // Allow optional `"ident"` quoting — strip the quotes.
-    let mut i = start;
-    let quoted = i < bytes.len() && bytes[i] == b'"';
-    if quoted {
-        i += 1;
-    }
-    let id_start = i;
-    while i < bytes.len() {
-        let c = bytes[i];
-        if c.is_ascii_alphanumeric() || c == b'_' || c == b'.' {
-            i += 1;
-        } else {
+    let mut cursor = start;
+    let mut parts: Vec<String> = Vec::new();
+
+    loop {
+        let (segment, next) = read_identifier_segment(bytes, cursor);
+        let Some(segment) = segment else {
             break;
+        };
+        parts.push(segment);
+        cursor = next;
+        // Allow `.` between segments.
+        if cursor < bytes.len() && bytes[cursor] == b'.' {
+            cursor += 1;
+            continue;
         }
+        break;
     }
-    if id_start == i {
-        return (None, start);
-    }
-    let raw = std::str::from_utf8(&bytes[id_start..i])
-        .unwrap_or("")
-        .to_string();
-    let end = if quoted && i < bytes.len() && bytes[i] == b'"' {
-        i + 1
-    } else {
-        i
-    };
-    if raw.is_empty() {
+
+    if parts.is_empty() {
         (None, start)
     } else {
-        (Some(raw), end)
+        (Some(parts.join(".")), cursor)
+    }
+}
+
+/// Read a single identifier segment — either `"quoted"` (any char except
+/// `"`) or unquoted (ASCII alphanumeric / `_`).
+fn read_identifier_segment(bytes: &[u8], start: usize) -> (Option<String>, usize) {
+    if start >= bytes.len() {
+        return (None, start);
+    }
+    if bytes[start] == b'"' {
+        let body_start = start + 1;
+        let mut i = body_start;
+        while i < bytes.len() && bytes[i] != b'"' {
+            i += 1;
+        }
+        if i >= bytes.len() {
+            // Unterminated quote: give up.
+            return (None, start);
+        }
+        let raw = std::str::from_utf8(&bytes[body_start..i])
+            .unwrap_or("")
+            .to_string();
+        if raw.is_empty() {
+            (None, start)
+        } else {
+            (Some(raw), i + 1)
+        }
+    } else {
+        let mut i = start;
+        while i < bytes.len() {
+            let c = bytes[i];
+            if c.is_ascii_alphanumeric() || c == b'_' {
+                i += 1;
+            } else {
+                break;
+            }
+        }
+        if i == start {
+            (None, start)
+        } else {
+            let raw = std::str::from_utf8(&bytes[start..i])
+                .unwrap_or("")
+                .to_string();
+            (Some(raw), i)
+        }
     }
 }
 
@@ -294,9 +344,43 @@ fn parser_skips_create_index_and_create_virtual_table() {
 
 #[test]
 fn parser_does_not_match_inside_identifiers() {
-    // The literal word "createtable" (no space) must not match.
-    let sql = "-- createtablefoo is not DDL\nCREATE TABLE real (id INT);";
+    // Neither `createtable` (right-boundary violation) nor `xxcreate`
+    // (left-boundary violation) should match.
+    let sql = "-- createtablefoo is not DDL\n\
+               -- xxcreate table fake (id INT); this is inside a comment\n\
+               CREATE TABLE real (id INT);";
     let tables = extract_table_names(sql);
     assert_eq!(tables.len(), 1);
     assert!(tables.contains("real"));
+}
+
+#[test]
+fn parser_handles_multi_part_quoted_identifiers() {
+    let sql = "CREATE TABLE \"public\".\"users\" (id INT);";
+    let tables = extract_table_names(sql);
+    assert!(
+        tables.contains("users"),
+        "expected schema-prefix stripped to `users`, got: {:?}",
+        tables
+    );
+}
+
+#[test]
+fn parser_handles_quoted_identifiers_with_spaces() {
+    let sql = "CREATE TABLE \"weird name\" (id INT);";
+    let tables = extract_table_names(sql);
+    assert!(
+        tables.contains("weird name"),
+        "expected quoted-with-space identifier, got: {:?}",
+        tables
+    );
+}
+
+#[test]
+fn parser_skips_pathological_empty_schema_prefix() {
+    // `public.` alone should not yield an empty table name.
+    let sql = "CREATE TABLE public. CREATE TABLE good (id INT);";
+    let tables = extract_table_names(sql);
+    assert!(!tables.contains(""), "empty string leaked: {:?}", tables);
+    assert!(tables.contains("good"));
 }
