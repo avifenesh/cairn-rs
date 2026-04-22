@@ -14,7 +14,7 @@
 //! *next* iteration's prompt.
 
 // Note: bash, file_read, file_write, glob_find, grep_search, web_fetch
-// were removed in favor of cairn-harness-tools (PR #C).
+// were removed in favor of cairn-harness-tools.
 pub mod calculate;
 pub mod cancel_task;
 pub mod create_task;
@@ -273,7 +273,7 @@ pub enum ToolError {
     TimedOut,
     /// Structured failure produced by a `@agent-sh/harness-*` tool.
     ///
-    /// Introduced with the harness-tools adapter (PR #C). Carries the
+    /// Introduced with the harness-tools adapter. Carries the
     /// harness stable error code and structured meta payload through the
     /// orchestrator so retry / cache logic can pattern-match on
     /// `ToolErrorCode` rather than string-parse the message.

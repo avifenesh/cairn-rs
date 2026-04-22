@@ -46,9 +46,19 @@ fn ledger_key(ctx: &ToolContext, project: &ProjectKey) -> String {
 }
 
 /// Lookup or create the ledger for this (project, session, run) tuple.
+///
+/// On mutex poisoning (a prior panic while the lock was held) we recover
+/// the inner map instead of propagating — tool calls should not fail
+/// because of an unrelated panic in a different task.
+///
+/// **TODO**: the map grows unbounded with accumulated runs. Follow-up
+/// work: evict the ledger when the orchestrator finalizes a run
+/// (complete / fail / cancel). For typical single-run cairn-app lifetimes
+/// this is not urgent; for long-lived server processes with many runs
+/// per hour it needs an eviction hook.
 pub(crate) fn ledger_for(ctx: &ToolContext, project: &ProjectKey) -> Arc<dyn Ledger> {
     let key = ledger_key(ctx, project);
-    let mut guard = LEDGERS.lock().unwrap();
+    let mut guard = LEDGERS.lock().unwrap_or_else(|e| e.into_inner());
     guard
         .entry(key)
         .or_insert_with(|| Arc::new(InMemoryLedger::default()) as Arc<dyn Ledger>)
@@ -130,10 +140,10 @@ impl HarnessTool for HarnessWrite {
         ToolCategory::FileSystem
     }
     fn tool_effect() -> ToolEffect {
-        ToolEffect::External
+        ToolEffect::Internal
     }
     fn retry_safety() -> RetrySafety {
-        RetrySafety::DangerousPause
+        RetrySafety::AuthorResponsible
     }
 
     fn build_session(
@@ -202,10 +212,10 @@ impl HarnessTool for HarnessEdit {
         ToolCategory::FileSystem
     }
     fn tool_effect() -> ToolEffect {
-        ToolEffect::External
+        ToolEffect::Internal
     }
     fn retry_safety() -> RetrySafety {
-        RetrySafety::DangerousPause
+        RetrySafety::AuthorResponsible
     }
 
     fn build_session(
@@ -289,10 +299,10 @@ impl HarnessTool for HarnessMultiEdit {
         ToolCategory::FileSystem
     }
     fn tool_effect() -> ToolEffect {
-        ToolEffect::External
+        ToolEffect::Internal
     }
     fn retry_safety() -> RetrySafety {
-        RetrySafety::DangerousPause
+        RetrySafety::AuthorResponsible
     }
 
     fn build_session(

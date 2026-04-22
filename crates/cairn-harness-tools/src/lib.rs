@@ -16,9 +16,13 @@
 //! ## Ledger lifetime
 //!
 //! `harness-write` requires a `Ledger` implementation that tracks
-//! read-before-edit state. v1 uses a process-global `InMemoryLedger` —
-//! adequate for single-run cairn-app invocations. A future PR can scope
-//! ledgers to session boundaries via `ToolContext`.
+//! read-before-edit state. Ledgers are keyed by
+//! `(tenant_id, workspace_id, project_id, session_id, run_id)` from the
+//! `ToolContext` passed on every invocation, so a read in one run never
+//! satisfies `NOT_READ_THIS_SESSION` for another run — cross-tenant and
+//! cross-run coupling are both prevented. The ledger map grows unbounded
+//! over a cairn-app process lifetime; eviction on run-finalize is a
+//! follow-up (tracked alongside #228).
 
 pub mod adapter;
 pub mod error;

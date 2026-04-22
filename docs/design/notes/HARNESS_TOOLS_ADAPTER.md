@@ -1,6 +1,6 @@
-# Harness tools adapter (PR #C)
+# Harness tools adapter
 
-**Status**: shipped (PR C).
+**Status**: shipped.
 **Scope**: integrate the `@agent-sh/harness-*` Rust crates (0.1.0 on crates.io)
 as the implementation backing 10 cairn built-in tools.
 
