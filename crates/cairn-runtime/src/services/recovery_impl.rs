@@ -1,9 +1,9 @@
 //! RFC 020 Track 1 — run-level recovery on cairn-app startup.
 //!
-//! Owned responsibility (post commit `5fefc76` ownership split): run-level
-//! state recovery. FF's 14 background scanners own operational recovery
-//! (lease expiry, attempt timeouts, dependency reconciliation, …) and run
-//! continuously, so this service does **not** touch any of that.
+//! Owned responsibility: run-level state recovery. FF's 14 background
+//! scanners own operational recovery (lease expiry, attempt timeouts,
+//! dependency reconciliation, …) and run continuously, so this service
+//! does **not** touch any of that.
 //!
 //! On every cairn-app boot, [`RecoveryServiceImpl::recover_all`] runs once
 //! between `SandboxService::recover_all` and the readiness-gate flip. It
@@ -48,6 +48,20 @@ const RUN_WEDGE_THRESHOLD_MS: u64 = 300_000;
 /// is best-effort bounded: a pathological backlog won't stall startup here,
 /// the next boot will pick up any stragglers.
 const RECOVERY_SCAN_LIMIT: usize = 10_000;
+
+/// Page size used when paginating approvals for a project. Large enough to
+/// keep the total round-trip count small on realistic workloads (dozens of
+/// approvals per project are typical), small enough that a pathological
+/// project doesn't balloon memory in a single `list_all` call.
+const APPROVAL_PAGE_SIZE: usize = 500;
+
+/// Hard cap on the total number of approvals scanned per project during
+/// recovery. If a project truly has more resolved approvals than this in
+/// its history, running recovery is the wrong tool to reconcile it anyway
+/// — the operator needs a backfill. Tuneable; 50_000 is ~100 pages of
+/// round-trips which still completes in seconds against a local SQLite or
+/// a well-provisioned Postgres.
+const APPROVAL_SCAN_LIMIT: usize = 50_000;
 
 /// RFC 020: run-level recovery on cairn-app startup.
 ///
@@ -313,11 +327,22 @@ where
         // No pending approval but the run is still `WaitingApproval` — look
         // at the most recent resolved approval for this run and derive the
         // follow-up transition. We look up approvals project-wide and cache
-        // the result so a boot with many WaitingApproval runs in the same
-        // project hits the store once, not once per run.
+        // the full, paginated result so a boot with many WaitingApproval
+        // runs in the same project hits the store once, not once per run.
+        //
+        // Pagination: `ApprovalReadModel::list_all` is page-based and does
+        // not expose a by-run filter. A fixed 500-row cap would silently
+        // drop recovery on any project with more than 500 approvals in its
+        // history — the resolved approval we need might be on page 2+ and
+        // the run would be stranded in WaitingApproval. Instead, scan
+        // forward in `APPROVAL_PAGE_SIZE`-row pages up to a hard cap that
+        // is high enough to cover realistic recovery windows without
+        // risking unbounded memory. Boots with more than this many
+        // resolved approvals total are a real operational problem and
+        // surface via `RecoveryAttempted.reason` rather than silently
+        // skipping the advance.
         if !resolved_approvals_by_project.contains_key(&run.project) {
-            let fetched =
-                ApprovalReadModel::list_all(self.store.as_ref(), &run.project, 500, 0).await?;
+            let fetched = fetch_all_approvals(self.store.as_ref(), &run.project).await?;
             resolved_approvals_by_project.insert(run.project.clone(), fetched);
         }
         let all_approvals = resolved_approvals_by_project
@@ -329,13 +354,29 @@ where
             .max_by_key(|a| a.updated_at)
             .cloned();
 
+        // Audit-trail correctness (Cursor low-1): emit the
+        // RecoveryAttempted reason based on what we actually found, not on
+        // what we expected to find. If the "no pending approval" branch
+        // was a stale projection and no resolved record exists, the reason
+        // says so explicitly instead of claiming an advance that didn't
+        // happen.
+        let attempted_reason = match &latest_resolved {
+            Some(approval) => format!(
+                "approval {} resolved during crash window; advancing run state",
+                approval.approval_id,
+            ),
+            None => "no pending approvals remain but no resolved approval found; \
+                     leaving run for operator"
+                .to_owned(),
+        };
+
         let mut events = Vec::with_capacity(3);
         events.push(make_envelope(RuntimeEvent::RecoveryAttempted(
             RecoveryAttempted {
                 project: run.project.clone(),
                 run_id: Some(run.run_id.clone()),
                 task_id: None,
-                reason: "approval resolved during crash window; advancing run state".to_owned(),
+                reason: attempted_reason,
                 boot_id: Some(boot_id_str.clone()),
             },
         )));
@@ -436,4 +477,38 @@ fn current_unix_ms() -> u64 {
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_millis() as u64)
         .unwrap_or_default()
+}
+
+/// Paginate through every approval for a project up to
+/// [`APPROVAL_SCAN_LIMIT`]. Returns accumulated records in the order the
+/// projection yields them. Used by `plan_waiting_approval` to find a run's
+/// resolved approval without issuing one store call per run (the obvious
+/// N+1) and without silently dropping approvals past page 1 (the failure
+/// mode of a fixed 500-row cap).
+async fn fetch_all_approvals<S>(
+    store: &S,
+    project: &cairn_domain::ProjectKey,
+) -> Result<Vec<cairn_store::projections::ApprovalRecord>, RuntimeError>
+where
+    S: ApprovalReadModel + ?Sized,
+{
+    let mut out = Vec::new();
+    let mut offset = 0usize;
+    loop {
+        if out.len() >= APPROVAL_SCAN_LIMIT {
+            break;
+        }
+        let remaining = APPROVAL_SCAN_LIMIT - out.len();
+        let page_limit = APPROVAL_PAGE_SIZE.min(remaining);
+        let page = ApprovalReadModel::list_all(store, project, page_limit, offset).await?;
+        let page_len = page.len();
+        out.extend(page);
+        if page_len < page_limit {
+            // Short page → end of history; no need to issue a final empty
+            // round-trip just to confirm.
+            break;
+        }
+        offset += page_len;
+    }
+    Ok(out)
 }
