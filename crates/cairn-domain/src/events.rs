@@ -866,6 +866,11 @@ pub struct RecoveryAttempted {
     pub run_id: Option<RunId>,
     pub task_id: Option<TaskId>,
     pub reason: String,
+    /// RFC 020 Track 1: the cairn-app boot that originated this recovery sweep.
+    /// `None` for legacy FF-authored recovery events (task lease expiry etc.)
+    /// so existing callers keep deserialising cleanly.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub boot_id: Option<String>,
 }
 
 impl RecoveryAttempted {
@@ -898,6 +903,11 @@ pub struct RecoveryCompleted {
     pub run_id: Option<RunId>,
     pub task_id: Option<TaskId>,
     pub recovered: bool,
+    /// RFC 020 Track 1: the cairn-app boot that originated this recovery sweep.
+    /// `None` for legacy FF-authored recovery events so pre-RFC-020 events
+    /// still round-trip through serde.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub boot_id: Option<String>,
 }
 
 impl RecoveryCompleted {

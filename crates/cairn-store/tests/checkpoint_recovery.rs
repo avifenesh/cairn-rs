@@ -240,6 +240,7 @@ async fn recovery_events_land_in_log_in_order() {
                 run_id: Some(run_id()),
                 task_id: None,
                 reason: "simulated failure requiring checkpoint restore".to_owned(),
+                boot_id: None,
             }),
         )])
         .await
@@ -254,6 +255,7 @@ async fn recovery_events_land_in_log_in_order() {
                 run_id: Some(run_id()),
                 task_id: None,
                 recovered: true,
+                boot_id: None,
             }),
         )])
         .await

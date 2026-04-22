@@ -84,6 +84,63 @@ pub struct RecoveryEscalation {
     pub escalated_at_ms: u64,
 }
 
+/// Unique identifier for one cairn-app process boot.
+///
+/// RFC 020 §"Boot ID": minted once at process start, plumbed into every
+/// `RecoveryEvent` emitted during that boot so audit-trail readers can
+/// correlate a recovery sweep with the process that ran it. A fresh boot
+/// id is visible at the INFO startup banner and in `/health/ready`
+/// progress JSON.
+///
+/// The payload is opaque to the domain layer (callers mint UUID v7 at
+/// the app boundary); `BootId` only promises stable string equality.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct BootId(String);
+
+impl BootId {
+    /// Wrap an already-minted identifier (caller responsible for uniqueness).
+    pub fn new(value: impl Into<String>) -> Self {
+        Self(value.into())
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl std::fmt::Display for BootId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+/// Per-run outcome recorded by `RecoveryService::recover_all`.
+///
+/// RFC 020 Track 1: the service emits `RecoveryAttempted` + `RecoveryCompleted`
+/// (both carrying the boot id) for every non-terminal run; this enum is the
+/// in-process summary the caller inspects without re-reading the event log.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", tag = "kind")]
+pub enum RunRecoveryOutcome {
+    /// Run re-asserted as-is; orchestrator will re-pick it up on next tick.
+    Recovered { run_id: RunId },
+    /// Run's state advanced (e.g. approval resolved during the crash window).
+    Advanced { run_id: RunId },
+    /// Run failed out on recovery (wedged, crashed before first progress).
+    Failed { run_id: RunId, reason: String },
+}
+
+/// Aggregate outcome of a single `RecoveryService::recover_all` sweep.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RunRecoverySummary {
+    pub boot_id: Option<String>,
+    pub scanned_runs: u32,
+    pub recovered_runs: u32,
+    pub advanced_runs: u32,
+    pub failed_runs: u32,
+    pub outcomes: Vec<RunRecoveryOutcome>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::{

@@ -1,7 +1,12 @@
 //! Durable runtime services for sessions, runs, tasks, and approvals.
 //!
-//! Recovery is owned unconditionally by FlowFabric's 14 background
-//! scanners (see cairn-fabric). There is no cairn-side recovery service.
+//! Recovery is split per RFC 020: FlowFabric's 14 background scanners own
+//! **operational** recovery (lease expiry, attempt/execution/suspension
+//! timeouts, pending waitpoint expiry, budget/quota/dependency reconcilers,
+//! flow projection, index reconciliation, retention trimming, unblock
+//! propagation, delayed promotion). `cairn-runtime::RecoveryService` owns
+//! **run-level** recovery and runs once on cairn-app boot, after
+//! `SandboxService::recover_all` and before the readiness-gate flip.
 //!
 //! `cairn-runtime` owns the runtime service boundaries that accept
 //! commands, validate state transitions, persist events, and update
@@ -109,8 +114,9 @@ pub use services::{
     ApprovalPolicyServiceImpl, ApprovalServiceImpl, CheckpointServiceImpl, EvalRunServiceImpl,
     ExternalWorkerService, ExternalWorkerServiceImpl, IngestJobServiceImpl,
     LlmObservabilityServiceImpl, MailboxServiceImpl, ProjectServiceImpl, PromptAssetServiceImpl,
-    PromptReleaseServiceImpl, PromptVersionServiceImpl, SignalServiceImpl, SimpleRouteResolver,
-    TenantServiceImpl, ToolInvocationService, ToolInvocationServiceImpl, WorkspaceServiceImpl,
+    PromptReleaseServiceImpl, PromptVersionServiceImpl, RecoveryService, RecoveryServiceImpl,
+    SignalServiceImpl, SimpleRouteResolver, TenantServiceImpl, ToolInvocationService,
+    ToolInvocationServiceImpl, WorkspaceServiceImpl,
 };
 pub use sessions::SessionService;
 pub use signals::SignalService;
