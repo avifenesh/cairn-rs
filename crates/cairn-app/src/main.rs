@@ -101,8 +101,77 @@ use sqlx::sqlite::SqlitePoolOptions;
 // Ollama, provider discovery, generate, embed, stream, model mgmt → bin_providers.rs
 // ── Arg parsing ───────────────────────────────────────────────────────────────
 
+fn parse_db_value(raw: &str) -> StorageBackend {
+    if raw == "memory" {
+        StorageBackend::InMemory
+    } else if raw.starts_with("postgres://") || raw.starts_with("postgresql://") {
+        StorageBackend::Postgres {
+            connection_url: raw.to_owned(),
+        }
+    } else {
+        StorageBackend::Sqlite {
+            path: raw.to_owned(),
+        }
+    }
+}
+
+/// Apply env-var fallback for the three operator-facing startup
+/// knobs: `CAIRN_MODE`, `CAIRN_PORT`, `CAIRN_DB`. CLI flags always
+/// win — env vars fill in only the fields that were NOT set on the
+/// command line. Previously these env vars were documented but not
+/// read by the Rust binary (the Dockerfile shell wrapper translated
+/// them to `--flag` form); this lets operators set them directly,
+/// matching how every other `CAIRN_*` env var works.
+fn apply_env_fallback(config: &mut BootstrapConfig, provided: &CliProvided) {
+    if !provided.mode {
+        if let Ok(raw) = std::env::var("CAIRN_MODE") {
+            let trimmed = raw.trim();
+            if !trimmed.is_empty() {
+                config.mode = match trimmed {
+                    "team" | "self-hosted" => DeploymentMode::SelfHostedTeam,
+                    "local" => DeploymentMode::Local,
+                    other => {
+                        eprintln!("Unknown CAIRN_MODE: {} (expected local|team)", other);
+                        std::process::exit(1);
+                    }
+                };
+            }
+        }
+    }
+    if !provided.port {
+        if let Ok(raw) = std::env::var("CAIRN_PORT") {
+            let trimmed = raw.trim();
+            if !trimmed.is_empty() {
+                match trimmed.parse::<u16>() {
+                    Ok(port) => config.listen_port = port,
+                    Err(_) => {
+                        eprintln!("Invalid CAIRN_PORT: {}", trimmed);
+                        std::process::exit(1);
+                    }
+                }
+            }
+        }
+    }
+    if !provided.db {
+        if let Ok(raw) = std::env::var("CAIRN_DB") {
+            let trimmed = raw.trim();
+            if !trimmed.is_empty() {
+                config.storage = parse_db_value(trimmed);
+            }
+        }
+    }
+}
+
+#[derive(Default)]
+struct CliProvided {
+    mode: bool,
+    port: bool,
+    db: bool,
+}
+
 fn parse_args_from(args: &[String]) -> BootstrapConfig {
     let mut config = BootstrapConfig::default();
+    let mut provided = CliProvided::default();
 
     let mut i = 1;
     while i < args.len() {
@@ -114,6 +183,7 @@ fn parse_args_from(args: &[String]) -> BootstrapConfig {
                         "team" | "self-hosted" => DeploymentMode::SelfHostedTeam,
                         _ => DeploymentMode::Local,
                     };
+                    provided.mode = true;
                 }
             }
             "--port" => {
@@ -121,6 +191,7 @@ fn parse_args_from(args: &[String]) -> BootstrapConfig {
                 if i < args.len() {
                     if let Ok(port) = args[i].parse::<u16>() {
                         config.listen_port = port;
+                        provided.port = true;
                     }
                 }
             }
@@ -133,16 +204,8 @@ fn parse_args_from(args: &[String]) -> BootstrapConfig {
             "--db" => {
                 i += 1;
                 if i < args.len() {
-                    let val = &args[i];
-                    if val == "memory" {
-                        config.storage = StorageBackend::InMemory;
-                    } else if val.starts_with("postgres://") || val.starts_with("postgresql://") {
-                        config.storage = StorageBackend::Postgres {
-                            connection_url: val.clone(),
-                        };
-                    } else {
-                        config.storage = StorageBackend::Sqlite { path: val.clone() };
-                    }
+                    config.storage = parse_db_value(args[i].as_str());
+                    provided.db = true;
                 }
             }
             "--role" => {
@@ -164,6 +227,8 @@ fn parse_args_from(args: &[String]) -> BootstrapConfig {
         }
         i += 1;
     }
+
+    apply_env_fallback(&mut config, &provided);
 
     if config.mode == DeploymentMode::SelfHostedTeam {
         if config.listen_addr == "127.0.0.1" {
