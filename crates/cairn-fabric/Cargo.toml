@@ -14,32 +14,28 @@ default = []
 test-harness = ["dep:testcontainers", "dep:url"]
 
 [dependencies]
-# FlowFabric crates — consumed from crates.io. 0.2 adds waitpoint HMAC
-# rotation (`ff_rotate_waitpoint_hmac_secret` FCALL + grace window) that
-# cairn-fabric surfaces via the rotate_waitpoint_hmac admin endpoint.
-# 0.2 is behavior-compatible for claim/submit/complete paths; the only
-# semver break is `ScriptError` gaining `#[non_exhaustive]`, which cairn
-# never matches exhaustively. Edition bumped to 2024 in FF; cairn
-# builds under edition 2021 unaffected.
-# Pinned to FF rev 68c1b5b (RFC-012 Stage 1a: EngineBackend trait + EngineError
-# crate-move). Using git deps because FF#129 blocks the full 0.3.0 family
-# publish — only ff-core and ff-script are on crates.io at 0.3.0 today. When
-# FF#129 resolves, each `git = ..., rev = ...` line flips back to
-# `version = "0.3"`. Do NOT merge this prep branch before that happens.
-ff-core = { git = "https://github.com/avifenesh/FlowFabric.git", rev = "68c1b5b" }
-ff-sdk = { git = "https://github.com/avifenesh/FlowFabric.git", rev = "68c1b5b" }
-ff-engine = { git = "https://github.com/avifenesh/FlowFabric.git", rev = "68c1b5b" }
-ff-scheduler = { git = "https://github.com/avifenesh/FlowFabric.git", rev = "68c1b5b" }
-ff-script = { git = "https://github.com/avifenesh/FlowFabric.git", rev = "68c1b5b" }
-ff-backend-valkey = { git = "https://github.com/avifenesh/FlowFabric.git", rev = "68c1b5b" }
+# FlowFabric crates — consumed from crates.io at 0.3.2 family.
+# RFC-012 Stage 1a: EngineBackend trait + EngineError crate-move from
+# ff-sdk to ff-core. ScannerFilter { namespace, instance_tag } added for
+# cross-instance isolation (FF#122). `ScriptError` is `#[non_exhaustive]`;
+# cairn never matches exhaustively. Edition bumped to 2024 in FF; cairn
+# builds under edition 2021 unaffected. Bumping the minor version across
+# all FF crates requires lockstep updates here — they share internal API
+# surface.
+ff-core = "0.3"
+ff-sdk = "0.3"
+ff-engine = "0.3"
+ff-scheduler = "0.3"
+ff-script = "0.3"
+ff-backend-valkey = "0.3"
 # Needed for `Engine::start_with_completions` which takes an
 # `Arc<ff_observability::Metrics>`. ff-engine does NOT re-export the
-# type; pulled in at the same rev to stay lock-step with FF's internal
-# minor-version churn.
-ff-observability = { git = "https://github.com/avifenesh/FlowFabric.git", rev = "68c1b5b" }
-# ferriskey 0.3 ships inside FF at rev 68c1b5b. Must share a single
+# type; pulled in at the same version to stay lock-step with FF's
+# internal minor-version churn.
+ff-observability = "0.3"
+# ferriskey 0.3 ships alongside FF 0.3 family. Must share a single
 # version with FF crates to avoid duplicate-crate type mismatches.
-ferriskey = { git = "https://github.com/avifenesh/FlowFabric.git", rev = "68c1b5b" }
+ferriskey = "0.3"
 
 # Cairn crates
 cairn-domain = { path = "../cairn-domain" }

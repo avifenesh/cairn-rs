@@ -9,6 +9,26 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- **FlowFabric bumped to 0.3.2.** Closes #129 (FlowFabric family publish).
+  Adopts RFC-012 Stage 1a: `EngineBackend` trait + `EngineError` crate-move
+  from `ff-sdk` to `ff-core`. All seven FF crates consumed from crates.io at
+  `"0.3"`, along with `ferriskey = "0.3"`.
+- **Added `ff-observability` as a direct dependency.** Required because
+  `Engine::start_with_completions(config, client, metrics, CompletionStream)`
+  takes an `Arc<ff_observability::Metrics>`; `ff-engine` does not re-export
+  the type. Replaces the previous `EngineConfig.completion_listener` wiring.
+- **Consumes FF's upstream `ScannerFilter { namespace, instance_tag }`**
+  (FF#122 / FF PR #127) for cross-instance isolation at the scanner and
+  completion-subscriber layers. Per-instance isolation is now enforced by
+  both the upstream filter AND cairn's `LeaseHistorySubscriber` client-side
+  filter — layered defense, because the upstream filter does not cover the
+  per-execution `:lease:history` stream XREAD path that the subscriber
+  walks via the partition-global `lease_expiry` ZSET.
+- `ff_sdk::task::read_stream` signature takes a `StreamCursor` enum instead
+  of `&str`; call sites updated.
+
 ### Fixed
 
 - **Cross-instance event leak in `LeaseHistorySubscriber`.** Two
