@@ -1429,6 +1429,34 @@ async fn main() {
             tracing::info!("cairn-app readiness: /health/ready now returns 200");
         });
 
+        // ── Test-only: SIGUSR1 arms the injected append-failure hook ────────
+        // Chaos integration tests send SIGUSR1 after the subprocess is
+        // healthy so startup appends (tenant seed, projections bootstrap)
+        // don't consume the failure budget. Each SIGUSR1 re-arms to
+        // `skip=0, fail=1`. Debug-only; release builds strip both the
+        // handler and the underlying hook in cairn-store.
+        #[cfg(debug_assertions)]
+        {
+            tokio::spawn(async move {
+                let mut sigusr1 = match tokio::signal::unix::signal(
+                    tokio::signal::unix::SignalKind::user_defined1(),
+                ) {
+                    Ok(s) => s,
+                    Err(e) => {
+                        tracing::warn!(error = %e, "SIGUSR1 handler install failed");
+                        return;
+                    }
+                };
+                while sigusr1.recv().await.is_some() {
+                    cairn_store::arm_fail_next_append(0, 1);
+                    tracing::warn!(
+                        "SIGUSR1 received — armed injected append-failure \
+                         (skip=0 fail=1); debug-only hook"
+                    );
+                }
+            });
+        }
+
         // ── Graceful shutdown wiring ─────────────────────────────────────────
         let (signal_tx, signal_rx) = tokio::sync::watch::channel(false);
 

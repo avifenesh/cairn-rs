@@ -499,6 +499,7 @@ dependencies = [
  "ff-core",
  "futures",
  "http-body-util",
+ "libc",
  "mime_guess",
  "opentelemetry-proto",
  "prost",

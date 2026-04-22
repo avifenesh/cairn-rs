@@ -25,6 +25,11 @@ pub mod sqlite;
 pub use db::{Backend, DbAdapter};
 pub use error::StoreError;
 pub use event_log::{DurabilityClass, EntityRef, EventLog, EventPosition, StoredEvent};
+/// Test-only runtime arming for the injected-append-failure hook.
+/// Stripped from release builds along with the hook itself, so this
+/// symbol cannot be reached from a production cairn-app binary.
+#[cfg(debug_assertions)]
+pub use in_memory::arm_fail_next_append;
 pub use in_memory::{InMemoryStore, UsageCounters};
 pub use migrations::{AppliedMigration, Migration, MigrationRunner};
 pub use projections::SyncProjection;

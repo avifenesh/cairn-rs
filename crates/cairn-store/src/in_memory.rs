@@ -15,6 +15,47 @@ use crate::error::StoreError;
 use crate::event_log::*;
 use crate::projections::*;
 
+// Test-only: inject one (or more) `append` failure(s) deterministically
+// so chaos tests can exercise the HTTP/service-level error path without
+// OS-level disk-full or fsync tricks. Armed at runtime via
+// [`arm_fail_next_append`]; zero-cost when not armed.
+//
+// Gated behind `#[cfg(debug_assertions)]` — release builds strip the
+// atomics, the arming function, and the per-append branch, so no
+// production cairn-app can have its event log poisoned through this
+// path. Same precedent as the `CAIRN_TEST_SEED_*` hooks in
+// cairn-app/src/main.rs.
+//
+// Portability: sits in the in-memory store path, which is the `--db
+// memory` backend used by LiveHarness. Postgres/SQLite `EventLog::append`
+// implementations are untouched.
+#[cfg(debug_assertions)]
+static FAIL_APPEND_SKIP_REMAINING: std::sync::atomic::AtomicU32 =
+    std::sync::atomic::AtomicU32::new(0);
+
+#[cfg(debug_assertions)]
+static FAIL_APPEND_FAIL_REMAINING: std::sync::atomic::AtomicU32 =
+    std::sync::atomic::AtomicU32::new(0);
+
+/// Test-only: arm the injected-failure hook at runtime. Chaos tests
+/// call this after the subprocess is healthy so bootstrap appends
+/// (tenant seed, projection init) don't consume the failure budget.
+/// Stripped from release builds.
+///
+/// `skip` = number of subsequent `append` calls to let through
+/// untouched. `fail` = number of appends to reject with
+/// `StoreError::Internal` after the skip window. Both are assigned
+/// absolutely (not added): calling `arm_fail_next_append(0, 1)` resets
+/// to "fail the next append". Concurrent callers race; last writer
+/// wins. This is a single-purpose test knob, not a coordination
+/// primitive.
+#[cfg(debug_assertions)]
+pub fn arm_fail_next_append(skip: u32, fail: u32) {
+    use std::sync::atomic::Ordering;
+    FAIL_APPEND_SKIP_REMAINING.store(skip, Ordering::Release);
+    FAIL_APPEND_FAIL_REMAINING.store(fail, Ordering::Release);
+}
+
 fn now_millis() -> u64 {
     // Matches pg/sqlite backends' fallback on clock skew: a clock before
     // UNIX_EPOCH (container misconfiguration) MUST NOT panic the store.
@@ -1742,6 +1783,47 @@ impl EventLog for InMemoryStore {
         &self,
         events: &[EventEnvelope<RuntimeEvent>],
     ) -> Result<Vec<EventPosition>, StoreError> {
+        // Test hook: simulate a failing append (e.g. disk-full, fsync
+        // error, backend partition) without OS-level trickery. Stripped
+        // from release builds; see FAIL_APPEND_* for the full contract.
+        // We check BEFORE touching any state so the hook also proves
+        // our no-partial-write invariant: on injected failure the log
+        // is byte-identical to pre-call.
+        #[cfg(debug_assertions)]
+        {
+            use std::sync::atomic::Ordering;
+            // Consume a skip token first; only once the skip budget is
+            // exhausted do we start firing failures. `fetch_update`
+            // returns `Err` when the closure yields `None` (skip
+            // counter already 0).
+            let skip_decremented = FAIL_APPEND_SKIP_REMAINING
+                .fetch_update(Ordering::AcqRel, Ordering::Acquire, |v| {
+                    if v == 0 {
+                        None
+                    } else {
+                        Some(v - 1)
+                    }
+                })
+                .is_ok();
+            if !skip_decremented {
+                // Skip budget is zero → maybe fire a failure.
+                let fired = FAIL_APPEND_FAIL_REMAINING
+                    .fetch_update(Ordering::AcqRel, Ordering::Acquire, |v| {
+                        if v == 0 {
+                            None
+                        } else {
+                            Some(v - 1)
+                        }
+                    })
+                    .is_ok();
+                if fired {
+                    return Err(StoreError::Internal(
+                        "arm_fail_next_append: injected append failure".to_owned(),
+                    ));
+                }
+            }
+        }
+
         // Scope the MutexGuard so it is lexically dropped before any `.await`.
         let positions = {
             let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
