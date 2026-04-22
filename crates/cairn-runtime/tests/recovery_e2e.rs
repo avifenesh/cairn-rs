@@ -1,9 +1,41 @@
-//! Integration tests for RFC 020: Durable Recovery and Tool-Call Idempotency.
+//! Unit tests for RFC 020 recovery primitives.
+//!
+//! # Scope
+//!
+//! This file holds **unit tests** on the recovery types declared in
+//! `cairn_runtime::startup` (`ToolCallId`, `ToolCallResultCache`,
+//! `CheckpointMeta`, `ReadinessState`, `RecoverySummary`, …) and on the pure
+//! `recovery_dispatch_decision()` function. Per the user rule
+//! `feedback_integration_tests_only.md`, these tests **do not count as RFC
+//! 020 compliance proof** — they exercise types in isolation without ever
+//! crashing a real `cairn-app` process. They remain in the workspace because
+//! they are fast, type-level regression guards that catch obvious breakage
+//! before the integration suite runs.
+//!
+//! # Compliance proof lives elsewhere
+//!
+//! The end-to-end, crash-and-replay integration tests that actually prove
+//! RFC 020 invariants are in `crates/cairn-app/tests/test_rfc020_*.rs`
+//! and drive a real subprocess over HTTP via the `LiveHarness` fixture.
+//! See `project_recovery_e2e_migration_plan.md` for the full migration map.
+//!
+//! # Migration status (PR 1 of 3 — `project_recovery_e2e_migration_plan.md`)
+//!
+//! | Former test                                     | Action            | Replaced by                                                      |
+//! |-------------------------------------------------|-------------------|------------------------------------------------------------------|
+//! | `rfc020_invariant5_dual_checkpoint_per_iteration` | KEEP_AS_UNIT    | (pending Track 4 — no integration counterpart yet)               |
+//! | `rfc020_invariant6_tool_result_cache_hit_on_resume` | KEEP_AS_UNIT (blocked on Track 3) | planned `test_rfc020_08_tool_result_cache_hit` (future PR) |
+//! | `rfc020_dangerous_pause_requires_operator_confirmation` | KEEP_AS_UNIT (blocked on Track 3) | planned `test_rfc020_13a_dangerous_pause` (future PR)       |
+//! | `rfc020_author_responsible_redispatches_with_same_id` | KEEP_AS_UNIT (blocked on Track 3) | planned `test_rfc020_13b_author_responsible_redispatch` (future PR) |
+//! | `rfc020_clean_recovery_state_survives_restart`  | **DELETED**       | `test_rfc020_recovery::clean_crash_recovery_restores_non_terminal_runs` (PR #75) |
+//! | `rfc020_in_flight_approval_survives_restart`    | **DELETED**       | `test_rfc020_recovery::in_flight_approval_survives_crash` (this PR) |
+//! | `rfc020_recovery_summary_has_all_counters`      | **DELETED**       | `test_rfc020_recovery::recovery_summary_emitted_once_per_boot` (this PR) |
+//! | `rfc020_batched_append_all_or_nothing`          | KEEP_AS_UNIT      | (batch atomicity relies on store ACID; crash timing not repeatable from LiveHarness) |
 
 use cairn_domain::recovery::{CheckpointKind, RetrySafety};
 use cairn_runtime::startup::{
     recovery_dispatch_decision, BranchState, CachedToolResult, CheckpointMeta, ReadinessState,
-    RecoveryDispatchDecision, RecoverySummary, ToolCallId, ToolCallResultCache,
+    RecoveryDispatchDecision, ToolCallId, ToolCallResultCache,
 };
 
 // ── RFC 020 Invariant 5: Two checkpoints per iteration ──────────────────────
@@ -189,136 +221,15 @@ fn rfc020_readiness_flips_after_all_branches_complete() {
     assert_eq!(progress.status, "ready");
 }
 
-// ── RFC 020: Recovery summary ───────────────────────────────────────────────
-
-#[test]
-fn rfc020_recovery_summary_has_all_counters() {
-    let summary = RecoverySummary {
-        recovered_runs: 5,
-        recovered_tasks: 12,
-        recovered_sandboxes: 3,
-        preserved_sandboxes: 1,
-        orphaned_sandboxes_cleaned: 2,
-        decision_cache_entries: 87,
-        stale_pending_cleared: 2,
-        tool_result_cache_entries: 42,
-        memory_projection_entries: 3401,
-        graph_nodes_recovered: 892,
-        graph_edges_recovered: 2104,
-        webhook_dedup_entries: 156,
-        trigger_projections: 5,
-        boot_id: "boot-1234".into(),
-        startup_ms: 2340,
-    };
-
-    assert_eq!(summary.recovered_runs, 5);
-    assert_eq!(summary.preserved_sandboxes, 1);
-    assert_eq!(summary.startup_ms, 2340);
-    assert_eq!(summary.boot_id, "boot-1234");
-}
-
-// ── RFC 020 Test: Clean recovery — state survives restart ────────────────────
-
-#[test]
-fn rfc020_clean_recovery_state_survives_restart() {
-    // Simulate: create run, write 20 events (tool results), stop, restart.
-    // On restart, the tool result cache must contain all 20 entries.
-    let mut cache = ToolCallResultCache::new();
-
-    // Write 20 tool results (simulating a run with 20 tool calls)
-    for i in 0..20 {
-        let tcid = ToolCallId::derive(
-            "run-recovery",
-            i / 3,
-            i % 3,
-            "memory_search",
-            &format!(r#"{{"query":"q{}"}}"#, i),
-        );
-        cache.insert(CachedToolResult {
-            tool_call_id: tcid,
-            tool_name: "memory_search".into(),
-            result_json: serde_json::json!({"result": i}),
-            completed_at: 1000 + i as u64,
-        });
-    }
-
-    assert_eq!(cache.len(), 20, "all 20 events must be in cache");
-
-    // Simulate restart: rebuild cache from the same events
-    let mut recovered_cache = ToolCallResultCache::new();
-    for i in 0..20 {
-        let tcid = ToolCallId::derive(
-            "run-recovery",
-            i / 3,
-            i % 3,
-            "memory_search",
-            &format!(r#"{{"query":"q{}"}}"#, i),
-        );
-        // On replay, the same ToolCallId deterministically matches
-        recovered_cache.insert(CachedToolResult {
-            tool_call_id: tcid.clone(),
-            tool_name: "memory_search".into(),
-            result_json: serde_json::json!({"result": i}),
-            completed_at: 1000 + i as u64,
-        });
-
-        // Verify the recovered cache returns the same result
-        let original = cache.get(&tcid).unwrap();
-        let recovered = recovered_cache.get(&tcid).unwrap();
-        assert_eq!(original.completed_at, recovered.completed_at);
-    }
-
-    assert_eq!(
-        recovered_cache.len(),
-        20,
-        "recovered cache must have same 20 entries"
-    );
-}
-
-// ── RFC 020 Test: In-flight approval survives restart ────────────────────────
-
-#[test]
-fn rfc020_in_flight_approval_survives_restart() {
-    // A run in WaitingApproval at crash must still be in WaitingApproval after recovery.
-    // The readiness state tracks this — runs are the last branch to complete.
-    let state = ReadinessState::new();
-
-    // Step 2: event log replayed, projections warmed
-    state.update_branch("2", |b| {
-        b.event_log = branch_complete(5000);
-        b.tool_result_cache = branch_complete(10);
-        b.decision_cache = branch_complete(25);
-        b.memory = branch_complete(100);
-        b.graph = branch_complete(50);
-        b.evals = branch_complete(5);
-        b.webhook_dedup = branch_complete(0);
-        b.triggers = branch_complete(2);
-    });
-
-    // Step 3: parallel branches
-    state.update_branch("3", |b| {
-        b.repo_store = branch_complete(1);
-        b.plugin_host = branch_complete(0);
-        b.providers = branch_complete(1);
-    });
-
-    // Step 4b: run recovery — 3 runs recovered, 1 still WaitingApproval
-    state.update_branch("4b", |b| {
-        b.sandboxes = branch_complete(2);
-        b.runs = BranchStatus::complete_with_detail(3, "1 waiting_approval, 2 resumed");
-    });
-
-    state.mark_ready();
-    let progress = state.progress();
-
-    // The run in WaitingApproval survived — it's counted in the recovery
-    assert_eq!(progress.status, "ready");
-    let runs = &progress.branches.runs;
-    assert_eq!(runs.count, Some(3));
-    assert!(runs.detail.as_ref().unwrap().contains("waiting_approval"));
-}
-
 // ── RFC 020 Test: Batched append coherence ──────────────────────────────────
+//
+// KEEP_AS_UNIT: this test documents the batch-atomicity invariant as a
+// contract sanity check. Hitting a real crash between the in-memory buffer
+// and the event-log commit is not reliably reproducible from LiveHarness,
+// and production durability here ultimately rests on the store's ACID
+// guarantees rather than on any cairn-level code path. A LiveHarness
+// variant is deferred until/unless the store grows deterministic
+// mid-batch crash hooks for testing.
 
 #[test]
 fn rfc020_batched_append_all_or_nothing() {
