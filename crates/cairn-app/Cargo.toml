@@ -124,6 +124,11 @@ ff-core = { version = "0.2", optional = true }
 [dev-dependencies]
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "process", "io-util"] }
 http-body-util = "0.1"
+# Chaos test only: `libc::kill` to deliver SIGSTOP/SIGCONT to the live
+# cairn-app subprocess without pulling `nix`. std's `Child::kill` only
+# sends SIGKILL; a raw libc FFI call is the minimal portable shim for
+# arbitrary signals on POSIX. Test-only, never reaches the binary.
+libc = "0.2"
 # Turn on the testcontainers-backed Valkey harness so HTTP integration
 # tests under `tests/integration/` can point the spawned cairn-app
 # subprocess at a shared live Valkey.
