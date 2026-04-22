@@ -5,7 +5,7 @@
 //! completion).  It pins a second, real production shape that the plain
 //! contract test does not cover: a reasoning model that exhausts its
 //! `max_tokens` budget on internal reasoning before emitting any
-//! user-visible content.  Observed during the PR #91 fixture refresh:
+//! user-visible content.  The invariant shape is:
 //!
 //! - HTTP 200.
 //! - `choices[0].message.content` is **`null`** (JSON null, not missing,
@@ -27,12 +27,11 @@
 //! `src/wire/openai_compat.rs`), so serde deserializes JSON `null` into
 //! `None` without panicking.  `ChatResponse::text()` returns
 //! `Option<String>`, not a blind `unwrap`.  The parser is therefore
-//! already correct for this shape — **no parser change is needed**.  The
-//! panic observed in the PR #91 fixture refresh was in the test's own
-//! over-strict `.expect("choices[0].message.content must be present")`
-//! assertion, not in the parser itself.  This contract test locks in the
-//! correct behavior so future parser refactors cannot silently regress
-//! it.
+//! already correct for this shape — **no parser change is needed**.
+//! Callers that panic on this shape do so in their own over-strict
+//! `.expect("choices[0].message.content must be present")` assertions,
+//! not in the parser.  This contract test locks in the correct parser
+//! behavior so future refactors cannot silently regress it.
 //!
 //! # Refresh mode
 //!
@@ -72,8 +71,8 @@ const REFRESH_PROMPT: &str = "A farmer has chickens and cows. There are 30 heads
      How many chickens? Show your full step-by-step reasoning.";
 
 /// Small enough that a reasoning model reliably hits `finish_reason: length`
-/// with `content: null`.  Matches the value that reproduced the shape
-/// during PR #91 fixture work.
+/// with `content: null` — the model burns its budget inside the hidden
+/// chain-of-thought before any visible content is emitted.
 const REFRESH_MAX_TOKENS: u32 = 30;
 
 /// Freshness warning threshold — same cadence as `contract_openrouter.rs`.
