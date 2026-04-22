@@ -907,8 +907,38 @@ impl SandboxService {
         // No allowlist wired (`None`) → skip entirely. Workspace-layer
         // unit tests exercise the sweep directly with seeded entries and
         // would otherwise need to stand up the full access service.
+        //
+        // **Authoritative-allowlist gate (Cursor Bugbot high-1):**
+        // `ProjectRepoAccessService` is an in-memory `RwLock<HashMap>`
+        // populated via HTTP `POST /v1/projects/.../repos/...` — it is
+        // NOT replayed from the event log on boot. A freshly-started
+        // cairn-app therefore sees an empty allowlist for every project
+        // until the operator (or an external controller) re-asserts
+        // entries. Treating that empty state as "all repos revoked"
+        // would flag every repo-backed sandbox as `AllowlistRevoked` on
+        // every restart — a catastrophic false positive that would
+        // freeze unrelated runs until an operator resolved the flood of
+        // synthesized approvals.
+        //
+        // Until the allowlist persists across restarts (whether via an
+        // event replay, a sidecar, or a projection), the sweep is only
+        // sound for projects with *at least one* allowlisted repo at
+        // recovery time. Projects with zero entries are treated as
+        // "not authoritative yet" and skipped; the sweep picks them up
+        // on the next `recover_all` call once the operator has re-
+        // asserted the allowlist. This is strictly an under-approximation
+        // (false negatives, no false positives) — the exact opposite of
+        // the failure mode the bug report flagged.
+        //
+        // TODO(RFC 016 persistence): when the allowlist gains durable
+        // storage, remove the "non-empty project" gate and rely on the
+        // allowlist's own authoritative semantics.
         if let Some(allowlist) = self.allowlist.clone() {
             let entries = self.list_registry_entries()?;
+            // Cache per-project "is the allowlist authoritative?" answers
+            // so we don't re-query `list_for_project` for every registry
+            // entry in the same project.
+            let mut project_authoritative: HashMap<ProjectKey, bool> = HashMap::new();
             for mut entry in entries {
                 if entry.allowlist_revoked_handled {
                     continue;
@@ -919,6 +949,17 @@ impl SandboxService {
                 let ctx = RepoAccessContext {
                     project: entry.project.clone(),
                 };
+                let authoritative = match project_authoritative.get(&entry.project).copied() {
+                    Some(v) => v,
+                    None => {
+                        let v = !allowlist.list_for_project(&ctx).await.is_empty();
+                        project_authoritative.insert(entry.project.clone(), v);
+                        v
+                    }
+                };
+                if !authoritative {
+                    continue;
+                }
                 if allowlist.is_allowed(&ctx, &repo_id).await {
                     continue;
                 }
@@ -1989,10 +2030,25 @@ mod tests {
         // on `summary.allowlist_revoked_runs`.
         use crate::repo_store::access_service::ProjectRepoAccessService;
 
+        use cairn_domain::{ActorRef, OperatorId, RepoAccessContext};
+
         let run = RunId::new("run-revoked");
         let repo_id = crate::sandbox::RepoId::new("octocat/hello");
         let provider = RecoveryProvider::new(SandboxStrategy::Overlay, Vec::new(), HashMap::new());
         let allowlist = Arc::new(ProjectRepoAccessService::new());
+        // Seed a sentinel repo so the project is "authoritative" under
+        // the sweep gate (an empty allowlist is treated as
+        // not-yet-replayed and skipped — Bugbot high-1).
+        allowlist
+            .allow(
+                &RepoAccessContext { project: project() },
+                &crate::sandbox::RepoId::new("other/sentinel"),
+                ActorRef::Operator {
+                    operator_id: OperatorId::new("test"),
+                },
+            )
+            .await
+            .expect("seed sentinel");
         let sink = Arc::new(BufferedSandboxEventSink::default());
         let base_dir = unique_test_dir("allowlist-revoked");
         let service = SandboxService::new(
@@ -2050,6 +2106,54 @@ mod tests {
         let second = service.recover_all().await.unwrap();
         assert_eq!(second.preserved_allowlist_revoked, 0);
         assert!(second.allowlist_revoked_runs.is_empty());
+        assert!(sink.drain().is_empty());
+    }
+
+    #[tokio::test]
+    async fn recover_all_skips_allowlist_revoked_sweep_when_project_allowlist_empty() {
+        // Bugbot high-1 gate: an empty allowlist for a project means
+        // "not yet replayed / re-asserted this boot", NOT "all repos
+        // revoked". The sweep must skip such projects so a freshly-
+        // started cairn-app does not flood operators with approvals.
+        use crate::repo_store::access_service::ProjectRepoAccessService;
+
+        let run = RunId::new("run-empty-allowlist");
+        let repo_id = crate::sandbox::RepoId::new("octocat/hello");
+        let provider = RecoveryProvider::new(SandboxStrategy::Overlay, Vec::new(), HashMap::new());
+        let allowlist = Arc::new(ProjectRepoAccessService::new());
+        // Do NOT seed any entries. The project is "not authoritative".
+        let sink = Arc::new(BufferedSandboxEventSink::default());
+        let base_dir = unique_test_dir("allowlist-empty");
+        let service = SandboxService::new(
+            HashMap::from([(
+                SandboxStrategy::Overlay,
+                Box::new(provider) as Box<dyn crate::providers::SandboxProvider>,
+            )]),
+            sink.clone(),
+            base_dir.clone(),
+            Arc::new(FixedClock::new(1_000)),
+        )
+        .with_allowlist(allowlist);
+
+        let sandbox_path = base_dir.join("sbx-run-empty-allowlist");
+        fs::create_dir_all(&sandbox_path).expect("create stub sandbox dir");
+        service
+            .seed_registry_entry_for_test_with_repo(
+                crate::sandbox::SandboxId::new("sbx-run-empty-allowlist"),
+                run.clone(),
+                project(),
+                SandboxStrategy::Overlay,
+                sandbox_path,
+                Some(repo_id),
+            )
+            .expect("seed registry entry");
+
+        let summary = service.recover_all().await.unwrap();
+        assert_eq!(
+            summary.preserved_allowlist_revoked, 0,
+            "empty allowlist must be treated as not-yet-authoritative, not as all-revoked",
+        );
+        assert!(summary.allowlist_revoked_runs.is_empty());
         assert!(sink.drain().is_empty());
     }
 

@@ -383,7 +383,16 @@ where
                     && !allowlist_revoked_handled.contains(&r.run_id)
             })
             .collect();
-        summary.scanned_runs = (runs.len() as u32).saturating_add(summary.failed_runs);
+        // `scanned_runs` must reflect everything recovery touched this
+        // boot — the non-terminal runs about to be planned, plus the
+        // sandbox-lost runs we already transitioned to Failed, plus the
+        // allowlist-revoked runs we already transitioned to
+        // WaitingApproval. Undercounting these in the `scanned=` log
+        // line would understate recovery work for operators.
+        // (Cursor Bugbot low-1.)
+        summary.scanned_runs = (runs.len() as u32)
+            .saturating_add(summary.failed_runs)
+            .saturating_add(summary.advanced_runs);
         for run in runs {
             let plan = self
                 .plan_for_run(&run, boot_id, now_ms, &mut resolved_approvals_by_project)

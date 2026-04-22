@@ -1560,6 +1560,30 @@ async fn seed_allowlist_revoked_sandbox_for_test(
     let session_id = SessionId::new(format!("sess-{}", parts[0]));
     let sandbox_id = format!("sbx-{}", parts[0]);
 
+    // Seed an *unrelated* repo into the allowlist so the project is
+    // "authoritative" under the Bugbot high-1 gate in
+    // `SandboxService::recover_all`. The bound repo (`parts[4]`) is
+    // deliberately NOT added; `is_allowed(bound_repo) == false` is
+    // what makes recovery emit `SandboxAllowlistRevoked`.
+    {
+        use cairn_domain::{ActorRef, OperatorId, RepoAccessContext};
+        let ctx = RepoAccessContext {
+            project: project.clone(),
+        };
+        let sentinel = cairn_workspace::RepoId::new("cairn-test/allowlist-sentinel");
+        lib_state
+            .project_repo_access
+            .allow(
+                &ctx,
+                &sentinel,
+                ActorRef::Operator {
+                    operator_id: OperatorId::new("test-seed"),
+                },
+            )
+            .await
+            .map_err(|e| format!("seed allowlist sentinel: {e}"))?;
+    }
+
     // Idempotency: on sigkill+restart the run is no longer Running and
     // re-seeding must be a no-op. The registry entry's
     // `allowlist_revoked_handled` flag survives the restart via the
