@@ -69,6 +69,16 @@ lint is tracked as a follow-up in
 
 ## Phase D — control-plane FCALLs + FCALL ARGV pre-reads (split)
 
+**Status: COMPLETE.** PR 1 (budget / quota / rotation / worker
+registry), PR 2a (run + session + claim lifecycle), and PR 2b
+(task lifecycle + dependency graph) have all shipped. Cairn
+services in `services/*` (sans the documented `scheduler_service`
+exception) no longer import `ff_core::keys`, `ff_core::partition`,
+or `ff_core::contracts` — every FF-state read / FCALL goes through
+the [`Engine`] / [`ControlPlaneBackend`] trait boundary. The
+remaining phases (E typed errors, F upstream `describe_*` swap-in)
+can build on this surface without further service-layer churn.
+
 The dispatch grew once Phase C shipped: control-plane FCALLs (budget,
 quota, rotation, worker) plus run/task/session lifecycle FCALLs plus
 the ~12 `hget ctx.core()` ARGV pre-reads combined to ~5-8k LOC in a
@@ -139,27 +149,60 @@ Services migrated:
 Audit: `git grep -nE '^use ff_core::(keys|partition)::' crates/cairn-fabric/src/services/{run_service,session_service,claim_common}.rs`
 returns zero hits.
 
-### Phase D PR 2b — task lifecycle (deferred)
+### Phase D PR 2b — task lifecycle (shipped)
 
-`services/task_service.rs` (11 lifecycle methods) still imports
-`ff_core::keys::{ExecKeyContext, IndexKeys}` + `ff_core::partition::
-execution_partition`. The service hasn't migrated yet because it
-carries behaviour that deserves its own scope audit:
-  - `declare_dependency` retry loop (5 attempts on
-    `stale_graph_revision`, with `stage_dependency_edge` +
-    `apply_dependency_to_child` fan-out).
-  - `check_dependencies` envelope walk across
-    `list_incoming_edges` + per-edge `evaluate_flow_eligibility`.
-  - `submit` / `complete` / `fail` / `cancel` / `claim` / `renew` /
-    `heartbeat` lifecycle ops that share ARGV pre-read patterns
-    with run_service but operate on flow-scoped edge state.
+`services/task_service.rs` no longer imports `ff_core::keys` or
+`ff_core::partition`. All 11 lifecycle paths (`submit`,
+`add_execution_to_session_flow`, `declare_dependency`,
+`check_dependencies`, `claim`, `heartbeat`, `complete`, `fail`,
+`cancel`, `pause`, `resume`) route through the
+[`ControlPlaneBackend`] trait; the service retains only the
+behaviour that is genuinely cairn-side:
+  - 5-attempt retry loop on `StageDependencyOutcome::StaleGraphRevision`
+    (exponential 10/20/40/80/160 ms backoff — pre-migration
+    observable behaviour preserved).
+  - `reconcile_existing_dependency_edge` — reads the staged edge via
+    `Engine::describe_edge` and constructs `DependencyConflictDetail`
+    on kind / data_passing_ref mismatch.
+  - Cairn-native mirror construction for every trait input (no
+    `ff_core::contracts::*` leaking through the boundary).
 
-PR 2b will apply the same trait-delegation pattern, adding ~10
-more methods to `ControlPlaneBackend` (or, if the audit shows it,
-carving a `TaskDependencyBackend` sibling for the edge-shaped
-ops). `claim_common::issue_grant_and_claim` is already PR-2a-ready
-— task_service only needs to pass `&self.control_plane` there
-(already done in 2a).
+**Q6 audit outcome (pre-implementation):** REUSE
+[`ControlPlaneBackend::issue_grant_and_claim`] — task and run claim
+issue byte-identical FCALL KEYS/ARGV. +0 methods.
+
+**Methods added:**
+- [`ControlPlaneBackend`] +6:
+  - `submit_task_execution` — kind-tagged mirror of
+    `create_run_execution` with priority + default policy.
+  - `add_execution_to_flow` — `ff_create_flow` (idempotent) +
+    `ff_add_execution_to_flow` pair.
+  - `stage_dependency_edge` — FCALL + typed `StageDependencyOutcome`
+    enum; service owns retry + reconcile.
+  - `apply_dependency_to_child` — second half of the declare edge
+    fan-out.
+  - `evaluate_flow_eligibility` — typed `EligibilityResult` enum.
+  - `renew_task_lease` — heartbeat path.
+- [`Engine`] +1:
+  - `list_expired_leases` — ZRANGEBYSCORE over `lease_expiry`
+    zset across every execution partition.
+
+`complete_run_execution`, `fail_run_execution`, `cancel_run_execution`,
+`suspend_run_execution`, and `resume_run_execution` are
+**kind-neutral** — they operate on an `ExecutionId` and don't care
+whether cairn minted it as a run or a task. Task service reuses them
+verbatim; the `_run_` in the name is kept only to avoid churn on run
+call sites.
+
+**ControlPlaneBackend total: 26 methods** (budget 5 + quota 2 +
+rotation 1 + run lifecycle 7 + session 2 + claim 1 + task 8 — 6 new
+task-specific + 2 the task service shares with runs).
+**Engine total: 13 methods** (reads 5 + tag writes 3 + worker 3 +
+task lifecycle reads 1 + — counting from the Engine trait surface).
+
+[`ControlPlaneBackend`]: ../../crates/cairn-fabric/src/engine/control_plane.rs
+[`ControlPlaneBackend::issue_grant_and_claim`]: ../../crates/cairn-fabric/src/engine/control_plane.rs
+[`Engine`]: ../../crates/cairn-fabric/src/engine/mod.rs
 
 ### Phase D exception — `scheduler_service.rs`
 
