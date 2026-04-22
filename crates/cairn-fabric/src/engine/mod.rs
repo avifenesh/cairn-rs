@@ -65,11 +65,13 @@ use crate::error::FabricError;
 
 pub use control_plane::ControlPlaneBackend;
 pub use control_plane_types::{
-    BudgetSpendOutcome, BudgetStatusSnapshot, CancelFlowInput, CancelRunInput, ClaimGrantOutcome,
-    CompleteRunInput, CreateFlowInput, CreateRunExecutionInput, DeliverApprovalSignalInput,
-    ExecutionCreated, ExecutionLeaseContext, FailExecutionOutcome, FailRunInput,
-    FlowCancelOutcome, IssueGrantAndClaimInput, QuotaAdmission, ResumeRunInput, RotationFailure,
-    RotationOutcome, SuspendRunInput, WorkerRegistration,
+    AddExecutionToFlowInput, ApplyDependencyToChildInput, BudgetSpendOutcome,
+    BudgetStatusSnapshot, CancelFlowInput, CancelRunInput, ClaimGrantOutcome, CompleteRunInput,
+    CreateFlowInput, CreateRunExecutionInput, DeliverApprovalSignalInput, EligibilityResult,
+    ExecutionCreated, ExecutionLeaseContext, ExpiredLease, FailExecutionOutcome, FailRunInput,
+    FlowCancelOutcome, IssueGrantAndClaimInput, QuotaAdmission, RenewLeaseInput, ResumeRunInput,
+    RotationFailure, RotationOutcome, StageDependencyEdgeInput, StageDependencyOutcome,
+    SubmitTaskInput, SuspendRunInput, WorkerRegistration,
 };
 pub use snapshots::{
     AttemptSummary, EdgeSnapshot, EdgeState, ExecutionSnapshot, FlowSnapshot, LeaseSummary,
@@ -210,4 +212,23 @@ pub trait Engine: Send + Sync {
     /// path covers the implicit case; this is the opt-out for graceful
     /// shutdown.
     async fn mark_worker_dead(&self, instance_id: &WorkerInstanceId) -> Result<(), FabricError>;
+
+    // ── Task lifecycle reads (Phase D PR 2b) ────────────────────────────
+
+    /// Enumerate executions whose active lease has expired as of
+    /// `now_ms`, capped at `limit`. Read-only ZRANGEBYSCORE over FF's
+    /// `lease_expiry` zset across every execution partition.
+    ///
+    /// FF's server-side lease_expiry scanner handles reclaim — this
+    /// primitive exists so cairn can surface a projection of
+    /// timed-out tasks for operator dashboards without duplicating
+    /// FF's scan logic.
+    ///
+    /// Empty `Vec` means no expired leases across the configured
+    /// partition count.
+    async fn list_expired_leases(
+        &self,
+        now_ms: u64,
+        limit: usize,
+    ) -> Result<Vec<control_plane_types::ExpiredLease>, FabricError>;
 }
