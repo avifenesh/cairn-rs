@@ -110,6 +110,18 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **UI: `OrchestrationPage` re-processed every SSE event per render and
+  leaked `setTimeout` callbacks on unmount (#177).** The stream effect
+  depended on the whole `streamEvents` array, so the "latest" frame was
+  re-handled on every state change (spurious refetches + fresh
+  highlights), and the 3 s fresh-clear `setTimeout` it scheduled had no
+  cleanup — timeouts accumulated for the life of the tab. Added a
+  `useRef` seen-ids set so each frame is processed exactly once
+  (keyed on the server-assigned event id from `useEventStream`), tracked
+  pending timeouts in a `useRef<Map>`, and clear them both when a newer
+  one is scheduled for the same id and on component unmount. Operator
+  actions wired in PR P are untouched.
+
 - **UI: `ApprovalsPage` 24h stats double-counted pending requests (#176).**
   The "Approved (24h)" and "Rejected (24h)" stat cards filtered resolved
   approvals by `created_at`, so approvals requested within the last 24h

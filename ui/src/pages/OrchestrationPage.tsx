@@ -8,7 +8,7 @@
  */
 
 import type { ReactNode } from "react";
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { ErrorFallback } from "../components/ErrorFallback";
 import {
@@ -641,10 +641,24 @@ export function OrchestrationPage() {
 
   const { events: streamEvents, status: sseStatus } = useEventStream();
 
+  // Dedupe SSE events across renders — the effect below re-runs on every
+  // new streamEvents reference, and previously re-processed the "latest"
+  // entry even when we had already seen it (issue #177). Keying on the
+  // server-assigned event id makes each frame process-once.
+  const seenEventIds = useRef(new Set<string>());
+  // Track fresh-highlight timeouts so they can be cleared on unmount
+  // (or when superseded for the same id). Previously these leaked: the
+  // effect scheduled a setTimeout per event with no cleanup, so a tab
+  // left open accumulated callbacks indefinitely.
+  const freshTimeouts = useRef(new Map<string, ReturnType<typeof setTimeout>>());
+
   // On new SSE events: refetch relevant data and mark new node IDs as fresh
   useEffect(() => {
     if (streamEvents.length === 0) return;
     const latest = streamEvents[streamEvents.length - 1];
+    if (seenEventIds.current.has(latest.id)) return;
+    seenEventIds.current.add(latest.id);
+
     const type   = latest.type;
     const payload = latest.payload as Record<string, unknown> | null;
 
@@ -661,10 +675,16 @@ export function OrchestrationPage() {
 
     // Mark as fresh for 3 s
     if (newId) {
-      setFreshIds(prev => new Set([...prev, newId as string]));
-      setTimeout(() => {
-        setFreshIds(prev => { const next = new Set(prev); next.delete(newId as string); return next; });
+      const freshId = newId;
+      setFreshIds(prev => new Set([...prev, freshId]));
+      // Clear any prior timeout for this id before scheduling a new one.
+      const prior = freshTimeouts.current.get(freshId);
+      if (prior !== undefined) clearTimeout(prior);
+      const handle = setTimeout(() => {
+        setFreshIds(prev => { const next = new Set(prev); next.delete(freshId); return next; });
+        freshTimeouts.current.delete(freshId);
       }, 3_000);
+      freshTimeouts.current.set(freshId, handle);
 
       // Auto-expand the parent
       if (type === "run_created") {
@@ -677,6 +697,16 @@ export function OrchestrationPage() {
       }
     }
   }, [streamEvents, rSessions, rRuns, rTasks]);
+
+  // Clear pending fresh-highlight timeouts on unmount to avoid leaking
+  // callbacks that would run after the component is gone.
+  useEffect(() => {
+    const timeouts = freshTimeouts.current;
+    return () => {
+      for (const handle of timeouts.values()) clearTimeout(handle);
+      timeouts.clear();
+    };
+  }, []);
 
   // Auto-expand active sessions and their running runs on first load
   useEffect(() => {
