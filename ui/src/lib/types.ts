@@ -922,7 +922,11 @@ export interface AuditRecord {
 
 export interface AuditLogResponse {
   items: AuditRecord[];
-  has_more: boolean;
+  // Backend uses `cairn_api::ListResponse<T>` with
+  // `#[serde(rename_all = "camelCase")]`, so the wire field is `hasMore`
+  // even though the Rust struct field is `has_more`. Older-page pagination
+  // on AuditLogPage was permanently disabled because the UI read `has_more`.
+  hasMore: boolean;
 }
 
 // ── Eval Runs ─────────────────────────────────────────────────────────────────
