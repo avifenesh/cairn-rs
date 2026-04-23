@@ -76,6 +76,7 @@ export type GraphNodeKind =
   | "task"
   | "approval"
   | "checkpoint"
+  | "trigger"
   | "mailbox_message"
   | "tool_invocation"
   | "memory"
@@ -95,6 +96,8 @@ export type GraphNodeKind =
 
 export type GraphEdgeKind =
   | "triggered"
+  | "matched_by"
+  | "fired"
   | "spawned"
   | "depended_on"
   | "approved_by"
