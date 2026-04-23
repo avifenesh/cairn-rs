@@ -53,6 +53,13 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **ApprovalsPage rows now navigate to the linked run on click
+  (closes #231).** Clicking (or pressing Enter/Space on) an approval
+  row whose `run_id` is populated now routes to `#run/:id`; rows
+  without a run id remain non-interactive, and the Approve/Reject and
+  copy-id buttons keep stopping propagation so they don't trigger
+  navigation.
+
 - **`GET /v1/tasks` + `GET /v1/runs` now honor the
   `tenant_id`/`workspace_id`/`project_id` query filters (closes
   #234).** `list_tasks_filtered` in the in-memory store was declared
