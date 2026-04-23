@@ -362,10 +362,16 @@ async fn chat_stream_returns_422_when_model_not_supported_by_any_connection() {
         .expect("connection reaches server");
     assert_eq!(r.status().as_u16(), 201);
 
-    // Chat stream with a model no connection serves.
+    // Chat stream with a model no connection serves. The admin token
+    // authenticates as the `default` tenant; our test connection lives
+    // under `default_tenant`, so we pass `?tenant_id=` explicitly (admin
+    // tokens are allowed to override).
     let r = h
         .client()
-        .post(format!("{}/v1/chat/stream", h.base_url))
+        .post(format!(
+            "{}/v1/chat/stream?tenant_id={}",
+            h.base_url, tenant,
+        ))
         .bearer_auth(&h.admin_token)
         .json(&json!({
             "model": "openrouter/definitely-not-registered",

@@ -16,14 +16,16 @@ use axum::Json;
 #[allow(unused_imports)]
 use cairn_runtime::{OllamaEmbeddingProvider, OllamaModel};
 
-/// Optional `?tenant_id=&workspace_id=&project_id=` scope on provider
-/// playground routes (generate / embed / chat-stream).
+/// Optional `?tenant_id=` scope on provider playground routes (generate /
+/// embed / chat-stream), honoured **only for admin callers**.
 ///
 /// Pre-#157, these handlers hardcoded `TenantId::new("default_tenant")`,
 /// which silently served the wrong tenant's providers to any operator
-/// not running on the default scope. Now the caller can pin the tenant
-/// explicitly; absence still falls back to `default_tenant` for local
-/// single-tenant dev workflows.
+/// not running on the default scope. The fix is to use the tenant the
+/// auth middleware already attached via `TenantScope`. An admin service
+/// account may override it with `?tenant_id=` for cross-tenant tooling;
+/// a non-admin caller supplying the param gets a 403 so the handler
+/// cannot be used to exfiltrate another tenant's registered providers.
 #[derive(Clone, Debug, Default, serde::Deserialize)]
 pub(crate) struct PlaygroundScopeQuery {
     pub tenant_id: Option<String>,
@@ -34,18 +36,51 @@ pub(crate) struct PlaygroundScopeQuery {
 }
 
 impl PlaygroundScopeQuery {
-    pub(crate) fn tenant(&self) -> cairn_domain::TenantId {
-        // Mirrors `cairn_app::state::DEFAULT_TENANT_ID` (same literal);
-        // duplicated because this file lives in the binary crate which
-        // cannot reach the lib-crate `pub(crate)` constant directly.
+    /// Resolve the effective tenant for a playground call.
+    ///
+    /// Rules:
+    /// - admin service account: use `?tenant_id=` when provided, else
+    ///   the `DEFAULT_TENANT_ID` (admin has no intrinsic tenant scope)
+    /// - operator (per-tenant) caller: always use the authenticated
+    ///   tenant. `?tenant_id=` that matches is a no-op; mismatched
+    ///   values are rejected with 403 to prevent cross-tenant reads
+    pub(crate) fn resolve_tenant(
+        &self,
+        authenticated: Option<&cairn_domain::TenantId>,
+        is_admin: bool,
+    ) -> Result<cairn_domain::TenantId, axum::response::Response> {
+        // Mirrors `cairn_app::state::DEFAULT_TENANT_ID` — duplicated
+        // because the binary crate cannot reach the lib `pub(crate)`
+        // constant directly.
         const DEFAULT_TENANT_ID: &str = "default_tenant";
-        cairn_domain::TenantId::new(
-            self.tenant_id
-                .as_deref()
-                .map(str::trim)
-                .filter(|s| !s.is_empty())
-                .unwrap_or(DEFAULT_TENANT_ID),
-        )
+
+        let requested = self
+            .tenant_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty());
+
+        match (authenticated, is_admin, requested) {
+            // Operator with no override — use their tenant.
+            (Some(auth), false, None) => Ok(auth.clone()),
+            // Operator with matching override — fine.
+            (Some(auth), false, Some(req)) if req == auth.as_str() => Ok(auth.clone()),
+            // Operator attempting cross-tenant access — refuse.
+            (Some(auth), false, Some(req)) => Err((
+                StatusCode::FORBIDDEN,
+                axum::Json(serde_json::json!({
+                    "error": "cross-tenant playground access requires an admin token",
+                    "authenticated_tenant": auth.as_str(),
+                    "requested_tenant":     req,
+                })),
+            )
+                .into_response()),
+            // Admin (or no attached tenant) with explicit override.
+            (_, _, Some(req)) => Ok(cairn_domain::TenantId::new(req)),
+            // Admin (or no attached tenant) with no override: default.
+            (Some(auth), true, None) => Ok(auth.clone()),
+            (None, _, None) => Ok(cairn_domain::TenantId::new(DEFAULT_TENANT_ID)),
+        }
     }
 }
 
@@ -769,6 +804,8 @@ pub(crate) struct OllamaGenerateRequest {
 
 pub(crate) async fn ollama_generate_handler(
     State(state): State<AppState>,
+    axum::Extension(principal): axum::Extension<cairn_api::auth::AuthPrincipal>,
+    auth_tenant: Option<axum::Extension<cairn_domain::TenantId>>,
     Query(scope): Query<PlaygroundScopeQuery>,
     Json(body): Json<OllamaGenerateRequest>,
 ) -> impl IntoResponse {
@@ -785,7 +822,14 @@ pub(crate) async fn ollama_generate_handler(
     let default_model = state.runtime.runtime_config.default_generate_model().await;
     let model_id = body.model.as_deref().unwrap_or(&default_model).to_owned();
 
-    let tenant_id = scope.tenant();
+    let is_admin = cairn_app::is_admin_principal(&principal);
+    let tenant_id = match scope.resolve_tenant(
+        auth_tenant.as_ref().map(|axum::Extension(t)| t),
+        is_admin,
+    ) {
+        Ok(t) => t,
+        Err(resp) => return resp,
+    };
     let provider: Arc<dyn cairn_domain::providers::GenerationProvider> = match state
         .runtime
         .provider_registry
@@ -944,6 +988,8 @@ pub(crate) struct OllamaEmbedRequest {
 
 pub(crate) async fn ollama_embed_handler(
     State(state): State<AppState>,
+    axum::Extension(principal): axum::Extension<cairn_api::auth::AuthPrincipal>,
+    auth_tenant: Option<axum::Extension<cairn_domain::TenantId>>,
     Query(scope): Query<PlaygroundScopeQuery>,
     Json(body): Json<OllamaEmbedRequest>,
 ) -> impl IntoResponse {
@@ -973,7 +1019,14 @@ pub(crate) async fn ollama_embed_handler(
         })
         .to_owned();
 
-    let tenant_id = scope.tenant();
+    let is_admin = cairn_app::is_admin_principal(&principal);
+    let tenant_id = match scope.resolve_tenant(
+        auth_tenant.as_ref().map(|axum::Extension(t)| t),
+        is_admin,
+    ) {
+        Ok(t) => t,
+        Err(resp) => return resp,
+    };
     let embedder: Arc<dyn cairn_domain::providers::EmbeddingProvider> = match state
         .runtime
         .provider_registry
@@ -1178,12 +1231,21 @@ pub(crate) fn stream_chat_provider_as_sse(
 
 pub(crate) async fn chat_stream_handler(
     State(state): State<AppState>,
+    axum::Extension(principal): axum::Extension<cairn_api::auth::AuthPrincipal>,
+    auth_tenant: Option<axum::Extension<cairn_domain::TenantId>>,
     Query(scope): Query<PlaygroundScopeQuery>,
     Json(body): Json<OllamaGenerateRequest>,
 ) -> impl IntoResponse {
     let default_stream = state.runtime.runtime_config.default_stream_model().await;
     let model_id = body.model.as_deref().unwrap_or(&default_stream).to_owned();
-    let tenant_id = scope.tenant();
+    let is_admin = cairn_app::is_admin_principal(&principal);
+    let tenant_id = match scope.resolve_tenant(
+        auth_tenant.as_ref().map(|axum::Extension(t)| t),
+        is_admin,
+    ) {
+        Ok(t) => t,
+        Err(resp) => return resp,
+    };
     let messages: Vec<serde_json::Value> = body
         .messages
         .unwrap_or_else(|| vec![serde_json::json!({"role": "user", "content": body.prompt})]);
@@ -1331,7 +1393,7 @@ pub(crate) async fn chat_stream_handler(
                 "error": format!(
                     "No registered connection for tenant '{}' supports model '{}'. \
                      Register with POST /v1/providers/connections with supported_models \
-                     including '{}', or call POST /v1/providers/connections/<id>/discover-models \
+                     including '{}', or call GET /v1/providers/connections/:id/discover-models \
                      to refresh.",
                     tenant_id.as_str(),
                     model_id,
