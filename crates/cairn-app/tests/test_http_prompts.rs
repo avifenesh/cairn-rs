@@ -159,8 +159,7 @@ async fn prompt_asset_version_and_release_with_server_minted_ids() {
         status.is_success(),
         "request approval returned {status}: {txt}"
     );
-    let approval_body: serde_json::Value =
-        serde_json::from_str(&txt).expect("approval json");
+    let approval_body: serde_json::Value = serde_json::from_str(&txt).expect("approval json");
     assert!(
         approval_body["approval_id"]
             .as_str()
