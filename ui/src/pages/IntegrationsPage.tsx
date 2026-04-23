@@ -314,13 +314,18 @@ export function IntegrationsPage() {
     },
   });
 
+  // Small local helper so every mutation `onError` surfaces a toast with the
+  // same error-extraction logic. Matches the `toastErr` pattern used in
+  // `PluginsPage.tsx`.
+  const toastErr = useCallback((prefix: string) => (err: unknown) => {
+    const msg = err instanceof Error ? err.message : String(err);
+    toast.error(`${prefix}: ${msg}`);
+  }, [toast]);
+
   const skipMut = useMutation({
     mutationFn: (issue: number) => defaultApi.skipGitHubIssue(issue),
     onSuccess: () => void qc.invalidateQueries({ queryKey: ["github-queue"] }),
-    onError: (err: unknown) => {
-      const msg = err instanceof Error ? err.message : String(err);
-      toast.error(`Failed to skip: ${msg}`);
-    },
+    onError: toastErr("Failed to skip"),
   });
 
   const retryMut = useMutation({
@@ -329,20 +334,23 @@ export function IntegrationsPage() {
       toast.success("Issue re-queued");
       void qc.invalidateQueries({ queryKey: ["github-queue"] });
     },
-    onError: (err: unknown) => {
-      const msg = err instanceof Error ? err.message : String(err);
-      toast.error(`Failed to retry: ${msg}`);
-    },
+    onError: toastErr("Failed to retry"),
   });
 
   const concurrencyMut = useMutation({
     mutationFn: (value: number) => defaultApi.setGitHubQueueConcurrency(value),
     onSuccess: () => void qc.invalidateQueries({ queryKey: ["github-queue"] }),
-    onError: (err: unknown) => {
-      const msg = err instanceof Error ? err.message : String(err);
-      toast.error(`Failed to update concurrency: ${msg}`);
-    },
+    onError: toastErr("Failed to update concurrency"),
   });
+
+  // While the mutation is in-flight, `maxConcurrent` still reflects the stale
+  // server value (the `github-queue` query has not refetched yet), so show the
+  // user's pending selection on the controlled <select> instead of snapping
+  // back. On error, `variables` clears and the select reverts to the
+  // authoritative server value.
+  const concurrencySelected = concurrencyMut.isPending && concurrencyMut.variables != null
+    ? concurrencyMut.variables
+    : maxConcurrent;
 
   const handleScan = useCallback((repo: string, labels?: string, limit?: number) => {
     scanMut.mutate({ repo, labels, limit });
@@ -385,18 +393,19 @@ export function IntegrationsPage() {
                 <div className="flex items-center gap-1.5">
                   <span className={clsx("text-[10px]", text.muted)}>Parallel:</span>
                   <select
-                    value={maxConcurrent}
+                    value={concurrencySelected}
                     onChange={(e) => {
                       const val = Number(e.target.value);
                       concurrencyMut.mutate(val);
                     }}
+                    disabled={concurrencyMut.isPending}
                     className={clsx(
                       "rounded border px-1.5 py-0.5 text-[11px]",
                       surface.elevated, border.default, text.body,
                       "focus:outline-none focus:ring-1 focus:ring-indigo-500/40"
                     )}
                   >
-                    {Array.from(new Set([1, 2, 3, 5, 10, maxConcurrent]))
+                    {Array.from(new Set([1, 2, 3, 5, 10, maxConcurrent, concurrencySelected]))
                       .filter((n) => n >= 1 && n <= 20)
                       .sort((a, b) => a - b)
                       .map((n) => (
