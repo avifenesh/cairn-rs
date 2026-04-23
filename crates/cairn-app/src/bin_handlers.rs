@@ -1050,19 +1050,24 @@ pub(crate) async fn apply_template_handler(
 ///
 /// Compatible with Prometheus scrape configs and Grafana data sources.
 pub(crate) async fn metrics_prometheus_handler(State(state): State<AppState>) -> impl IntoResponse {
-    let m = state.metrics.read().unwrap_or_else(|e| e.into_inner());
+    // Read from the lib-side `AppMetrics` populated by the observability
+    // middleware on every request. The binary-side `state.metrics` struct
+    // is an orphan from an older design (issue #243) — no middleware ever
+    // wrote to it, so `cairn_http_*` series stayed at 0 despite traffic.
+    let m = state.lib_metrics.as_ref();
     let mut out = String::with_capacity(1024);
 
     out.push_str("# HELP cairn_http_requests_total Total HTTP requests handled\n");
     out.push_str("# TYPE cairn_http_requests_total counter\n");
     out.push_str(&format!(
         "cairn_http_requests_total {}\n\n",
-        m.total_requests
+        m.http_total_requests()
     ));
 
     out.push_str("# HELP cairn_http_requests_by_path_total Requests grouped by path\n");
     out.push_str("# TYPE cairn_http_requests_by_path_total counter\n");
-    let mut paths: Vec<(&String, &u64)> = m.requests_by_path.iter().collect();
+    let by_path = m.http_requests_by_path();
+    let mut paths: Vec<(&String, &u64)> = by_path.iter().collect();
     paths.sort_by_key(|(p, _)| p.as_str());
     for (path, count) in &paths {
         let safe = path.replace('\\', "\\\\").replace('"', "\\\"");
@@ -1076,29 +1081,33 @@ pub(crate) async fn metrics_prometheus_handler(State(state): State<AppState>) ->
     out.push_str("# TYPE cairn_http_latency_ms gauge\n");
     out.push_str(&format!(
         "cairn_http_latency_ms{{quantile=\"0.50\"}} {}\n",
-        m.percentile(50.0)
+        m.http_latency_percentile(50.0)
     ));
     out.push_str(&format!(
         "cairn_http_latency_ms{{quantile=\"0.95\"}} {}\n",
-        m.percentile(95.0)
+        m.http_latency_percentile(95.0)
     ));
     out.push_str(&format!(
         "cairn_http_latency_ms{{quantile=\"0.99\"}} {}\n",
-        m.percentile(99.0)
+        m.http_latency_percentile(99.0)
     ));
     out.push_str(&format!(
         "cairn_http_latency_ms{{quantile=\"avg\"}} {}\n",
-        m.avg_latency_ms()
+        m.http_avg_latency_ms()
     ));
     out.push('\n');
 
     out.push_str("# HELP cairn_http_error_rate Fraction of requests with 4xx/5xx status\n");
     out.push_str("# TYPE cairn_http_error_rate gauge\n");
-    out.push_str(&format!("cairn_http_error_rate {:.6}\n\n", m.error_rate()));
+    out.push_str(&format!(
+        "cairn_http_error_rate {:.6}\n\n",
+        m.http_error_rate()
+    ));
 
     out.push_str("# HELP cairn_http_errors_by_status Error count by HTTP status code\n");
     out.push_str("# TYPE cairn_http_errors_by_status counter\n");
-    let mut statuses: Vec<(&u16, &u64)> = m.errors_by_status.iter().collect();
+    let by_status = m.http_errors_by_status();
+    let mut statuses: Vec<(&u16, &u64)> = by_status.iter().collect();
     statuses.sort_by_key(|(s, _)| *s);
     for (status, count) in &statuses {
         out.push_str(&format!(

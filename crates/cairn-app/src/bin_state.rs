@@ -100,7 +100,11 @@ pub(crate) struct AppState {
         Option<Arc<cairn_providers::wire::openai_compat::OpenAiCompat>>,
     /// Backward-compat alias: first of brain/worker/openrouter that is configured.
     pub(crate) openai_compat: Option<Arc<cairn_providers::wire::openai_compat::OpenAiCompat>>,
-    pub(crate) metrics: Arc<RwLock<AppMetrics>>,
+    /// Shared with lib.rs AppState — the observability middleware populates
+    /// this struct on every request so the binary Prometheus handler can
+    /// expose live `cairn_http_*` counters/gauges without duplicating the
+    /// recording path. See issue #243 for the bug that motivated the split.
+    pub(crate) lib_metrics: Arc<cairn_app::metrics::AppMetrics>,
     pub(crate) rate_limits: RateLimitTable,
     /// Shared with lib_state — the observability middleware populates this
     /// buffer and the OTLP export handler reads from it.
@@ -184,56 +188,8 @@ impl NotificationBuffer {
     }
 }
 
-// ── Request metrics ──────────────────────────────────────────────────────────
-
-/// Rolling-window request metrics.  No external crates required.
-///
-/// Latency samples are stored in a fixed-size ring buffer; percentiles are
-/// computed on-demand from a sorted copy of the buffer (cheap for N=1000).
-pub(crate) const LATENCY_RING_SIZE: usize = 1_000;
-
-pub(crate) struct AppMetrics {
-    pub(crate) total_requests: u64,
-    pub(crate) requests_by_path: HashMap<String, u64>,
-    pub(crate) errors_by_status: HashMap<u16, u64>,
-    /// Rolling window — LATENCY_RING_SIZE most-recent latencies in ms.
-    pub(crate) latency_ring: VecDeque<u64>,
-}
-
-impl AppMetrics {
-    pub(crate) fn new() -> Self {
-        Self {
-            total_requests: 0,
-            requests_by_path: HashMap::new(),
-            errors_by_status: HashMap::new(),
-            latency_ring: VecDeque::with_capacity(LATENCY_RING_SIZE),
-        }
-    }
-    pub(crate) fn percentile(&self, p: f64) -> u64 {
-        if self.latency_ring.is_empty() {
-            return 0;
-        }
-        let mut sorted: Vec<u64> = self.latency_ring.iter().copied().collect();
-        sorted.sort_unstable();
-        let idx = ((p / 100.0) * (sorted.len() as f64 - 1.0)).round() as usize;
-        sorted[idx.min(sorted.len() - 1)]
-    }
-
-    pub(crate) fn avg_latency_ms(&self) -> u64 {
-        if self.latency_ring.is_empty() {
-            return 0;
-        }
-        self.latency_ring.iter().sum::<u64>() / self.latency_ring.len() as u64
-    }
-
-    pub(crate) fn error_rate(&self) -> f64 {
-        if self.total_requests == 0 {
-            return 0.0;
-        }
-        let errors: u64 = self.errors_by_status.values().sum();
-        errors as f64 / self.total_requests as f64
-    }
-}
-
-// LogEntry and RequestLogBuffer removed — now shared from lib crate
+// LogEntry, RequestLogBuffer, and the binary-side `AppMetrics` struct were
+// removed: the lib-side `cairn_app::metrics::AppMetrics` is now the single
+// source of truth for HTTP counters/gauges, populated by the observability
+// middleware on every request (see issue #243 for the orphaning story).
 // (cairn_app::tokens::RequestLogEntry / cairn_app::tokens::RequestLogBuffer)

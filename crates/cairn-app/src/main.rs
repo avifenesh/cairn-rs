@@ -90,7 +90,8 @@ use sqlx::postgres::PgPoolOptions;
 use sqlx::sqlite::SqlitePoolOptions;
 
 // PgBackend, SqliteBackend, RateBucket, AppState, NotificationBuffer,
-// AppMetrics, RequestLogBuffer → bin_state.rs
+// RequestLogBuffer → bin_state.rs
+// HTTP metrics live in lib-side `cairn_app::metrics::AppMetrics`.
 // RequestId, ApiError, pagination_headers, PaginationQuery, ProjectQuery → bin_types.rs
 
 // ── Metrics middleware ────────────────────────────────────────────────────────
@@ -1018,7 +1019,7 @@ async fn main() {
         openai_compat_worker,
         openai_compat_openrouter,
         openai_compat,
-        metrics: Arc::new(std::sync::RwLock::new(AppMetrics::new())),
+        lib_metrics: lib_state.metrics.clone(),
         rate_limits: Arc::new(Mutex::new(HashMap::new())),
         request_log: lib_state.request_log.clone(),
         notifications: Arc::new(std::sync::RwLock::new(NotificationBuffer::new())),
