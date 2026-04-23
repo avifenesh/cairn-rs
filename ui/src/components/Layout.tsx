@@ -12,7 +12,7 @@ const VALID_PAGES: NavPage[] = [
   'dashboard', 'workspaces',
   'sessions', 'runs', 'tasks', 'workers', 'orchestration', 'approvals', 'triggers', 'decisions', 'prompts', 'agent-templates',
   'traces', 'memory', 'sources', 'costs', 'cost-calc', 'evals', 'graph', 'audit-log', 'logs', 'metrics',
-  'providers', 'plugins', 'skills', 'credentials', 'integrations', 'project-repos', 'channels', 'deployment', 'playground', 'test-harness', 'api-docs', 'settings', 'profile',
+  'providers', 'plugins', 'skills', 'credentials', 'integrations', 'project-repos', 'channels', 'notifications', 'deployment', 'playground', 'test-harness', 'api-docs', 'settings', 'profile',
 ];
 
 // ── Route descriptor ──────────────────────────────────────────────────────────
@@ -88,6 +88,7 @@ export const PAGE_TITLES: Record<NavPage, string> = {
   integrations: 'Integrations',
   'project-repos': 'Project Repos',
   channels:    'Channels',
+  notifications: 'Notifications',
   playground:      'Playground',
   'test-harness':  'Test Harness',
   settings:    'Settings',
@@ -123,6 +124,7 @@ const PAGE_GROUP: Partial<Record<NavPage, string>> = {
   deployment:   'Infrastructure',
   'project-repos': 'Infrastructure',
   channels:     'Infrastructure',
+  notifications: 'Infrastructure',
   playground:      'Infrastructure',
   'test-harness':  'Infrastructure',
   'api-docs':  'Infrastructure',
