@@ -19,6 +19,7 @@ import type {
   SystemStatus,
 } from "./types";
 import { getStoredScope } from "../hooks/useScope";
+import { DEFAULT_SCOPE } from "./scope";
 
 type RunModeRequest =
   | { type: "direct" }
@@ -679,9 +680,14 @@ export function createApiClient(config: ApiClientConfig) {
       put(`/v1/settings/defaults/${encodeURIComponent(scope)}/${encodeURIComponent(scopeId)}/${encodeURIComponent(key)}`, { value }),
 
     /** GET /v1/settings/defaults/resolve/:key — resolve effective default for a key.
-     *  project must be "tenant/workspace/project" format, e.g. "default/default/default".
+     *  `project` must be "tenant/workspace/project" format. When omitted, the
+     *  canonical DEFAULT_SCOPE (`default_tenant/default_workspace/default_project`)
+     *  is used — these must match the Rust `DEFAULT_*` constants.
      *  Returns null on 404 (setting not configured) to avoid console error noise. */
-    resolveDefaultSetting: async (key: string, project = "default/default/default"): Promise<{ key: string; value: unknown } | null> => {
+    resolveDefaultSetting: async (
+      key: string,
+      project = `${DEFAULT_SCOPE.tenant_id}/${DEFAULT_SCOPE.workspace_id}/${DEFAULT_SCOPE.project_id}`,
+    ): Promise<{ key: string; value: unknown } | null> => {
       try {
         return await get<{ key: string; value: unknown }>(`/v1/settings/defaults/resolve/${encodeURIComponent(key)}?project=${encodeURIComponent(project)}`);
       } catch (e) {
@@ -780,12 +786,11 @@ export function createApiClient(config: ApiClientConfig) {
       limit?: number;
     }): Promise<import("./types").MemorySearchResponse> => {
       const merged = withScope(params);
-      const s = config.scope;
       const qs = new URLSearchParams();
       qs.set("query_text",   params.query_text);
-      qs.set("tenant_id",    merged.tenant_id    ?? s?.tenant_id    ?? "default");
-      qs.set("workspace_id", merged.workspace_id ?? s?.workspace_id ?? "default");
-      qs.set("project_id",   merged.project_id   ?? s?.project_id   ?? "default");
+      qs.set("tenant_id",    merged.tenant_id    ?? DEFAULT_SCOPE.tenant_id);
+      qs.set("workspace_id", merged.workspace_id ?? DEFAULT_SCOPE.workspace_id);
+      qs.set("project_id",   merged.project_id   ?? DEFAULT_SCOPE.project_id);
       if (params.limit !== undefined) qs.set("limit", String(params.limit));
       return get(`/v1/memory/search?${qs}`);
     },
@@ -934,7 +939,7 @@ export function createApiClient(config: ApiClientConfig) {
     /** GET /v1/admin/operators/:operatorId/notifications — fetch preferences for one operator. */
     getNotificationPreferences: (
       operatorId: string,
-      tenantId = "default",
+      tenantId = DEFAULT_SCOPE.tenant_id,
     ): Promise<import("./types").NotificationPreference> => {
       const qs = new URLSearchParams({ tenant_id: tenantId });
       return get(`/v1/admin/operators/${encodeURIComponent(operatorId)}/notifications?${qs}`);
@@ -952,13 +957,13 @@ export function createApiClient(config: ApiClientConfig) {
       post(`/v1/admin/operators/${encodeURIComponent(operatorId)}/notifications`, body),
 
     /** GET /v1/admin/notifications/failed — list failed delivery records. */
-    getFailedNotifications: (tenantId = "default"): Promise<import("./types").ListResponse<import("./types").NotificationRecord>> => {
+    getFailedNotifications: (tenantId = DEFAULT_SCOPE.tenant_id): Promise<import("./types").ListResponse<import("./types").NotificationRecord>> => {
       const qs = new URLSearchParams({ tenant_id: tenantId });
       return get(`/v1/admin/notifications/failed?${qs}`);
     },
 
     /** POST /v1/admin/notifications/:id/retry — retry a failed delivery. */
-    retryNotification: (recordId: string, tenantId = "default"): Promise<import("./types").NotificationRecord> => {
+    retryNotification: (recordId: string, tenantId = DEFAULT_SCOPE.tenant_id): Promise<import("./types").NotificationRecord> => {
       const qs = new URLSearchParams({ tenant_id: tenantId });
       return post(`/v1/admin/notifications/${encodeURIComponent(recordId)}/retry?${qs}`, {});
     },
@@ -974,16 +979,26 @@ export function createApiClient(config: ApiClientConfig) {
 
     // ── Prompts (RFC 006) ────────────────────────────────────────────────────
 
-    /** GET /v1/prompts/assets — list prompt assets. */
-    getPromptAssets: (params?: { limit?: number; offset?: number }): Promise<import("./types").ListResponse<import("./types").PromptAssetRecord>> => {
+    /** GET /v1/prompts/assets — list prompt assets (RFC 006 project-scoped). */
+    getPromptAssets: (params?: {
+      limit?: number;
+      offset?: number;
+      tenant_id?: string;
+      workspace_id?: string;
+      project_id?: string;
+    }): Promise<import("./types").ListResponse<import("./types").PromptAssetRecord>> => {
+      const merged = withScope(params);
       const qs = new URLSearchParams();
+      if (merged.tenant_id)    qs.set("tenant_id",    merged.tenant_id);
+      if (merged.workspace_id) qs.set("workspace_id", merged.workspace_id);
+      if (merged.project_id)   qs.set("project_id",   merged.project_id);
       if (params?.limit  !== undefined) qs.set("limit",  String(params.limit));
       if (params?.offset !== undefined) qs.set("offset", String(params.offset));
       const q = qs.toString() ? `?${qs}` : "";
       return get(`/v1/prompts/assets${q}`);
     },
 
-    /** POST /v1/prompts/assets — create a new prompt asset. */
+    /** POST /v1/prompts/assets — create a new prompt asset (RFC 006 project-scoped). */
     createPromptAsset: (body: {
       prompt_asset_id: string;
       name: string;
@@ -992,7 +1007,7 @@ export function createApiClient(config: ApiClientConfig) {
       workspace_id?: string;
       project_id?: string;
     }): Promise<import("./types").PromptAssetRecord> =>
-      post("/v1/prompts/assets", body),
+      post("/v1/prompts/assets", withScope(body)),
 
     /** GET /v1/prompts/assets/:id/versions — version history. */
     getPromptVersions: (assetId: string, params?: { limit?: number }): Promise<import("./types").ListResponse<import("./types").PromptVersionRecord>> => {

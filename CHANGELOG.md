@@ -11,6 +11,16 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Security
 
+- **Plugged cross-tenant leak in `TriggersPage`.** The page was sending
+  just `scope.project_id` as the `:project` route segment, which the
+  backend (`crates/cairn-app/src/trigger_routes.rs`) parses as
+  `tenant_id/workspace_id/project_id` and **silently falls back to the
+  `DEFAULT_*` constants** when it cannot split on `/`. An operator on
+  tenant `acme`, workspace `prod` was therefore reading and writing
+  triggers in `default_tenant/default_workspace/acme-project-id` — the
+  wrong tenant entirely. All six trigger endpoints (list, create, delete,
+  enable, disable, run-templates) now send the full
+  `tenant/workspace/project` slash path.
 - Removed the dev-admin-token one-click hint from the login page now
   that the UI is reachable from untrusted networks. The placeholder
   hint inside the input still shows `dev-admin-token` when the client
@@ -35,6 +45,31 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   pass-through for `harness_core::ToolErrorCode` (37 stable codes) so
   orchestrator retry / cache logic can pattern-match on the failure
   reason rather than string-parse the message.
+
+### Fixed
+
+- **Unified frontend "default scope" constants.** Two conflicting
+  conventions were in use: `useScope.ts` defined
+  `DEFAULT_SCOPE = { tenant_id: 'default_tenant', workspace_id: 'default_workspace', project_id: 'default_project' }`
+  (matching the Rust `DEFAULT_*` constants in
+  `crates/cairn-app/src/handlers/feed.rs`), but scattered fallbacks
+  across the UI used `'default'` or `'default/default/default'`. Any
+  fresh install or non-default-scope operator saw empty results or
+  wrote to the wrong tenant. All fallbacks now reference the canonical
+  `DEFAULT_SCOPE` constant (moved to `ui/src/lib/scope.ts` so
+  non-React modules can import it without pulling React):
+  `api.ts` (`searchMemory`, `resolveDefaultSetting`,
+  notification helpers), `CredentialsPage.tsx`, `ChannelsPage.tsx`.
+- **`MemoryPage` search now honours the active scope.** Previously
+  `searchMemory` was called with no scope, and the `api.ts` fallback
+  wrote `'default'` for all three IDs — searches in any non-default
+  scope silently returned empty. `MemoryPage` now reads the current
+  scope via `useScope()` and passes it explicitly.
+- **Prompt assets (RFC 006) now scope-aware.** `getPromptAssets` and
+  `createPromptAsset` in `api.ts` now flow through `withScope(...)`
+  like the other project-scoped endpoints, so operators working in a
+  non-default workspace no longer see empty lists or accidentally
+  create assets in the default project.
 
 ### Removed
 

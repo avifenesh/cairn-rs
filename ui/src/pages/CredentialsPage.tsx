@@ -21,6 +21,7 @@ import {
 import { clsx } from 'clsx';
 import { defaultApi } from '../lib/api';
 import { useScope } from '../hooks/useScope';
+import { DEFAULT_SCOPE } from '../lib/scope';
 import { useFocusTrap } from '../hooks/useFocusTrap';
 import type { CredentialSummary, StoreCredentialRequest } from '../lib/types';
 import { Badge } from '../components/Badge';
@@ -29,8 +30,6 @@ import { StatCard } from '../components/StatCard';
 import { ds } from '../lib/design-system';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
-
-const DEFAULT_TENANT = 'default';
 
 const CREDENTIAL_TYPES = [
   { value: 'api_key',           label: 'API Key' },
@@ -437,13 +436,13 @@ function CredentialRow({
 
 export function CredentialsPage() {
   const [scope] = useScope();
-  const [tenantId,    setTenantId]    = useState(scope.tenant_id || DEFAULT_TENANT);
+  const [tenantId,    setTenantId]    = useState(scope.tenant_id || DEFAULT_SCOPE.tenant_id);
   const [showAdd,     setShowAdd]     = useState(false);
   const [revokeTarget, setRevokeTarget] = useState<CredentialSummary | null>(null);
   const queryClient = useQueryClient();
 
   useEffect(() => {
-    setTenantId(scope.tenant_id || DEFAULT_TENANT);
+    setTenantId(scope.tenant_id || DEFAULT_SCOPE.tenant_id);
   }, [scope.tenant_id]);
 
   const { data, isLoading, isError, error, refetch, isFetching } = useQuery({
@@ -501,7 +500,7 @@ export function CredentialsPage() {
           <input
             type="text"
             value={tenantId}
-            onChange={e => setTenantId(e.target.value || DEFAULT_TENANT)}
+            onChange={e => setTenantId(e.target.value || DEFAULT_SCOPE.tenant_id)}
             className="h-6 w-32 bg-gray-100 dark:bg-zinc-800 border border-gray-200 dark:border-zinc-700 rounded px-2 text-[11px] font-mono text-gray-700 dark:text-zinc-300 focus:outline-none focus:border-indigo-500 transition-colors"
           />
         </div>

@@ -86,7 +86,12 @@ function StatePill({ state }: { state: string }) {
 export function TriggersPage() {
   const [tab, setTab] = useState<"triggers" | "templates">("triggers");
   const [scope] = useScope();
-  const projectPath = scope.project_id;
+  // Backend `trigger_routes.rs` parses `:project` as
+  // "tenant_id/workspace_id/project_id" and silently falls back to the
+  // DEFAULT_* constants when it cannot split on `/`. Sending just
+  // `scope.project_id` therefore leaks triggers across tenants — always
+  // send the full slash path. See FE audit 2026-04-22 (CRITICAL).
+  const projectPath = `${scope.tenant_id}/${scope.workspace_id}/${scope.project_id}`;
   const qc = useQueryClient();
   const toast = useToast();
 
