@@ -134,13 +134,9 @@ where
         // O(10) credentials. Switching to a dedicated projection lookup
         // is a measurable optimization only if a tenant grows past a
         // few hundred active credentials.
-        let existing = CredentialReadModel::list_by_tenant(
-            self.store.as_ref(),
-            &tenant_id,
-            usize::MAX,
-            0,
-        )
-        .await?;
+        let existing =
+            CredentialReadModel::list_by_tenant(self.store.as_ref(), &tenant_id, usize::MAX, 0)
+                .await?;
         if existing
             .iter()
             .any(|c| c.active && c.provider_id == provider_id)

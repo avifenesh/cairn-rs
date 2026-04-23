@@ -1115,17 +1115,15 @@ pub(crate) async fn store_credential_handler(
         Err(cairn_runtime::RuntimeError::Conflict {
             entity: "credential",
             ..
-        }) => {
-            AppApiError::new(
-                StatusCode::CONFLICT,
-                "credential_exists",
-                format!(
-                    "credential for provider '{provider_id}' already exists for tenant '{}'",
-                    tenant.as_str()
-                ),
-            )
-            .into_response()
-        }
+        }) => AppApiError::new(
+            StatusCode::CONFLICT,
+            "credential_exists",
+            format!(
+                "credential for provider '{provider_id}' already exists for tenant '{}'",
+                tenant.as_str()
+            ),
+        )
+        .into_response(),
         Err(err) => runtime_error_response(err),
     }
 }
