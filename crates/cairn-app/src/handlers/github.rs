@@ -1376,6 +1376,9 @@ pub(crate) async fn github_queue_handler(State(state): State<Arc<AppState>>) -> 
         None => {
             return Json(serde_json::json!({
                 "queue": [],
+                "total": 0,
+                "max_concurrent": 0,
+                "dispatcher_running": false,
                 "github_configured": false,
             }))
             .into_response();
@@ -1397,9 +1400,22 @@ pub(crate) async fn github_queue_handler(State(state): State<Arc<AppState>>) -> 
         })
         .collect();
 
+    let max_concurrent = github
+        .max_concurrent
+        .load(std::sync::atomic::Ordering::SeqCst);
+    let paused = github
+        .queue_paused
+        .load(std::sync::atomic::Ordering::SeqCst);
+    let running = github
+        .queue_running
+        .load(std::sync::atomic::Ordering::SeqCst);
+    let dispatcher_running = running && !paused;
+
     Json(serde_json::json!({
         "queue": items,
         "total": items.len(),
+        "max_concurrent": max_concurrent,
+        "dispatcher_running": dispatcher_running,
     }))
     .into_response()
 }

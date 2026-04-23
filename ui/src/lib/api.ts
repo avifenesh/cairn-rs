@@ -1132,7 +1132,12 @@ export function createApiClient(config: ApiClientConfig) {
       post("/v1/webhooks/github/scan", { repo, ...opts }),
 
     /** GET /v1/webhooks/github/queue — get issue processing queue. */
-    getGitHubQueue: (): Promise<{ queue: GitHubQueueEntry[]; total: number }> =>
+    getGitHubQueue: (): Promise<{
+      queue: GitHubQueueEntry[];
+      total: number;
+      max_concurrent: number;
+      dispatcher_running: boolean;
+    }> =>
       get("/v1/webhooks/github/queue"),
 
     /** POST /v1/webhooks/github/queue/pause — pause processing. */
