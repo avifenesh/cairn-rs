@@ -78,7 +78,7 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - **UI: `ApiDocsPage` endpoint catalog had drifted (#148).** Audited
   every documented entry against `router.rs` + `bin_router.rs` and added
-  14 missing real routes: run operator mutations
+  17 missing real routes: run operator mutations
   (`orchestrate`/`diagnose`/`intervene`/`spawn`/`children`),
   `GET /v1/runs/:id/replay`, `POST /v1/runs/:id/replay-to-checkpoint`,
   `GET /v1/sessions/:id/runs`, workers/fleet

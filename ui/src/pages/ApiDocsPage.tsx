@@ -89,12 +89,7 @@ const DOMAINS: DomainGroup[] = [
         pathParams: [{ name: "id", type: "string", description: "Session ID", example: "sess_..." }],
         responseDesc: '{ version, type: "session_export", exported_at, data: { session, runs, tasks, events } }',
       },
-      {
-        id: "list-session-runs", method: "GET", path: "/v1/sessions/:id/runs",
-        description: "List runs that belong to a session, most recent first.",
-        pathParams: [{ name: "id", type: "string", description: "Session ID", example: "sess_..." }],
-        responseDesc: "Array of RunRecord",
-      },
+      { id: "list-session-runs", method: "GET", path: "/v1/sessions/:id/runs", description: "List runs that belong to a session, most recent first.", pathParams: [{ name: "id", type: "string", description: "Session ID", example: "sess_..." }], responseDesc: "Array of RunRecord" },
     ],
   },
   {
