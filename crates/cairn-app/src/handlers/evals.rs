@@ -539,6 +539,17 @@ pub(crate) async fn create_eval_run_handler(
         serde_json::from_value(serde_json::to_value(domain_subject_kind).unwrap_or_default())
             .unwrap_or(EvalSubjectKind::PromptRelease);
 
+    // Idempotency guard: the EvalRunStarted event is persisted with a
+    // deterministic event_id (`eval_create_<eval_run_id>`) so the event_log's
+    // UNIQUE(event_id) constraint would 500 on any legitimate client retry.
+    // Detect the duplicate upfront and return the existing run (200) instead
+    // of letting the store-append surface as an internal_error. (Copilot PR
+    // review on #227.)
+    let candidate_id = EvalRunId::new(body.eval_run_id.clone());
+    if let Some(existing) = state.evals.get(&candidate_id) {
+        return (StatusCode::OK, Json(existing)).into_response();
+    }
+
     // Validate linked artifacts exist AND belong to the request's tenant.
     // Without the tenant check, an operator could bind a run to another
     // tenant's dataset/rubric/baseline simply by guessing its id.
@@ -583,7 +594,7 @@ pub(crate) async fn create_eval_run_handler(
         }
     }
 
-    let eval_run_id = EvalRunId::new(body.eval_run_id);
+    let eval_run_id = candidate_id;
     let project_key = ProjectKey::new(
         body.tenant_id.as_str(),
         body.workspace_id.as_str(),
