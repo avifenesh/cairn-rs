@@ -66,14 +66,15 @@ async fn list_tasks_without_query_params_returns_200() {
     );
 }
 
-#[tokio::test]
-async fn list_runs_with_empty_string_params_returns_200() {
-    // Empty-string query params are treated as absent (UI sometimes
-    // sends `?tenant_id=` when scope hasn't hydrated from localStorage).
+/// Empty-string query params are treated as absent (UI sometimes sends
+/// `?tenant_id=` when scope hasn't hydrated from localStorage). Covered
+/// for all three list endpoints so future regressions where only one
+/// query struct keeps the empty-string filtering are caught.
+async fn assert_empty_string_params_return_200(path: &str) {
     let h = LiveHarness::setup().await;
     let url = format!(
-        "{}/v1/runs?tenant_id=&workspace_id=&project_id=",
-        h.base_url
+        "{}{}?tenant_id=&workspace_id=&project_id=",
+        h.base_url, path
     );
     let r = h
         .client()
@@ -81,11 +82,26 @@ async fn list_runs_with_empty_string_params_returns_200() {
         .bearer_auth(&h.admin_token)
         .send()
         .await
-        .expect("list runs empty params");
+        .unwrap_or_else(|e| panic!("list {path} empty params: {e}"));
     assert_eq!(
         r.status().as_u16(),
         200,
-        "empty-string params must not 422: {}",
+        "empty-string params on {path} must not 422: {}",
         r.text().await.unwrap_or_default(),
     );
+}
+
+#[tokio::test]
+async fn list_runs_with_empty_string_params_returns_200() {
+    assert_empty_string_params_return_200("/v1/runs").await;
+}
+
+#[tokio::test]
+async fn list_sessions_with_empty_string_params_returns_200() {
+    assert_empty_string_params_return_200("/v1/sessions").await;
+}
+
+#[tokio::test]
+async fn list_tasks_with_empty_string_params_returns_200() {
+    assert_empty_string_params_return_200("/v1/tasks").await;
 }
