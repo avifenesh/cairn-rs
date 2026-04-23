@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   AlertTriangle,
@@ -30,7 +30,7 @@ import { BarChart } from "../components/BarChart";
 import { defaultApi } from "../lib/api";
 import { useAutoRefresh, REFRESH_OPTIONS } from "../hooks/useAutoRefresh";
 import type { StatCardVariant } from "../components/StatCard";
-import type { CostSummary, HealthCheckEntry, RunRecord } from "../lib/types";
+import type { CostSummary, HealthCheckEntry, RunRecord, TaskRecord } from "../lib/types";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -90,7 +90,7 @@ function Skeleton({ className }: { className?: string }) {
 
 function ActiveRunRow({ run }: { run: RunRecord }) {
   const handleClick = useCallback(() => {
-    window.location.hash = `run/${run.run_id}`;
+    window.location.hash = `run/${encodeURIComponent(run.run_id)}`;
   }, [run.run_id]);
 
   return (
@@ -138,10 +138,11 @@ function ActiveRunRow({ run }: { run: RunRecord }) {
 }
 
 function ActiveRunsWidget() {
-  const { data: runs, isLoading } = useQuery({
+  const { data: runs, isLoading, isError } = useQuery({
     queryKey: ["runs-active"],
     queryFn:  () => defaultApi.getRuns({ limit: 50 }),
     refetchInterval: 5_000,
+    retry: false,
     select: (rows) => rows.filter(r => ACTIVE_STATES.has(r.state))
                           .sort((a, b) => b.created_at - a.created_at)
                           .slice(0, 8),
@@ -170,6 +171,11 @@ function ActiveRunsWidget() {
             </div>
           ))}
         </div>
+      ) : isError ? (
+        <div className="flex-1 flex flex-col items-center justify-center py-6 gap-2">
+          <AlertTriangle size={18} className="text-amber-500" />
+          <p className="text-[12px] text-amber-500">Failed to load runs</p>
+        </div>
       ) : !runs || runs.length === 0 ? (
         <div className="flex-1 flex flex-col items-center justify-center py-6 gap-2">
           <CheckCircle2 size={18} className="text-emerald-600/50" />
@@ -178,6 +184,118 @@ function ActiveRunsWidget() {
       ) : (
         <div className="space-y-0.5">
           {runs.map(run => <ActiveRunRow key={run.run_id} run={run} />)}
+        </div>
+      )}
+    </Card>
+  );
+}
+
+// ── Widget: Active Tasks ──────────────────────────────────────────────────────
+
+const ACTIVE_TASK_STATES = new Set(["queued", "leased", "running", "paused", "waiting_dependency"]);
+
+function taskStateColors(state: string): string {
+  switch (state) {
+    case "running":            return "text-emerald-400 bg-emerald-400/10";
+    case "leased":             return "text-sky-400    bg-sky-400/10";
+    case "queued":             return "text-gray-400 dark:text-zinc-400   bg-gray-100 dark:bg-zinc-800";
+    case "paused":             return "text-amber-400  bg-amber-400/10";
+    case "waiting_dependency": return "text-purple-400 bg-purple-400/10";
+    default:                   return "text-gray-400 dark:text-zinc-500   bg-gray-100 dark:bg-zinc-800";
+  }
+}
+
+function ActiveTaskRow({ task }: { task: TaskRecord }) {
+  const handleClick = useCallback(() => {
+    if (task.parent_run_id) window.location.hash = `run/${encodeURIComponent(task.parent_run_id)}`;
+  }, [task.parent_run_id]);
+
+  return (
+    <button
+      onClick={handleClick}
+      className="w-full flex items-center gap-3 px-3 py-2 rounded-md hover:bg-gray-100/60 dark:hover:bg-gray-100/60 dark:bg-zinc-800/60 transition-colors text-left group"
+    >
+      <span className={clsx(
+        "shrink-0 flex h-6 w-6 items-center justify-center rounded-full",
+        task.state === "running" ? "bg-emerald-500/15" : "bg-gray-100 dark:bg-zinc-800",
+      )}>
+        {task.state === "running"
+          ? <Play size={9} className="text-emerald-400 fill-emerald-400" />
+          : <Timer size={9} className="text-gray-400 dark:text-zinc-500" />
+        }
+      </span>
+
+      <div className="flex-1 min-w-0">
+        <p className="text-[12px] font-mono text-gray-800 dark:text-zinc-200 truncate group-hover:text-gray-900 dark:group-hover:text-zinc-100">
+          {task.task_id}
+        </p>
+        <p className="text-[10px] text-gray-400 dark:text-zinc-600 truncate font-mono">
+          {task.project.tenant_id}/{task.project.project_id}
+        </p>
+      </div>
+
+      <div className="flex flex-col items-end gap-0.5 shrink-0">
+        <span className={clsx(
+          "text-[10px] font-medium px-1.5 py-0.5 rounded-full",
+          taskStateColors(task.state),
+        )}>
+          {task.state.replace(/_/g, " ")}
+        </span>
+        <span className="text-[10px] font-mono text-gray-400 dark:text-zinc-600 tabular-nums">
+          {fmtElapsed(task.created_at)}
+        </span>
+      </div>
+    </button>
+  );
+}
+
+function ActiveTasksWidget() {
+  const { data: tasks, isLoading, isError } = useQuery({
+    queryKey: ["tasks-active-dashboard"],
+    queryFn:  () => defaultApi.getAllTasks({ limit: 50 }),
+    refetchInterval: 5_000,
+    retry: false,
+    select: (rows) => rows.filter(t => ACTIVE_TASK_STATES.has(t.state))
+                          .sort((a, b) => b.created_at - a.created_at)
+                          .slice(0, 8),
+  });
+
+  return (
+    <Card className="flex flex-col min-h-[160px]">
+      <div className="flex items-center justify-between mb-2">
+        <SectionLabel>Active Tasks</SectionLabel>
+        <span className="text-[10px] text-gray-400 dark:text-zinc-600 flex items-center gap-1">
+          <Radio size={9} className="text-emerald-500" />
+          5s
+        </span>
+      </div>
+
+      {isLoading ? (
+        <div className="space-y-2">
+          {[0, 1, 2].map(i => (
+            <div key={i} className="flex items-center gap-3 px-3 py-2">
+              <Skeleton className="h-6 w-6 rounded-full" />
+              <div className="flex-1 space-y-1">
+                <Skeleton className="h-3 w-3/4" />
+                <Skeleton className="h-2 w-1/2" />
+              </div>
+              <Skeleton className="h-4 w-16" />
+            </div>
+          ))}
+        </div>
+      ) : isError ? (
+        <div className="flex-1 flex flex-col items-center justify-center py-6 gap-2">
+          <AlertTriangle size={18} className="text-amber-500" />
+          <p className="text-[12px] text-amber-500">Failed to load tasks</p>
+        </div>
+      ) : !tasks || tasks.length === 0 ? (
+        <div className="flex-1 flex flex-col items-center justify-center py-6 gap-2">
+          <CheckCircle2 size={18} className="text-emerald-600/50" />
+          <p className="text-[12px] text-gray-400 dark:text-zinc-600">No active tasks</p>
+        </div>
+      ) : (
+        <div className="space-y-0.5">
+          {tasks.map(task => <ActiveTaskRow key={task.task_id} task={task} />)}
         </div>
       )}
     </Card>
@@ -253,20 +371,37 @@ function CostWidget() {
     refetchInterval: 30_000,
   });
 
-  const { data: rawPrevCosts } = useQuery({
-    queryKey: ["costs-widget-prev"],
-    queryFn:  () => defaultApi.getCosts(),
-    staleTime: Infinity,
-    gcTime: 30_000,
-    enabled: false,        // seeded from cache; we just compare snapshots
-  });
+  // Memoise so the object identity is stable across unrelated re-renders;
+  // otherwise the effect below would re-run on every render instead of only
+  // when a new fetch arrives.
+  const costs = useMemo(() => rawCosts ? aggregateCosts(rawCosts) : undefined, [rawCosts]);
 
-  const costs = rawCosts ? aggregateCosts(rawCosts) : undefined;
-  const prevCosts = rawPrevCosts ? aggregateCosts(rawPrevCosts) : undefined;
+  // Track the *previous* fetched snapshot across refreshes so we can compute a
+  // real delta. We only advance the stored total when `dataUpdatedAt` changes
+  // (i.e. a genuinely new server response arrived). Without that guard, every
+  // unrelated re-render (tab switches, parent updates) would stamp the current
+  // total into the ref, collapse `prev` to the current value, and permanently
+  // pin the delta at 0.0 % flat.
+  const prevTotalRef   = useRef<number | null>(null);
+  const lastUpdatedRef = useRef<number>(0);
+  const [displayedPrev, setDisplayedPrev] = useState<number | null>(null);
 
-  const trend = costs && prevCosts && prevCosts.total_cost_micros > 0
-    ? costs.total_cost_micros > prevCosts.total_cost_micros ? "up" : "down"
+  useEffect(() => {
+    if (!costs) return;
+    if (dataUpdatedAt === lastUpdatedRef.current) return;
+    // A new snapshot arrived: freeze the prior total as the comparison base,
+    // then shift the ref forward to this snapshot for the next tick.
+    setDisplayedPrev(prevTotalRef.current);
+    prevTotalRef.current   = costs.total_cost_micros;
+    lastUpdatedRef.current = dataUpdatedAt;
+  }, [dataUpdatedAt, costs]);
+
+  const deltaPct = (costs && displayedPrev !== null && displayedPrev > 0)
+    ? ((costs.total_cost_micros - displayedPrev) / displayedPrev) * 100
     : null;
+  const trend: "up" | "down" | "flat" | null = deltaPct === null
+    ? null
+    : Math.abs(deltaPct) < 0.05 ? "flat" : deltaPct > 0 ? "up" : "down";
 
   return (
     <Card>
@@ -289,13 +424,23 @@ function CostWidget() {
         <p className="text-[12px] text-gray-400 dark:text-zinc-600 italic">Unavailable</p>
       ) : (
         <div className="space-y-2">
-          {/* Total cost headline */}
+          {/* Total cost headline + delta vs. previous snapshot */}
           <div className="flex items-baseline gap-2">
             <span className="text-[22px] font-semibold tabular-nums text-gray-900 dark:text-zinc-100 leading-none">
               {fmtMicros(costs.total_cost_micros)}
             </span>
-            {trend === "up" && <TrendingUp  size={13} className="text-red-400" />}
-            {trend === "down" && <TrendingDown size={13} className="text-emerald-400" />}
+            {trend && deltaPct !== null && (
+              <span className={clsx(
+                "inline-flex items-center gap-0.5 text-[10px] font-mono tabular-nums",
+                trend === "up"   ? "text-red-400" :
+                trend === "down" ? "text-emerald-400" :
+                                   "text-gray-400 dark:text-zinc-500",
+              )}>
+                {trend === "up"   && <TrendingUp   size={11} />}
+                {trend === "down" && <TrendingDown size={11} />}
+                {trend === "flat" ? "0.0%" : `${deltaPct > 0 ? "+" : ""}${deltaPct.toFixed(1)}%`}
+              </span>
+            )}
           </div>
 
           {/* Sparkline: token distribution */}
@@ -340,40 +485,38 @@ function ProviderDot({ status }: { status: string }) {
   );
 }
 
+/** Map a /v1/status component status string onto the palette used by ProviderDot. */
+function normalizeComponentStatus(status: string): string {
+  const s = status.toLowerCase();
+  if (s === "ok" || s === "healthy")                            return "healthy";
+  if (s === "degraded" || s === "warning" || s === "warn")      return "degraded";
+  if (s === "unhealthy" || s === "error" || s === "down")       return "unhealthy";
+  if (s === "unconfigured" || s === "disabled" || s === "skip") return "unconfigured";
+  return status;
+}
+
+/** Pretty-print a snake_case component name for display. */
+function formatComponentName(raw: string): string {
+  return raw
+    .split("_")
+    .map(w => w.length === 0 ? w : w[0].toUpperCase() + w.slice(1))
+    .join(" ");
+}
+
 function ProviderStatusWidget() {
-  const { data: health, isLoading: healthLoading } = useQuery({
-    queryKey: ["detailed-health"],
-    queryFn:  () => defaultApi.getDetailedHealth(),
+  const { data: status, isLoading } = useQuery({
+    queryKey: ["system-status"],
+    queryFn:  () => defaultApi.getStatus(),
     refetchInterval: 30_000,
     retry: false,
   });
 
-  const isLoading = healthLoading;
-
   type ProviderRow = { name: string; status: string; detail: string };
-  const providers: ProviderRow[] = [];
-
-  if (health) {
-    providers.push({
-      name:   "Store",
-      status: health.checks.store.status,
-      detail: health.checks.store.latency_ms !== undefined
-        ? `${health.checks.store.latency_ms}ms`
-        : health.checks.store.status,
-    });
-    providers.push({
-      name:   "Events",
-      status: health.checks.event_buffer.status,
-      detail: health.checks.event_buffer.status,
-    });
-    providers.push({
-      name:   "Memory",
-      status: health.checks.memory.status,
-      detail: health.checks.memory.rss_mb !== undefined
-        ? `${health.checks.memory.rss_mb}MB RSS`
-        : health.checks.memory.status,
-    });
-  }
+  const providers: ProviderRow[] = (status?.components ?? []).map(c => ({
+    name:   formatComponentName(c.name),
+    status: normalizeComponentStatus(c.status),
+    detail: c.message ?? normalizeComponentStatus(c.status),
+  }));
 
   return (
     <Card>
@@ -613,12 +756,19 @@ function useHourlyEventCounts(): number[] {
 
   const hours = 12;
   const now   = Date.now();
+  // RecentEvent carries EITHER `stored_at` (numeric unix ms — backend truth)
+  // OR `timestamp` (legacy ISO string). Prefer the numeric form so we don't
+  // accidentally Date-parse a field that isn't there.
   const buckets = Array.from({ length: hours }, (_, i) => {
     const bucketStart = now - (hours - i) * 3_600_000;
     const bucketEnd   = bucketStart + 3_600_000;
     return (data ?? []).filter((e) => {
-      const ts = typeof e === "object" && e !== null && "timestamp" in e
-        ? new Date((e as { timestamp: string }).timestamp).getTime()
+      if (!e || typeof e !== "object") return false;
+      const rec = e as { stored_at?: number; timestamp?: string };
+      const ts = typeof rec.stored_at === "number"
+        ? rec.stored_at
+        : typeof rec.timestamp === "string"
+        ? new Date(rec.timestamp).getTime()
         : 0;
       return ts >= bucketStart && ts < bucketEnd;
     }).length;
@@ -1150,27 +1300,9 @@ export function DashboardPage() {
             </div>
           )}
 
-          {activeTab === 'Runs' && (
-            <Card>
-              <SectionLabel>Recent Runs</SectionLabel>
-              <ActiveRunsWidget />
-            </Card>
-          )}
+          {activeTab === 'Runs' && <ActiveRunsWidget />}
 
-          {activeTab === 'Tasks' && (
-            <Card>
-              <SectionLabel>Recent Tasks</SectionLabel>
-              <div className="space-y-1 pt-1">
-                {(stats?.total_tasks ?? 0) === 0 ? (
-                  <p className="text-[12px] text-gray-400 dark:text-zinc-600 py-4 text-center">No tasks yet.</p>
-                ) : (
-                  <p className="text-[12px] text-gray-400 dark:text-zinc-500">
-                    {stats?.total_tasks ?? 0} total tasks · {runs} active
-                  </p>
-                )}
-              </div>
-            </Card>
-          )}
+          {activeTab === 'Tasks' && <ActiveTasksWidget />}
 
           {activeTab === 'Activity' && (
             <Card className="flex flex-col min-h-[320px]">
