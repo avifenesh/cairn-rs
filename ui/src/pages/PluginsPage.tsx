@@ -525,9 +525,13 @@ function CatalogCard({ entry }: { entry: CatalogEntry }) {
           <div className="mt-3 pt-3 border-t border-gray-200 dark:border-zinc-800">
             <p className="text-[10px] text-gray-400 dark:text-zinc-600 uppercase tracking-wider mb-2">Per-Project</p>
             <div className="flex items-center gap-2">
-              <div className="flex-1 min-w-0 text-[11px] text-gray-500 dark:text-zinc-400">
-                Scope:{' '}
-                <span className="font-mono text-gray-700 dark:text-zinc-300 truncate">
+              <div className="flex-1 min-w-0 text-[11px] text-gray-500 dark:text-zinc-400 flex items-center gap-1">
+                <span className="shrink-0">Scope:</span>
+                {/* `truncate` only clips on block/inline-block elements, so
+                    force `block` + `min-w-0` here; otherwise a long
+                    tenant/workspace/project triple would push the
+                    Enable/Disable buttons off the card. */}
+                <span className="block min-w-0 max-w-full truncate font-mono text-gray-700 dark:text-zinc-300">
                   {scope.tenant_id}/{scope.workspace_id}/{scope.project_id}
                 </span>
               </div>
