@@ -310,7 +310,7 @@ export function GlobalSearch({ initialQuery = '', onClose, onBack }: GlobalSearc
       },
       {
         queryKey: ['traces'],
-        queryFn:  () => defaultApi.getTraces(500),
+        queryFn:  () => defaultApi.getTraces({ limit: 500 }),
         enabled,
         staleTime: 60_000,
         retry: false,

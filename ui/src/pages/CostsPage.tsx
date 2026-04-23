@@ -108,7 +108,7 @@ export function CostsPage() {
   // Traces — source of per-model cost breakdown and daily-trend sparkline.
   const { data: tracesData } = useQuery({
     queryKey: ["traces-costs"],
-    queryFn:  () => defaultApi.getTraces(500),
+    queryFn:  () => defaultApi.getTraces({ limit: 500 }),
     refetchInterval: 60_000,
     staleTime: 30_000,
     retry: false,

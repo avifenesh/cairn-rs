@@ -955,9 +955,28 @@ export function createApiClient(config: ApiClientConfig) {
 
     // ── LLM Traces ───────────────────────────────────────────────────────────
 
-    /** GET /v1/traces — all recent LLM call traces (operator view). */
-    getTraces: (limit = 500): Promise<import("./types").TracesResponse> =>
-      get(`/v1/traces?limit=${limit}`),
+    /** GET /v1/traces — all recent LLM call traces (operator view).
+     *
+     * Scope params are folded in via `withScope()` so switching
+     * tenant/workspace/project invalidates the browser cache key and
+     * sends the scope down for forward-compatible backend filtering.
+     */
+    getTraces: (
+      params?: {
+        limit?: number;
+        tenant_id?: string;
+        workspace_id?: string;
+        project_id?: string;
+      },
+    ): Promise<import("./types").TracesResponse> => {
+      const merged = withScope(params);
+      const qs = new URLSearchParams();
+      qs.set("limit", String(params?.limit ?? 500));
+      if (merged.tenant_id)    qs.set("tenant_id",    merged.tenant_id);
+      if (merged.workspace_id) qs.set("workspace_id", merged.workspace_id);
+      if (merged.project_id)   qs.set("project_id",   merged.project_id);
+      return get(`/v1/traces?${qs}`);
+    },
 
     /** GET /v1/sessions/:id/llm-traces — traces for one session. */
     getSessionTraces: (sessionId: string, limit = 200): Promise<import("./types").TracesResponse> =>

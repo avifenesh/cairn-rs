@@ -830,7 +830,7 @@ function fmtTokensShort(n: number): string {
 function ModelUsageWidget() {
   const { data: tracesData, isLoading } = useQuery({
     queryKey: ["traces-model-usage"],
-    queryFn:  () => defaultApi.getTraces(200),
+    queryFn:  () => defaultApi.getTraces({ limit: 200 }),
     refetchInterval: 60_000,
     staleTime: 30_000,
     retry: false,
