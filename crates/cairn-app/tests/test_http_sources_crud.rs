@@ -79,7 +79,9 @@ async fn sources_crud_and_memory_ingest_roundtrip() {
     let body: Value = res.json().await.expect("list json");
     let items = body.as_array().cloned().unwrap_or_default();
     assert!(
-        items.iter().any(|s| s.get("source_id").and_then(|v| v.as_str()) == Some(source_id)),
+        items
+            .iter()
+            .any(|s| s.get("source_id").and_then(|v| v.as_str()) == Some(source_id)),
         "expected list to contain new source, got {body}",
     );
 
@@ -96,7 +98,11 @@ async fn sources_crud_and_memory_ingest_roundtrip() {
         .expect("chunks reaches server");
     assert_eq!(res.status().as_u16(), 200);
     let body: Value = res.json().await.expect("chunks json");
-    let chunks = body.get("items").and_then(|v| v.as_array()).cloned().unwrap_or_default();
+    let chunks = body
+        .get("items")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
     assert!(!chunks.is_empty(), "expected ingested chunks, got {body}");
 
     // 5. Update source metadata.
@@ -116,7 +122,10 @@ async fn sources_crud_and_memory_ingest_roundtrip() {
         .expect("update reaches server");
     assert_eq!(res.status().as_u16(), 200);
     let body: Value = res.json().await.expect("update json");
-    assert_eq!(body.get("name").and_then(|v| v.as_str()), Some("Updated Handbook"));
+    assert_eq!(
+        body.get("name").and_then(|v| v.as_str()),
+        Some("Updated Handbook")
+    );
 
     // 6. Set refresh schedule.
     let res = h
@@ -132,7 +141,10 @@ async fn sources_crud_and_memory_ingest_roundtrip() {
         .expect("schedule reaches server");
     assert_eq!(res.status().as_u16(), 200);
     let body: Value = res.json().await.expect("schedule json");
-    assert_eq!(body.get("interval_ms").and_then(|v| v.as_u64()), Some(3_600_000));
+    assert_eq!(
+        body.get("interval_ms").and_then(|v| v.as_u64()),
+        Some(3_600_000)
+    );
 
     // 7. Process-refresh — global endpoint, may process 0+ schedules.
     let res = h
@@ -145,7 +157,10 @@ async fn sources_crud_and_memory_ingest_roundtrip() {
         .expect("process-refresh reaches server");
     assert_eq!(res.status().as_u16(), 200);
     let body: Value = res.json().await.expect("process-refresh json");
-    assert!(body.get("processed_count").is_some(), "missing processed_count: {body}");
+    assert!(
+        body.get("processed_count").is_some(),
+        "missing processed_count: {body}"
+    );
 
     // 8. Delete (deactivate) the source.
     let res = h
