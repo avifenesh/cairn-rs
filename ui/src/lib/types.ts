@@ -944,6 +944,52 @@ export interface EvalRunsResponse {
   hasMore?: boolean;
 }
 
+// ── Eval artifacts (datasets / rubrics / baselines) ───────────────────────────
+
+/** One record from GET /v1/evals/datasets */
+export interface EvalDatasetRecord {
+  dataset_id: string;
+  tenant_id: string;
+  name: string;
+  subject_kind: string;
+  entries?: unknown[];
+  created_at_ms: number;
+}
+
+/** One record from GET /v1/evals/rubrics */
+export interface EvalRubricRecord {
+  rubric_id: string;
+  tenant_id: string;
+  name: string;
+  dimensions?: Array<{
+    name: string;
+    weight: number;
+    scoring_fn: string;
+    threshold?: number | null;
+  }>;
+  created_at_ms: number;
+}
+
+/** One record from GET /v1/evals/baselines */
+export interface EvalBaselineRecord {
+  baseline_id: string;
+  tenant_id: string;
+  name: string;
+  prompt_asset_id: string;
+  metrics: Record<string, number | null>;
+  created_at_ms: number;
+  locked: boolean;
+}
+
+/** Response from GET /v1/evals/compare?run_ids=a,b */
+export interface EvalCompareResponse {
+  run_ids: string[];
+  rows: Array<{
+    metric: string;
+    values: Record<string, unknown>;
+  }>;
+}
+
 // ── Plugins ───────────────────────────────────────────────────────────────────
 
 /** Discriminated union matching cairn_tools::PluginCapability */

@@ -48,6 +48,15 @@ pub(crate) struct CreateEvalRunRequest {
     prompt_release_id: Option<String>,
     created_by: Option<String>,
     dataset_id: Option<String>,
+    /// Optional rubric the operator intends to score this run against.
+    /// Validated to exist at create time so that the form cannot submit
+    /// dangling references; scoring itself is invoked later via
+    /// `POST /v1/evals/runs/:id/score-rubric`.
+    rubric_id: Option<String>,
+    /// Optional baseline that this run will be compared against.
+    /// Validated to exist at create time. Comparison is invoked later
+    /// via `POST /v1/evals/runs/:id/compare-baseline`.
+    baseline_id: Option<String>,
 }
 
 impl CreateEvalRunRequest {
@@ -429,6 +438,44 @@ pub(crate) async fn add_eval_dataset_entry_handler(
     }
 }
 
+pub(crate) async fn list_eval_baselines_handler(
+    State(state): State<Arc<AppState>>,
+    Query(query): Query<ListEvalDatasetsQuery>,
+) -> impl IntoResponse {
+    let tenant_id = TenantId::new(
+        query
+            .tenant_id
+            .unwrap_or_else(|| DEFAULT_TENANT_ID.to_owned()),
+    );
+    (
+        StatusCode::OK,
+        Json(ListResponse {
+            items: state.eval_baselines.list(&tenant_id),
+            has_more: false,
+        }),
+    )
+        .into_response()
+}
+
+pub(crate) async fn list_eval_rubrics_handler(
+    State(state): State<Arc<AppState>>,
+    Query(query): Query<ListEvalDatasetsQuery>,
+) -> impl IntoResponse {
+    let tenant_id = TenantId::new(
+        query
+            .tenant_id
+            .unwrap_or_else(|| DEFAULT_TENANT_ID.to_owned()),
+    );
+    (
+        StatusCode::OK,
+        Json(ListResponse {
+            items: state.eval_rubrics.list(&tenant_id),
+            has_more: false,
+        }),
+    )
+        .into_response()
+}
+
 pub(crate) async fn create_eval_baseline_handler(
     State(state): State<Arc<AppState>>,
     Json(body): Json<CreateEvalBaselineRequest>,
@@ -498,6 +545,22 @@ pub(crate) async fn create_eval_run_handler(
                 .into_response();
         }
     }
+    if let Some(rubric_id) = body.rubric_id.as_deref() {
+        if state.eval_rubrics.get(rubric_id).is_none() {
+            return AppApiError::new(StatusCode::NOT_FOUND, "not_found", "eval rubric not found")
+                .into_response();
+        }
+    }
+    if let Some(baseline_id) = body.baseline_id.as_deref() {
+        if state.eval_baselines.get(baseline_id).is_none() {
+            return AppApiError::new(
+                StatusCode::NOT_FOUND,
+                "not_found",
+                "eval baseline not found",
+            )
+            .into_response();
+        }
+    }
 
     let eval_run_id = EvalRunId::new(body.eval_run_id);
     let project_key = ProjectKey::new(
@@ -505,7 +568,7 @@ pub(crate) async fn create_eval_run_handler(
         body.workspace_id.as_str(),
         body.project_id.as_str(),
     );
-    let run = state.evals.create_run(
+    let mut run = state.evals.create_run(
         eval_run_id.clone(),
         ProjectId::new(body.project_id),
         subject_kind,
@@ -517,6 +580,13 @@ pub(crate) async fn create_eval_run_handler(
             .as_deref()
             .map(cairn_domain::OperatorId::new),
     );
+    // Link the dataset picked in the form to the freshly-minted run so the
+    // operator can see (and downstream services can honour) the binding.
+    if let Some(dataset_id) = body.dataset_id.as_deref() {
+        if let Ok(updated) = state.evals.set_dataset(&eval_run_id, dataset_id.to_owned()) {
+            run = updated;
+        }
+    }
 
     // Persist to the event log so eval runs survive restarts (replay_evals on boot).
     let now = std::time::SystemTime::now()

@@ -790,6 +790,24 @@ pub const OPENAPI_JSON: &str = r##"{
         "responses": { "200": { "description": "Eval run list" } }
       }
     },
+    "/v1/evals/rubrics": {
+      "get": {
+        "tags": ["Evals"],
+        "summary": "List rubrics for a tenant (issue #138)",
+        "operationId": "listEvalRubrics",
+        "parameters": [{ "name": "tenant_id", "in": "query", "schema": { "type": "string" } }],
+        "responses": { "200": { "description": "Eval rubric list" } }
+      }
+    },
+    "/v1/evals/baselines": {
+      "get": {
+        "tags": ["Evals"],
+        "summary": "List baselines for a tenant (issue #138)",
+        "operationId": "listEvalBaselines",
+        "parameters": [{ "name": "tenant_id", "in": "query", "schema": { "type": "string" } }],
+        "responses": { "200": { "description": "Eval baseline list" } }
+      }
+    },
     "/v1/traces": {
       "get": {
         "tags": ["Evals"],

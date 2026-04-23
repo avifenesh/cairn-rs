@@ -388,6 +388,18 @@ pub fn preserved_route_catalog() -> Vec<RouteEntry> {
             path: "/v1/evals/datasets".into(),
             classification: Preserve,
         },
+        // Issue #138 — eval artifacts list surfaces used by the EvalsPage
+        // New Eval Run form.
+        RouteEntry {
+            method: Get,
+            path: "/v1/evals/rubrics".into(),
+            classification: Preserve,
+        },
+        RouteEntry {
+            method: Get,
+            path: "/v1/evals/baselines".into(),
+            classification: Preserve,
+        },
         // RFC 010: sources and channels surface.
         RouteEntry {
             method: Get,
