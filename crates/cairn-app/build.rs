@@ -123,17 +123,35 @@ fn main() {
 
     // Re-run when env overrides change OR when HEAD moves, so that
     // `GIT_COMMIT`/`BUILD_DATE` don't go stale across incremental rebuilds on
-    // a developer machine. We only watch `.git/HEAD` and the packed-refs file
-    // (both rewritten by `git commit` / `git checkout`), which is cheap —
-    // not every file in the repo. CI builds inject the env vars explicitly
-    // so these file-watches are a no-op there.
+    // a developer machine. `.git/HEAD` itself usually just contains
+    // `ref: refs/heads/<branch>` and doesn't change on `git commit`, so we
+    // also resolve and watch the ref file (e.g. `.git/refs/heads/main`) and
+    // `.git/packed-refs` as a fallback — whichever actually advances on the
+    // next commit. CI builds inject `GIT_COMMIT`/`BUILD_DATE` explicitly, so
+    // these file-watches are a no-op there.
     println!("cargo:rerun-if-env-changed=GIT_COMMIT");
     println!("cargo:rerun-if-env-changed=BUILD_DATE");
     println!("cargo:rerun-if-changed=build.rs");
-    if std::path::Path::new("../../.git/HEAD").exists() {
-        println!("cargo:rerun-if-changed=../../.git/HEAD");
+
+    let git_dir = std::path::Path::new("../../.git");
+    let head_path = git_dir.join("HEAD");
+    if head_path.exists() {
+        println!("cargo:rerun-if-changed={}", head_path.display());
+        // Resolve `ref: refs/heads/<branch>` → `.git/refs/heads/<branch>`
+        // and watch that file too. Loose-ref repos rewrite this on every
+        // commit; once git runs `git gc` and packs refs, the file vanishes
+        // and `packed-refs` takes over (watched below).
+        if let Ok(head) = std::fs::read_to_string(&head_path) {
+            if let Some(rest) = head.trim().strip_prefix("ref: ") {
+                let ref_path = git_dir.join(rest);
+                if ref_path.exists() {
+                    println!("cargo:rerun-if-changed={}", ref_path.display());
+                }
+            }
+        }
     }
-    if std::path::Path::new("../../.git/packed-refs").exists() {
-        println!("cargo:rerun-if-changed=../../.git/packed-refs");
+    let packed_refs = git_dir.join("packed-refs");
+    if packed_refs.exists() {
+        println!("cargo:rerun-if-changed={}", packed_refs.display());
     }
 }
