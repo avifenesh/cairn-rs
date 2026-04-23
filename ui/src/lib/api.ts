@@ -1137,8 +1137,12 @@ export function createApiClient(config: ApiClientConfig) {
 
     /** PUT /v1/sources/:id — update source metadata (name/description). */
     updateSource: (sourceId: string, body: {
-      name?: string;
-      description?: string;
+      // Widened to `string | null` to match the wire contract — the backend
+      // accepts null to clear these fields, and this client actively sends
+      // null when the caller passes undefined. Matches UpdateSourceRequest
+      // in types.ts.
+      name?: string | null;
+      description?: string | null;
       tenant_id?: string;
       workspace_id?: string;
       project_id?: string;

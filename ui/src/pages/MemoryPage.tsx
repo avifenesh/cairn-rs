@@ -19,16 +19,14 @@ function truncate(s: string, n: number) {
  * Detect the "no embedding provider configured" condition from a structured
  * ApiError. The current `memory_search_handler` returns 400 `bad_request`
  * with no dedicated error code for missing provider config, so in practice
- * this branch only fires if/when the backend is extended to emit 503 with
- * `code: 'provider_unavailable'`. Until then every search error falls into
- * the generic "Search failed" branch, which surfaces the real message
- * instead of the misleading provider hint.
+ * this branch only fires if/when the backend is extended to emit
+ * `code: 'provider_unavailable'`. We key strictly on that stable code so a
+ * generic 503 (proxy outage, backend maintenance) correctly falls into the
+ * "Search failed" branch instead of misleading the operator toward the
+ * Providers page.
  */
 function isProviderUnavailable(err: unknown): boolean {
-  if (err instanceof ApiError) {
-    return err.status === 503 || err.code === 'provider_unavailable';
-  }
-  return false;
+  return err instanceof ApiError && err.code === 'provider_unavailable';
 }
 
 function errorMessage(err: unknown): string {

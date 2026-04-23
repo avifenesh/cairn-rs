@@ -1,0 +1,1 @@
+import{n as e}from"./clsx-1x2H0FXB.js";var t=e(`loader-circle`,[[`path`,{d:`M21 12a9 9 0 1 1-6.219-8.56`,key:`13zald`}]]);export{t};

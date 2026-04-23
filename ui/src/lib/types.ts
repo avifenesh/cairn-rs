@@ -663,6 +663,13 @@ export interface SourceDetailResponse {
   active: boolean;
   document_count: number;
   chunk_count: number;
+  /**
+   * Epoch milliseconds of the most recent ingest, or null if the source has
+   * never been ingested. The backend field is `last_ingested_at_ms` in the
+   * Rust `SourceSummary`; the HTTP handler drops the `_ms` suffix on this
+   * DTO but the units are still milliseconds since the Unix epoch. Parse
+   * with `new Date(ms)` — never treat this as seconds or an ISO string.
+   */
   last_ingested_at: number | null;
   name: string | null;
   description: string | null;
