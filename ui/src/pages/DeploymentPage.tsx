@@ -382,14 +382,14 @@ export function DeploymentPage() {
               {info?.version && (
                 <Row label="Version" value={`v${info.version}`} mono />
               )}
-              {info?.git_commit && (
+              {info?.git_commit && info.git_commit !== "dev" && info.git_commit !== "unknown" && (
                 <Row
                   label="Git commit"
                   value={info.git_commit.length > 12 ? info.git_commit.slice(0, 12) + "…" : info.git_commit}
                   mono
                 />
               )}
-              {info?.build_date && (
+              {info?.build_date && info.build_date !== "unknown" && !info.build_date.includes("not embedded") && (
                 <Row label="Build date" value={fmtDate(info.build_date)} />
               )}
               {info?.rust_version && (

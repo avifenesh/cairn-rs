@@ -874,8 +874,8 @@ pub(crate) async fn system_info_handler(
     Json(serde_json::json!({
         "version":      env!("CARGO_PKG_VERSION"),
         "rust_version": env!("CARGO_PKG_VERSION"),   // CARGO_PKG_VERSION is the crate version
-        "build_date":   concat!(env!("CARGO_PKG_VERSION"), " (build date not embedded)"),
-        "git_commit":   option_env!("GIT_COMMIT").unwrap_or("dev"),
+        "build_date":   env!("BUILD_DATE"),
+        "git_commit":   env!("GIT_COMMIT"),
         "os":           std::env::consts::OS,
         "arch":         std::env::consts::ARCH,
 

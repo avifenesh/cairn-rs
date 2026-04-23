@@ -13,7 +13,6 @@ import {
   AlignJustify,
   ChevronDown,
   Server,
-  ListOrdered,
 } from 'lucide-react';
 import { clsx } from 'clsx';
 import {
@@ -371,38 +370,6 @@ function AboutSection() {
   );
 }
 
-// ── Release Notes ─────────────────────────────────────────────────────────────
-
-function ReleaseNotesSection() {
-  return (
-    <SectionCard title="Release Notes" icon={ListOrdered}>
-      <div>
-        <div className="flex items-baseline gap-3 mb-2">
-          <span className="text-[13px] font-semibold text-gray-900 dark:text-zinc-100 font-mono">
-            v0.1.0
-          </span>
-          <span className="text-[11px] text-gray-400 dark:text-zinc-600">2026-04-12</span>
-        </div>
-        <ul className="space-y-1">
-          {[
-            "Postgres default store with auto-migrations and event replay",
-            "13 LLM provider backends — runtime provider registry with hot-reload",
-            "Rate limiting (1000/min token, 100/min IP) with X-RateLimit headers",
-            "Log rotation via CAIRN_LOG_DIR, admin token rotation endpoint",
-            "Docker single-command deployment with health checks",
-            "30 operator UI pages with unified design system",
-          ].map((note, i) => (
-            <li key={i} className="flex items-start gap-2 text-[12px] text-gray-500 dark:text-zinc-400">
-              <span className="mt-1.5 h-1 w-1 rounded-full bg-zinc-600 shrink-0" />
-              {note}
-            </li>
-          ))}
-        </ul>
-      </div>
-    </SectionCard>
-  );
-}
-
 // ── Main page ─────────────────────────────────────────────────────────────────
 
 export function ProfilePage() {
@@ -423,7 +390,6 @@ export function ProfilePage() {
         <TokenSection />
         <PreferencesSection />
         <AboutSection />
-        <ReleaseNotesSection />
       </div>
     </div>
   );

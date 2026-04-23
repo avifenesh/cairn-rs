@@ -110,6 +110,26 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **Public-facing polish: real build info, no nested-button warning, no
+  fake release notes (#141, #142, #145).**
+  - `/v1/system/info` no longer emits the placeholder strings `"dev"` and
+    `"(build date not embedded)"`. A new `crates/cairn-app/build.rs`
+    populates `GIT_COMMIT` (short 12-char SHA via `git rev-parse`) and
+    `BUILD_DATE` (UTC ISO-8601) at build time; CI may pre-set either env
+    var to override. Fallback is the literal `"unknown"`. `DeploymentPage`
+    additionally hides the Git-commit / Build-date rows when the value is
+    a legacy placeholder, so older backends don't leak embarrassing copy.
+  - `ApiDocsPage` endpoint row no longer wraps `<CopyButton>` (a
+    `<button>`) inside an outer `<button>` — the outer element is now a
+    `<div role="button" tabIndex={0}>` with Enter/Space key handling and
+    `aria-expanded`, resolving the React/Vite `<button> cannot contain a
+    nested <button>` console warning.
+  - `ProfilePage` drops the hardcoded "Release Notes" block that
+    contradicted live `/v1/system/info` (claimed "Postgres default store"
+    and "13 LLM providers" regardless of the actual deployment). The
+    `About` section already surfaces the real store type and provider
+    count; no stand-in copy added.
+
 - **UI: `TriggersPage` swallowed backend failures on raw `fetch` calls (#154).**
   Replaced the 5 raw `fetch` calls (list triggers, list run-templates,
   enable/disable/delete trigger) with new `defaultApi.listTriggers` /

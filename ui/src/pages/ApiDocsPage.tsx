@@ -603,8 +603,21 @@ function EndpointRow({ ep }: { ep: Endpoint }) {
       "rounded-lg border transition-colors",
       expanded ? "border-gray-200 dark:border-zinc-700 bg-gray-50/60 dark:bg-zinc-900/60" : "border-gray-200 dark:border-zinc-800 bg-gray-50 dark:bg-zinc-900 hover:border-gray-200 dark:border-zinc-700",
     )}>
-      <button onClick={() => setExpanded(v => !v)}
-        className="w-full flex items-center gap-3 px-4 py-3 text-left group">
+      {/* Outer row is a `div role="button"` (not `<button>`) so the nested
+          CopyButton `<button>` remains valid HTML — React/Vite warns on
+          `<button>` inside `<button>`. */}
+      <div
+        role="button"
+        tabIndex={0}
+        aria-expanded={expanded}
+        onClick={() => setExpanded(v => !v)}
+        onKeyDown={e => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            setExpanded(v => !v);
+          }
+        }}
+        className="w-full flex items-center gap-3 px-4 py-3 text-left group cursor-pointer select-none">
         <MethodBadge method={ep.method} />
         <code className="flex-1 text-[13px] font-mono text-gray-800 dark:text-zinc-200 truncate">{ep.path}</code>
         {ep.sse && <span className="text-[10px] font-medium text-sky-400 bg-sky-950/60 border border-sky-800/40 rounded px-1.5 py-0.5 shrink-0">SSE</span>}
@@ -616,7 +629,7 @@ function EndpointRow({ ep }: { ep: Endpoint }) {
         />
         <span className="text-[12px] text-gray-400 dark:text-zinc-500 truncate max-w-xs hidden md:block">{ep.description}</span>
         {expanded ? <ChevronDown size={13} className="text-gray-400 dark:text-zinc-500 shrink-0" /> : <ChevronRight size={13} className="text-gray-400 dark:text-zinc-600 shrink-0" />}
-      </button>
+      </div>
 
       {expanded && (
         <div className="px-4 pb-4 space-y-4 border-t border-gray-200 dark:border-zinc-800">
