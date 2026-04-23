@@ -13,7 +13,6 @@ import {
   AlignJustify,
   ChevronDown,
   Server,
-  ListOrdered,
 } from 'lucide-react';
 import { clsx } from 'clsx';
 import {
@@ -333,6 +332,15 @@ function AboutSection() {
     queryFn:  () => defaultApi.getStatus(),
     refetchInterval: 30_000,
   });
+  const { data: info } = useQuery({
+    queryKey: ['system-info'],
+    queryFn:  () => defaultApi.getSystemInfo(),
+    // Version / deployment / store are fixed for a running binary — treat
+    // them as effectively immutable within a session. Prevents needless
+    // refetches on every window focus or tab switch.
+    staleTime: Infinity,
+    refetchOnWindowFocus: false,
+  });
 
   function fmtUptime(secs: number): string {
     if (secs < 60)    return `${secs}s`;
@@ -346,11 +354,13 @@ function AboutSection() {
     <SectionCard title="About" icon={Server}>
       <div className="space-y-0">
         {[
-          { label: 'Version',        value: 'v0.1.0 (cairn-rs)' },
+          { label: 'Version',        value: info?.version ? `v${info.version} (cairn-rs)` : '—' },
           { label: 'API endpoint',   value: import.meta.env.VITE_API_URL || 'localhost:3000' },
+          { label: 'Deployment',     value: info?.environment?.deployment_mode ?? '—' },
           { label: 'Runtime',        value: status ? (status.status === 'ok' ? 'Healthy' : 'Degraded') : '—',
             ok: status?.status === 'ok' },
-          { label: 'Store',          value: status ? ((status.components?.find(c => c.name === 'event_store')?.status === 'ok') ? 'Healthy' : 'Degraded') : '—',
+          { label: 'Store',          value: info?.features?.store_type ?? '—' },
+          { label: 'Store health',   value: status ? ((status.components?.find(c => c.name === 'event_store')?.status === 'ok') ? 'Healthy' : 'Degraded') : '—',
             ok: status?.components?.find(c => c.name === 'event_store')?.status === 'ok' },
           { label: 'Uptime',         value: status ? fmtUptime(status.uptime_secs) : '—' },
         ].map(({ label, value, ok }) => (
@@ -366,38 +376,6 @@ function AboutSection() {
             </span>
           </div>
         ))}
-      </div>
-    </SectionCard>
-  );
-}
-
-// ── Release Notes ─────────────────────────────────────────────────────────────
-
-function ReleaseNotesSection() {
-  return (
-    <SectionCard title="Release Notes" icon={ListOrdered}>
-      <div>
-        <div className="flex items-baseline gap-3 mb-2">
-          <span className="text-[13px] font-semibold text-gray-900 dark:text-zinc-100 font-mono">
-            v0.1.0
-          </span>
-          <span className="text-[11px] text-gray-400 dark:text-zinc-600">2026-04-12</span>
-        </div>
-        <ul className="space-y-1">
-          {[
-            "Postgres default store with auto-migrations and event replay",
-            "13 LLM provider backends — runtime provider registry with hot-reload",
-            "Rate limiting (1000/min token, 100/min IP) with X-RateLimit headers",
-            "Log rotation via CAIRN_LOG_DIR, admin token rotation endpoint",
-            "Docker single-command deployment with health checks",
-            "30 operator UI pages with unified design system",
-          ].map((note, i) => (
-            <li key={i} className="flex items-start gap-2 text-[12px] text-gray-500 dark:text-zinc-400">
-              <span className="mt-1.5 h-1 w-1 rounded-full bg-zinc-600 shrink-0" />
-              {note}
-            </li>
-          ))}
-        </ul>
       </div>
     </SectionCard>
   );
@@ -423,7 +401,6 @@ export function ProfilePage() {
         <TokenSection />
         <PreferencesSection />
         <AboutSection />
-        <ReleaseNotesSection />
       </div>
     </div>
   );
