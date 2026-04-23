@@ -99,7 +99,10 @@ async fn channel_create_send_list_roundtrip() {
     // 4. List messages on the channel — the message we just sent should be there.
     let msgs_res = h
         .client()
-        .get(format!("{}/v1/channels/{}/messages", h.base_url, channel_id))
+        .get(format!(
+            "{}/v1/channels/{}/messages",
+            h.base_url, channel_id
+        ))
         .bearer_auth(&h.admin_token)
         .send()
         .await
