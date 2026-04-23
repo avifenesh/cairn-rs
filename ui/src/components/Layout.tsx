@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, type ReactNode } from 'react';
-import { useIsFetching } from '@tanstack/react-query';
+import { useIsFetching, useIsMutating } from '@tanstack/react-query';
 import { clsx } from 'clsx';
 import { Sidebar, type NavPage } from './Sidebar';
 import { TopBar } from './TopBar';
@@ -207,13 +207,18 @@ function PlaceholderPage({ page }: { page: NavPage }) {
 const LOADING_BAR_SHOW_DELAY_MS = 500;
 
 function LoadingBar() {
-  const isFetching = useIsFetching();
+  // Union of queries + mutations so writes (create session, rotate token,
+  // etc.) still surface the bar even though `useIsFetching` counts only
+  // read-side query activity.
+  const isFetching  = useIsFetching();
+  const isMutating  = useIsMutating();
+  const busyCount   = isFetching + isMutating;
   const [phase, setPhase] = useState<'idle' | 'loading' | 'done'>('idle');
   const showTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const finishTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
-    if (isFetching > 0) {
+    if (busyCount > 0) {
       if (phase === 'done') {
         // A finish animation is in flight but new work arrived — the bar is
         // still on screen, so bounce straight back to 'loading' instead of
@@ -247,7 +252,7 @@ function LoadingBar() {
         finishTimerRef.current = setTimeout(() => setPhase('idle'), 450);
       }
     }
-  }, [isFetching, phase]);
+  }, [busyCount, phase]);
 
   // Clear any outstanding timers on unmount. Kept separate from the main
   // effect so normal re-renders (isFetching changes) don't clear the
