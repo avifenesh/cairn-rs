@@ -32,10 +32,11 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `POST /v1/decisions/invalidate`. Worse, the raw `fetch` call never
   checked `res.ok`, so a 404 still triggered the "All cache entries
   invalidated" success toast. Both raw-fetch mutations now wrap the
-  response in an `assertOk` helper that throws on non-2xx, surface
-  the failure through a toast via `onError`, and normalize list
-  responses through a local `unwrapList` helper (mirrors
-  `api.ts::getList`).
+  response in an `assertOk` helper that throws `ApiError` on non-2xx
+  (so the global 401 interceptor picks up auth-expired failures from
+  this page too), surface the failure through a toast via `onError`,
+  and normalize list responses through a local `unwrapList` helper
+  (mirrors `api.ts::getList`).
 - **UI: ApiDocsPage documented a nonexistent SSE path.** `GET
   /v1/events/stream` does not exist — the canonical runtime SSE
   path is `GET /v1/stream` (see `crates/cairn-app/src/router.rs:369`).
@@ -63,6 +64,32 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   silently showed 0. Same dual-match now applied to
   `http_request_duration_ms_{sum,count,bucket}` and to
   `active_runs_total` / `active_tasks_total`.
+- **`IntegrationsPage` — derive pause state from the server, not local
+  React state.** The "paused" flag used to live in `useState` and only
+  flipped on mutation success, so a page reload or a failed pause call
+  left the UI out of sync with the dispatcher. Pause/resume rendering is
+  now driven by `queueData.dispatcher_running` — a newly emitted field
+  on `GET /v1/webhooks/github/queue`.
+- **`IntegrationsPage` SSE reuses the shared `useEventStream` hook.**
+  The page previously opened its own bespoke `EventSource` against
+  `/v1/stream` with no reconnect, back-off, or `Last-Event-ID` replay; a
+  one-second network blip killed live updates until the component
+  re-rendered. It now subscribes to the singleton stream
+  (`useEventStream`) which handles reconnect with jittered back-off and
+  gapless replay. `github_progress` was added to the hook's named event
+  list so the frame reaches subscribers.
+- **`GET /v1/webhooks/github/queue` now emits `max_concurrent` and
+  `dispatcher_running`.** The UI was reading both fields via an untyped
+  `as Record<string, unknown>` cast with silent defaults, hiding drift
+  when the handler shape changed. The Rust handler now populates both
+  fields explicitly (derived from the `queue_paused` + `queue_running`
+  atomics), the TypeScript return type of `getGitHubQueue()` declares
+  them, and the cast is gone.
+- **`pauseMut` now invalidates the `github-queue` query and both pause
+  and resume mutations show `onError` toasts.** Previously only
+  `resumeMut` invalidated on success and `pauseMut` had no error path,
+  so a failed pause call silently dropped the user back into a
+  green-button UI that looked like everything had worked.
 
 ### Security
 

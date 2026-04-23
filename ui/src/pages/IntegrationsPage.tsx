@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   Loader2, GitBranch, Play, Pause, SkipForward,
@@ -12,6 +12,7 @@ import type { GitHubQueueEntry } from "../lib/api";
 import { surface, border, text } from "../lib/design-system";
 import { PageHeader } from "../components/PageHeader";
 import { StatCard } from "../components/StatCard";
+import { useEventStream } from "../hooks/useEventStream";
 
 // ── Status helpers ──────────────────────────────────────────────────────────
 
@@ -239,7 +240,6 @@ export function IntegrationsPage() {
   const qc = useQueryClient();
   const toast = useToast();
   const [showScan, setShowScan] = useState(false);
-  const [queuePaused, setQueuePaused] = useState(false);
 
   // Fetch GitHub config.
   const { data: ghConfig } = useQuery({
@@ -255,20 +255,16 @@ export function IntegrationsPage() {
     refetchInterval: 3_000,
   });
 
-  // SSE-powered live updates.
+  // SSE-powered live updates — reuse shared stream (reconnect + replay).
+  const { events: streamEvents } = useEventStream();
+  const lastSeenProgressId = useRef<string | null>(null);
   useEffect(() => {
-    const token = localStorage.getItem("cairn_token") ?? "";
-    if (!token) return;
-
-    const url = `${import.meta.env.VITE_API_URL ?? ""}/v1/stream?token=${encodeURIComponent(token)}`;
-    const es = new EventSource(url);
-
-    es.addEventListener("github_progress", () => {
+    const latest = streamEvents.find((ev) => ev.type === "github_progress");
+    if (latest && latest.id !== lastSeenProgressId.current) {
+      lastSeenProgressId.current = latest.id;
       void qc.invalidateQueries({ queryKey: ["github-queue"] });
-    });
-
-    return () => es.close();
-  }, [qc]);
+    }
+  }, [streamEvents, qc]);
 
   const queue = queueData?.queue ?? [];
   const pending = queue.filter((e) => e.status.includes("Pending")).length;
@@ -276,8 +272,8 @@ export function IntegrationsPage() {
   const completed = queue.filter((e) => e.status.includes("Completed")).length;
   const failed = queue.filter((e) => e.status.includes("Failed")).length;
   const waiting = queue.filter((e) => e.status.includes("WaitingApproval")).length;
-  const maxConcurrent = (queueData as Record<string, unknown>)?.max_concurrent as number ?? 3;
-  const dispatcherRunning = (queueData as Record<string, unknown>)?.dispatcher_running as boolean ?? false;
+  const maxConcurrent = queueData?.max_concurrent ?? 3;
+  const dispatcherRunning = queueData?.dispatcher_running ?? false;
 
   // Mutations.
   const scanMut = useMutation({
@@ -292,13 +288,19 @@ export function IntegrationsPage() {
 
   const pauseMut = useMutation({
     mutationFn: () => defaultApi.pauseGitHubQueue(),
-    onSuccess: () => { setQueuePaused(true); toast.success("Queue paused"); },
+    onSuccess: () => {
+      toast.success("Queue paused");
+      void qc.invalidateQueries({ queryKey: ["github-queue"] });
+    },
+    onError: (err: unknown) => {
+      const msg = err instanceof Error ? err.message : String(err);
+      toast.error(`Failed to pause: ${msg}`);
+    },
   });
 
   const resumeMut = useMutation({
     mutationFn: () => defaultApi.resumeGitHubQueue(),
     onSuccess: () => {
-      setQueuePaused(false);
       toast.success("Processing started");
       void qc.invalidateQueries({ queryKey: ["github-queue"] });
     },
@@ -359,7 +361,10 @@ export function IntegrationsPage() {
           <div className="flex items-center gap-2">
             {isConfigured && (
               <>
-                {/* Concurrency selector */}
+                {/* Concurrency selector. Option set unions the preset stops
+                    with the current server value so a server-clamped value
+                    outside the presets (server accepts 1..=20) still renders
+                    as the selected option. */}
                 <div className="flex items-center gap-1.5">
                   <span className={clsx("text-[10px]", text.muted)}>Parallel:</span>
                   <select
@@ -381,29 +386,33 @@ export function IntegrationsPage() {
                       "focus:outline-none focus:ring-1 focus:ring-indigo-500/40"
                     )}
                   >
-                    {[1, 2, 3, 5, 10].map((n) => (
-                      <option key={n} value={n}>{n}</option>
-                    ))}
+                    {Array.from(new Set([1, 2, 3, 5, 10, maxConcurrent]))
+                      .filter((n) => n >= 1 && n <= 20)
+                      .sort((a, b) => a - b)
+                      .map((n) => (
+                        <option key={n} value={n}>{n}</option>
+                      ))}
                   </select>
                 </div>
 
-                {queuePaused || (!dispatcherRunning && processing === 0) ? (
+                {!dispatcherRunning ? (
                   <button
                     onClick={() => resumeMut.mutate()}
-                    disabled={pending === 0 && !queuePaused}
+                    disabled={resumeMut.isPending || (pending === 0 && processing === 0)}
                     className={clsx(
                       "inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors",
-                      pending > 0 || queuePaused
-                        ? "bg-emerald-600 hover:bg-emerald-700 text-white"
+                      pending > 0 || processing > 0
+                        ? "bg-emerald-600 hover:bg-emerald-700 text-white disabled:opacity-60"
                         : "bg-zinc-800 text-zinc-500 cursor-not-allowed"
                     )}
                   >
-                    <Play size={12} /> {queuePaused ? "Resume" : "Start"}
+                    <Play size={12} /> {pending > 0 || processing > 0 ? "Resume" : "Start"}
                   </button>
                 ) : (
                   <button
                     onClick={() => pauseMut.mutate()}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-amber-600 hover:bg-amber-700 text-white transition-colors"
+                    disabled={pauseMut.isPending}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-amber-600 hover:bg-amber-700 text-white transition-colors disabled:opacity-60"
                   >
                     <Pause size={12} /> Pause ({processing}/{maxConcurrent})
                   </button>

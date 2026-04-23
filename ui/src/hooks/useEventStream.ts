@@ -126,6 +126,8 @@ function connect() {
     'orchestrate_started', 'gather_completed', 'decide_completed',
     'tool_called', 'tool_result', 'step_completed', 'orchestrate_finished',
     'operator_notification',
+    // Integration events
+    'github_progress',
   ];
   for (const type of NAMED_TYPES) {
     es.addEventListener(type, handleMessage);
