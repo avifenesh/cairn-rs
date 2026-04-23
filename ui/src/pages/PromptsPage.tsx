@@ -312,15 +312,18 @@ function ReleaseControls({ release }: { release: PromptReleaseRecord }) {
     onError:   () => toast.error("Failed to archive release."),
   });
 
-  // Any pending transition locks out competing buttons so we never
-  // fire overlapping mutations into the same release.
+  // Any pending mutation on this release locks out competing buttons
+  // so we never fire overlapping requests into the same release —
+  // including rollout, which shares the `state` field with state
+  // transitions on the server.
   const anyPending =
     reqApproval.isPending
     || approve.isPending
     || reject.isPending
     || activate.isPending
     || demote.isPending
-    || archive.isPending;
+    || archive.isPending
+    || applyRollout.isPending;
 
   return (
     <div className="flex items-center gap-2 flex-wrap">
@@ -427,7 +430,7 @@ function ReleaseControls({ release }: { release: PromptReleaseRecord }) {
             </span>
             <button
               onClick={() => applyRollout.mutate()}
-              disabled={applyRollout.isPending || rollout === (release.rollout_percent ?? 0)}
+              disabled={anyPending || rollout === (release.rollout_percent ?? 0)}
               className="flex items-center gap-1 rounded px-2 py-0.5 text-[10px] font-medium
                          bg-indigo-900/40 text-indigo-300 border border-indigo-800/40
                          hover:bg-indigo-900/70 transition-colors disabled:opacity-40"
