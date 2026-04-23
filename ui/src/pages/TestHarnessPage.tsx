@@ -288,7 +288,7 @@ function buildScenarios(scope: ProjectScope): ScenarioDef[] {
         description: "GET /v1/costs",
         run: async () => {
           const r = await defaultApi.getCosts();
-          if (typeof r.total_cost_micros !== "number") throw new Error("missing total_cost_micros");
+          if (!Array.isArray(r.items)) throw new Error("missing items array");
           return r;
         },
       },

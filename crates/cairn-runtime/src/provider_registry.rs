@@ -235,6 +235,30 @@ where
         Ok(!self.active_connections(tenant_id).await?.is_empty())
     }
 
+    /// Summarise the active connections for a tenant as a list of
+    /// `(connection_id, supported_models)` pairs.
+    ///
+    /// Used by operator-facing error messages to tell the caller exactly
+    /// which connections are registered and which models they serve when
+    /// model resolution fails — turning the unhelpful "no provider
+    /// configured" 503 into an actionable "this model isn't served by
+    /// any active connection" hint. See issue #156.
+    pub async fn active_connection_summaries(
+        &self,
+        tenant_id: &TenantId,
+    ) -> Result<Vec<(String, Vec<String>)>, RuntimeError> {
+        let connections = self.active_connections(tenant_id).await?;
+        Ok(connections
+            .into_iter()
+            .map(|c| {
+                (
+                    c.provider_connection_id.as_str().to_owned(),
+                    c.supported_models.clone(),
+                )
+            })
+            .collect())
+    }
+
     pub async fn resolve_embedding_for_model(
         &self,
         tenant_id: &TenantId,

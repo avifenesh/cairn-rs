@@ -5,7 +5,7 @@ import { ErrorFallback } from "../components/ErrorFallback";
 import { clsx } from "clsx";
 import { MiniChart } from "../components/MiniChart";
 import { BarChart } from "../components/BarChart";
-import { defaultApi } from "../lib/api";
+import { defaultApi, summariseCostItems } from "../lib/api";
 import { PageHeader } from "../components/PageHeader";
 import { StatCard } from "../components/StatCard";
 import { Card, CardHeader } from "../components/Card";
@@ -92,11 +92,18 @@ function modelColor(id: string): string {
 // ── Main page ─────────────────────────────────────────────────────────────────
 
 export function CostsPage() {
-  const { data: costs, isLoading, isError, error, refetch } = useQuery({
+  const { data: costsList, isLoading, isError, error, refetch } = useQuery({
     queryKey: ["costs"],
     queryFn: () => defaultApi.getCosts(),
     refetchInterval: 30_000,
   });
+
+  // `/v1/costs` returns `{items, has_more}` — collapse into the stat-card
+  // shape client-side so the existing layout keeps working.
+  const costs = useMemo(
+    () => summariseCostItems(costsList?.items ?? []),
+    [costsList],
+  );
 
   // Traces — source of per-model cost breakdown and daily-trend sparkline.
   const { data: tracesData } = useQuery({
@@ -135,9 +142,9 @@ export function CostsPage() {
 
   if (isError) return <ErrorFallback error={error} resource="costs" onRetry={() => void refetch()} />;
 
-  const totalTokens = (costs?.total_tokens_in ?? 0) + (costs?.total_tokens_out ?? 0);
-  const avgPerCall  = (costs?.total_provider_calls ?? 0) > 0
-    ? (costs?.total_cost_micros ?? 0) / costs!.total_provider_calls
+  const totalTokens = costs.total_tokens_in + costs.total_tokens_out;
+  const avgPerCall  = costs.total_provider_calls > 0
+    ? costs.total_cost_micros / costs.total_provider_calls
     : 0;
 
   return (
@@ -155,10 +162,10 @@ export function CostsPage() {
 
       {/* Stat cards */}
       <div className={ds.spacing.statGrid}>
-        <StatCard label="Total Spend"     value={formatMicros(costs?.total_cost_micros ?? 0)} description={`${(costs?.total_cost_micros ?? 0).toLocaleString()} µUSD`} variant="success" loading={isLoading} />
-        <StatCard label="Provider Calls"  value={(costs?.total_provider_calls ?? 0).toLocaleString()} description={`avg ${formatMicros(avgPerCall)} / call`} variant="info" loading={isLoading} />
-        <StatCard label="Input Tokens"    value={formatTokens(costs?.total_tokens_in ?? 0)}  description="sent to providers"     variant="info"    loading={isLoading} />
-        <StatCard label="Output Tokens"   value={formatTokens(costs?.total_tokens_out ?? 0)} description="received"              variant="info"  loading={isLoading} />
+        <StatCard label="Total Spend"     value={formatMicros(costs.total_cost_micros)} description={`${(costs.total_cost_micros).toLocaleString()} µUSD`} variant="success" loading={isLoading} />
+        <StatCard label="Provider Calls"  value={(costs.total_provider_calls).toLocaleString()} description={`avg ${formatMicros(avgPerCall)} / call`} variant="info" loading={isLoading} />
+        <StatCard label="Input Tokens"    value={formatTokens(costs.total_tokens_in)}  description="sent to providers"     variant="info"    loading={isLoading} />
+        <StatCard label="Output Tokens"   value={formatTokens(costs.total_tokens_out)} description="received"              variant="info"  loading={isLoading} />
       </div>
 
       {/* Token split + breakdown */}
@@ -169,7 +176,7 @@ export function CostsPage() {
             <CardHeader>Token Distribution</CardHeader>
             <div className="p-4">
               {totalTokens > 0
-                ? <TokenBar input={costs?.total_tokens_in ?? 0} output={costs?.total_tokens_out ?? 0} />
+                ? <TokenBar input={costs.total_tokens_in} output={costs.total_tokens_out} />
                 : <p className="text-[11px] text-gray-400 dark:text-zinc-600 text-center py-3">No token data yet</p>
               }
             </div>
@@ -179,13 +186,13 @@ export function CostsPage() {
           <Card variant="shell">
             <CardHeader>Breakdown</CardHeader>
             <div className="divide-y divide-gray-200 dark:divide-zinc-800/50">
-              <BreakdownRow label="Total spend (USD)"   value={formatMicros(costs?.total_cost_micros ?? 0)} mono  even />
-              <BreakdownRow label="Total spend (µUSD)"  value={(costs?.total_cost_micros ?? 0).toLocaleString()} mono />
+              <BreakdownRow label="Total spend (USD)"   value={formatMicros(costs.total_cost_micros)} mono  even />
+              <BreakdownRow label="Total spend (µUSD)"  value={(costs.total_cost_micros).toLocaleString()} mono />
               <BreakdownRow label="Avg cost / call"     value={formatMicros(avgPerCall)} mono even />
-              <BreakdownRow label="Total provider calls" value={(costs?.total_provider_calls ?? 0).toLocaleString()} mono />
+              <BreakdownRow label="Total provider calls" value={(costs.total_provider_calls).toLocaleString()} mono />
               <BreakdownRow label="Total tokens"         value={formatTokens(totalTokens)} mono even />
-              <BreakdownRow label="Input tokens"         value={formatTokens(costs?.total_tokens_in ?? 0)} mono />
-              <BreakdownRow label="Output tokens"        value={formatTokens(costs?.total_tokens_out ?? 0)} mono even />
+              <BreakdownRow label="Input tokens"         value={formatTokens(costs.total_tokens_in)} mono />
+              <BreakdownRow label="Output tokens"        value={formatTokens(costs.total_tokens_out)} mono even />
             </div>
           </Card>
         </div>
@@ -247,7 +254,7 @@ export function CostsPage() {
       )}
 
       {/* Zero state */}
-      {!isLoading && (costs?.total_provider_calls ?? 0) === 0 && (
+      {!isLoading && (costs.total_provider_calls) === 0 && (
         <div className="flex flex-col items-center justify-center py-12 rounded-lg border border-gray-200 dark:border-zinc-800 text-center gap-2">
           <p className="text-sm text-gray-400 dark:text-zinc-500">No spend recorded yet</p>
           <p className="text-[11px] text-gray-400 dark:text-zinc-600">Costs appear once LLM calls are routed through a provider binding</p>
