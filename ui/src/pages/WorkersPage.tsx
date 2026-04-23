@@ -18,7 +18,7 @@ import { StatCard } from "../components/StatCard";
 import { ErrorFallback } from "../components/ErrorFallback";
 import { useToast } from "../components/Toast";
 import { defaultApi } from "../lib/api";
-import type { WorkerRecord, FleetReport } from "../lib/types";
+import type { WorkerRecord, FleetReport, WorkerStatus } from "../lib/types";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -42,8 +42,6 @@ function fmtTime(ms: number): string {
 
 const shortId = (id: string) =>
   id.length > 28 ? `${id.slice(0, 14)}…${id.slice(-8)}` : id;
-
-type WorkerStatus = "active" | "suspended" | "offline" | string;
 
 function statusColor(status: WorkerStatus, isAlive: boolean): string {
   if (status === "suspended") return "text-amber-400 bg-amber-400/10";

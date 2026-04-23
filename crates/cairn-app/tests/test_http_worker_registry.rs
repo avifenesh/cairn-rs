@@ -13,10 +13,28 @@ mod support;
 use serde_json::{json, Value};
 use support::live_fabric::LiveHarness;
 
+/// Percent-encode a path segment so worker ids containing `/`, `#`,
+/// spaces, etc. route to the intended handler. Mirrors the UI client's
+/// `encodeURIComponent(id)` behaviour.
+fn encode_path(segment: &str) -> String {
+    let mut out = String::with_capacity(segment.len());
+    for &b in segment.as_bytes() {
+        match b {
+            // RFC 3986 unreserved characters — safe in a path segment.
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(b as char);
+            }
+            _ => out.push_str(&format!("%{:02X}", b)),
+        }
+    }
+    out
+}
+
 #[tokio::test]
 async fn worker_registry_lifecycle_surfaces_through_list_get_and_fleet() {
     let h = LiveHarness::setup().await;
     let worker_id = format!("worker_{}", &h.project);
+    let enc = encode_path(&worker_id);
 
     // 1. Register the worker.
     let res = h
@@ -24,7 +42,7 @@ async fn worker_registry_lifecycle_surfaces_through_list_get_and_fleet() {
         .post(format!("{}/v1/workers/register", h.base_url))
         .bearer_auth(&h.admin_token)
         .json(&json!({
-            "worker_id":    worker_id,
+            "worker_id":    &worker_id,
             "display_name": "lifecycle-test-worker",
         }))
         .send()
@@ -64,7 +82,7 @@ async fn worker_registry_lifecycle_surfaces_through_list_get_and_fleet() {
     // 3. GET /v1/workers/:id — detail read-back.
     let res = h
         .client()
-        .get(format!("{}/v1/workers/{}", h.base_url, worker_id))
+        .get(format!("{}/v1/workers/{}", h.base_url, enc))
         .bearer_auth(&h.admin_token)
         .send()
         .await
@@ -77,7 +95,7 @@ async fn worker_registry_lifecycle_surfaces_through_list_get_and_fleet() {
     // 4. Suspend.
     let res = h
         .client()
-        .post(format!("{}/v1/workers/{}/suspend", h.base_url, worker_id))
+        .post(format!("{}/v1/workers/{}/suspend", h.base_url, enc))
         .bearer_auth(&h.admin_token)
         .json(&json!({ "reason": "integration-test" }))
         .send()
@@ -93,7 +111,7 @@ async fn worker_registry_lifecycle_surfaces_through_list_get_and_fleet() {
     // Suspension must be reflected by the detail endpoint.
     let res = h
         .client()
-        .get(format!("{}/v1/workers/{}", h.base_url, worker_id))
+        .get(format!("{}/v1/workers/{}", h.base_url, enc))
         .bearer_auth(&h.admin_token)
         .send()
         .await
@@ -137,7 +155,7 @@ async fn worker_registry_lifecycle_surfaces_through_list_get_and_fleet() {
         .client()
         .post(format!(
             "{}/v1/workers/{}/reactivate",
-            h.base_url, worker_id,
+            h.base_url, enc,
         ))
         .bearer_auth(&h.admin_token)
         .send()
@@ -152,7 +170,7 @@ async fn worker_registry_lifecycle_surfaces_through_list_get_and_fleet() {
 
     let res = h
         .client()
-        .get(format!("{}/v1/workers/{}", h.base_url, worker_id))
+        .get(format!("{}/v1/workers/{}", h.base_url, enc))
         .bearer_auth(&h.admin_token)
         .send()
         .await
