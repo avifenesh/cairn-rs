@@ -11,6 +11,19 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **LogsPage + AuditLogPage — time-range filter, page-size control, and
+  cursor pagination (closes #163).** Both pages previously hardcoded a
+  single fetch (500 / 200 entries) with no way to scroll into older
+  history. The admin request-log handler now accepts `since_ms`; the
+  audit-log handler now accepts `before_ms` (exclusive upper bound) in
+  addition to the existing `since_ms`/`limit`, with the limit clamped to
+  `[1, 1000]`. The UI gains last-15m / 1h / 24h / 7d / all time-range
+  dropdowns, a 50/100/250/500 page-size picker, and — for the audit log
+  — prev / next / jump-to-newest pagination driven by a `before_ms`
+  cursor stack. The request-log response now also returns `buffered` +
+  `has_more` so the footer can show "showing N of M" and surface a
+  hint when the page was truncated.
+
 - **`GET /v1/skills` + `GET /v1/skills/:id` — real skills catalog wiring.**
   Replaces the hard-coded empty stub
   (`list_skills_preserved_handler` in `handlers/memory.rs`) with a
