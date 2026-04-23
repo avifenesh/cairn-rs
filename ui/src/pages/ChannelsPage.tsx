@@ -26,6 +26,7 @@ import { StatCard } from '../components/StatCard';
 import { defaultApi } from '../lib/api';
 import { useFocusTrap } from '../hooks/useFocusTrap';
 import { ErrorFallback } from '../components/ErrorFallback';
+import { useToast } from '../components/Toast';
 import type { Channel } from '../lib/types';
 import { useScope } from '../hooks/useScope';
 
@@ -351,24 +352,34 @@ function MessagesDrawer({
 export function ChannelsPage() {
   const [scope] = useScope();
   const queryClient = useQueryClient();
+  const toast = useToast();
   const [showCreate, setShowCreate] = useState(false);
   const [sendTarget, setSendTarget] = useState<Channel | null>(null);
   const [messagesTarget, setMessagesTarget] = useState<Channel | null>(null);
 
+  // Pass scope explicitly so list/create are unambiguously project-scoped
+  // and the query key ↔ network call coupling is obvious to reviewers.
   const listQuery = useQuery({
     queryKey: ['channels-crud', scope.tenant_id, scope.workspace_id, scope.project_id],
-    queryFn: () => defaultApi.listChannels(),
+    queryFn: () => defaultApi.listChannels({
+      tenant_id:    scope.tenant_id,
+      workspace_id: scope.workspace_id,
+      project_id:   scope.project_id,
+    }),
     retry: 1,
     staleTime: 10_000,
   });
 
   const createMutation = useMutation({
     mutationFn: (args: { name: string; capacity: number }) =>
-      defaultApi.createChannel(args.name, args.capacity),
+      defaultApi.createChannel(args.name, args.capacity, scope),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['channels-crud'] });
       setShowCreate(false);
+      toast.success('Channel created.');
     },
+    onError: (e: unknown) =>
+      toast.error(e instanceof Error ? e.message : 'Failed to create channel.'),
   });
 
   const sendMutation = useMutation({
@@ -377,7 +388,10 @@ export function ChannelsPage() {
     onSuccess: (_, vars) => {
       queryClient.invalidateQueries({ queryKey: ['channel-messages', vars.channelId] });
       setSendTarget(null);
+      toast.success('Message sent.');
     },
+    onError: (e: unknown) =>
+      toast.error(e instanceof Error ? e.message : 'Failed to send message.'),
   });
 
   if (listQuery.isError) {
