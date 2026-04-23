@@ -126,6 +126,12 @@ function IngestForm() {
       document_id:  documentId.trim(),
       content,
       ...(sourceType.trim() ? { source_type: sourceType.trim() } : {}),
+      // Pass scope explicitly so the ingest is pinned to the scope the
+      // operator saw in the tooltip at submit time — no drift if the
+      // active scope in localStorage flips before the mutation resolves.
+      tenant_id:    scope.tenant_id,
+      workspace_id: scope.workspace_id,
+      project_id:   scope.project_id,
     }),
     onSuccess: (res) => {
       toast.success(
@@ -234,8 +240,10 @@ export function MemoryPage() {
     staleTime: 30_000,
   });
 
+  // Scope-keyed — same pattern as SourcesPage — so changing scope does not
+  // bleed sources from a previous tenant/workspace/project into the panel.
   const { data: sources, isError: isSourcesError, refetch: refetchSources } = useQuery({
-    queryKey: ['sources'],
+    queryKey: ['sources', scope.tenant_id, scope.workspace_id, scope.project_id],
     queryFn: () => defaultApi.getSources(),
     staleTime: 60_000,
   });
