@@ -90,6 +90,16 @@ const TH = ({ ch, right, hide }: { ch: React.ReactNode; right?: boolean; hide?: 
   )}>{ch}</th>
 );
 
+// ── Pagination limits ─────────────────────────────────────────────────────────
+
+/** How many runs to request per `GET /v1/sessions/:id/runs` page. */
+const SESSION_RUNS_PAGE_SIZE = 500;
+/** Hard cap on pages — protects against an unbounded loop if the backend
+ *  ever stops honouring the page-size contract. Sessions with more runs
+ *  than `SESSION_RUNS_PAGE_SIZE * SESSION_RUNS_MAX_PAGES` are surfaced
+ *  via an explicit truncation banner, not silently dropped. */
+const SESSION_RUNS_MAX_PAGES = 40;
+
 // ── Page ──────────────────────────────────────────────────────────────────────
 
 interface SessionDetailPageProps {
@@ -109,28 +119,33 @@ export function SessionDetailPage({ sessionId, onBack }: SessionDetailPageProps)
   const session = sessions?.find(s => s.session_id === sessionId);
 
   // Runs for this session — server-side filter via /v1/sessions/:id/runs,
-  // paginated so no run is silently truncated. Fixes #170, where a global
-  // `getRuns({limit:500})` + client-side filter dropped older runs in
-  // projects past 500 total runs.
-  const { data: sessionRuns, isLoading: runsLoading } = useQuery({
+  // paginated up to SESSION_RUNS_PAGE_SIZE * SESSION_RUNS_MAX_PAGES.
+  // Fixes #170, where a global `getRuns({limit:500})` + client-side filter
+  // dropped older runs in projects past 500 total runs. If the hard cap is
+  // hit we surface a banner (see below) rather than silently truncating.
+  const { data: sessionRunsResult, isLoading: runsLoading } = useQuery({
     queryKey: ["session-runs", sessionId],
-    queryFn: async () => {
-      const pageSize = 500;
+    queryFn: async (): Promise<{ runs: RunRecord[]; truncated: boolean }> => {
       const all: RunRecord[] = [];
       let offset = 0;
-      // Cap at 20k runs (40 pages) to avoid unbounded loops if the
-      // backend ever stops honouring the page-size contract.
-      for (let page = 0; page < 40; page++) {
-        const chunk = await defaultApi.getSessionRuns(sessionId, { limit: pageSize, offset });
+      let truncated = false;
+      for (let page = 0; page < SESSION_RUNS_MAX_PAGES; page++) {
+        const chunk = await defaultApi.getSessionRuns(sessionId, {
+          limit: SESSION_RUNS_PAGE_SIZE,
+          offset,
+        });
         all.push(...chunk);
-        if (chunk.length < pageSize) break;
+        if (chunk.length < SESSION_RUNS_PAGE_SIZE) break;
         offset += chunk.length;
+        // Final iteration returned a full page — there may be more.
+        if (page === SESSION_RUNS_MAX_PAGES - 1) truncated = true;
       }
-      return all;
+      return { runs: all, truncated };
     },
     staleTime: 30_000,
   });
-  const runs = sessionRuns ?? [];
+  const runs = sessionRunsResult?.runs ?? [];
+  const runsTruncated = sessionRunsResult?.truncated ?? false;
   const activeRuns = runs.filter(r => r.state === "running" || r.state === "pending").length;
 
   // LLM traces for this session.
@@ -230,6 +245,15 @@ export function SessionDetailPage({ sessionId, onBack }: SessionDetailPageProps)
 
         {/* Runs table */}
         <Section title="Runs">
+          {runsTruncated && (
+            <div className="flex items-start gap-2 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 mb-3 text-[12px] text-amber-500 dark:text-amber-400">
+              <AlertTriangle size={13} className="mt-0.5 shrink-0" />
+              <span>
+                Showing the first {SESSION_RUNS_PAGE_SIZE * SESSION_RUNS_MAX_PAGES} runs of this session.
+                Older runs exist but are not loaded; use the session export to retrieve them in full.
+              </span>
+            </div>
+          )}
           {runsLoading ? (
             <div className="flex items-center gap-2 text-gray-400 dark:text-zinc-600 text-[13px] py-4">
               <Loader2 size={14} className="animate-spin" /> Loading runs…
