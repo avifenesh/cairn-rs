@@ -55,11 +55,6 @@ impl PlaygroundScopeQuery {
         authenticated: Option<&cairn_domain::TenantId>,
         is_admin: bool,
     ) -> Result<cairn_domain::TenantId, axum::response::Response> {
-        // Mirrors `cairn_app::state::DEFAULT_TENANT_ID` — duplicated
-        // because the binary crate cannot reach the lib `pub(crate)`
-        // constant directly.
-        const DEFAULT_TENANT_ID: &str = "default_tenant";
-
         let requested = self
             .tenant_id
             .as_deref()
@@ -85,9 +80,34 @@ impl PlaygroundScopeQuery {
             (_, _, Some(req)) => Ok(cairn_domain::TenantId::new(req)),
             // Admin (or no attached tenant) with no override: default.
             (Some(auth), true, None) => Ok(auth.clone()),
-            (None, _, None) => Ok(cairn_domain::TenantId::new(DEFAULT_TENANT_ID)),
+            (None, _, None) => Ok(cairn_domain::TenantId::new(
+                cairn_app::state::DEFAULT_TENANT_ID,
+            )),
         }
     }
+}
+
+/// Derive the authenticated tenant for a playground call.
+///
+/// Single source of truth: the tenant baked into the `AuthPrincipal`
+/// itself (Operator / ServiceAccount carry one; `System` does not).
+/// Falls back to the request-extension tenant the auth middleware
+/// attaches only when the principal lacks one — kept as a safety net
+/// in case the middleware contract ever changes, so the handler
+/// doesn't silently start returning the wrong tenant. After resolving
+/// the authenticated tenant, dispatch to `PlaygroundScopeQuery::resolve_tenant`
+/// to apply admin override / non-admin 403 rules.
+#[allow(clippy::result_large_err)]
+fn resolve_playground_tenant(
+    scope: &PlaygroundScopeQuery,
+    principal: &cairn_api::auth::AuthPrincipal,
+    auth_tenant: Option<&axum::Extension<cairn_domain::TenantId>>,
+    is_admin: bool,
+) -> Result<cairn_domain::TenantId, axum::response::Response> {
+    let principal_tenant = principal.tenant().map(|t| t.tenant_id.clone());
+    let ext_tenant = auth_tenant.map(|axum::Extension(t)| t.clone());
+    let authenticated = principal_tenant.or(ext_tenant);
+    scope.resolve_tenant(authenticated.as_ref(), is_admin)
 }
 
 // ── Ollama handler ────────────────────────────────────────────────────────────
@@ -830,7 +850,7 @@ pub(crate) async fn ollama_generate_handler(
 
     let is_admin = cairn_app::is_admin_principal(&principal);
     let tenant_id =
-        match scope.resolve_tenant(auth_tenant.as_ref().map(|axum::Extension(t)| t), is_admin) {
+        match resolve_playground_tenant(&scope, &principal, auth_tenant.as_ref(), is_admin) {
             Ok(t) => t,
             Err(resp) => return resp,
         };
@@ -1025,7 +1045,7 @@ pub(crate) async fn ollama_embed_handler(
 
     let is_admin = cairn_app::is_admin_principal(&principal);
     let tenant_id =
-        match scope.resolve_tenant(auth_tenant.as_ref().map(|axum::Extension(t)| t), is_admin) {
+        match resolve_playground_tenant(&scope, &principal, auth_tenant.as_ref(), is_admin) {
             Ok(t) => t,
             Err(resp) => return resp,
         };
@@ -1242,7 +1262,7 @@ pub(crate) async fn chat_stream_handler(
     let model_id = body.model.as_deref().unwrap_or(&default_stream).to_owned();
     let is_admin = cairn_app::is_admin_principal(&principal);
     let tenant_id =
-        match scope.resolve_tenant(auth_tenant.as_ref().map(|axum::Extension(t)| t), is_admin) {
+        match resolve_playground_tenant(&scope, &principal, auth_tenant.as_ref(), is_admin) {
             Ok(t) => t,
             Err(resp) => return resp,
         };
