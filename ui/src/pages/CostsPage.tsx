@@ -6,6 +6,7 @@ import { clsx } from "clsx";
 import { MiniChart } from "../components/MiniChart";
 import { BarChart } from "../components/BarChart";
 import { defaultApi, summariseCostItems } from "../lib/api";
+import { useScope } from "../hooks/useScope";
 import { PageHeader } from "../components/PageHeader";
 import { StatCard } from "../components/StatCard";
 import { Card, CardHeader } from "../components/Card";
@@ -92,6 +93,7 @@ function modelColor(id: string): string {
 // ── Main page ─────────────────────────────────────────────────────────────────
 
 export function CostsPage() {
+  const [scope] = useScope();
   const { data: costsList, isLoading, isError, error, refetch } = useQuery({
     queryKey: ["costs"],
     queryFn: () => defaultApi.getCosts(),
@@ -107,8 +109,15 @@ export function CostsPage() {
 
   // Traces — source of per-model cost breakdown and daily-trend sparkline.
   const { data: tracesData } = useQuery({
-    queryKey: ["traces-costs"],
-    queryFn:  () => defaultApi.getTraces(500),
+    // Scope tuple is part of the key so switching tenant/workspace/project
+    // doesn't mix cost data across scopes.
+    queryKey: ["traces-costs", scope.tenant_id, scope.workspace_id, scope.project_id],
+    queryFn:  () => defaultApi.getTraces({
+      limit:        500,
+      tenant_id:    scope.tenant_id,
+      workspace_id: scope.workspace_id,
+      project_id:   scope.project_id,
+    }),
     refetchInterval: 60_000,
     staleTime: 30_000,
     retry: false,

@@ -6,11 +6,11 @@
  * so the scrollbar thumb matches the full data size.
  */
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   RefreshCw, Loader2, AlertTriangle, CheckCircle2,
-  Search, X, Download,
+  Search, X, Download, ExternalLink,
 } from "lucide-react";
 import { clsx } from "clsx";
 import { ErrorFallback } from "../components/ErrorFallback";
@@ -18,7 +18,9 @@ import { defaultApi } from "../lib/api";
 import { useVirtualScroll, DEFAULT_ROW_HEIGHT } from "../hooks/useVirtualScroll";
 import type { LlmCallTrace } from "../lib/types";
 import { useAutoRefresh, REFRESH_OPTIONS } from "../hooks/useAutoRefresh";
+import { useScope } from "../hooks/useScope";
 import { StatCard } from "../components/StatCard";
+import { Drawer } from "../components/Drawer";
 import { ds } from "../lib/design-system";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -67,19 +69,63 @@ const TH = ({ ch, right, hide }: { ch: string; right?: boolean; hide?: string })
 
 // ── Virtual trace row ─────────────────────────────────────────────────────────
 
-function TraceRow({ trace, even }: { trace: LlmCallTrace; even: boolean }) {
+function TraceRow({
+  trace, even, onOpen,
+}: {
+  trace: LlmCallTrace;
+  even: boolean;
+  onOpen: (t: LlmCallTrace) => void;
+}) {
+  // Keep inner hash-links from also triggering the row's onClick.
+  const stop = (e: React.MouseEvent) => e.stopPropagation();
   return (
     <tr
       data-virtual-row
       style={{ height: DEFAULT_ROW_HEIGHT }}
+      onClick={() => onOpen(trace)}
+      onKeyDown={e => {
+        // Only act on the row itself — keydown bubbles from the inner
+        // session/run `<a>` links, and we don't want Enter-on-link to
+        // both navigate and open the drawer.
+        if (e.target !== e.currentTarget) return;
+        if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onOpen(trace); }
+      }}
+      tabIndex={0}
+      role="button"
+      aria-label={`Open trace ${trace.trace_id}`}
       className={clsx(
         ds.table.rowBorder, ds.table.rowHover,
         even ? ds.table.rowEven : ds.table.rowOdd,
+        "cursor-pointer focus:outline-none focus:ring-1 focus:ring-indigo-500",
       )}
     >
-      <td className="px-3 font-mono text-gray-500 dark:text-zinc-400 whitespace-nowrap text-[11px] hidden sm:table-cell"
+      <td className="px-3 font-mono whitespace-nowrap text-[11px] hidden sm:table-cell"
           title={trace.session_id ?? ''}>
-        {shortId(trace.session_id ?? '—')}
+        {trace.session_id ? (
+          <a
+            href={`#session/${encodeURIComponent(trace.session_id)}`}
+            onClick={stop}
+            className="text-indigo-500 hover:text-indigo-400 hover:underline"
+          >
+            {shortId(trace.session_id)}
+          </a>
+        ) : (
+          <span className="text-gray-500 dark:text-zinc-400">—</span>
+        )}
+      </td>
+      <td className="px-3 font-mono whitespace-nowrap text-[11px] hidden md:table-cell"
+          title={trace.run_id ?? ''}>
+        {trace.run_id ? (
+          <a
+            href={`#run/${encodeURIComponent(trace.run_id)}`}
+            onClick={stop}
+            className="text-indigo-500 hover:text-indigo-400 hover:underline"
+          >
+            {shortId(trace.run_id)}
+          </a>
+        ) : (
+          <span className="text-gray-500 dark:text-zinc-400">—</span>
+        )}
       </td>
       <td className="px-3 text-xs text-gray-700 dark:text-zinc-300 whitespace-nowrap">
         {trace.model_id}
@@ -135,16 +181,175 @@ function exportCsv(traces: LlmCallTrace[]) {
   URL.revokeObjectURL(url);
 }
 
+// ── Detail drawer ─────────────────────────────────────────────────────────────
+
+/**
+ * TraceDetailDrawer — surfaces everything the server persists for a single
+ * LLM call so operators don't have to open the JSON payload to triage.
+ *
+ * Prompt/response *bodies* are intentionally absent: cairn stores provider
+ * call metadata (model, tokens, latency, cost, status) but never the prompt
+ * or completion text itself — doing so would leak customer data through
+ * /v1/traces.  This drawer shows the full metadata we do have and links
+ * out to session/run pages for deeper context.
+ */
+function TraceDetailDrawer({
+  trace, onClose,
+}: {
+  trace: LlmCallTrace | null;
+  onClose: () => void;
+}) {
+  const t = trace;
+  return (
+    <Drawer
+      open={t !== null}
+      onClose={onClose}
+      title={t ? `Trace — ${shortId(t.trace_id)}` : "Trace"}
+      width="w-[28rem]"
+    >
+      {t && (
+        <div className="p-4 space-y-4 text-[12px] text-gray-700 dark:text-zinc-300">
+          <DetailRow label="Trace ID"  value={t.trace_id} mono copyable />
+          <DetailRow label="Model"     value={t.model_id} />
+          <DetailRow label="Provider"  value={inferProvider(t.model_id)} />
+
+          <div className="grid grid-cols-2 gap-3">
+            <DetailRow label="Latency"         value={fmtLatency(t.latency_ms)} />
+            <DetailRow label="Cost"            value={fmtCost(t.cost_micros)} />
+            <DetailRow label="Prompt tokens"   value={fmtTokens(t.prompt_tokens)} />
+            <DetailRow label="Completion tokens" value={fmtTokens(t.completion_tokens)} />
+          </div>
+
+          <DetailRow label="Status" value={
+            t.is_error ? (
+              <span className="inline-flex items-center gap-1 text-red-400">
+                <AlertTriangle size={11} /> error
+              </span>
+            ) : (
+              <span className="inline-flex items-center gap-1 text-emerald-400">
+                <CheckCircle2 size={11} /> ok
+              </span>
+            )
+          } />
+
+          <DetailRow label="Timestamp" value={fmtTime(t.created_at_ms)} />
+
+          <div className="border-t border-gray-200 dark:border-zinc-800 pt-3 space-y-2">
+            <div className="text-[10px] uppercase tracking-wider text-gray-500 dark:text-zinc-500">
+              Context
+            </div>
+            <DetailLink label="Session" id={t.session_id} hash="session" />
+            <DetailLink label="Run"     id={t.run_id}     hash="run" />
+          </div>
+
+          <div className="border-t border-gray-200 dark:border-zinc-800 pt-3">
+            <div className="text-[10px] uppercase tracking-wider text-gray-500 dark:text-zinc-500 mb-1.5">
+              Prompt / response body
+            </div>
+            <p className="text-[11px] text-gray-500 dark:text-zinc-500 leading-relaxed">
+              Cairn does not persist prompt or completion text in the trace log —
+              only metadata. Open the parent session or run to see the full
+              conversation transcript.
+            </p>
+          </div>
+        </div>
+      )}
+    </Drawer>
+  );
+}
+
+function DetailRow({
+  label, value, mono, copyable,
+}: {
+  label: string;
+  value: React.ReactNode;
+  mono?: boolean;
+  copyable?: boolean;
+}) {
+  return (
+    <div>
+      <div className="text-[10px] uppercase tracking-wider text-gray-500 dark:text-zinc-500">
+        {label}
+      </div>
+      <div className={clsx(
+        "mt-0.5 break-all",
+        mono && "font-mono text-[11px]",
+      )}>
+        {value}
+        {copyable && typeof value === "string" && (
+          <button
+            onClick={() => { void navigator.clipboard?.writeText(value); }}
+            className="ml-2 text-[10px] text-indigo-500 hover:text-indigo-400"
+            title="Copy"
+          >
+            copy
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function DetailLink({
+  label, id, hash,
+}: {
+  label: string;
+  id: string | null;
+  hash: "session" | "run";
+}) {
+  return (
+    <div className="flex items-center justify-between gap-3">
+      <span className="text-[10px] uppercase tracking-wider text-gray-500 dark:text-zinc-500">
+        {label}
+      </span>
+      {id ? (
+        <a
+          href={`#${hash}/${encodeURIComponent(id)}`}
+          className="inline-flex items-center gap-1 font-mono text-[11px] text-indigo-500 hover:text-indigo-400 hover:underline"
+          title={id}
+        >
+          {shortId(id)}
+          <ExternalLink size={10} />
+        </a>
+      ) : (
+        <span className="text-[11px] text-gray-500 dark:text-zinc-500">—</span>
+      )}
+    </div>
+  );
+}
+
 // ── Page ──────────────────────────────────────────────────────────────────────
 
 export function TracesPage() {
   const { ms: refreshMs, setOption: setRefreshOption, interval: refreshInterval } = useAutoRefresh("traces", "30s");
+  const [scope] = useScope();
 
   const [filterQuery, setFilterQuery] = useState('');
+  const [selected, setSelected]       = useState<LlmCallTrace | null>(null);
+
+  // Drop the selected trace whenever scope changes so the drawer
+  // can't keep showing metadata for a trace that no longer belongs
+  // to the current tenant/workspace/project (cross-scope UI leak).
+  useEffect(() => {
+    setSelected(null);
+  }, [scope.tenant_id, scope.workspace_id, scope.project_id]);
 
   const { data, isLoading, isError, error, refetch, isFetching } = useQuery({
-    queryKey: ["traces"],
-    queryFn:  () => defaultApi.getTraces(500),
+    // Scope is part of the key so switching tenant/workspace/project
+    // invalidates the cache instead of returning stale rows from a
+    // different project.
+    queryKey: [
+      "traces",
+      scope.tenant_id,
+      scope.workspace_id,
+      scope.project_id,
+    ],
+    queryFn:  () => defaultApi.getTraces({
+      limit:        500,
+      tenant_id:    scope.tenant_id,
+      workspace_id: scope.workspace_id,
+      project_id:   scope.project_id,
+    }),
     refetchInterval: refreshMs,
   });
 
@@ -290,6 +495,7 @@ export function TracesPage() {
             <thead>
               <tr>
                 <TH ch="Session"   hide="hidden sm:table-cell" />
+                <TH ch="Run"       hide="hidden md:table-cell" />
                 <TH ch="Model" />
                 <TH ch="Provider"  hide="hidden sm:table-cell" />
                 <TH ch="Latency"   right />
@@ -303,32 +509,39 @@ export function TracesPage() {
               {/* Top spacer — takes up the height of rows above the render window */}
               {offsetY > 0 && (
                 <tr aria-hidden="true">
-                  <td style={{ height: offsetY }} colSpan={8} />
+                  <td style={{ height: offsetY }} colSpan={9} />
                 </tr>
               )}
 
               {filtered.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="px-4 py-12 text-center text-[13px] text-gray-400 dark:text-zinc-600">
+                  <td colSpan={9} className="px-4 py-12 text-center text-[13px] text-gray-400 dark:text-zinc-600">
                     No traces match this filter
                   </td>
                 </tr>
               ) : (
                 visibleItems.map(({ item, index }) => (
-                  <TraceRow key={item.trace_id} trace={item} even={index % 2 === 0} />
+                  <TraceRow
+                    key={item.trace_id}
+                    trace={item}
+                    even={index % 2 === 0}
+                    onOpen={setSelected}
+                  />
                 ))
               )}
 
               {/* Bottom spacer — takes up the height of rows below the render window */}
               {bottomSpacerHeight > 0 && (
                 <tr aria-hidden="true">
-                  <td style={{ height: bottomSpacerHeight }} colSpan={8} />
+                  <td style={{ height: bottomSpacerHeight }} colSpan={9} />
                 </tr>
               )}
             </tbody>
           </table>
         </div>
       )}
+
+      <TraceDetailDrawer trace={selected} onClose={() => setSelected(null)} />
     </div>
   );
 }

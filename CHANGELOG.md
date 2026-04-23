@@ -11,6 +11,30 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **Traces page detail drawer + cross-entity links + scope-aware query
+  (closes #241).** `TracesPage` now opens a right-side `Drawer` when an
+  operator clicks (or keyboards onto) any row, surfacing the full
+  metadata cairn persists for each provider call — trace id, model,
+  provider, latency, cost, prompt/completion tokens, status, timestamp
+  — plus deep links out to the owning session and run. The drawer is
+  explicit about *not* rendering prompt or completion bodies, because
+  cairn deliberately keeps that content off the trace read model, and
+  points operators at the session/run pages for transcripts instead.
+- **`session_id` and `run_id` as navigable links in the traces table.**
+  Both ids were previously rendered as opaque `shortId` text; they are
+  now `#session/:id` / `#run/:id` anchors so hopping from a slow
+  provider call to its originating run or session no longer requires a
+  manual URL edit. A new `Run` column also appears on md-and-wider
+  viewports.
+- **`defaultApi.getTraces` is now scope-aware.** The helper used to
+  take a bare `limit: number`; it now accepts `{ limit?, tenant_id?,
+  workspace_id?, project_id? }`, folds the current `useScope()` values
+  in via `withScope()`, and `TracesPage`'s React-Query `queryKey`
+  includes the scope tuple so switching tenants/workspaces/projects
+  invalidates the cache instead of flashing stale rows from another
+  project. Existing call sites in `DashboardPage`, `CostsPage`, and
+  `GlobalSearch` were migrated to the new object form.
+
 - **Workspace soft-delete via `DELETE /v1/admin/tenants/:t/workspaces/:w`
   (closes #218).** Before this there was no way to remove a workspace
   short of wiping the event log — every typo or stale dev workspace
