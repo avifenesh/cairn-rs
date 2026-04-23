@@ -49,6 +49,48 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **Provider UX: register → use in one wizard.** Three dogfood-blocker bugs
+  in the provider-connection path collapsed into one chain — operators
+  registered OpenRouter with empty `supported_models`, picked a model in
+  Playground, and got a misleading 503 "set `OPENROUTER_API_KEY`" error.
+  (a) `ProvidersPage` Step 3 now auto-runs `GET
+  /v1/providers/connections/:id/discover-models` right after registration
+  when the operator leaves the manual model list blank, patches
+  `supported_models` with the result, and surfaces a warning toast if the
+  provider returns nothing. Every connection row also gets a **Discover**
+  action and an amber "no models registered" warning so stale rows are
+  recoverable in one click. (b) `chat_stream_handler` /
+  `ollama_generate_handler` / `ollama_embed_handler` no longer hardcode
+  `TenantId::new("default_tenant")` — they resolve the tenant from
+  `?tenant_id=` (falling back to the default) the same way
+  `list_provider_connections` does, which was silently serving the wrong
+  tenant's providers to multi-tenant operators. (c) When the tenant has
+  active connections but none supports the requested model,
+  `chat_stream_handler` now returns `422 Unprocessable Entity` with an
+  actionable body — `"No registered connection for tenant '<t>' supports
+  model '<m>'. Active connections: [...]. Register with POST
+  /v1/providers/connections with supported_models including '<m>', or
+  call discover-models to refresh."` — instead of the old 503 that
+  pointed at env vars. Closes #156. Closes #157. Closes #158.
+- **UI: `ModelPicker` on SettingsPage filtered to reachable + registered
+  models.** The picker used to list every registry catalog entry
+  regardless of `available=true` and whether any registered connection
+  supported the model. Operators picked phantom models and fell straight
+  into the misleading-503 chain above. It now filters to `available:
+  true` models that are served by at least one registered connection for
+  the active scope; when no connection exists, it falls back to the
+  catalog with an explicit "register a provider to use this model"
+  disclaimer.
+- **UI: `CostsPage` + `ProjectDashboardPage` stat cards no longer stuck
+  at 0.** `GET /v1/costs` returns `{items, hasMore}` (the standard
+  `ListResponse<T>` camelCase envelope — a list of per-session cost
+  records); the UI was typed as a flat `CostSummary` and
+  `total_cost_micros` was `undefined` on every page. Added a
+  `CostListResponse` / `SessionCostRecord` pair to `types.ts`, a
+  `summariseCostItems()` helper in `api.ts` that folds items into the
+  legacy `CostSummary` shape client-side, and wired it through both
+  pages. TestHarnessPage's "Cost summary" probe updated to assert `items`
+  instead of the removed top-level field.
 - **UI: `PluginsPage` per-project enable/disable (405 → 200).** The
   Marketplace tab called `POST /v1/projects/:id/plugins/:pluginId/enable`
   and `POST …/disable`, but the real routes in `marketplace_routes.rs`

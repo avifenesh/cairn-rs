@@ -59,12 +59,15 @@ use cairn_tools::{execute_eval_score, InMemoryPluginRegistry, StdioPluginHost};
 
 use crate::metrics::AppMetrics;
 use crate::tokens::{OperatorTokenStore, RequestLogBuffer};
-#[allow(dead_code)] // Used by submodules via crate::DEFAULT_*
-pub(crate) const DEFAULT_TENANT_ID: &str = "default_tenant";
-#[allow(dead_code)]
-pub(crate) const DEFAULT_WORKSPACE_ID: &str = "default_workspace";
-#[allow(dead_code)]
-pub(crate) const DEFAULT_PROJECT_ID: &str = "default_project";
+/// Default tenant ID used when no scope is supplied.
+///
+/// Exported as `pub` so the binary crate (`main.rs` + `bin_*` modules)
+/// can reuse the same literal without redefining it. Pre-#185 these
+/// lived as `pub(crate)` and the binary crate carried a duplicate
+/// `const` to avoid reaching into the lib's private namespace.
+pub const DEFAULT_TENANT_ID: &str = "default_tenant";
+pub const DEFAULT_WORKSPACE_ID: &str = "default_workspace";
+pub const DEFAULT_PROJECT_ID: &str = "default_project";
 
 // ── Type aliases ─────────────────────────────────────────────────────────────
 

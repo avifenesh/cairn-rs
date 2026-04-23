@@ -16,6 +16,100 @@ use axum::Json;
 #[allow(unused_imports)]
 use cairn_runtime::{OllamaEmbeddingProvider, OllamaModel};
 
+/// Optional `?tenant_id=` scope on provider playground routes (generate /
+/// embed / chat-stream), honoured **only for admin callers**.
+///
+/// Pre-#157, these handlers hardcoded `TenantId::new("default_tenant")`,
+/// which silently served the wrong tenant's providers to any operator
+/// not running on the default scope. The fix is to use the tenant the
+/// auth middleware already attached via `TenantScope`. An admin service
+/// account may override it with `?tenant_id=` for cross-tenant tooling;
+/// a non-admin caller supplying the param gets a 403 so the handler
+/// cannot be used to exfiltrate another tenant's registered providers.
+#[derive(Clone, Debug, Default, serde::Deserialize)]
+pub(crate) struct PlaygroundScopeQuery {
+    pub tenant_id: Option<String>,
+    #[allow(dead_code)]
+    pub workspace_id: Option<String>,
+    #[allow(dead_code)]
+    pub project_id: Option<String>,
+}
+
+impl PlaygroundScopeQuery {
+    /// Resolve the effective tenant for a playground call.
+    ///
+    /// Rules (implemented by the match below):
+    /// - Operator caller, no `?tenant_id=` → authenticated tenant.
+    /// - Operator caller, `?tenant_id=T` matching the authenticated
+    ///   tenant → authenticated tenant (no-op override).
+    /// - Operator caller, `?tenant_id=T` mismatched → **403**. Non-admin
+    ///   callers can never read another tenant's providers.
+    /// - Admin caller, `?tenant_id=T` → `T` (cross-tenant tooling).
+    /// - Admin caller, no `?tenant_id=`, with an attached tenant
+    ///   (ServiceAccount has `tenant` set) → that tenant.
+    /// - Admin caller, no attached tenant (`AuthPrincipal::System`) and
+    ///   no override → `DEFAULT_TENANT_ID`.
+    #[allow(clippy::result_large_err)] // axum Response is the natural error shape
+    pub(crate) fn resolve_tenant(
+        &self,
+        authenticated: Option<&cairn_domain::TenantId>,
+        is_admin: bool,
+    ) -> Result<cairn_domain::TenantId, axum::response::Response> {
+        let requested = self
+            .tenant_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty());
+
+        match (authenticated, is_admin, requested) {
+            // Operator with no override — use their tenant.
+            (Some(auth), false, None) => Ok(auth.clone()),
+            // Operator with matching override — fine.
+            (Some(auth), false, Some(req)) if req == auth.as_str() => Ok(auth.clone()),
+            // Operator attempting cross-tenant access — refuse.
+            (Some(auth), false, Some(req)) => Err((
+                StatusCode::FORBIDDEN,
+                axum::Json(serde_json::json!({
+                    "error": "cross-tenant playground access requires an admin token",
+                    "authenticated_tenant": auth.as_str(),
+                    "requested_tenant":     req,
+                })),
+            )
+                .into_response()),
+            // Admin (or no attached tenant) with explicit override.
+            (_, _, Some(req)) => Ok(cairn_domain::TenantId::new(req)),
+            // Admin (or no attached tenant) with no override: default.
+            (Some(auth), true, None) => Ok(auth.clone()),
+            (None, _, None) => Ok(cairn_domain::TenantId::new(
+                cairn_app::state::DEFAULT_TENANT_ID,
+            )),
+        }
+    }
+}
+
+/// Derive the authenticated tenant for a playground call.
+///
+/// Single source of truth: the tenant baked into the `AuthPrincipal`
+/// itself (Operator / ServiceAccount carry one; `System` does not).
+/// Falls back to the request-extension tenant the auth middleware
+/// attaches only when the principal lacks one — kept as a safety net
+/// in case the middleware contract ever changes, so the handler
+/// doesn't silently start returning the wrong tenant. After resolving
+/// the authenticated tenant, dispatch to `PlaygroundScopeQuery::resolve_tenant`
+/// to apply admin override / non-admin 403 rules.
+#[allow(clippy::result_large_err)]
+fn resolve_playground_tenant(
+    scope: &PlaygroundScopeQuery,
+    principal: &cairn_api::auth::AuthPrincipal,
+    auth_tenant: Option<&axum::Extension<cairn_domain::TenantId>>,
+    is_admin: bool,
+) -> Result<cairn_domain::TenantId, axum::response::Response> {
+    let principal_tenant = principal.tenant().map(|t| t.tenant_id.clone());
+    let ext_tenant = auth_tenant.map(|axum::Extension(t)| t.clone());
+    let authenticated = principal_tenant.or(ext_tenant);
+    scope.resolve_tenant(authenticated.as_ref(), is_admin)
+}
+
 // ── Ollama handler ────────────────────────────────────────────────────────────
 
 /// `GET /v1/providers/ollama/models` — list models available in the local Ollama registry.
@@ -736,6 +830,9 @@ pub(crate) struct OllamaGenerateRequest {
 
 pub(crate) async fn ollama_generate_handler(
     State(state): State<AppState>,
+    axum::Extension(principal): axum::Extension<cairn_api::auth::AuthPrincipal>,
+    auth_tenant: Option<axum::Extension<cairn_domain::TenantId>>,
+    Query(scope): Query<PlaygroundScopeQuery>,
     Json(body): Json<OllamaGenerateRequest>,
 ) -> impl IntoResponse {
     if let Err(msg) = validate::check_all(&[
@@ -751,11 +848,17 @@ pub(crate) async fn ollama_generate_handler(
     let default_model = state.runtime.runtime_config.default_generate_model().await;
     let model_id = body.model.as_deref().unwrap_or(&default_model).to_owned();
 
+    let is_admin = cairn_app::is_admin_principal(&principal);
+    let tenant_id =
+        match resolve_playground_tenant(&scope, &principal, auth_tenant.as_ref(), is_admin) {
+            Ok(t) => t,
+            Err(resp) => return resp,
+        };
     let provider: Arc<dyn cairn_domain::providers::GenerationProvider> = match state
         .runtime
         .provider_registry
         .resolve_generation_for_model(
-            &cairn_domain::TenantId::new("default_tenant"),
+            &tenant_id,
             &model_id,
             cairn_runtime::ProviderResolutionPurpose::Generate,
         )
@@ -909,6 +1012,9 @@ pub(crate) struct OllamaEmbedRequest {
 
 pub(crate) async fn ollama_embed_handler(
     State(state): State<AppState>,
+    axum::Extension(principal): axum::Extension<cairn_api::auth::AuthPrincipal>,
+    auth_tenant: Option<axum::Extension<cairn_domain::TenantId>>,
+    Query(scope): Query<PlaygroundScopeQuery>,
     Json(body): Json<OllamaEmbedRequest>,
 ) -> impl IntoResponse {
     if body.texts.is_empty() {
@@ -937,10 +1043,16 @@ pub(crate) async fn ollama_embed_handler(
         })
         .to_owned();
 
+    let is_admin = cairn_app::is_admin_principal(&principal);
+    let tenant_id =
+        match resolve_playground_tenant(&scope, &principal, auth_tenant.as_ref(), is_admin) {
+            Ok(t) => t,
+            Err(resp) => return resp,
+        };
     let embedder: Arc<dyn cairn_domain::providers::EmbeddingProvider> = match state
         .runtime
         .provider_registry
-        .resolve_embedding_for_model(&cairn_domain::TenantId::new("default_tenant"), &model_id)
+        .resolve_embedding_for_model(&tenant_id, &model_id)
         .await
     {
         Ok(Some(embedder)) => embedder,
@@ -1141,11 +1253,19 @@ pub(crate) fn stream_chat_provider_as_sse(
 
 pub(crate) async fn chat_stream_handler(
     State(state): State<AppState>,
+    axum::Extension(principal): axum::Extension<cairn_api::auth::AuthPrincipal>,
+    auth_tenant: Option<axum::Extension<cairn_domain::TenantId>>,
+    Query(scope): Query<PlaygroundScopeQuery>,
     Json(body): Json<OllamaGenerateRequest>,
 ) -> impl IntoResponse {
     let default_stream = state.runtime.runtime_config.default_stream_model().await;
     let model_id = body.model.as_deref().unwrap_or(&default_stream).to_owned();
-    let tenant_id = cairn_domain::TenantId::new("default_tenant");
+    let is_admin = cairn_app::is_admin_principal(&principal);
+    let tenant_id =
+        match resolve_playground_tenant(&scope, &principal, auth_tenant.as_ref(), is_admin) {
+            Ok(t) => t,
+            Err(resp) => return resp,
+        };
     let messages: Vec<serde_json::Value> = body
         .messages
         .unwrap_or_else(|| vec![serde_json::json!({"role": "user", "content": body.prompt})]);
@@ -1226,6 +1346,68 @@ pub(crate) async fn chat_stream_handler(
         }
     }
 
+    // Issue #156: if the tenant has active connections but the registry
+    // returned `Ok(None)` above (no connection serves this model), DO NOT
+    // fall through to the global static fallbacks — that would silently
+    // route the request to whatever env-configured provider happens to be
+    // present and mask the real problem. Emit the actionable 422 now.
+    if has_active_connections {
+        let summaries = match state
+            .runtime
+            .provider_registry
+            .active_connection_summaries(&tenant_id)
+            .await
+        {
+            Ok(summaries) => summaries,
+            Err(err) => {
+                // Surface the store/runtime failure instead of
+                // silently returning an empty `active_connections`
+                // list in the 422 body — that would make the error
+                // message claim "no connection serves this model"
+                // when the real cause is the store itself.
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    axum::Json(serde_json::json!({
+                        "error": format!(
+                            "Failed to load active connection summaries for tenant '{}': {err}",
+                            tenant_id.as_str(),
+                        ),
+                        "tenant_id": tenant_id.as_str(),
+                        "requested_model": model_id,
+                    })),
+                )
+                    .into_response();
+            }
+        };
+        let conn_list: Vec<serde_json::Value> = summaries
+            .iter()
+            .map(|(id, models)| {
+                serde_json::json!({
+                    "connection_id": id,
+                    "supported_models": models,
+                })
+            })
+            .collect();
+        return (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            axum::Json(serde_json::json!({
+                "error": format!(
+                    "No registered connection for tenant '{}' supports model '{}'. \
+                     Register with POST /v1/providers/connections with supported_models \
+                     including '{}', or call GET /v1/providers/connections/:id/discover-models \
+                     to refresh.",
+                    tenant_id.as_str(),
+                    model_id,
+                    model_id,
+                ),
+                "tenant_id": tenant_id.as_str(),
+                "requested_model": model_id,
+                "active_connections": conn_list,
+            })),
+        )
+            .into_response();
+    }
+
     if is_bedrock_model {
         if let Some(ref bedrock) = state.bedrock {
             return stream_generation_provider_as_sse(
@@ -1267,6 +1449,10 @@ pub(crate) async fn chat_stream_handler(
             or_.api_key.as_str().to_owned(),
         )
     } else {
+        // Reached only when the tenant has NO active connections AND no
+        // env-var static fallback is configured — the genuine "nothing
+        // wired up" case. When active connections exist but don't serve
+        // the model, control returned above with the actionable 422.
         return (
                 StatusCode::SERVICE_UNAVAILABLE,
                 axum::Json(serde_json::json!({

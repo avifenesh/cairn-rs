@@ -411,7 +411,37 @@ export interface OverviewResponse {
 
 // ── Costs ─────────────────────────────────────────────────────────────────────
 
-/** GET /v1/costs */
+/** One row of `GET /v1/costs` — a per-session accumulated cost record
+ *  projected from `SessionCostUpdated` events. Shape mirrors the Rust
+ *  `SessionCostRecord` in `cairn_domain::providers`. */
+export interface SessionCostRecord {
+  session_id: string;
+  tenant_id: string;
+  total_cost_micros: number;
+  total_tokens_in: number;
+  total_tokens_out: number;
+  updated_at_ms: number;
+  provider_calls: number;
+  /** alias for `total_tokens_in` — server emits both for legacy consumers */
+  token_in?: number;
+  /** alias for `total_tokens_out` */
+  token_out?: number;
+}
+
+/** GET /v1/costs response shape — `{ items, hasMore }` list.
+ *  The backend's `ListResponse<T>` serialises with
+ *  `#[serde(rename_all = "camelCase")]`, so the pagination flag lands
+ *  as `hasMore` on the wire even though the Rust struct uses
+ *  `has_more`. Stat cards sum across `items[]` client-side (pre-fix
+ *  the UI assumed a flat summary object and every stat rendered 0 —
+ *  issue #158). */
+export interface CostListResponse {
+  items: SessionCostRecord[];
+  hasMore: boolean;
+}
+
+/** Derived aggregate used by CostsPage stat cards, computed client-side
+ *  from `CostListResponse.items`. */
 export interface CostSummary {
   total_provider_calls: number;
   total_tokens_in: number;
