@@ -249,7 +249,10 @@ async fn spawn_subagent_appears_in_children_list() {
     // Children list must include the spawned child.
     let res = h
         .client()
-        .get(format!("{}/v1/runs/{}/children?limit=50", h.base_url, run_id))
+        .get(format!(
+            "{}/v1/runs/{}/children?limit=50",
+            h.base_url, run_id
+        ))
         .bearer_auth(&h.admin_token)
         .header("X-Cairn-Tenant", TENANT)
         .header("X-Cairn-Workspace", WORKSPACE)
@@ -315,7 +318,10 @@ async fn intervene_records_intervention() {
     // List interventions must contain our entry.
     let res = h
         .client()
-        .get(format!("{}/v1/runs/{}/interventions?limit=50", h.base_url, run_id))
+        .get(format!(
+            "{}/v1/runs/{}/interventions?limit=50",
+            h.base_url, run_id
+        ))
         .bearer_auth(&h.admin_token)
         .header("X-Cairn-Tenant", TENANT)
         .header("X-Cairn-Workspace", WORKSPACE)
@@ -344,7 +350,9 @@ async fn intervene_records_intervention() {
         .filter_map(|v| v.get("action").and_then(|x| x.as_str()))
         .collect();
     assert!(
-        actions.iter().any(|a| a.contains("message") || a.contains("inject")),
+        actions
+            .iter()
+            .any(|a| a.contains("message") || a.contains("inject")),
         "inject_message action must be recorded: got {actions:?}",
     );
 }
