@@ -515,7 +515,6 @@ const SESSION_ID_MAX_LEN: usize = 256;
     request_body = CreateSessionRequest,
     responses(
         (status = 201, description = "Session created", body = SessionRecordDoc),
-        (status = 400, description = "Invalid request", body = ApiError),
         (status = 401, description = "Unauthorized", body = ApiError),
         (status = 409, description = "Session already exists", body = ApiError),
         (status = 422, description = "Unprocessable entity", body = ApiError),
@@ -583,7 +582,20 @@ pub(crate) async fn delete_session_admin_handler(
     _role: AdminRoleGuard,
     Path((tenant_id, session_id)): Path<(String, String)>,
 ) -> impl IntoResponse {
-    let session_id = SessionId::new(session_id);
+    // Apply the same shape rules as `create_session_handler` — a URL
+    // segment is still operator input, so an oversized or whitespace-
+    // only `:session_id` should surface as 422 instead of hitting the
+    // runtime with a 10k-char lookup key.
+    let trimmed = session_id.trim().to_owned();
+    if trimmed.is_empty() {
+        return bad_request_response("session_id must not be empty");
+    }
+    if trimmed.len() > SESSION_ID_MAX_LEN {
+        return bad_request_response(format!(
+            "session_id exceeds max length {SESSION_ID_MAX_LEN}"
+        ));
+    }
+    let session_id = SessionId::new(trimmed);
 
     // Enforce tenant-ownership: admin token may address any tenant, but
     // the URL's :tenant_id must actually own the session. Prevents a
