@@ -645,6 +645,11 @@ export function OrchestrationPage() {
   // new streamEvents reference, and previously re-processed the "latest"
   // entry even when we had already seen it (issue #177). Keying on the
   // server-assigned event id makes each frame process-once.
+  //
+  // Bounding: `useEventStream` caps its internal buffer at MAX_EVENTS=50,
+  // so pruning our seen-set to the same order of magnitude keeps it
+  // permanently O(buffer) without dropping valid dedupe entries.
+  const SEEN_CAP = 256;
   const seenEventIds = useRef(new Set<string>());
   // Track fresh-highlight timeouts so they can be cleared on unmount
   // (or when superseded for the same id). Previously these leaked: the
@@ -652,48 +657,79 @@ export function OrchestrationPage() {
   // left open accumulated callbacks indefinitely.
   const freshTimeouts = useRef(new Map<string, ReturnType<typeof setTimeout>>());
 
-  // On new SSE events: refetch relevant data and mark new node IDs as fresh
+  // On new SSE events: refetch relevant data and mark new node IDs as fresh.
+  // `streamEvents` is newest-first (see `useEventStream`: `[parsed, ...events]`),
+  // so we iterate in reverse to process events in causal order and handle
+  // any that arrived between renders — not just the most recent one.
   useEffect(() => {
     if (streamEvents.length === 0) return;
-    const latest = streamEvents[streamEvents.length - 1];
-    if (seenEventIds.current.has(latest.id)) return;
-    seenEventIds.current.add(latest.id);
 
-    const type   = latest.type;
-    const payload = latest.payload as Record<string, unknown> | null;
+    let needSessions = false;
+    let needRuns     = false;
+    let needTasks    = false;
 
-    // Derive the new entity ID from the payload
-    let newId: string | null = null;
-    if (type === "session_created")   { newId = (payload as Record<string, unknown> | null)?.session_id as string; }
-    if (type === "run_created")        { newId = (payload as Record<string, unknown> | null)?.run_id     as string; }
-    if (type === "task_created")       { newId = (payload as Record<string, unknown> | null)?.task_id    as string; }
+    for (let i = streamEvents.length - 1; i >= 0; i--) {
+      const ev = streamEvents[i];
+      if (seenEventIds.current.has(ev.id)) continue;
+      seenEventIds.current.add(ev.id);
 
-    // Trigger refetch
-    if (type.includes("session"))      { void rSessions(); }
-    if (type.includes("run"))          { void rRuns(); }
-    if (type.includes("task"))         { void rTasks(); }
+      const type    = ev.type;
+      const payload = (ev.payload ?? {}) as Record<string, unknown>;
 
-    // Mark as fresh for 3 s
-    if (newId) {
-      const freshId = newId;
-      setFreshIds(prev => new Set([...prev, freshId]));
-      // Clear any prior timeout for this id before scheduling a new one.
-      const prior = freshTimeouts.current.get(freshId);
-      if (prior !== undefined) clearTimeout(prior);
-      const handle = setTimeout(() => {
-        setFreshIds(prev => { const next = new Set(prev); next.delete(freshId); return next; });
-        freshTimeouts.current.delete(freshId);
-      }, 3_000);
-      freshTimeouts.current.set(freshId, handle);
+      // Accept both snake_case and camelCase — some event emitters
+      // serialize with camelCase and matching both avoids silently
+      // dropping the fresh-highlight + auto-expand for those frames.
+      const sessionId = (payload.session_id ?? payload.sessionId) as string | undefined;
+      const runId     = (payload.run_id     ?? payload.runId)     as string | undefined;
+      const taskId    = (payload.task_id    ?? payload.taskId)    as string | undefined;
 
-      // Auto-expand the parent
-      if (type === "run_created") {
-        const sessionId = (payload as Record<string, unknown> | null)?.session_id as string | undefined;
-        if (sessionId) setExpandedSessions(p => new Set([...p, sessionId]));
+      let newId: string | undefined;
+      if (type === "session_created")    newId = sessionId;
+      else if (type === "run_created")   newId = runId;
+      else if (type === "task_created")  newId = taskId;
+
+      if (type.includes("session")) needSessions = true;
+      if (type.includes("run"))     needRuns     = true;
+      if (type.includes("task"))    needTasks    = true;
+
+      // Mark as fresh for 3 s
+      if (newId) {
+        const freshId = newId;
+        setFreshIds(prev => new Set([...prev, freshId]));
+        // Clear any prior timeout for this id before scheduling a new one.
+        const prior = freshTimeouts.current.get(freshId);
+        if (prior !== undefined) clearTimeout(prior);
+        const handle = setTimeout(() => {
+          setFreshIds(prev => { const next = new Set(prev); next.delete(freshId); return next; });
+          freshTimeouts.current.delete(freshId);
+        }, 3_000);
+        freshTimeouts.current.set(freshId, handle);
+
+        // Auto-expand the parent
+        if (type === "run_created" && sessionId) {
+          setExpandedSessions(p => new Set([...p, sessionId]));
+        }
+        if (type === "task_created" && runId) {
+          setExpandedRuns(p => new Set([...p, runId]));
+        }
       }
-      if (type === "task_created") {
-        const runId = (payload as Record<string, unknown> | null)?.run_id as string | undefined;
-        if (runId) setExpandedRuns(p => new Set([...p, runId]));
+    }
+
+    // Coalesce refetches so a burst of events triggers at most one of each.
+    if (needSessions) void rSessions();
+    if (needRuns)     void rRuns();
+    if (needTasks)    void rTasks();
+
+    // Bound the dedupe set: drop the oldest insertion-order entries once
+    // we cross the cap. Set iteration order is insertion order, so this
+    // is a cheap O(overflow) trim and preserves the most recent ids.
+    if (seenEventIds.current.size > SEEN_CAP) {
+      const overflow = seenEventIds.current.size - SEEN_CAP;
+      const it = seenEventIds.current.values();
+      for (let n = 0; n < overflow; n++) {
+        const next = it.next();
+        if (next.done) break;
+        seenEventIds.current.delete(next.value);
       }
     }
   }, [streamEvents, rSessions, rRuns, rTasks]);
