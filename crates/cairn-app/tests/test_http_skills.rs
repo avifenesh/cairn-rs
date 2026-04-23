@@ -249,4 +249,17 @@ async fn get_skill_returns_detail_or_404() {
         .await
         .unwrap();
     assert_eq!(miss.status(), StatusCode::NOT_FOUND);
+    // 404 body uses the standard AppApiError envelope
+    // (`{status_code, code, message, request_id}`), not a bespoke shape.
+    let miss_body = to_bytes(miss.into_body(), usize::MAX).await.unwrap();
+    let miss_json: serde_json::Value = serde_json::from_slice(&miss_body).unwrap();
+    assert_eq!(miss_json["status_code"], 404);
+    assert_eq!(miss_json["code"], "skill_not_found");
+    assert!(
+        miss_json["message"]
+            .as_str()
+            .unwrap_or("")
+            .contains("unknown"),
+        "error message should name the missing id: {miss_json}"
+    );
 }

@@ -601,6 +601,8 @@ export interface ApprovalRecord {
   requirement: ApprovalRequirement;
   decision: ApprovalDecision | null;
   created_at: number; // unix ms
+  /** Last mutation timestamp. For resolved approvals this is the resolution time. */
+  updated_at: number; // unix ms
 }
 
 // ── Memory / Knowledge ───────────────────────────────────────────────────────

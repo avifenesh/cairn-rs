@@ -24,6 +24,7 @@ use cairn_api::skills_api::SkillSummary;
 use cairn_domain::skills::{Skill, SkillStatus};
 use serde::{Deserialize, Serialize};
 
+use crate::errors::AppApiError;
 use crate::state::AppState;
 
 /// Query parameters for `GET /v1/skills`.
@@ -126,17 +127,13 @@ pub(crate) async fn list_skills_handler(
 pub(crate) async fn get_skill_handler(
     State(state): State<Arc<AppState>>,
     Path(skill_id): Path<String>,
-) -> impl IntoResponse {
+) -> Result<Json<Skill>, AppApiError> {
     let catalog = state.skill_catalog.read().await;
-    match catalog.get(&skill_id) {
-        Some(skill) => (StatusCode::OK, Json(skill.clone())).into_response(),
-        None => (
+    catalog.get(&skill_id).cloned().map(Json).ok_or_else(|| {
+        AppApiError::new(
             StatusCode::NOT_FOUND,
-            Json(serde_json::json!({
-                "error": "skill_not_found",
-                "skill_id": skill_id,
-            })),
+            "skill_not_found",
+            format!("skill '{skill_id}' is not registered"),
         )
-            .into_response(),
-    }
+    })
 }

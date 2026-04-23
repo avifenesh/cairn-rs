@@ -110,6 +110,16 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **UI: `ApprovalsPage` 24h stats double-counted pending requests (#176).**
+  The "Approved (24h)" and "Rejected (24h)" stat cards filtered resolved
+  approvals by `created_at`, so approvals requested within the last 24h
+  were counted regardless of when (or whether) they were decided, and
+  approvals resolved recently but requested earlier were missed. Switched
+  both filters to `updated_at`, which the backend `ApprovalRecord`
+  projection stamps on every decision write — effectively the resolution
+  timestamp for resolved records. `updated_at` was already serialized by
+  the handler but was missing from the UI `ApprovalRecord` type and the
+  OpenAPI schema; both are now aligned with the wire shape.
 - **UI: `TasksPage` table rows were not clickable (#181).** Added
   `onRowClick` to the DataTable so clicking a task row navigates to the
   parent run detail page (`#run/:id`), mirroring the behaviour of the
