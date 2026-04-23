@@ -210,7 +210,8 @@ CREATE TABLE IF NOT EXISTS workspaces (
     tenant_id    TEXT NOT NULL REFERENCES tenants(tenant_id),
     name         TEXT NOT NULL,
     created_at   INTEGER NOT NULL,
-    updated_at   INTEGER NOT NULL
+    updated_at   INTEGER NOT NULL,
+    archived_at  INTEGER
 );
 CREATE INDEX IF NOT EXISTS idx_workspaces_tenant
     ON workspaces (tenant_id, created_at, workspace_id);

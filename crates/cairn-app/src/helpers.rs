@@ -987,6 +987,7 @@ pub fn event_type_name(event: &RuntimeEvent) -> &'static str {
         RuntimeEvent::TenantQuotaSet(_) => "tenant_quota_set",
         RuntimeEvent::TenantQuotaViolated(_) => "tenant_quota_violated",
         RuntimeEvent::WorkspaceCreated(_) => "workspace_created",
+        RuntimeEvent::WorkspaceArchived(_) => "workspace_archived",
         RuntimeEvent::WorkspaceMemberAdded(_) => "workspace_member_added",
         RuntimeEvent::WorkspaceMemberRemoved(_) => "workspace_member_removed",
         RuntimeEvent::DefaultSettingSet(_) => "default_setting_set",
@@ -1357,6 +1358,9 @@ pub(crate) fn event_message(event: &RuntimeEvent) -> String {
         }
         RuntimeEvent::WorkspaceCreated(workspace) => {
             format!("Workspace {} created", workspace.workspace_id)
+        }
+        RuntimeEvent::WorkspaceArchived(workspace) => {
+            format!("Workspace {} archived", workspace.workspace_id)
         }
         RuntimeEvent::WorkspaceMemberAdded(member) => {
             format!("Workspace member {} added", member.member_id)

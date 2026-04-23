@@ -343,7 +343,7 @@ async fn full_hierarchy_tenant_workspace_project() {
 
     // Tenant A: list workspaces — must return exactly 2.
     let a_workspaces = workspaces
-        .list_by_tenant(&TenantId::new("tenant_hier_a"), 10, 0)
+        .list_by_tenant(&TenantId::new("tenant_hier_a"), 10, 0, false)
         .await
         .unwrap();
     assert_eq!(
@@ -357,7 +357,7 @@ async fn full_hierarchy_tenant_workspace_project() {
 
     // Tenant B: list workspaces — must return exactly 1.
     let b_workspaces = workspaces
-        .list_by_tenant(&TenantId::new("tenant_hier_b"), 10, 0)
+        .list_by_tenant(&TenantId::new("tenant_hier_b"), 10, 0, false)
         .await
         .unwrap();
     assert_eq!(

@@ -1520,8 +1520,22 @@ impl InMemoryStore {
                         name: e.name.clone(),
                         created_at: e.created_at,
                         updated_at: e.created_at,
+                        archived_at: None,
                     },
                 );
+            }
+            RuntimeEvent::WorkspaceArchived(e) => {
+                // Defense-in-depth: only archive when the event's
+                // `tenant_id` matches the stored record. The service
+                // layer validates ownership before emitting, but a
+                // replay with a mismatched event must not touch
+                // another tenant's workspace.
+                if let Some(ws) = state.workspaces.get_mut(e.workspace_id.as_str()) {
+                    if ws.tenant_id == e.tenant_id {
+                        ws.archived_at = Some(e.archived_at);
+                        ws.updated_at = e.archived_at;
+                    }
+                }
             }
             RuntimeEvent::ProjectCreated(e) => {
                 state.projects.insert(

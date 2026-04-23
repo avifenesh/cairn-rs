@@ -572,6 +572,21 @@ impl AppState {
                         e.prompt_release_id.clone(),
                         e.created_by.clone(),
                     );
+                    // Issue #220: restore dataset binding that was previously
+                    // only held in memory. Defaults to None for pre-#220
+                    // events (serde default on `EvalRunStarted`).
+                    if let Some(dataset_id) = e.dataset_id.as_ref() {
+                        if let Err(err) = self
+                            .evals
+                            .set_dataset_id(&e.eval_run_id, dataset_id.clone())
+                        {
+                            tracing::warn!(
+                                eval_run_id = %e.eval_run_id,
+                                dataset_id = %dataset_id,
+                                "eval replay: set_dataset_id failed: {err}",
+                            );
+                        }
+                    }
                     created += 1;
                 }
                 cairn_domain::RuntimeEvent::EvalRunCompleted(e) => {

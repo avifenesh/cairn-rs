@@ -652,6 +652,10 @@ pub(crate) async fn create_eval_run_handler(
                 .created_by
                 .as_deref()
                 .map(cairn_domain::OperatorId::new),
+            // Issue #220: persist dataset binding so `replay_evals` can
+            // restore it on restart. Before this the dataset_id lived only
+            // in the in-memory `EvalsService` and was lost on reboot.
+            dataset_id: body.dataset_id.clone(),
         }),
     );
     // Best-effort: log warning but don't fail the request if event write fails.

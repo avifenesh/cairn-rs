@@ -363,7 +363,7 @@ pub(crate) async fn get_tenant_overview_handler(
     let workspaces = match state
         .runtime
         .workspaces
-        .list_by_tenant(&tenant_id, usize::MAX, 0)
+        .list_by_tenant(&tenant_id, usize::MAX, 0, false)
         .await
     {
         Ok(ws) => ws,
@@ -837,15 +837,40 @@ pub(crate) async fn create_workspace_handler(
     }
 }
 
+#[derive(Clone, Debug, Default, serde::Deserialize)]
+pub(crate) struct ListWorkspacesQuery {
+    pub limit: Option<usize>,
+    pub offset: Option<usize>,
+    /// When true, soft-deleted (archived) workspaces are included in the
+    /// response. Defaults to false so operator lists show only active
+    /// workspaces.
+    #[serde(default)]
+    pub include_archived: bool,
+}
+
+impl ListWorkspacesQuery {
+    pub fn limit(&self) -> usize {
+        self.limit.unwrap_or(100)
+    }
+    pub fn offset(&self) -> usize {
+        self.offset.unwrap_or(0)
+    }
+}
+
 pub(crate) async fn list_workspaces_handler(
     State(state): State<Arc<AppState>>,
     Path(tenant_id): Path<String>,
-    Query(query): Query<PaginationQuery>,
+    Query(query): Query<ListWorkspacesQuery>,
 ) -> impl IntoResponse {
     match state
         .runtime
         .workspaces
-        .list_by_tenant(&TenantId::new(tenant_id), query.limit(), query.offset())
+        .list_by_tenant(
+            &TenantId::new(tenant_id),
+            query.limit(),
+            query.offset(),
+            query.include_archived,
+        )
         .await
     {
         Ok(items) => (
@@ -856,6 +881,37 @@ pub(crate) async fn list_workspaces_handler(
             }),
         )
             .into_response(),
+        Err(err) => runtime_error_response(err),
+    }
+}
+
+#[utoipa::path(
+    delete,
+    path = "/v1/admin/tenants/{tenant_id}/workspaces/{workspace_id}",
+    tag = "admin",
+    params(
+        ("tenant_id" = String, Path, description = "Tenant identifier"),
+        ("workspace_id" = String, Path, description = "Workspace identifier")
+    ),
+    responses(
+        (status = 204, description = "Workspace archived"),
+        (status = 401, description = "Unauthorized", body = ApiError),
+        (status = 404, description = "Workspace not found for tenant", body = ApiError),
+        (status = 500, description = "Internal server error", body = ApiError)
+    )
+)]
+pub(crate) async fn delete_workspace_handler(
+    State(state): State<Arc<AppState>>,
+    _role: AdminRoleGuard,
+    Path((tenant_id, workspace_id)): Path<(String, String)>,
+) -> impl IntoResponse {
+    match state
+        .runtime
+        .workspaces
+        .archive(&TenantId::new(tenant_id), &WorkspaceId::new(workspace_id))
+        .await
+    {
+        Ok(()) => StatusCode::NO_CONTENT.into_response(),
         Err(err) => runtime_error_response(err),
     }
 }

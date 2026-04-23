@@ -480,6 +480,25 @@ impl SqliteSyncProjection {
                 .await
                 .map_err(|err| StoreError::Internal(err.to_string()))?;
             }
+            RuntimeEvent::WorkspaceArchived(e) => {
+                // `tenant_id` in the WHERE clause is defense-in-depth —
+                // the service layer already rejects cross-tenant archives
+                // before emitting, but a replay or injected event with a
+                // mismatched tenant_id should no-op rather than touch
+                // another tenant's row.
+                sqlx::query(
+                    "UPDATE workspaces
+                        SET archived_at = ?, updated_at = ?
+                      WHERE workspace_id = ? AND tenant_id = ?",
+                )
+                .bind(e.archived_at as i64)
+                .bind(e.archived_at as i64)
+                .bind(e.workspace_id.as_str())
+                .bind(e.tenant_id.as_str())
+                .execute(&mut **tx)
+                .await
+                .map_err(|err| StoreError::Internal(err.to_string()))?;
+            }
             RuntimeEvent::ProjectCreated(e) => {
                 sqlx::query(
                     "INSERT INTO projects (project_id, workspace_id, tenant_id, name, created_at, updated_at)

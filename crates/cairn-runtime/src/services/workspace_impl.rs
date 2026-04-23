@@ -81,8 +81,103 @@ where
         tenant_id: &TenantId,
         limit: usize,
         offset: usize,
+        include_archived: bool,
     ) -> Result<Vec<WorkspaceRecord>, RuntimeError> {
-        Ok(self.store.list_by_tenant(tenant_id, limit, offset).await?)
+        if limit == 0 {
+            return Ok(Vec::new());
+        }
+
+        // The `WorkspaceReadModel` trait only supports tenant pagination, not
+        // archived-aware filtering. Rather than loading every workspace for the
+        // tenant up-front, page through the store in bounded batches and
+        // apply the archived filter as we go. This keeps memory usage bounded
+        // on tenants that accumulate many soft-deleted workspaces over time.
+        //
+        // The batch is capped at `BATCH_CAP` so callers that pass
+        // `limit = usize::MAX` (e.g. the tenant-overview handler asking for
+        // "all workspaces") do not trigger a `Vec::with_capacity(usize::MAX)`
+        // allocation or an unbounded query.
+        const BATCH_CAP: usize = 512;
+        let batch_size = limit.clamp(128, BATCH_CAP);
+        let mut store_offset = 0usize;
+        let mut skipped = 0usize;
+        let mut results: Vec<WorkspaceRecord> = Vec::with_capacity(limit.min(BATCH_CAP));
+
+        loop {
+            let batch = self
+                .store
+                .list_by_tenant(tenant_id, batch_size, store_offset)
+                .await?;
+
+            if batch.is_empty() {
+                break;
+            }
+
+            let batch_len = batch.len();
+            for workspace in batch {
+                if !include_archived && workspace.archived_at.is_some() {
+                    continue;
+                }
+                if skipped < offset {
+                    skipped += 1;
+                    continue;
+                }
+                results.push(workspace);
+                if results.len() == limit {
+                    return Ok(results);
+                }
+            }
+
+            if batch_len < batch_size {
+                break;
+            }
+            store_offset += batch_len;
+        }
+
+        Ok(results)
+    }
+
+    async fn archive(
+        &self,
+        tenant_id: &TenantId,
+        workspace_id: &WorkspaceId,
+    ) -> Result<(), RuntimeError> {
+        let existing = WorkspaceReadModel::get(self.store.as_ref(), workspace_id)
+            .await?
+            .ok_or_else(|| RuntimeError::NotFound {
+                entity: "workspace",
+                id: workspace_id.to_string(),
+            })?;
+
+        // Enforce tenant ownership — refusing cross-tenant deletes by id.
+        if existing.tenant_id != *tenant_id {
+            return Err(RuntimeError::NotFound {
+                entity: "workspace",
+                id: workspace_id.to_string(),
+            });
+        }
+
+        // Already-archived is idempotent: no new event, Ok(()).
+        if existing.archived_at.is_some() {
+            return Ok(());
+        }
+
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as u64;
+
+        let project = ProjectKey::new(tenant_id.clone(), workspace_id.clone(), "__system__");
+
+        let event = make_envelope(RuntimeEvent::WorkspaceArchived(WorkspaceArchived {
+            project,
+            workspace_id: workspace_id.clone(),
+            tenant_id: tenant_id.clone(),
+            archived_at: now,
+        }));
+
+        self.store.append(&[event]).await?;
+        Ok(())
     }
 }
 
@@ -93,6 +188,7 @@ mod tests {
     use cairn_domain::*;
     use cairn_store::InMemoryStore;
 
+    use crate::error::RuntimeError;
     use crate::workspaces::WorkspaceService;
 
     use super::WorkspaceServiceImpl;
@@ -188,15 +284,112 @@ mod tests {
         .unwrap();
 
         let results = svc
-            .list_by_tenant(&TenantId::new("t1"), 10, 0)
+            .list_by_tenant(&TenantId::new("t1"), 10, 0, false)
             .await
             .unwrap();
         assert_eq!(results.len(), 2);
 
         let other_results = svc
-            .list_by_tenant(&TenantId::new("t2"), 10, 0)
+            .list_by_tenant(&TenantId::new("t2"), 10, 0, false)
             .await
             .unwrap();
         assert_eq!(other_results.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn archive_soft_deletes_and_excludes_from_list() {
+        let store = Arc::new(InMemoryStore::new());
+        let svc = WorkspaceServiceImpl::new(store);
+
+        svc.create(
+            TenantId::new("t1"),
+            WorkspaceId::new("ws_keep"),
+            "keep".to_owned(),
+        )
+        .await
+        .unwrap();
+        svc.create(
+            TenantId::new("t1"),
+            WorkspaceId::new("ws_gone"),
+            "gone".to_owned(),
+        )
+        .await
+        .unwrap();
+
+        svc.archive(&TenantId::new("t1"), &WorkspaceId::new("ws_gone"))
+            .await
+            .unwrap();
+
+        // Default list excludes archived.
+        let active = svc
+            .list_by_tenant(&TenantId::new("t1"), 10, 0, false)
+            .await
+            .unwrap();
+        assert_eq!(active.len(), 1);
+        assert_eq!(active[0].workspace_id, WorkspaceId::new("ws_keep"));
+
+        // include_archived=true surfaces both with archived_at populated.
+        let all = svc
+            .list_by_tenant(&TenantId::new("t1"), 10, 0, true)
+            .await
+            .unwrap();
+        assert_eq!(all.len(), 2);
+        let gone = all
+            .iter()
+            .find(|w| w.workspace_id == WorkspaceId::new("ws_gone"))
+            .unwrap();
+        assert!(gone.archived_at.is_some(), "archived_at must be set");
+    }
+
+    #[tokio::test]
+    async fn archive_wrong_tenant_returns_not_found() {
+        let store = Arc::new(InMemoryStore::new());
+        let svc = WorkspaceServiceImpl::new(store);
+
+        svc.create(
+            TenantId::new("t1"),
+            WorkspaceId::new("ws_1"),
+            "w".to_owned(),
+        )
+        .await
+        .unwrap();
+
+        let err = svc
+            .archive(&TenantId::new("other"), &WorkspaceId::new("ws_1"))
+            .await
+            .unwrap_err();
+        assert!(matches!(err, RuntimeError::NotFound { .. }));
+    }
+
+    #[tokio::test]
+    async fn archive_missing_returns_not_found() {
+        let store = Arc::new(InMemoryStore::new());
+        let svc = WorkspaceServiceImpl::new(store);
+
+        let err = svc
+            .archive(&TenantId::new("t1"), &WorkspaceId::new("does_not_exist"))
+            .await
+            .unwrap_err();
+        assert!(matches!(err, RuntimeError::NotFound { .. }));
+    }
+
+    #[tokio::test]
+    async fn archive_is_idempotent() {
+        let store = Arc::new(InMemoryStore::new());
+        let svc = WorkspaceServiceImpl::new(store);
+
+        svc.create(
+            TenantId::new("t1"),
+            WorkspaceId::new("ws_1"),
+            "w".to_owned(),
+        )
+        .await
+        .unwrap();
+        svc.archive(&TenantId::new("t1"), &WorkspaceId::new("ws_1"))
+            .await
+            .unwrap();
+        svc.archive(&TenantId::new("t1"), &WorkspaceId::new("ws_1"))
+            .await
+            .unwrap();
     }
 }
