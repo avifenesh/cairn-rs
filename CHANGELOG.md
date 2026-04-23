@@ -110,6 +110,7 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **UI: `PlaygroundPage` model picker excluded Anthropic-native providers (#160).** The registry-derived model list filtered out providers whose `api_format` was `anthropic`, silently hiding every Anthropic-native connection even though the backend `chat/stream` handler routes through the native adapter. Removed the adapter-kind filter so all available registered providers contribute their models to the picker. Closes #160.
 - **UI: `DecisionsPage` row-level Invalidate button was invisible (#153).**
   The per-row "Invalidate" button in the cache tab used Tailwind's
   `opacity-0 group-hover:opacity-100` reveal pattern, but the shared
