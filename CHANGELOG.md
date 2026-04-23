@@ -110,7 +110,6 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
-<<<<<<< HEAD
 - **UI: `OrchestrationPage` re-processed the oldest buffered SSE event
   on each SSE update and leaked `setTimeout` callbacks on unmount
   (#177).** The stream effect depended on the whole `streamEvents`

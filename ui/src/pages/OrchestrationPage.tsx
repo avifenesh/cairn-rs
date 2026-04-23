@@ -642,9 +642,12 @@ export function OrchestrationPage() {
   const { events: streamEvents, status: sseStatus } = useEventStream();
 
   // Dedupe SSE events across renders — the effect below re-runs on every
-  // new streamEvents reference, and previously re-processed the "latest"
-  // entry even when we had already seen it (issue #177). Keying on the
-  // server-assigned event id makes each frame process-once.
+  // new streamEvents reference. The previous code read
+  // `streamEvents[length - 1]`, which (because `useEventStream` prepends
+  // frames, newest-first) is actually the OLDEST buffered event — so
+  // that same stale event was reprocessed on every state change
+  // (issue #177). Keying on the server-assigned event id makes each
+  // frame process-once.
   //
   // Bounding: `useEventStream` caps its internal buffer, so sizing the
   // seen-set a few multiples above it keeps dedupe permanently O(buffer)
