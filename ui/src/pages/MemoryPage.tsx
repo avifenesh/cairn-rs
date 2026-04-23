@@ -139,9 +139,10 @@ function IngestForm() {
       );
       setDocumentId('');
       setContent('');
-      // Invalidate both queries. The page-level `useQuery(['sources'])`
-      // will refetch automatically; we do NOT also call `refetchSources()`
-      // from the parent, to avoid duplicate network requests.
+      // Invalidate both queries. The page-level sources query is keyed
+      // ['sources', tenant_id, workspace_id, project_id]; the partial
+      // queryKey `['sources']` still matches all scoped variants, so
+      // the panel refetches without a parent-level refetch call.
       qc.invalidateQueries({ queryKey: ['memory-search'] });
       qc.invalidateQueries({ queryKey: ['sources'] });
     },
@@ -244,7 +245,14 @@ export function MemoryPage() {
   // bleed sources from a previous tenant/workspace/project into the panel.
   const { data: sources, isError: isSourcesError, refetch: refetchSources } = useQuery({
     queryKey: ['sources', scope.tenant_id, scope.workspace_id, scope.project_id],
-    queryFn: () => defaultApi.getSources(),
+    // Pass scope explicitly so the request body is guaranteed to match the
+    // queryKey even if the API client's implicit scope (localStorage) has
+    // drifted from the hook state.
+    queryFn: () => defaultApi.getSources({
+      tenant_id:    scope.tenant_id,
+      workspace_id: scope.workspace_id,
+      project_id:   scope.project_id,
+    }),
     staleTime: 60_000,
   });
 

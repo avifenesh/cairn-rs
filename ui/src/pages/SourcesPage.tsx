@@ -548,10 +548,16 @@ export function SourcesPage() {
   const [scheduleFor,    setScheduleFor]    = useState<string | null>(null);
 
   // Scope travels in the queryKey so changing tenant/workspace/project does
-  // not serve stale sources from a different scope's cache.
+  // not serve stale sources from a different scope's cache. Also pass scope
+  // explicitly to the queryFn so the request matches the key even if the
+  // API client's implicit scope (localStorage) drifts.
   const { data: sources, isLoading, isError, error, refetch, isFetching } = useQuery<SourceRecord[]>({
     queryKey: ['sources', scope.tenant_id, scope.workspace_id, scope.project_id],
-    queryFn:  () => defaultApi.getSources(),
+    queryFn:  () => defaultApi.getSources({
+      tenant_id:    scope.tenant_id,
+      workspace_id: scope.workspace_id,
+      project_id:   scope.project_id,
+    }),
     refetchInterval: 60_000,
   });
 
