@@ -95,9 +95,9 @@ fn items(body: &serde_json::Value) -> Vec<serde_json::Value> {
 async fn list_tasks_honors_scope_filter() {
     let h = LiveHarness::setup().await;
 
-    // Project A uses the harness's uuid-scoped triple. Project B shares
-    // the same workspace but lives under a distinct tenant so a leak
-    // across the tenant axis would show up immediately.
+    // Project A uses the harness's uuid-scoped triple. Project B uses a
+    // distinct tenant/workspace/project triple so a scoped list must not
+    // leak entities across any scope boundary.
     let tenant_b = format!("{}-b", h.tenant);
     let workspace_b = format!("{}-b", h.workspace);
     let project_b = format!("{}-b", h.project);
@@ -189,5 +189,30 @@ async fn list_runs_honors_scope_filter() {
         list.iter()
             .all(|r| r.get("run_id").and_then(|v| v.as_str()) != Some("run_b")),
         "run_b must NOT leak into project-A list: {body}"
+    );
+
+    // And the inverse: project B must only see its own run.
+    let res = h
+        .client()
+        .get(format!(
+            "{}/v1/runs?tenant_id={}&workspace_id={}&project_id={}",
+            h.base_url, tenant_b, workspace_b, project_b,
+        ))
+        .bearer_auth(&h.admin_token)
+        .send()
+        .await
+        .expect("list runs B");
+    assert_eq!(res.status().as_u16(), 200);
+    let body: serde_json::Value = res.json().await.expect("list B json");
+    let list = items(&body);
+    assert!(
+        list.iter()
+            .any(|r| r.get("run_id").and_then(|v| v.as_str()) == Some("run_b")),
+        "run_b must be in project-B list: {body}"
+    );
+    assert!(
+        list.iter()
+            .all(|r| r.get("run_id").and_then(|v| v.as_str()) != Some("run_a")),
+        "run_a must NOT leak into project-B list: {body}"
     );
 }
