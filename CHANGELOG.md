@@ -226,6 +226,26 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **Backend: `EvalRunStarted` persists `dataset_id` / `rubric_id` /
+  `baseline_id` (closes #223, supersedes #220).** `POST /v1/evals/runs`
+  accepted the three linkage fields in the request body but dropped
+  them before emitting the `EvalRunStarted` event, so the binding was
+  invisible on `GET /v1/evals/runs/:id` and vanished entirely on
+  event-log replay. The event now carries the three ids (all
+  `Option<String>` with `#[serde(default)]` for backward-compat),
+  `create_eval_run_handler` threads them from the request into the
+  event and the in-memory `EvalRun` record via
+  `set_dataset_id` / `set_rubric_id` / `set_baseline_id`, and
+  `AppState::replay_evals` re-binds them on boot. Covered by
+  `tests/test_http_evals_full.rs::eval_run_full_contract_roundtrip`
+  and a new replay-survives-restart assertion.
+
+- **Backend: `GET /v1/evals/rubrics` + `/v1/evals/baselines` return
+  200 with the list shape the UI consumes (closes #223).** The routes
+  are registered in the preserved catalog and the axum fold; this PR
+  locks the contract with an integration test so they cannot regress
+  to 405 again.
+
 - **Backend: `POST /v1/prompts/releases/:id/request-approval` routed to
   the wrong handler (closes #222).** QA2 Slice 9 surfaced a 422 on every
   "Request Approval" click (`missing field approval_id`). Two routes

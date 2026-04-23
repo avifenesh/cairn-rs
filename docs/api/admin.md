@@ -54,6 +54,7 @@ Source of truth: [`tests/compat/http_routes.tsv`](../../tests/compat/http_routes
 | `POST` | `/v1/admin/tenants/:tenant_id/retention-policy` | Preserve |  |
 | `GET` | `/v1/admin/tenants/:tenant_id/workspaces` | Preserve |  |
 | `POST` | `/v1/admin/tenants/:tenant_id/workspaces` | Preserve |  |
+| `DELETE` | `/v1/admin/tenants/:tenant_id/workspaces/:workspace_id` | Preserve | Soft-delete: archives workspace + cascades archival to children. |
 | `GET` | `/v1/admin/workspaces` | Preserve | { items } |
 | `GET` | `/v1/admin/workspaces/:id/shares` | Preserve |  |
 | `POST` | `/v1/admin/workspaces/:id/shares` | Preserve |  |

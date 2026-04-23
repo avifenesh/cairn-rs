@@ -583,55 +583,41 @@ pub(crate) async fn create_eval_run_handler(
         }
     }
 
-    let eval_run_id = EvalRunId::new(body.eval_run_id);
+    let eval_run_id = EvalRunId::new(body.eval_run_id.clone());
+    let project_id_domain = ProjectId::new(body.project_id.clone());
     let project_key = ProjectKey::new(
         body.tenant_id.as_str(),
         body.workspace_id.as_str(),
         body.project_id.as_str(),
     );
-    let mut run = state.evals.create_run(
-        eval_run_id.clone(),
-        ProjectId::new(body.project_id),
-        subject_kind,
-        body.evaluator_type.clone(),
-        body.prompt_asset_id.as_deref().map(PromptAssetId::new),
-        body.prompt_version_id.as_deref().map(PromptVersionId::new),
-        body.prompt_release_id.as_deref().map(PromptReleaseId::new),
-        body.created_by
-            .as_deref()
-            .map(cairn_domain::OperatorId::new),
-    );
-    // Link the dataset picked in the form to the freshly-minted run so the
-    // operator can see (and downstream services can honour) the binding.
-    // We already validated dataset existence above and just minted the run,
-    // so a failure here is an internal inconsistency: surface it as 500
-    // rather than silently drop the link (which would violate the
-    // round-trip contract asserted by test_http_evals_full.rs).
-    if let Some(dataset_id) = body.dataset_id.as_deref() {
-        if let Err(err) = state
-            .evals
-            .set_dataset_id(&eval_run_id, dataset_id.to_owned())
-        {
-            tracing::error!(
-                %eval_run_id,
-                dataset_id = %dataset_id,
-                "failed to attach dataset to freshly-created eval run: {err}"
-            );
-            return AppApiError::new(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "internal_error",
-                format!("failed to attach dataset to eval run: {err}"),
-            )
-            .into_response();
+
+    // Idempotency guard (Copilot review on PR #227): the EvalRunStarted event
+    // is persisted with a deterministic event_id (`eval_create_<run_id>`), so
+    // the event_log's UNIQUE(event_id) constraint would 500 on every legitimate
+    // client retry. Detect the duplicate upfront and return the existing run
+    // (200). Critically: scope the match by project — a bare eval_run_id is
+    // just a string and could collide across tenants, so we refuse to return
+    // another tenant's run.
+    if let Some(existing) = state.evals.get(&eval_run_id) {
+        if existing.project_id == project_id_domain {
+            return (StatusCode::OK, Json(existing)).into_response();
         }
-        // Re-fetch with the fresh dataset_id so the response body reflects
-        // the binding.
-        if let Some(updated) = state.evals.get(&eval_run_id) {
-            run = updated;
-        }
+        return AppApiError::new(
+            StatusCode::CONFLICT,
+            "conflict",
+            format!(
+                "eval_run_id {} already exists in another project",
+                eval_run_id.as_str()
+            ),
+        )
+        .into_response();
     }
 
-    // Persist to the event log so eval runs survive restarts (replay_evals on boot).
+    // Build the EvalRunStarted event and persist it to the event log FIRST.
+    // Event-log is the durable source of truth; the in-memory `EvalRunService`
+    // is a projection that `replay_evals` rebuilds on boot. Writing to memory
+    // before the event-log would leave divergent state on append-failure and
+    // make concurrent retries observe a "half-created" run (Copilot review).
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
@@ -641,9 +627,9 @@ pub(crate) async fn create_eval_run_handler(
         EventSource::Runtime,
         cairn_domain::RuntimeEvent::EvalRunStarted(cairn_domain::events::EvalRunStarted {
             project: project_key,
-            eval_run_id,
-            subject_kind: body.subject_kind,
-            evaluator_type: body.evaluator_type,
+            eval_run_id: eval_run_id.clone(),
+            subject_kind: body.subject_kind.clone(),
+            evaluator_type: body.evaluator_type.clone(),
             started_at: now,
             prompt_asset_id: body.prompt_asset_id.as_deref().map(PromptAssetId::new),
             prompt_version_id: body.prompt_version_id.as_deref().map(PromptVersionId::new),
@@ -652,15 +638,104 @@ pub(crate) async fn create_eval_run_handler(
                 .created_by
                 .as_deref()
                 .map(cairn_domain::OperatorId::new),
-            // Issue #220: persist dataset binding so `replay_evals` can
-            // restore it on restart. Before this the dataset_id lived only
-            // in the in-memory `EvalsService` and was lost on reboot.
+            // Issue #220 (dataset) + #223 (rubric + baseline): persist bindings
+            // so `replay_evals` can restore them on restart. Before this the
+            // linkage lived only in the in-memory `EvalsService` and was lost
+            // on reboot.
             dataset_id: body.dataset_id.clone(),
+            rubric_id: body.rubric_id.clone(),
+            baseline_id: body.baseline_id.clone(),
         }),
     );
-    // Best-effort: log warning but don't fail the request if event write fails.
     if let Err(e) = state.runtime.store.append(&[ev]).await {
-        tracing::warn!("eval_run event write failed (non-fatal): {e}");
+        tracing::error!(
+            %eval_run_id,
+            "failed to persist EvalRunStarted event: {e}"
+        );
+        return AppApiError::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "internal_error",
+            format!("failed to persist eval run: {e}"),
+        )
+        .into_response();
+    }
+
+    // Event log persisted — now mutate the in-memory projection.
+    let mut run = state.evals.create_run(
+        eval_run_id.clone(),
+        project_id_domain,
+        subject_kind,
+        body.evaluator_type.clone(),
+        body.prompt_asset_id.as_deref().map(PromptAssetId::new),
+        body.prompt_version_id.as_deref().map(PromptVersionId::new),
+        body.prompt_release_id.as_deref().map(PromptReleaseId::new),
+        body.created_by
+            .as_deref()
+            .map(cairn_domain::OperatorId::new),
+    );
+    // The run was just created above; set_* can only fail if the in-memory
+    // projection is inconsistent with the event we just appended. Treat that
+    // as an internal error so the response reflects persisted state (Copilot
+    // review on PR #227).
+    if let Some(dataset_id) = body.dataset_id.as_deref() {
+        if let Err(err) = state
+            .evals
+            .set_dataset_id(&eval_run_id, dataset_id.to_owned())
+        {
+            tracing::error!(
+                %eval_run_id,
+                dataset_id = %dataset_id,
+                "in-memory set_dataset_id failed after event-log append: {err}"
+            );
+            return AppApiError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "internal_error",
+                format!("failed to attach dataset to eval run: {err}"),
+            )
+            .into_response();
+        }
+    }
+    if let Some(rubric_id) = body.rubric_id.as_deref() {
+        if let Err(err) = state
+            .evals
+            .set_rubric_id(&eval_run_id, rubric_id.to_owned())
+        {
+            tracing::error!(
+                %eval_run_id,
+                rubric_id = %rubric_id,
+                "in-memory set_rubric_id failed after event-log append: {err}"
+            );
+            return AppApiError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "internal_error",
+                format!("failed to attach rubric to eval run: {err}"),
+            )
+            .into_response();
+        }
+    }
+    if let Some(baseline_id) = body.baseline_id.as_deref() {
+        if let Err(err) = state
+            .evals
+            .set_baseline_id(&eval_run_id, baseline_id.to_owned())
+        {
+            tracing::error!(
+                %eval_run_id,
+                baseline_id = %baseline_id,
+                "in-memory set_baseline_id failed after event-log append: {err}"
+            );
+            return AppApiError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "internal_error",
+                format!("failed to attach baseline to eval run: {err}"),
+            )
+            .into_response();
+        }
+    }
+    // Re-fetch so the response body reflects any bindings applied above.
+    if body.dataset_id.is_some() || body.rubric_id.is_some() || body.baseline_id.is_some() {
+        if let Some(updated) = state.evals.get(&eval_run_id) {
+            run = updated;
+        }
     }
 
     (StatusCode::CREATED, Json(run)).into_response()

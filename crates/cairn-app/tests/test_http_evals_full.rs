@@ -188,11 +188,22 @@ async fn eval_run_full_contract_roundtrip() {
         run.get("eval_run_id").and_then(|v| v.as_str()),
         Some(eval_run_id),
     );
-    // dataset_id is persisted on the EvalRun record (see cairn-evals EvalRun).
+    // dataset_id / rubric_id / baseline_id are all persisted on the EvalRun
+    // record (see cairn-evals EvalRun + issue #223).
     assert_eq!(
         run.get("dataset_id").and_then(|v| v.as_str()),
         Some(dataset_id.as_str()),
         "created run must echo dataset_id: {run}",
+    );
+    assert_eq!(
+        run.get("rubric_id").and_then(|v| v.as_str()),
+        Some(rubric_id.as_str()),
+        "created run must echo rubric_id: {run}",
+    );
+    assert_eq!(
+        run.get("baseline_id").and_then(|v| v.as_str()),
+        Some(baseline_id.as_str()),
+        "created run must echo baseline_id: {run}",
     );
 
     // ── 5. Round-trip via GET /v1/evals/runs/:id.
@@ -209,6 +220,22 @@ async fn eval_run_full_contract_roundtrip() {
     assert_eq!(
         got.get("eval_run_id").and_then(|v| v.as_str()),
         Some(eval_run_id),
+    );
+    // GET must echo all three linkage ids (issue #223).
+    assert_eq!(
+        got.get("dataset_id").and_then(|v| v.as_str()),
+        Some(dataset_id.as_str()),
+        "GET run dataset_id: {got}",
+    );
+    assert_eq!(
+        got.get("rubric_id").and_then(|v| v.as_str()),
+        Some(rubric_id.as_str()),
+        "GET run rubric_id: {got}",
+    );
+    assert_eq!(
+        got.get("baseline_id").and_then(|v| v.as_str()),
+        Some(baseline_id.as_str()),
+        "GET run baseline_id: {got}",
     );
 
     // ── 6. Compare endpoint (Results link backend) returns metric rows.
@@ -336,5 +363,116 @@ async fn eval_dataset_id_survives_restart() {
         got.get("dataset_id").and_then(|v| v.as_str()),
         Some(dataset_id.as_str()),
         "post-restart: dataset_id must survive replay, got: {got}",
+    );
+}
+
+/// Issue #223 — `rubric_id` + `baseline_id` (in addition to `dataset_id`)
+/// must survive a process restart via the event log. Superset of
+/// `eval_dataset_id_survives_restart`; asserts all three linkages at once.
+#[tokio::test]
+async fn eval_run_linkage_survives_restart() {
+    let mut h = LiveHarness::setup_with_sqlite().await;
+    let base = h.base_url.clone();
+    let tenant = h.tenant.clone();
+
+    // Seed a dataset + rubric + baseline.
+    let ds: Value = h
+        .client()
+        .post(format!("{base}/v1/evals/datasets"))
+        .bearer_auth(&h.admin_token)
+        .json(&json!({"tenant_id": &tenant, "name": "ds-223", "subject_kind": "prompt_release"}))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let dataset_id = ds["dataset_id"].as_str().unwrap().to_owned();
+
+    let ru: Value = h
+        .client()
+        .post(format!("{base}/v1/evals/rubrics"))
+        .bearer_auth(&h.admin_token)
+        .json(&json!({"tenant_id": &tenant, "name": "ru-223", "dimensions": []}))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let rubric_id = ru["rubric_id"].as_str().unwrap().to_owned();
+
+    let bl: Value = h
+        .client()
+        .post(format!("{base}/v1/evals/baselines"))
+        .bearer_auth(&h.admin_token)
+        .json(&json!({
+            "tenant_id": &tenant,
+            "name": "bl-223",
+            "prompt_asset_id": "asset-223",
+            "metrics": {},
+        }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let baseline_id = bl["baseline_id"].as_str().unwrap().to_owned();
+
+    let eval_run_id = "eval_223_replay";
+    let res = h
+        .client()
+        .post(format!("{base}/v1/evals/runs"))
+        .bearer_auth(&h.admin_token)
+        .json(&json!({
+            "tenant_id":      &tenant,
+            "workspace_id":   &h.workspace,
+            "project_id":     &h.project,
+            "eval_run_id":    eval_run_id,
+            "subject_kind":   "prompt_release",
+            "evaluator_type": "accuracy",
+            "dataset_id":     &dataset_id,
+            "rubric_id":      &rubric_id,
+            "baseline_id":    &baseline_id,
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status().as_u16(), 201);
+
+    // Restart — event-log replay is the only path back to EvalRun state.
+    h.sigkill_and_restart()
+        .await
+        .expect("sigkill+restart must succeed");
+
+    let res = h
+        .client()
+        .get(format!("{}/v1/evals/runs/{eval_run_id}", h.base_url))
+        .bearer_auth(&h.admin_token)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        res.status().as_u16(),
+        200,
+        "GET run after restart: {}",
+        res.text().await.unwrap_or_default()
+    );
+    let got: Value = res.json().await.unwrap();
+    assert_eq!(
+        got.get("dataset_id").and_then(|v| v.as_str()),
+        Some(dataset_id.as_str()),
+        "dataset_id must survive restart: {got}",
+    );
+    assert_eq!(
+        got.get("rubric_id").and_then(|v| v.as_str()),
+        Some(rubric_id.as_str()),
+        "rubric_id must survive restart: {got}",
+    );
+    assert_eq!(
+        got.get("baseline_id").and_then(|v| v.as_str()),
+        Some(baseline_id.as_str()),
+        "baseline_id must survive restart: {got}",
     );
 }

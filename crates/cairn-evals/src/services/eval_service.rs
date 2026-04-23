@@ -94,6 +94,8 @@ impl EvalRunService {
             evaluator_type,
             dataset_id: None,
             dataset_source: None,
+            rubric_id: None,
+            baseline_id: None,
             metrics: EvalMetrics::default(),
             plugin_metrics: Vec::new(),
             cost: None,
@@ -167,6 +169,50 @@ impl EvalRunService {
             .get_mut(eval_run_id.as_str())
             .ok_or_else(|| EvalError::NotFound(eval_run_id.to_string()))?;
         run.dataset_id = Some(dataset_id);
+        Ok(())
+    }
+
+    /// Link a rubric to an existing eval run (issue #223).
+    ///
+    /// Uses the poison-tolerant lock pattern (`unwrap_or_else(into_inner)`)
+    /// so a panic on another thread while holding the mutex cannot take down
+    /// the whole eval service. Other methods on this service still use
+    /// `lock().unwrap()` (pre-#223); they are candidates for a future sweep,
+    /// but the non-convergent locking is intentional here — these two
+    /// setters are the only write paths exercised on the hot-restart code
+    /// path (`replay_evals`), so they are the ones where a poisoned-mutex
+    /// cascade is most damaging.
+    pub fn set_rubric_id(
+        &self,
+        eval_run_id: &EvalRunId,
+        rubric_id: String,
+    ) -> Result<(), EvalError> {
+        let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        let run = state
+            .runs
+            .get_mut(eval_run_id.as_str())
+            .ok_or_else(|| EvalError::NotFound(eval_run_id.to_string()))?;
+        run.rubric_id = Some(rubric_id);
+        Ok(())
+    }
+
+    /// Link a baseline to an existing eval run (issue #223).
+    ///
+    /// See `set_rubric_id` for the poison-tolerant locking rationale and
+    /// scope (this setter + `set_rubric_id` adopt the pattern; the rest of
+    /// this file intentionally still uses `lock().unwrap()` pending a
+    /// future file-wide sweep).
+    pub fn set_baseline_id(
+        &self,
+        eval_run_id: &EvalRunId,
+        baseline_id: String,
+    ) -> Result<(), EvalError> {
+        let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        let run = state
+            .runs
+            .get_mut(eval_run_id.as_str())
+            .ok_or_else(|| EvalError::NotFound(eval_run_id.to_string()))?;
+        run.baseline_id = Some(baseline_id);
         Ok(())
     }
 
