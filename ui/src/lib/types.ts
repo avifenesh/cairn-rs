@@ -899,6 +899,76 @@ export interface ChangelogEntry {
   changes: string[];
 }
 
+// ── Workers / Fleet (GAP-005) ─────────────────────────────────────────────────
+
+/**
+ * Lifecycle status for a registered external worker.
+ *
+ * The backend (`cairn-runtime::fleet::WorkerState::status`) is typed as
+ * `String`, but the value set is closed: only "active", "suspended", or
+ * "offline" are ever emitted. The `string & {}` branch preserves
+ * forward-compatibility without collapsing the union to bare `string`
+ * — call sites keep literal autocomplete on the known values while
+ * still accepting a future backend addition without a type break.
+ */
+export type WorkerStatus = "active" | "suspended" | "offline" | (string & {});
+
+/** Live health snapshot for a registered external worker. */
+export interface WorkerHealth {
+  /** Epoch-ms of the last received heartbeat (0 if no heartbeat yet). */
+  last_heartbeat_ms: number;
+  /** True when the worker sent a heartbeat within the configured TTL window. */
+  is_alive: boolean;
+  /** Number of tasks currently leased to this worker. */
+  active_task_count: number;
+}
+
+/**
+ * Registered external worker as returned by `GET /v1/workers` and
+ * `GET /v1/workers/:id`. Mirrors `ExternalWorkerRecord` in cairn-domain.
+ */
+export interface WorkerRecord {
+  worker_id:     string;
+  tenant_id:     string;
+  display_name:  string;
+  status:        WorkerStatus;
+  /** Epoch-ms when the worker first registered with the control plane. */
+  registered_at: number;
+  /** Epoch-ms of the last status/health mutation on the registry row. */
+  updated_at:    number;
+  health:        WorkerHealth;
+  /**
+   * The task currently leased to this worker, or `null` when idle.
+   * The Rust handler serialises `Option<TaskId>` without
+   * `skip_serializing_if`, so the field is always present in the wire
+   * shape.
+   */
+  current_task_id: string | null;
+}
+
+/** Per-worker snapshot inside a fleet report. Mirrors `WorkerState` in cairn-runtime. */
+export interface FleetWorkerState {
+  worker_id:    string;
+  display_name: string;
+  status:       WorkerStatus;
+  health:       WorkerHealth;
+  /** Always present; `null` when the worker holds no lease. */
+  current_task_id: string | null;
+}
+
+/**
+ * Fleet aggregate as returned by `GET /v1/fleet`. Mirrors `FleetReport`
+ * in cairn-runtime.
+ */
+export interface FleetReport {
+  workers: FleetWorkerState[];
+  total:   number;
+  /** Workers whose status is "active". */
+  active:  number;
+  /** Workers that reported a heartbeat recently. */
+  healthy: number;
+}
+
 // ── Project repos (RFC 016 — repo allowlist) ─────────────────────────────────
 
 /** One entry in a project's repo allowlist. Mirrors

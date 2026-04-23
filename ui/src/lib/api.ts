@@ -474,6 +474,38 @@ export function createApiClient(config: ApiClientConfig) {
     batchCancelTasks: (taskIds: string[]): Promise<{ cancelled: number; failed: { id: string; reason: string }[] }> =>
       post('/v1/tasks/batch/cancel', { task_ids: taskIds }),
 
+    // ── Workers / Fleet (GAP-005) ─────────────────────────────────────────────
+
+    /**
+     * GET /v1/workers — list registered external workers for the active tenant.
+     * Scope is derived from the tenant-scoped auth token (admin or tenant-bound).
+     */
+    listWorkers: (params?: { limit?: number; offset?: number }): Promise<import("./types").WorkerRecord[]> => {
+      const qs = new URLSearchParams();
+      if (params?.limit  !== undefined) qs.set("limit",  String(params.limit));
+      if (params?.offset !== undefined) qs.set("offset", String(params.offset));
+      const q = qs.toString() ? `?${qs}` : "";
+      return getList(`/v1/workers${q}`);
+    },
+
+    /** GET /v1/workers/:id — single worker detail. */
+    getWorker: (id: string): Promise<import("./types").WorkerRecord> =>
+      get(`/v1/workers/${encodeURIComponent(id)}`),
+
+    /** GET /v1/fleet — fleet report: per-tenant worker list + aggregate counts. */
+    getFleet: (): Promise<import("./types").FleetReport> => get("/v1/fleet"),
+
+    /**
+     * POST /v1/workers/:id/suspend — mark the worker suspended so it stops
+     * accepting claims. `reason` is required by the handler.
+     */
+    suspendWorker: (id: string, reason: string): Promise<import("./types").WorkerRecord> =>
+      post(`/v1/workers/${encodeURIComponent(id)}/suspend`, { reason }),
+
+    /** POST /v1/workers/:id/reactivate — clear suspension, worker can claim again. */
+    reactivateWorker: (id: string): Promise<import("./types").WorkerRecord> =>
+      post(`/v1/workers/${encodeURIComponent(id)}/reactivate`),
+
     /** GET /v1/runs/:id/tasks — tasks belonging to a run. */
     getRunTasks: (runId: string): Promise<import("./types").TaskRecord[]> =>
       getList(`/v1/runs/${encodeURIComponent(runId)}/tasks`),

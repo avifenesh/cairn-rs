@@ -11,6 +11,25 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **`WorkersPage` now reads the real worker registry.** The page used to
+  synthesise "workers" by grouping `GET /v1/tasks` rows by `lease_owner`,
+  which reported zero workers whenever no task was currently leased —
+  even with a dozen registered workers heartbeating. It now calls
+  `GET /v1/workers` and `GET /v1/fleet` on mount (polling every 10 s),
+  renders a fleet summary strip (total / active / healthy / suspended),
+  a workers table (id + display name, tenant, status, active task count,
+  last heartbeat, registered-at), and operator actions for Suspend /
+  Reactivate wired to `POST /v1/workers/:id/suspend` and
+  `/v1/workers/:id/reactivate`. Worker-detail navigation links to
+  `#worker/<id>` as a stub — a dedicated detail page is a follow-up.
+- **`defaultApi.listWorkers` / `getWorker` / `getFleet` /
+  `suspendWorker` / `reactivateWorker`** on the TypeScript API client,
+  with matching `WorkerRecord`, `WorkerHealth`, `FleetWorkerState`, and
+  `FleetReport` types mirroring the `ExternalWorkerRecord`,
+  `WorkerState`, and `FleetReport` Rust shapes.
+- **`test_http_worker_registry.rs`** integration test covering register
+  → list → get → suspend → fleet → reactivate against the live HTTP
+  server via `LiveHarness`.
 - **`ProjectReposPage` — attach/detach GitHub repos per project.** New
   operator page under the Infrastructure group that consumes the RFC 016
   `/v1/projects/:project/repos` surface (`GET` / `POST` / `GET :owner/:repo`
