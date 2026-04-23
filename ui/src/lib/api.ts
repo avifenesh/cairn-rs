@@ -1655,6 +1655,11 @@ export function createApiClient(config: ApiClientConfig) {
     retryGitHubIssue: (issue: number): Promise<{ status: string }> =>
       post(`/v1/webhooks/github/queue/${issue}/retry`, {}),
 
+    /** PUT /v1/webhooks/github/queue/concurrency — set max concurrent processing (1..=20).
+     *  Returns the applied value (server clamps to 1..=20) and the previous value. */
+    setGitHubQueueConcurrency: (maxConcurrent: number): Promise<{ max_concurrent: number; previous: number }> =>
+      put("/v1/webhooks/github/queue/concurrency", { max_concurrent: maxConcurrent }),
+
     // ── Project repos (RFC 016) ─────────────────────────────────────────────
     //
     // The backend (`crates/cairn-app/src/repo_routes.rs`) parses `:project`
