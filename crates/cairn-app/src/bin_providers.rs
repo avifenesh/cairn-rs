@@ -336,7 +336,12 @@ pub(crate) async fn discover_models_preview_handler(
     }
 
     // Resolve API key: inline value wins, else fall back to credential reference.
-    let api_key = match body.api_key.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+    let api_key = match body
+        .api_key
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
         Some(inline) => {
             // Honour the same $ENV_VAR convention the wizard advertises.
             if let Some(var_name) = inline.strip_prefix('$') {
@@ -345,7 +350,12 @@ pub(crate) async fn discover_models_preview_handler(
                 Some(inline.to_owned())
             }
         }
-        None => match body.api_key_ref.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+        None => match body
+            .api_key_ref
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+        {
             Some(cred_id) => {
                 match state
                     .runtime

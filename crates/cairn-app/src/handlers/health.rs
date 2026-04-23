@@ -1028,10 +1028,7 @@ async fn validate_setting_value(
         // (any tenant) must list this model as supported. We check the
         // cached registry snapshot plus the connection records.
         let snapshot = state.runtime.provider_registry.snapshot();
-        let supported_by_cached = snapshot
-            .connections
-            .iter()
-            .any(|c| c.model == model_id);
+        let supported_by_cached = snapshot.connections.iter().any(|c| c.model == model_id);
         if !supported_by_cached {
             // Fall back to the broader provider_connections read model:
             // caching is populated lazily, so an un-exercised connection

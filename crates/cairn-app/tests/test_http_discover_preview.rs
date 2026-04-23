@@ -106,7 +106,10 @@ async fn discover_preview_returns_models_without_registering_connection() {
     for item in &items {
         // None of the newly probed entries should carry our mock URL:
         // preview does NOT persist.
-        let endpoint = item.get("endpoint_url").and_then(|v| v.as_str()).unwrap_or("");
+        let endpoint = item
+            .get("endpoint_url")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
         assert!(
             !endpoint.contains(&mock_url),
             "discover-preview leaked a connection row: {item}",
