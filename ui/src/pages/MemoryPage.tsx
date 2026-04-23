@@ -5,6 +5,7 @@ import { HelpTooltip } from '../components/HelpTooltip';
 import { FeatureEmptyState } from '../components/FeatureEmptyState';
 import { clsx } from 'clsx';
 import { defaultApi } from '../lib/api';
+import { useScope } from '../hooks/useScope';
 import type { MemoryChunkResult, SourceRecord } from '../lib/types';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -112,10 +113,17 @@ export function MemoryPage() {
   const [query, setQuery]       = useState('');
   const [submitted, setSubmitted] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
+  const [scope] = useScope();
 
   const { data: searchData, isFetching, isError: isSearchError, error: _searchError } = useQuery({
-    queryKey: ['memory-search', submitted],
-    queryFn: () => defaultApi.searchMemory({ query_text: submitted, limit: 20 }),
+    queryKey: ['memory-search', scope.tenant_id, scope.workspace_id, scope.project_id, submitted],
+    queryFn: () => defaultApi.searchMemory({
+      tenant_id:    scope.tenant_id,
+      workspace_id: scope.workspace_id,
+      project_id:   scope.project_id,
+      query_text:   submitted,
+      limit:        20,
+    }),
     enabled: submitted.length > 0,
     staleTime: 30_000,
   });
