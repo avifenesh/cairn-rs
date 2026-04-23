@@ -1079,6 +1079,153 @@ export function createApiClient(config: ApiClientConfig) {
     getSourceQuality: (sourceId: string): Promise<import("./types").SourceQualityRecord> =>
       get(`/v1/sources/${encodeURIComponent(sourceId)}/quality`),
 
+    /** POST /v1/memory/ingest — ingest a single document into a source. */
+    ingestMemory: (body: {
+      source_id: string;
+      document_id: string;
+      content: string;
+      source_type?: string;
+      tenant_id?: string;
+      workspace_id?: string;
+      project_id?: string;
+    }): Promise<import("./types").MemoryIngestResponse> => {
+      const merged = withScope(body);
+      return post("/v1/memory/ingest", {
+        tenant_id:    merged.tenant_id    ?? DEFAULT_SCOPE.tenant_id,
+        workspace_id: merged.workspace_id ?? DEFAULT_SCOPE.workspace_id,
+        project_id:   merged.project_id   ?? DEFAULT_SCOPE.project_id,
+        source_id:    body.source_id,
+        document_id:  body.document_id,
+        content:      body.content,
+        ...(body.source_type ? { source_type: body.source_type } : {}),
+      });
+    },
+
+    /** POST /v1/sources — register a new source. */
+    createSource: (body: {
+      source_id: string;
+      name?: string;
+      description?: string;
+      tenant_id?: string;
+      workspace_id?: string;
+      project_id?: string;
+    }): Promise<import("./types").SourceRecord> => {
+      const merged = withScope(body);
+      return post("/v1/sources", {
+        tenant_id:    merged.tenant_id    ?? DEFAULT_SCOPE.tenant_id,
+        workspace_id: merged.workspace_id ?? DEFAULT_SCOPE.workspace_id,
+        project_id:   merged.project_id   ?? DEFAULT_SCOPE.project_id,
+        source_id:    body.source_id,
+        ...(body.name        ? { name: body.name }               : {}),
+        ...(body.description ? { description: body.description } : {}),
+      });
+    },
+
+    /** GET /v1/sources/:id — detailed source view. */
+    getSource: (sourceId: string, params?: {
+      tenant_id?: string;
+      workspace_id?: string;
+      project_id?: string;
+    }): Promise<import("./types").SourceDetailResponse> => {
+      const merged = withScope(params);
+      const qs = new URLSearchParams();
+      qs.set("tenant_id",    merged.tenant_id    ?? DEFAULT_SCOPE.tenant_id);
+      qs.set("workspace_id", merged.workspace_id ?? DEFAULT_SCOPE.workspace_id);
+      qs.set("project_id",   merged.project_id   ?? DEFAULT_SCOPE.project_id);
+      return get(`/v1/sources/${encodeURIComponent(sourceId)}?${qs}`);
+    },
+
+    /** PUT /v1/sources/:id — update source metadata (name/description). */
+    updateSource: (sourceId: string, body: {
+      // Widened to `string | null` to match the wire contract — the backend
+      // accepts null to clear these fields, and this client actively sends
+      // null when the caller passes undefined. Matches UpdateSourceRequest
+      // in types.ts.
+      name?: string | null;
+      description?: string | null;
+      tenant_id?: string;
+      workspace_id?: string;
+      project_id?: string;
+    }): Promise<import("./types").SourceDetailResponse> => {
+      const merged = withScope(body);
+      return put(`/v1/sources/${encodeURIComponent(sourceId)}`, {
+        tenant_id:    merged.tenant_id    ?? DEFAULT_SCOPE.tenant_id,
+        workspace_id: merged.workspace_id ?? DEFAULT_SCOPE.workspace_id,
+        project_id:   merged.project_id   ?? DEFAULT_SCOPE.project_id,
+        name:         body.name        ?? null,
+        description:  body.description ?? null,
+      });
+    },
+
+    /** DELETE /v1/sources/:id — deactivate a source. */
+    deleteSource: (sourceId: string, params?: {
+      tenant_id?: string;
+      workspace_id?: string;
+      project_id?: string;
+    }): Promise<{ ok: boolean }> => {
+      const merged = withScope(params);
+      const qs = new URLSearchParams();
+      qs.set("tenant_id",    merged.tenant_id    ?? DEFAULT_SCOPE.tenant_id);
+      qs.set("workspace_id", merged.workspace_id ?? DEFAULT_SCOPE.workspace_id);
+      qs.set("project_id",   merged.project_id   ?? DEFAULT_SCOPE.project_id);
+      return del(`/v1/sources/${encodeURIComponent(sourceId)}?${qs}`);
+    },
+
+    /** GET /v1/sources/:id/chunks — paginated chunk list for a source. */
+    getSourceChunks: (sourceId: string, params?: {
+      tenant_id?: string;
+      workspace_id?: string;
+      project_id?: string;
+      limit?: number;
+      offset?: number;
+    }): Promise<import("./types").ListResponse<import("./types").SourceChunkView>> => {
+      const merged = withScope(params);
+      const qs = new URLSearchParams();
+      qs.set("tenant_id",    merged.tenant_id    ?? DEFAULT_SCOPE.tenant_id);
+      qs.set("workspace_id", merged.workspace_id ?? DEFAULT_SCOPE.workspace_id);
+      qs.set("project_id",   merged.project_id   ?? DEFAULT_SCOPE.project_id);
+      if (params?.limit  !== undefined) qs.set("limit",  String(params.limit));
+      if (params?.offset !== undefined) qs.set("offset", String(params.offset));
+      return get(`/v1/sources/${encodeURIComponent(sourceId)}/chunks?${qs}`);
+    },
+
+    /** GET /v1/sources/:id/refresh-schedule — current schedule, if any. */
+    getSourceRefreshSchedule: (sourceId: string, params?: {
+      tenant_id?: string;
+      workspace_id?: string;
+      project_id?: string;
+    }): Promise<import("./types").RefreshScheduleResponse> => {
+      const merged = withScope(params);
+      const qs = new URLSearchParams();
+      qs.set("tenant_id",    merged.tenant_id    ?? DEFAULT_SCOPE.tenant_id);
+      qs.set("workspace_id", merged.workspace_id ?? DEFAULT_SCOPE.workspace_id);
+      qs.set("project_id",   merged.project_id   ?? DEFAULT_SCOPE.project_id);
+      return get(`/v1/sources/${encodeURIComponent(sourceId)}/refresh-schedule?${qs}`);
+    },
+
+    /** POST /v1/sources/:id/refresh-schedule — create or update schedule. */
+    setSourceRefreshSchedule: (sourceId: string, body: {
+      interval_ms: number;
+      refresh_url?: string | null;
+      tenant_id?: string;
+      workspace_id?: string;
+      project_id?: string;
+    }): Promise<import("./types").RefreshScheduleResponse> => {
+      const merged = withScope(body);
+      const qs = new URLSearchParams();
+      qs.set("tenant_id",    merged.tenant_id    ?? DEFAULT_SCOPE.tenant_id);
+      qs.set("workspace_id", merged.workspace_id ?? DEFAULT_SCOPE.workspace_id);
+      qs.set("project_id",   merged.project_id   ?? DEFAULT_SCOPE.project_id);
+      return post(`/v1/sources/${encodeURIComponent(sourceId)}/refresh-schedule?${qs}`, {
+        interval_ms:  body.interval_ms,
+        ...(body.refresh_url !== undefined ? { refresh_url: body.refresh_url } : {}),
+      });
+    },
+
+    /** POST /v1/sources/process-refresh — trigger due refresh schedules. */
+    processSourceRefresh: (): Promise<import("./types").ProcessRefreshResponse> =>
+      post("/v1/sources/process-refresh", {}),
+
     // ── Plugins ───────────────────────────────────────────────────────────────
 
     /** GET /v1/plugins — list all registered plugins. */

@@ -138,3 +138,7 @@ uuid = { version = "1", features = ["v4", "v7"] }
 # Full-binary HTTP driver for LiveHarness — tests launch the real
 # `cairn-app` binary on an ephemeral port and drive it via reqwest.
 reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
+# Robust percent-encoding for source_id (and future IDs that may contain
+# spaces, hashes, etc.) in path segments. Mirrors encodeURIComponent on
+# the UI side so tests stay honest against arbitrary operator input.
+percent-encoding = "2"
