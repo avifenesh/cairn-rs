@@ -15,6 +15,7 @@ import { CopyButton } from "../components/CopyButton";
 import { Drawer } from "../components/Drawer";
 import { useToast } from "../components/Toast";
 import { defaultApi } from "../lib/api";
+import { mapRunActionError, stateGateTooltip } from "../lib/runStateErrors";
 import { useEventStream } from "../hooks/useEventStream";
 import { table as tablePreset } from "../lib/design-system";
 import type {
@@ -679,7 +680,7 @@ function InterveneModal({
       onSuccess();
       onClose();
     },
-    onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Intervene failed."),
+    onError: (e: unknown) => toast.error(mapRunActionError(e, "Intervene failed.")),
   });
 
   const ACTIONS: { id: InterventionAction; label: string; hint: string }[] = [
@@ -767,12 +768,12 @@ function OperatorActions({ runId, run }: { runId: string; run?: RunRecord }) {
   const pauseMut = useMutation({
     mutationFn: () => defaultApi.pauseRun(runId, { reason_kind: "operator_pause", actor: "operator" }),
     onSuccess: () => { toast.success("Run paused."); invalidateRun(); },
-    onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Pause failed."),
+    onError: (e: unknown) => toast.error(mapRunActionError(e, "Pause failed.")),
   });
   const resumeMut = useMutation({
     mutationFn: () => defaultApi.resumeRun(runId, { trigger: "operator_resume", target: "running" }),
     onSuccess: () => { toast.success("Run resumed."); invalidateRun(); },
-    onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Resume failed."),
+    onError: (e: unknown) => toast.error(mapRunActionError(e, "Resume failed.")),
   });
   const recoverMut = useMutation({
     mutationFn: () => defaultApi.recoverRun(runId),
@@ -780,22 +781,22 @@ function OperatorActions({ runId, run }: { runId: string; run?: RunRecord }) {
       toast.success(r.deprecated ? "Recover acknowledged (handled by background scanners)." : "Recovery requested.");
       invalidateRun();
     },
-    onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Recover failed."),
+    onError: (e: unknown) => toast.error(mapRunActionError(e, "Recover failed.")),
   });
   const claimMut = useMutation({
     mutationFn: () => defaultApi.claimRun(runId),
     onSuccess: () => { toast.success("Run claimed for inspection."); invalidateRun(); },
-    onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Claim failed."),
+    onError: (e: unknown) => toast.error(mapRunActionError(e, "Claim failed.")),
   });
   const orchestrateMut = useMutation({
     mutationFn: () => defaultApi.orchestrateRun(runId, {}),
     onSuccess: () => { toast.success("Orchestration step triggered."); invalidateRun(); },
-    onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Orchestrate failed."),
+    onError: (e: unknown) => toast.error(mapRunActionError(e, "Orchestrate failed.")),
   });
   const diagnoseMut = useMutation({
     mutationFn: () => defaultApi.diagnoseRun(runId),
     onSuccess: (data) => { setDiagnoseDrawer({ open: true, data }); },
-    onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Diagnose failed."),
+    onError: (e: unknown) => toast.error(mapRunActionError(e, "Diagnose failed.")),
   });
 
   const { data: interventions } = useQuery({
@@ -830,7 +831,7 @@ function OperatorActions({ runId, run }: { runId: string; run?: RunRecord }) {
           onClick={() => pauseMut.mutate()}
           disabled={!canPause}
           pending={pauseMut.isPending}
-          title={canPause ? "Pause this run" : "Run is not in a pausable state"}
+          title={canPause ? "Pause this run" : stateGateTooltip("pause", state)}
         />
         <ActionBtn
           icon={<Play size={12} />}
@@ -839,7 +840,7 @@ function OperatorActions({ runId, run }: { runId: string; run?: RunRecord }) {
           onClick={() => resumeMut.mutate()}
           disabled={!canResume}
           pending={resumeMut.isPending}
-          title={canResume ? "Resume paused run" : "Run is not paused"}
+          title={canResume ? "Resume paused run" : stateGateTooltip("resume", state)}
         />
         <ActionBtn
           icon={<Sparkles size={12} />}
@@ -847,7 +848,7 @@ function OperatorActions({ runId, run }: { runId: string; run?: RunRecord }) {
           onClick={() => orchestrateMut.mutate()}
           disabled={isTerminal}
           pending={orchestrateMut.isPending}
-          title="Drive the orchestration loop one step"
+          title={isTerminal ? stateGateTooltip("orchestrate", state) : "Drive the orchestration loop one step"}
         />
         <ActionBtn
           icon={<Stethoscope size={12} />}
@@ -862,7 +863,7 @@ function OperatorActions({ runId, run }: { runId: string; run?: RunRecord }) {
           variant="primary"
           onClick={() => setInterveneOpen(true)}
           disabled={isTerminal}
-          title="Operator intervention (force complete/fail/restart or inject message)"
+          title={isTerminal ? stateGateTooltip("intervene", state) : "Operator intervention (force complete/fail/restart or inject message)"}
         />
         <ActionBtn
           icon={<GitBranch size={12} />}

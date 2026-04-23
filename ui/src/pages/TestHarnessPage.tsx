@@ -57,6 +57,49 @@ function fmtMs(ms: number): string {
   return `${(ms / 1_000).toFixed(2)}s`;
 }
 
+/**
+ * States from which a run can legitimately be suspended by
+ * `ff_suspend_execution` per cairn-app's `fabric_adapter.rs`. A freshly-
+ * created run sits in `pending` until the orchestrator claims a lease;
+ * calling pause before a lease exists fails the
+ * `partial_fence_triple` / `fence_required` gate with
+ * `invalid run transition: ... -> suspended` (issue #257).
+ *
+ * `running` and the `waiting_*` states all imply an active lease, so
+ * they are the safe pausable set.
+ */
+const PAUSABLE_RUN_STATES = new Set([
+  "running", "waiting_approval", "waiting_dependency",
+]);
+
+/**
+ * Poll `getRun` until `run.state` is in `pausable` or timeout elapses.
+ * Returns the last-known `RunRecord` on success; throws a friendly
+ * harness error on timeout rather than letting the downstream pause
+ * call surface a raw state-machine error (issue #257).
+ */
+async function waitForPausableState(
+  runId: string,
+  timeoutMs = 10_000,
+  pollIntervalMs = 250,
+): Promise<{ state: string; waited_ms: number }> {
+  const started = Date.now();
+  let last = "unknown";
+  while (Date.now() - started < timeoutMs) {
+    const r = await defaultApi.getRun(runId);
+    last = r.state;
+    if (PAUSABLE_RUN_STATES.has(r.state)) {
+      return { state: r.state, waited_ms: Date.now() - started };
+    }
+    // Terminal states will never reach pausable — fail fast.
+    if (["completed", "failed", "canceled", "dead_lettered"].includes(r.state)) {
+      throw new Error(`Run reached terminal state '${r.state}' before becoming pausable`);
+    }
+    await new Promise(res => setTimeout(res, pollIntervalMs));
+  }
+  throw new Error(`Run did not reach pausable state in ${Math.round(timeoutMs / 1000)}s (last state: ${last})`);
+}
+
 // ── Scenario definitions ──────────────────────────────────────────────────────
 
 function buildScenarios(scope: ProjectScope): ScenarioDef[] {
@@ -125,6 +168,20 @@ function buildScenarios(scope: ProjectScope): ScenarioDef[] {
           const found = runs.find(r => r.run_id === ctx["run_id"]);
           if (!found) throw new Error(`run ${ctx["run_id"]} not found in list`);
           return { found: true, state: found.state };
+        },
+      },
+      {
+        id: "wait_pausable",
+        label: "Wait for pausable state",
+        description: "Poll GET /v1/runs/:id until state is pausable (10s timeout)",
+        run: async (ctx) => {
+          // Bug #257 — the harness used to call pause immediately after
+          // create_run. Depending on scheduler timing the run could be
+          // in an intermediate state (e.g. `partial_fence_triple`) that
+          // rejects the pause transition with a raw state-machine error.
+          // Poll until the run is in a pausable state or fail with a
+          // human-readable message.
+          return waitForPausableState(String(ctx["run_id"]), 10_000);
         },
       },
       {
