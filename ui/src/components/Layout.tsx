@@ -45,7 +45,9 @@ export function parseRoute(hash: string): Route {
     }
   }
   if (h.startsWith('eval-results/') && h.length > 'eval-results/'.length) {
-    return { kind: 'eval-results', runId: h.slice('eval-results/'.length) };
+    // The link in EvalsPage encodes via encodeURIComponent; decode here so
+    // runIds containing reserved characters (/, ?, #, etc.) round-trip.
+    return { kind: 'eval-results', runId: decodeURIComponent(h.slice('eval-results/'.length)) };
   }
   // Empty hash → dashboard; known page → page; anything else → 404
   if (h === '') return { kind: 'page', page: 'dashboard' };

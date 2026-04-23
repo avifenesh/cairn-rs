@@ -539,26 +539,47 @@ pub(crate) async fn create_eval_run_handler(
         serde_json::from_value(serde_json::to_value(domain_subject_kind).unwrap_or_default())
             .unwrap_or(EvalSubjectKind::PromptRelease);
 
+    // Validate linked artifacts exist AND belong to the request's tenant.
+    // Without the tenant check, an operator could bind a run to another
+    // tenant's dataset/rubric/baseline simply by guessing its id.
+    let request_tenant = body.tenant_id.as_str();
     if let Some(dataset_id) = body.dataset_id.as_deref() {
-        if state.eval_datasets.get(dataset_id).is_none() {
-            return AppApiError::new(StatusCode::NOT_FOUND, "not_found", "eval dataset not found")
+        match state.eval_datasets.get(dataset_id) {
+            Some(d) if d.tenant_id.as_str() == request_tenant => {}
+            Some(_) | None => {
+                return AppApiError::new(
+                    StatusCode::NOT_FOUND,
+                    "not_found",
+                    "eval dataset not found",
+                )
                 .into_response();
+            }
         }
     }
     if let Some(rubric_id) = body.rubric_id.as_deref() {
-        if state.eval_rubrics.get(rubric_id).is_none() {
-            return AppApiError::new(StatusCode::NOT_FOUND, "not_found", "eval rubric not found")
+        match state.eval_rubrics.get(rubric_id) {
+            Some(r) if r.tenant_id.as_str() == request_tenant => {}
+            Some(_) | None => {
+                return AppApiError::new(
+                    StatusCode::NOT_FOUND,
+                    "not_found",
+                    "eval rubric not found",
+                )
                 .into_response();
+            }
         }
     }
     if let Some(baseline_id) = body.baseline_id.as_deref() {
-        if state.eval_baselines.get(baseline_id).is_none() {
-            return AppApiError::new(
-                StatusCode::NOT_FOUND,
-                "not_found",
-                "eval baseline not found",
-            )
-            .into_response();
+        match state.eval_baselines.get(baseline_id) {
+            Some(b) if b.tenant_id.as_str() == request_tenant => {}
+            Some(_) | None => {
+                return AppApiError::new(
+                    StatusCode::NOT_FOUND,
+                    "not_found",
+                    "eval baseline not found",
+                )
+                .into_response();
+            }
         }
     }
 
@@ -587,21 +608,26 @@ pub(crate) async fn create_eval_run_handler(
     // rather than silently drop the link (which would violate the
     // round-trip contract asserted by test_http_evals_full.rs).
     if let Some(dataset_id) = body.dataset_id.as_deref() {
-        match state.evals.set_dataset(&eval_run_id, dataset_id.to_owned()) {
-            Ok(updated) => run = updated,
-            Err(err) => {
-                tracing::error!(
-                    %eval_run_id,
-                    dataset_id = %dataset_id,
-                    "failed to attach dataset to freshly-created eval run: {err}"
-                );
-                return AppApiError::new(
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    "internal_error",
-                    format!("failed to attach dataset to eval run: {err}"),
-                )
-                .into_response();
-            }
+        if let Err(err) = state
+            .evals
+            .set_dataset_id(&eval_run_id, dataset_id.to_owned())
+        {
+            tracing::error!(
+                %eval_run_id,
+                dataset_id = %dataset_id,
+                "failed to attach dataset to freshly-created eval run: {err}"
+            );
+            return AppApiError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "internal_error",
+                format!("failed to attach dataset to eval run: {err}"),
+            )
+            .into_response();
+        }
+        // Re-fetch with the fresh dataset_id so the response body reflects
+        // the binding.
+        if let Some(updated) = state.evals.get(&eval_run_id) {
+            run = updated;
         }
     }
 

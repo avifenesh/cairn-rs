@@ -109,23 +109,6 @@ impl EvalRunService {
         run
     }
 
-    /// Attach a dataset to an existing eval run. Idempotent; used by the
-    /// HTTP create-run handler to link a dataset picked in the form after
-    /// the run has been minted.
-    pub fn set_dataset(
-        &self,
-        eval_run_id: &EvalRunId,
-        dataset_id: String,
-    ) -> Result<EvalRun, EvalError> {
-        let mut state = self.state.lock().unwrap();
-        let run = state
-            .runs
-            .get_mut(eval_run_id.as_str())
-            .ok_or_else(|| EvalError::NotFound(eval_run_id.to_string()))?;
-        run.dataset_id = Some(dataset_id);
-        Ok(run.clone())
-    }
-
     /// Start an eval run (Pending -> Running).
     pub fn start_run(&self, eval_run_id: &EvalRunId) -> Result<EvalRun, EvalError> {
         let mut state = self.state.lock().unwrap();

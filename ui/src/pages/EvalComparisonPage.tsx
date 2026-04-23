@@ -312,12 +312,15 @@ export function EvalComparisonPage({ leftId, rightId }: EvalComparisonPageProps)
     staleTime: 15_000,
   });
 
-  // Backend-authoritative metric comparison — uses `/v1/evals/compare`.
+  // Backend-authoritative metric rows for single-run mode.  Skipped when
+  // diffing two runs because the two-run view builds its table locally from
+  // fields already present on EvalRunRecord (no extra round-trip needed).
   const backendCompare = useQuery({
-    queryKey: ["evals-compare-backend", leftId, rightId],
-    queryFn:  () => defaultApi.getEvalComparison(singleRunMode ? [leftId] : [leftId, rightId]),
+    queryKey: ["evals-compare-backend", leftId],
+    queryFn:  () => defaultApi.getEvalComparison([leftId]),
+    enabled:  singleRunMode,
     staleTime: 15_000,
-    retry: false,
+    retry:    false,
   });
 
   const runs = data?.items ?? [];

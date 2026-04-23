@@ -11,7 +11,6 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
-<<<<<<< HEAD
 - **GraphPage — full node-kind coverage + 5 provenance query tabs
   (closes #151).** The simulation view previously collapsed all 22
   backend `NodeKind` variants down to `session` / `run` / `task` via a
@@ -33,7 +32,7 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   primitive. `GraphNodeKind` picked up the missing `trigger` variant
   and `GraphEdgeKind` picked up `matched_by` and `fired` so the
   TypeScript types match the Rust enum 1:1.
-=======
+
 - **EvalsPage — real eval-run contract with dataset / rubric / baseline /
   prompt-release pickers (closes #138).** The "New Eval Run" popover used
   to collect only `evaluator_type` and `subject_kind`; the backend accepted
@@ -52,7 +51,6 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   single-run mode and hydrates metrics from `/v1/evals/compare`. Locked
   by integration test
   `cairn-app/tests/test_http_evals_full.rs::eval_run_full_contract_roundtrip`.
->>>>>>> 4cda59c2 (feat(ui): EvalsPage — real eval run contract with dataset/rubric/baseline/scorecard)
 
 - **ChannelsPage — real `/v1/channels` CRUD UI (closes #139).** The
   `/v1/channels` runtime-channel API (create/list/send/consume/messages

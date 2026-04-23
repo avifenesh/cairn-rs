@@ -20,6 +20,7 @@ import { useToast } from "../components/Toast";
 import { MiniChart } from "../components/MiniChart";
 import { BarChart } from "../components/BarChart";
 import { defaultApi } from "../lib/api";
+import { useScope } from "../hooks/useScope";
 import type { EvalRunRecord, EvalRunStatus } from "../lib/types";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -317,34 +318,40 @@ export function EvalsPage() {
   const [newReleaseId, setNewReleaseId]   = useState<string>("");
   const qc = useQueryClient();
   const toast = useToast();
+  // Scope goes into every cache key so that switching tenant/workspace/project
+  // does not serve the previous scope's data from cache.
+  const [scope] = useScope();
+  const scopeKey = [scope.tenant_id, scope.workspace_id, scope.project_id];
 
   const { data, isLoading, isError, error, refetch, isFetching } = useQuery({
-    queryKey: ["evals"],
+    queryKey: ["evals", "runs", ...scopeKey],
     queryFn:  () => defaultApi.getEvalRuns(200),
     refetchInterval: 20_000,
   });
 
   // Artifact pickers — fetched lazily when the form is opened.
+  // tenant_id is the server-side scope for these list endpoints, so only that
+  // piece of the scope needs to be in the cache key; include it all for safety.
   const datasetsQ  = useQuery({
-    queryKey: ["evals", "datasets"],
+    queryKey: ["evals", "datasets", ...scopeKey],
     queryFn:  () => defaultApi.listEvalDatasets(),
     enabled:  showNewForm,
     staleTime: 60_000,
   });
   const rubricsQ   = useQuery({
-    queryKey: ["evals", "rubrics"],
+    queryKey: ["evals", "rubrics", ...scopeKey],
     queryFn:  () => defaultApi.listEvalRubrics(),
     enabled:  showNewForm,
     staleTime: 60_000,
   });
   const baselinesQ = useQuery({
-    queryKey: ["evals", "baselines"],
+    queryKey: ["evals", "baselines", ...scopeKey],
     queryFn:  () => defaultApi.listEvalBaselines(),
     enabled:  showNewForm,
     staleTime: 60_000,
   });
   const releasesQ  = useQuery({
-    queryKey: ["evals", "prompt-releases"],
+    queryKey: ["evals", "prompt-releases", ...scopeKey],
     queryFn:  () => defaultApi.getPromptReleases({ limit: 200 }),
     enabled:  showNewForm && newSubject === "prompt_release",
     staleTime: 60_000,

@@ -12,7 +12,7 @@ Source of truth: [`tests/compat/http_routes.tsv`](../../tests/compat/http_routes
 | `GET` | `/v1/evals/assets/:asset_id/report` | Preserve |  |
 | `GET` | `/v1/evals/assets/:asset_id/trend` | Preserve |  |
 | `GET` | `/v1/evals/assets/:asset_id/winner` | Preserve |  |
-| `GET` | `/v1/evals/baselines` | Preserve | query: tenant_id?; { items } |
+| `GET` | `/v1/evals/baselines` | Preserve | query: tenant_id?; { items, has_more } |
 | `POST` | `/v1/evals/baselines` | Preserve |  |
 | `GET` | `/v1/evals/baselines/:id` | Preserve |  |
 | `GET` | `/v1/evals/compare` | Preserve |  |
@@ -27,7 +27,7 @@ Source of truth: [`tests/compat/http_routes.tsv`](../../tests/compat/http_routes
 | `GET` | `/v1/evals/matrices/prompt-comparison` | Preserve | { rows } |
 | `GET` | `/v1/evals/matrices/provider-routing` | Preserve |  |
 | `GET` | `/v1/evals/matrices/skill-health` | Preserve | { rows } |
-| `GET` | `/v1/evals/rubrics` | Preserve | query: tenant_id?; { items } |
+| `GET` | `/v1/evals/rubrics` | Preserve | query: tenant_id?; { items, has_more } |
 | `POST` | `/v1/evals/rubrics` | Preserve |  |
 | `GET` | `/v1/evals/rubrics/:id` | Preserve |  |
 | `GET` | `/v1/evals/runs` | Preserve | query: limit?; { items } |
