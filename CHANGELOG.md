@@ -59,10 +59,33 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   paginates through all runs with named caps
   (`SESSION_RUNS_PAGE_SIZE` = 500, `SESSION_RUNS_MAX_PAGES` = 40). If
   the 20k-run hard cap is reached the page surfaces an explicit
-  truncation banner directing operators to session export. Integration
+  truncation banner directing operators to session export. The page
+  also reads `isError`/`error` from the runs query, renders a dedicated
+  "Session not found" red card on 404 and a generic error card for
+  other failures, and short-circuits retries on 404. Integration
   coverage in `crates/cairn-app/tests/test_http_session_detail.rs`
   asserts that a session's runs are returned in full and that
   sibling-session runs under the same project scope do not leak.
+- **UI: `WorkspacesPage` polish — surface create failures + drop dead stat
+  tiles.** The `createWorkspace` mutation only had an `onSuccess` handler,
+  so any failed POST (duplicate ID, 422 validation, 5xx) was silently
+  swallowed: the form dialog closed with no feedback and the operator had
+  no idea their workspace never landed. Added an `onError` handler that
+  surfaces the error message via the shared `useToast` hook, matching the
+  pattern from `ApprovalsPage` and the rest of the codebase. Separately,
+  each workspace card rendered three stat tiles — Projects / Sessions /
+  Runs — that were permanently pinned to `0` because the list endpoint
+  `GET /v1/admin/tenants/:tenant_id/workspaces` only emits the
+  `WorkspaceRecord` fields (id, name, timestamps) and no per-workspace
+  aggregates, and the `workspaces` `useMemo` builder never populated
+  the counters. The tiles were therefore actively misleading
+  ("this workspace has zero runs" when it actually has many). Rather
+  than extend the store layer across three backends to aggregate
+  sessions/runs/projects per workspace for a list page, the tiles (and
+  the parallel aggregate summary strip) have been removed; the card now
+  shows workspace ID, tenant, active badge, and last-activity timestamp.
+  Backend-sourced stats can be reintroduced in a follow-up if the
+  `list_workspaces_handler` starts emitting them. Closes #140.
 - **Provider UX: register → use in one wizard.** Three dogfood-blocker bugs
   in the provider-connection path collapsed into one chain — operators
   registered OpenRouter with empty `supported_models`, picked a model in
