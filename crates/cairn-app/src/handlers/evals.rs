@@ -673,20 +673,63 @@ pub(crate) async fn create_eval_run_handler(
             .as_deref()
             .map(cairn_domain::OperatorId::new),
     );
+    // The run was just created above; set_* can only fail if the in-memory
+    // projection is inconsistent with the event we just appended. Treat that
+    // as an internal error so the response reflects persisted state (Copilot
+    // review on PR #227).
     if let Some(dataset_id) = body.dataset_id.as_deref() {
-        let _ = state
+        if let Err(err) = state
             .evals
-            .set_dataset_id(&eval_run_id, dataset_id.to_owned());
+            .set_dataset_id(&eval_run_id, dataset_id.to_owned())
+        {
+            tracing::error!(
+                %eval_run_id,
+                dataset_id = %dataset_id,
+                "in-memory set_dataset_id failed after event-log append: {err}"
+            );
+            return AppApiError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "internal_error",
+                format!("failed to attach dataset to eval run: {err}"),
+            )
+            .into_response();
+        }
     }
     if let Some(rubric_id) = body.rubric_id.as_deref() {
-        let _ = state
+        if let Err(err) = state
             .evals
-            .set_rubric_id(&eval_run_id, rubric_id.to_owned());
+            .set_rubric_id(&eval_run_id, rubric_id.to_owned())
+        {
+            tracing::error!(
+                %eval_run_id,
+                rubric_id = %rubric_id,
+                "in-memory set_rubric_id failed after event-log append: {err}"
+            );
+            return AppApiError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "internal_error",
+                format!("failed to attach rubric to eval run: {err}"),
+            )
+            .into_response();
+        }
     }
     if let Some(baseline_id) = body.baseline_id.as_deref() {
-        let _ = state
+        if let Err(err) = state
             .evals
-            .set_baseline_id(&eval_run_id, baseline_id.to_owned());
+            .set_baseline_id(&eval_run_id, baseline_id.to_owned())
+        {
+            tracing::error!(
+                %eval_run_id,
+                baseline_id = %baseline_id,
+                "in-memory set_baseline_id failed after event-log append: {err}"
+            );
+            return AppApiError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "internal_error",
+                format!("failed to attach baseline to eval run: {err}"),
+            )
+            .into_response();
+        }
     }
     // Re-fetch so the response body reflects any bindings applied above.
     if body.dataset_id.is_some() || body.rubric_id.is_some() || body.baseline_id.is_some() {
