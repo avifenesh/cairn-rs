@@ -110,6 +110,16 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **UI: `TasksPage` table rows were not clickable (#181).** Added
+  `onRowClick` to the DataTable so clicking a task row navigates to the
+  parent run detail page (`#run/:id`), mirroring the behaviour of the
+  kanban task cards. Rows without a `parent_run_id` remain non-clickable.
+- **UI: `TasksPage` kanban board omitted DLQ columns (#175).** Added
+  `retryable_failed` ("Retryable Failed") and `dead_lettered`
+  ("Dead Lettered") kanban columns so tasks that drop into the
+  retry/dead-letter queues are visible alongside the other states. The
+  Rust `TaskState` enum in `crates/cairn-domain/src/lifecycle.rs` already
+  supports both variants; the UI now renders them.
 - **UI: `ApiDocsPage` endpoint catalog had drifted (#148).** Audited
   every documented entry against `router.rs` + `bin_router.rs` and added
   17 missing real routes: run operator mutations
