@@ -559,12 +559,81 @@ export function createApiClient(config: ApiClientConfig) {
       unwrapRun(await post<RunRecord | { run: RunRecord }>(`/v1/runs/${encodeURIComponent(runId)}/cancel`, {})),
 
     /** POST /v1/runs/:id/pause — pause a running run. */
-    pauseRun: async (runId: string, detail?: string): Promise<RunRecord> =>
-      unwrapRun(await post<RunRecord | { run: RunRecord }>(`/v1/runs/${encodeURIComponent(runId)}/pause`, { detail })),
+    pauseRun: async (runId: string, body?: import("./types").PauseRunRequest): Promise<RunRecord> =>
+      unwrapRun(await post<RunRecord | { run: RunRecord }>(`/v1/runs/${encodeURIComponent(runId)}/pause`, body ?? {})),
 
     /** POST /v1/runs/:id/resume — resume a paused run. */
-    resumeRun: async (runId: string): Promise<RunRecord> =>
-      unwrapRun(await post<RunRecord | { run: RunRecord }>(`/v1/runs/${encodeURIComponent(runId)}/resume`, {})),
+    resumeRun: async (runId: string, body?: import("./types").ResumeRunRequest): Promise<RunRecord> =>
+      unwrapRun(await post<RunRecord | { run: RunRecord }>(`/v1/runs/${encodeURIComponent(runId)}/resume`, body ?? {})),
+
+    /**
+     * POST /v1/runs/:id/recover — legacy no-op kept for back-compat.
+     * Recovery is driven by FlowFabric scanners; this endpoint simply
+     * confirms the run exists and returns 202. The UI surfaces it so
+     * operators have a "nudge" affordance that matches Go-sdk parity.
+     */
+    recoverRun: (runId: string): Promise<import("./types").RecoverRunResponse> =>
+      post(`/v1/runs/${encodeURIComponent(runId)}/recover`),
+
+    /**
+     * Replay a run.
+     *
+     *  - `GET /v1/runs/:id/replay` — summary replay (optionally windowed
+     *    by `from_position` / `to_position`).
+     *  - `POST /v1/runs/:id/replay-to-checkpoint?checkpoint_id=…` —
+     *    replay up to a specific checkpoint.
+     */
+    replayRun: (
+      runId: string,
+      query?: { from_position?: number; to_position?: number; checkpoint_id?: string },
+    ): Promise<import("./types").ReplayResult> => {
+      if (query?.checkpoint_id) {
+        const qs = new URLSearchParams({ checkpoint_id: query.checkpoint_id }).toString();
+        return post(`/v1/runs/${encodeURIComponent(runId)}/replay-to-checkpoint?${qs}`);
+      }
+      const params = new URLSearchParams();
+      if (query?.from_position !== undefined) params.set("from_position", String(query.from_position));
+      if (query?.to_position !== undefined) params.set("to_position", String(query.to_position));
+      const qs = params.toString();
+      return get(`/v1/runs/${encodeURIComponent(runId)}/replay${qs ? `?${qs}` : ""}`);
+    },
+
+    /** POST /v1/runs/:id/claim — operator claim (inspection lock). */
+    claimRun: async (runId: string): Promise<RunRecord> =>
+      unwrapRun(await post<RunRecord | { run: RunRecord }>(`/v1/runs/${encodeURIComponent(runId)}/claim`)),
+
+    /** POST /v1/runs/:id/spawn — spawn a subagent run. */
+    spawnSubagentRun: (
+      runId: string,
+      body: import("./types").SpawnSubagentRequest,
+    ): Promise<import("./types").SpawnSubagentResponse> =>
+      post(`/v1/runs/${encodeURIComponent(runId)}/spawn`, body),
+
+    /** GET /v1/runs/:id/children — list subagent runs spawned by this run. */
+    listChildRuns: (runId: string, limit = 50): Promise<RunRecord[]> =>
+      getList(`/v1/runs/${encodeURIComponent(runId)}/children?limit=${limit}`),
+
+    /** POST /v1/runs/:id/orchestrate — drive the GATHER/DECIDE/EXECUTE loop. */
+    orchestrateRun: (
+      runId: string,
+      body?: { goal?: string; model_id?: string; max_iterations?: number; timeout_ms?: number },
+    ): Promise<import("./types").OrchestrateResult> =>
+      post(`/v1/runs/${encodeURIComponent(runId)}/orchestrate`, body ?? {}),
+
+    /** POST /v1/runs/:id/diagnose — return a diagnosis report for a stuck run. */
+    diagnoseRun: (runId: string): Promise<import("./types").DiagnoseResult> =>
+      post(`/v1/runs/${encodeURIComponent(runId)}/diagnose`),
+
+    /** POST /v1/runs/:id/intervene — operator intervention. */
+    interveneRun: (
+      runId: string,
+      body: import("./types").InterveneRequest,
+    ): Promise<import("./types").InterveneResponse> =>
+      post(`/v1/runs/${encodeURIComponent(runId)}/intervene`, body),
+
+    /** GET /v1/runs/:id/interventions — list interventions on this run. */
+    listRunInterventions: (runId: string, limit = 50): Promise<import("./types").InterventionRecord[]> =>
+      getList(`/v1/runs/${encodeURIComponent(runId)}/interventions?limit=${limit}`),
 
     /** POST /v1/runs — start a new run in a session. */
     createRun: (body: {

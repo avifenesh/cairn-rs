@@ -351,6 +351,130 @@ export interface RunCostRecord {
   provider_calls: number;
 }
 
+// ── Run operator mutations (issues #166/#173) ────────────────────────────────
+
+/** Pause reason categorisation — mirrors `cairn_domain::PauseReasonKind`. */
+export type PauseReasonKind =
+  | "operator_pause"
+  | "runtime_suspension"
+  | "tool_requested_suspension"
+  | "policy_hold";
+
+/** Resume trigger — mirrors `cairn_domain::ResumeTrigger`. */
+export type ResumeTrigger =
+  | "operator_resume"
+  | "resume_after_timer"
+  | "runtime_signal";
+
+/** Resume target state — mirrors `cairn_domain::RunResumeTarget`. */
+export type RunResumeTarget = "pending" | "running";
+
+/** Body for POST /v1/runs/:id/pause */
+export interface PauseRunRequest {
+  reason_kind?: PauseReasonKind;
+  detail?: string;
+  actor?: string;
+  resume_after_ms?: number;
+}
+
+/** Body for POST /v1/runs/:id/resume */
+export interface ResumeRunRequest {
+  trigger?: ResumeTrigger;
+  target?: RunResumeTarget;
+}
+
+/** Body for POST /v1/runs/:id/spawn */
+export interface SpawnSubagentRequest {
+  session_id: string;
+  parent_task_id?: string;
+  child_task_id?: string;
+  child_run_id?: string;
+}
+
+/** Response for POST /v1/runs/:id/spawn */
+export interface SpawnSubagentResponse {
+  parent_run_id: string;
+  child_run_id: string;
+}
+
+/** Operator intervention actions — mirrors `RunInterventionAction`. */
+export type InterventionAction =
+  | "force_complete"
+  | "force_fail"
+  | "force_restart"
+  | "inject_message";
+
+/** Body for POST /v1/runs/:id/intervene */
+export interface InterveneRequest {
+  action: InterventionAction;
+  reason: string;
+  message_body?: string;
+}
+
+/**
+ * Response envelope for POST /v1/runs/:id/intervene.
+ * `ok` is always present; `run` is returned for state-changing actions,
+ * `messageId` is returned when the action is `inject_message`.
+ */
+export interface InterveneResponse {
+  ok: boolean;
+  run?: RunRecord;
+  messageId?: string;
+}
+
+/** One record from GET /v1/runs/:id/interventions */
+export interface InterventionRecord {
+  run_id: string;
+  tenant_id: string;
+  action: string;
+  reason: string;
+  intervened_at_ms: number;
+}
+
+/**
+ * Response for POST /v1/runs/:id/orchestrate. The orchestrator returns a
+ * free-form JSON document whose exact shape depends on the loop termination
+ * mode, so we intentionally type it as a record.
+ */
+export type OrchestrateResult = Record<string, unknown>;
+
+/**
+ * Response for POST /v1/runs/:id/diagnose — a diagnosis report emitted by
+ * `build_diagnosis_report`. Shape varies by run state, so treat as opaque
+ * JSON and render it as pretty-printed JSON in the UI.
+ */
+export type DiagnoseResult = Record<string, unknown>;
+
+/** One entry in `ReplayResult.final_task_states`. */
+export interface ReplayTaskStateView {
+  task_id: string;
+  state: string;
+}
+
+/**
+ * Response for `GET /v1/runs/:id/replay` and
+ * `POST /v1/runs/:id/replay-to-checkpoint` — mirrors `ReplayResult` in
+ * `crates/cairn-app/src/helpers.rs`. This is a compact summary of the
+ * replay (event count, terminal run state, terminal task states, and the
+ * number of checkpoints encountered), not the raw event stream.
+ */
+export interface ReplayResult {
+  events_replayed: number;
+  final_run_state: string | null;
+  final_task_states: ReplayTaskStateView[];
+  checkpoints_found: number;
+}
+
+/**
+ * Response for POST /v1/runs/:id/recover. The endpoint is a 202-Accepted
+ * no-op kept for back-compat; recovery is driven by FlowFabric scanners.
+ */
+export interface RecoverRunResponse {
+  status: string;
+  note?: string;
+  deprecated?: boolean;
+}
+
 /** Task state mirrors cairn_domain::TaskState */
 export type TaskState =
   | 'queued' | 'leased' | 'running' | 'completed'

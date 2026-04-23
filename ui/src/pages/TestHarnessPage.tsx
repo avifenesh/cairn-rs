@@ -132,7 +132,7 @@ function buildScenarios(scope: ProjectScope): ScenarioDef[] {
         label: "Pause run",
         description: "POST /v1/runs/:id/pause",
         run: async (ctx) => {
-          const r = await defaultApi.pauseRun(String(ctx["run_id"]), "harness test pause");
+          const r = await defaultApi.pauseRun(String(ctx["run_id"]), { detail: "harness test pause" });
           if (r.state !== "paused") throw new Error(`expected paused, got ${r.state}`);
           ctx["run_version_paused"] = r.version;
           return r;
