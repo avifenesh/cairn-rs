@@ -1748,7 +1748,10 @@ mod tests {
             reviewer_comments: None,
             approved_at: 0,
         });
-        assert_eq!(event_message(&approved), "Plan run_plan_1 approved by alice");
+        assert_eq!(
+            event_message(&approved),
+            "Plan run_plan_1 approved by alice"
+        );
 
         let rejected = RuntimeEvent::PlanRejected(PlanRejected {
             project: project_key(),
