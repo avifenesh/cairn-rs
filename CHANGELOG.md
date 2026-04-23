@@ -93,6 +93,16 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Security
 
+- **Plugged cross-tenant leak in `TriggersPage`.** The page was sending
+  just `scope.project_id` as the `:project` route segment, which the
+  backend (`crates/cairn-app/src/trigger_routes.rs`) parses as
+  `tenant_id/workspace_id/project_id` and **silently falls back to the
+  `DEFAULT_*` constants** when it cannot split on `/`. An operator on
+  tenant `acme`, workspace `prod` was therefore reading and writing
+  triggers in `default_tenant/default_workspace/acme-project-id` — the
+  wrong tenant entirely. All six trigger endpoints (list, create, delete,
+  enable, disable, run-templates) now send the full
+  `tenant/workspace/project` slash path.
 - Removed the dev-admin-token one-click hint from the login page now
   that the UI is reachable from untrusted networks. The placeholder
   hint inside the input still shows `dev-admin-token` when the client
@@ -118,6 +128,31 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   orchestrator retry / cache logic can pattern-match on the failure
   reason rather than string-parse the message.
 
+### Fixed
+
+- **Unified frontend "default scope" constants.** Two conflicting
+  conventions were in use: `useScope.ts` defined
+  `DEFAULT_SCOPE = { tenant_id: 'default_tenant', workspace_id: 'default_workspace', project_id: 'default_project' }`
+  (matching the Rust `DEFAULT_*` constants in
+  `crates/cairn-app/src/handlers/feed.rs`), but scattered fallbacks
+  across the UI used `'default'` or `'default/default/default'`. Any
+  fresh install or non-default-scope operator saw empty results or
+  wrote to the wrong tenant. All fallbacks now reference the canonical
+  `DEFAULT_SCOPE` constant (moved to `ui/src/lib/scope.ts` so
+  non-React modules can import it without pulling React):
+  `api.ts` (`searchMemory`, `resolveDefaultSetting`,
+  notification helpers), `CredentialsPage.tsx`, `ChannelsPage.tsx`.
+- **`MemoryPage` search now honours the active scope.** Previously
+  `searchMemory` was called with no scope, and the `api.ts` fallback
+  wrote `'default'` for all three IDs — searches in any non-default
+  scope silently returned empty. `MemoryPage` now reads the current
+  scope via `useScope()` and passes it explicitly.
+- **Prompt assets (RFC 006) now scope-aware.** `getPromptAssets` and
+  `createPromptAsset` in `api.ts` now flow through `withScope(...)`
+  like the other project-scoped endpoints, so operators working in a
+  non-default workspace no longer see empty lists or accidentally
+  create assets in the default project.
+
 ### Removed
 
 - **Replaced by harness-tools**: `cairn_tools::FileReadTool`,
@@ -141,6 +176,18 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- **Soak tests (`test_soak_5min`, `test_soak_30min`, `test_soak_1hr`)
+  now assert post-warmup fd steady-state variance rather than a
+  baseline→end %-growth bound.** A baseline→end % bound at small
+  baselines (~16 fds post-Phase-D + harness-tools) conflates one-time
+  startup fd cost with leak growth and fires spuriously. The new bound
+  skips the warmup window (60 s for 5min, 150 s for 30min/1hr) and
+  asserts `max(fd) - min(fd) <= 5` across steady-state samples —
+  exactly what "no leak" semantically means. Motivated by the
+  2026-04-22 30min run: 181 successful orchestrations, RSS stable,
+  fd oscillated 19–22 post-warmup (delta=3) but the +6 absolute fixed
+  startup cost tripped the old 30 % relative bound. Full sample trace
+  remains in the panic message for diagnostics.
 - **FlowFabric 0.3.2 → 0.3.4 lockfile refresh.** Workspace pins remain
   at the `"0.3"` caret (unchanged), only `Cargo.lock` moves. Picks up
   upstream hotfix for `FlowFabricWorker::connect_with` null

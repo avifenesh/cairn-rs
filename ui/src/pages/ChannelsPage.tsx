@@ -24,6 +24,7 @@ import { useFocusTrap } from '../hooks/useFocusTrap';
 import { ErrorFallback } from '../components/ErrorFallback';
 import type { NotificationChannel, NotificationRecord } from '../lib/types';
 import { useScope } from '../hooks/useScope';
+import { DEFAULT_SCOPE } from '../lib/scope';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -684,7 +685,7 @@ export function ChannelsPage() {
             <span className="text-[11px] text-gray-400 dark:text-zinc-600">Tenant:</span>
             <input
               value={tenantId}
-              onChange={e => setTenantId(e.target.value || 'default')}
+              onChange={e => setTenantId(e.target.value || DEFAULT_SCOPE.tenant_id)}
               className="h-6 w-24 bg-gray-100 dark:bg-zinc-800 border border-gray-200 dark:border-zinc-700 rounded px-2 text-[11px] font-mono text-gray-700 dark:text-zinc-300 focus:outline-none focus:border-indigo-500 transition-colors"
             />
           </div>

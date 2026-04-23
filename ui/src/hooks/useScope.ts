@@ -6,22 +6,18 @@
  */
 
 import { useState, useCallback } from 'react';
+import { DEFAULT_SCOPE, type ProjectScope } from '../lib/scope';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
-export interface ProjectScope {
-  tenant_id: string;
-  workspace_id: string;
-  project_id: string;
-}
+// The canonical `ProjectScope` type and `DEFAULT_SCOPE` constant live in
+// `../lib/scope` so non-React modules (e.g. `lib/api.ts`) can reference
+// them without pulling React. Re-exported here so existing imports keep
+// working.
+export { DEFAULT_SCOPE };
+export type { ProjectScope };
 
 export const SCOPE_KEY = 'cairn_scope';
-
-export const DEFAULT_SCOPE: ProjectScope = {
-  tenant_id:    'default_tenant',
-  workspace_id: 'default_workspace',
-  project_id:   'default_project',
-};
 
 // ── Persistence helpers ───────────────────────────────────────────────────────
 

@@ -89,9 +89,24 @@ const LOG_INTERVAL: Duration = Duration::from_secs(60);
 /// that breaks the plateau.
 const MAX_RSS_GROWTH_PCT: f64 = 40.0;
 
-/// fd growth bound. 30min empirical saw 18.8%; 35% catches any
-/// unbounded growth pattern.
-const MAX_FD_GROWTH_PCT: f64 = 35.0;
+/// Steady-state fd variance bound. We skip a warmup window
+/// (`FD_WARMUP_DURATION`) to let subsystem init (Valkey pools,
+/// subscribers, tokio-metrics, etc.) settle, then assert that
+/// `max(fd) - min(fd)` across the remaining samples is
+/// `<= MAX_STEADY_STATE_FD_DELTA`.
+///
+/// Why not a baseline→end %-growth bound? It conflates one-time
+/// startup fd cost with actual leak growth and is brittle at small
+/// baselines (~16 fds post-Phase-D + harness-tools). Steady-state
+/// variance directly tests "no growth after warmup" — the semantic
+/// property we actually care about. See commit body for the
+/// 2026-04-22 30min trace that motivated this change.
+///
+/// Warmup is defined as a `Duration` so the semantics stay stable if
+/// `SAMPLE_INTERVAL` changes; steady-state samples are those whose
+/// `elapsed_s` is at least `FD_WARMUP_DURATION`.
+const FD_WARMUP_DURATION: Duration = Duration::from_secs(150);
+const MAX_STEADY_STATE_FD_DELTA: usize = 5;
 
 /// Resolve `~/.cairn-secrets/openrouter.key`. Returns `None` if `$HOME`
 /// is unset or the file is absent — test self-skips in that case.
@@ -554,21 +569,42 @@ async fn cairn_app_sustains_1hr_real_llm_soak() {
             .collect::<Vec<_>>(),
     );
 
-    // d) fd growth bound (tighter than 30min — see module docs).
-    let fd_growth_pct = if baseline_fd == 0 {
-        0.0
+    // d) fd steady-state variance bound. Skip warmup samples (subsystem
+    //    init opens persistent fds) then assert that the spread across
+    //    the steady-state window is bounded. This directly tests
+    //    "no growth in the steady state", which is what "no leak"
+    //    actually means — a baseline→end % bound conflates startup
+    //    cost with leak growth and is brittle at small baselines.
+    let warmup_secs = FD_WARMUP_DURATION.as_secs();
+    let steady: Vec<usize> = samples
+        .iter()
+        .filter(|s| s.elapsed_s >= warmup_secs)
+        .map(|s| s.fd_count)
+        .collect();
+    if let (Some(&min_fd), Some(&max_fd)) = (steady.iter().min(), steady.iter().max()) {
+        let delta = max_fd - min_fd;
+        assert!(
+            delta <= MAX_STEADY_STATE_FD_DELTA,
+            "fd steady-state delta {delta} (min={min_fd}, max={max_fd}) over \
+             {MAX_STEADY_STATE_FD_DELTA} after skipping {warmup_secs}s warmup \
+             (baseline={baseline_fd}, end={end_fd}). Samples: {:?}",
+            samples
+                .iter()
+                .map(|s| (s.elapsed_s, s.fd_count))
+                .collect::<Vec<_>>(),
+        );
     } else {
-        ((end_fd as f64 - baseline_fd as f64) / baseline_fd as f64) * 100.0
-    };
-    assert!(
-        fd_growth_pct < MAX_FD_GROWTH_PCT,
-        "fd count grew {fd_growth_pct:.1}% (baseline={baseline_fd}, end={end_fd}), \
-         over {MAX_FD_GROWTH_PCT:.1}% bound. Samples: {:?}",
-        samples
-            .iter()
-            .map(|s| (s.elapsed_s, s.fd_count))
-            .collect::<Vec<_>>(),
-    );
+        panic!(
+            "not enough post-warmup samples to evaluate fd steady-state \
+             variance: have {} total samples, need at least one with \
+             elapsed_s >= {warmup_secs}s. Samples: {:?}",
+            samples.len(),
+            samples
+                .iter()
+                .map(|s| (s.elapsed_s, s.fd_count))
+                .collect::<Vec<_>>(),
+        );
+    }
 
     // e) Each worker completed at least one successful iteration. If
     //    OpenRouter was hard-down the whole run, fail loudly — the test
