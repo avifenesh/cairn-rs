@@ -11,6 +11,28 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **GraphPage — full node-kind coverage + 5 provenance query tabs
+  (closes #151).** The simulation view previously collapsed all 22
+  backend `NodeKind` variants down to `session` / `run` / `task` via a
+  `toSimKind` filter, silently hiding approvals, checkpoints, triggers,
+  mailbox messages, tool invocations, route decisions, provider calls,
+  memories, documents, chunks, sources, ingest jobs, signals, prompt
+  assets/versions/releases, eval runs, skills, and channel targets.
+  The filter is gone; every emitted kind now renders with its own
+  radius / fill / stroke, the legend rebuilds from live counts, and the
+  simulation cap was raised from 100 to 150 nodes. A new **Queries**
+  tab exposes thin wrappers around the five previously unused graph
+  endpoints — `GET /v1/graph/execution-trace/:run_id`,
+  `/v1/graph/dependency-path/:node_id`,
+  `/v1/graph/retrieval-provenance/:run_id`,
+  `/v1/graph/prompt-provenance/:release_id`, and
+  `/v1/graph/multi-hop/:node_id` — each with a small form for its
+  params (ID, max-depth/hops, and for multi-hop `min_confidence` +
+  `direction`) and a render pane reusing the existing force-graph
+  primitive. `GraphNodeKind` picked up the missing `trigger` variant
+  and `GraphEdgeKind` picked up `matched_by` and `fired` so the
+  TypeScript types match the Rust enum 1:1.
+
 - **LogsPage + AuditLogPage — time-range filter, page-size control, and
   cursor pagination (closes #163).** Both pages previously hardcoded a
   single fetch (500 / 200 entries) with no way to scroll into older
