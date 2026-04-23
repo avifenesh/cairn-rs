@@ -678,7 +678,7 @@ pub(crate) async fn create_eval_run_handler(
         EventSource::Runtime,
         cairn_domain::RuntimeEvent::EvalRunStarted(cairn_domain::events::EvalRunStarted {
             project: project_key,
-            eval_run_id,
+            eval_run_id: eval_run_id.clone(),
             subject_kind: body.subject_kind,
             evaluator_type: body.evaluator_type,
             started_at: now,
@@ -694,9 +694,20 @@ pub(crate) async fn create_eval_run_handler(
             baseline_id: body.baseline_id.clone(),
         }),
     );
-    // Best-effort: log warning but don't fail the request if event write fails.
+    // Fail the request if we cannot persist — a 201 that silently loses the
+    // linkage on restart would reintroduce issue #223. Callers already have
+    // retry semantics (creating a run is idempotent by eval_run_id).
     if let Err(e) = state.runtime.store.append(&[ev]).await {
-        tracing::warn!("eval_run event write failed (non-fatal): {e}");
+        tracing::error!(
+            %eval_run_id,
+            "failed to persist EvalRunStarted event: {e}"
+        );
+        return AppApiError::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "internal_error",
+            format!("failed to persist eval run: {e}"),
+        )
+        .into_response();
     }
 
     (StatusCode::CREATED, Json(run)).into_response()
