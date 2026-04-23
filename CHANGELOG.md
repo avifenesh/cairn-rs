@@ -145,6 +145,31 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **UI: `DashboardPage` — real widgets, no placeholders (#179).** Three
+  bugs fixed in one pass: (A) the Runs / Tasks tabs rendered empty or
+  dummy content — now render compact, live tables driven by
+  `defaultApi.getRuns({ limit: 50 })` / `defaultApi.getAllTasks({
+  limit: 50 })` filtered to active states, sorted newest-first, capped
+  at 8 rows, auto-refreshing every 5 s, mirroring the row pattern from
+  the existing `ActiveRunsWidget`. (B) `ProviderStatusWidget` hardcoded
+  three rows (`Store / Events / Memory`) against `/v1/health/detailed`;
+  it now iterates the real `components` array from `/v1/status`,
+  normalizes status tokens (`ok`/`healthy`/`degraded`/`unhealthy`/
+  `unconfigured`) and pretty-prints snake_case names. New components
+  added server-side appear automatically with no UI change. (C) the
+  `CostWidget` trend was dead code — the previous-snapshot query was
+  `enabled: false` so the arrow never rendered. Replaced with a
+  `useRef`-tracked prior total updated after each successful fetch;
+  widget now shows an up / down / flat arrow plus a signed percent
+  delta (`+12.3%` / `-4.1%` / `0.0%`) vs. the previous 30 s snapshot.
+  The `displayedPrev` baseline only advances when `dataUpdatedAt`
+  changes, so ordinary re-renders don't collapse the delta to flat.
+  Also fixed the event-sparkline bucketing bug: `useHourlyEventCounts`
+  now prefers numeric `stored_at` (backend truth) and falls back to
+  ISO `timestamp` — previously it only read `timestamp`, dropping
+  every `RecentEvent` that arrived with only the numeric field.
+  Hash navigation from the Run / Task rows is now URL-encoded, to
+  match the rest of the UI's routing pattern.
 - **UI: `TestHarnessPage` "Run All Scenarios" no-op'd scenario cards (#143).**
   The page-level Run All handler ran its own private copy of each
   scenario's steps against the server and then bumped a `runAllKey`
