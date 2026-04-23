@@ -565,6 +565,7 @@ export function RunDetailPage({ runId, onBack }: RunDetailPageProps) {
     mutationFn: () => defaultApi.cancelRun(runId),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["runs"] });
+      void queryClient.invalidateQueries({ queryKey: ["run-detail", runId] });
       void queryClient.invalidateQueries({ queryKey: ["run-events", runId] });
       toast.success(`Run ${runId} canceled.`);
     },
@@ -661,11 +662,19 @@ export function RunDetailPage({ runId, onBack }: RunDetailPageProps) {
             label="Events"
             value={safeEvents?.length ?? "—"}
           />
-          <StatCard compact variant="info"
-            label="Cost"
-            value={cost ? fmtMicros(cost.total_cost_micros) : "—"}
-            description={cost && cost.provider_calls > 0 ? `${cost.provider_calls} provider call${cost.provider_calls !== 1 ? "s" : ""}` : undefined}
-          />
+          {(() => {
+            // The backend returns a zero-valued RunCostRecord (HTTP 200) for runs with no
+            // cost data instead of 404, so we treat "no provider calls AND zero cost" as
+            // "no cost data yet" and render an em-dash instead of "$0.000000".
+            const hasCostData = !!cost && (cost.provider_calls > 0 || cost.total_cost_micros > 0);
+            return (
+              <StatCard compact variant="info"
+                label="Cost"
+                value={hasCostData ? fmtMicros(cost!.total_cost_micros) : "—"}
+                description={hasCostData ? `${cost!.provider_calls} provider call${cost!.provider_calls !== 1 ? "s" : ""}` : undefined}
+              />
+            );
+          })()}
         </div>
 
         {/* Trigger origin badge */}
