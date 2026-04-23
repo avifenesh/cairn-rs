@@ -151,10 +151,21 @@ function ApprovalsTable({ approvals }: { approvals: ApprovalRecord[] }) {
       <tbody className="divide-y divide-gray-200 dark:divide-zinc-800/50">
         {approvals.map((a, i) => (
           <tr key={a.approval_id}
+            onClick={a.run_id ? () => { window.location.hash = `run/${encodeURIComponent(a.run_id!)}`; } : undefined}
+            onKeyDown={a.run_id ? (e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                window.location.hash = `run/${encodeURIComponent(a.run_id!)}`;
+              }
+            } : undefined}
+            role={a.run_id ? "link" : undefined}
+            tabIndex={a.run_id ? 0 : undefined}
+            title={a.run_id ? "Open linked run" : undefined}
             className={clsx(
               "group transition-colors",
               i % 2 === 0 ? tablePreset.rowEven : tablePreset.rowOdd,
               "hover:bg-gray-100/70 dark:hover:bg-gray-100/70 dark:bg-zinc-800/70",
+              a.run_id && "cursor-pointer",
             )}>
             <td className="px-3 py-1.5 font-mono text-gray-700 dark:text-zinc-300 whitespace-nowrap" title={a.approval_id}>
               <span className="flex items-center gap-1 group/id">{shortId(a.approval_id)}<CopyButton text={a.approval_id} label="Copy approval ID" size={10} className="opacity-0 group-hover/id:opacity-100" /></span>
