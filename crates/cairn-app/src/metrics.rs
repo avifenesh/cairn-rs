@@ -458,6 +458,75 @@ impl AppMetrics {
         }
     }
 
+    /// Total number of HTTP requests observed (across all method/path/status
+    /// combinations). Exposed for binary-level Prometheus rendering.
+    pub fn http_total_requests(&self) -> u64 {
+        self.request_totals
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .values()
+            .sum()
+    }
+
+    /// Errors-by-status map (status >= 400). Exposed for binary-level
+    /// Prometheus rendering.
+    pub fn http_errors_by_status(&self) -> HashMap<u16, u64> {
+        let mut out: HashMap<u16, u64> = HashMap::new();
+        for (key, count) in self
+            .request_totals
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .iter()
+        {
+            if key.status >= 400 {
+                *out.entry(key.status).or_insert(0) += *count;
+            }
+        }
+        out
+    }
+
+    /// Requests-by-path map (summed across methods and statuses). Exposed
+    /// for binary-level Prometheus rendering.
+    pub fn http_requests_by_path(&self) -> HashMap<String, u64> {
+        let mut out: HashMap<String, u64> = HashMap::new();
+        for (key, count) in self
+            .request_totals
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .iter()
+        {
+            *out.entry(key.path.clone()).or_insert(0) += *count;
+        }
+        out
+    }
+
+    /// Average request latency in milliseconds, across all samples.
+    /// Returns 0 when no samples have been recorded.
+    pub fn http_avg_latency_ms(&self) -> u64 {
+        let durations = self
+            .request_durations
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let (mut total_sum, mut total_count) = (0u64, 0u64);
+        for sample in durations.values() {
+            total_sum = total_sum.saturating_add(sample.sum_ms);
+            total_count = total_count.saturating_add(sample.count);
+        }
+        total_sum.checked_div(total_count).unwrap_or(0)
+    }
+
+    /// Public wrapper around the histogram-bucket percentile. Returns 0
+    /// when no samples have been recorded (matches the Prometheus-friendly
+    /// semantic for empty histograms).
+    pub fn http_latency_percentile(&self, p: f64) -> u64 {
+        self.latency_percentile(p).unwrap_or(0)
+    }
+
+    /// Public wrapper around `error_rate` as an f64 in 0.0–1.0.
+    pub fn http_error_rate(&self) -> f64 {
+        f64::from(self.error_rate())
+    }
+
     /// Approximate latency percentile (p50 or p95) from histogram buckets.
     /// Returns `None` when no requests have been recorded.
     pub(crate) fn latency_percentile(&self, p: f64) -> Option<u64> {

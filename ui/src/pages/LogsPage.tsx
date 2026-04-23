@@ -436,10 +436,10 @@ export function LogsPage() {
           {paused ? 'Paused' : 'Live (2s)'}
         </span>
         <span className="text-[10px] text-gray-300 dark:text-zinc-600 ml-auto tabular-nums">
-          {data?.buffered !== undefined
-            ? `Showing ${entries.length} of ${data.buffered} buffered`
+          {data?.total !== undefined
+            ? `Showing ${entries.length} of ${data.total} buffered`
             : 'Ring buffer: last 2,000 requests'}
-          {data?.has_more && (
+          {data !== undefined && entries.length >= data.limit && data.total > entries.length && (
             <span className="ml-2 text-amber-500">
               • more available — widen range or raise page size
             </span>

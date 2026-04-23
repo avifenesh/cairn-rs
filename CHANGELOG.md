@@ -53,13 +53,41 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
-- **ApprovalsPage rows now navigate to the linked run on click
-  (closes #231).** Clicking (or pressing Enter/Space on) an approval
-  row whose `run_id` is populated now routes to `#run/:id`; rows
-  without a run id remain non-interactive, and the Approve/Reject and
-  copy-id buttons keep stopping propagation so they don't trigger
-  navigation.
-
+- **`cairn_http_*` Prometheus counters now advance with live traffic
+  (closes #243).** The binary-side `metrics_prometheus_handler` was
+  reading from a binary-local `AppMetrics` struct that no middleware
+  ever wrote to — so `cairn_http_requests_total`,
+  `cairn_http_latency_ms`, and `cairn_http_error_rate` all stayed at 0
+  despite sustained traffic. The handler now reads from the lib-side
+  `AppMetrics` that the `observability_middleware` populates on every
+  request. The orphaned binary struct was removed and new public
+  accessors (`http_total_requests`, `http_errors_by_status`,
+  `http_requests_by_path`, `http_avg_latency_ms`,
+  `http_latency_percentile`, `http_error_rate`) expose the existing
+  histograms without duplicating the recording path. A new integration
+  test (`test_http_metrics_middleware`) drives mixed 2xx/4xx traffic
+  through the router and asserts the counters advance.
+- **`GET /v1/admin/logs` returns a clean `{entries, limit, total}`
+  response, and the LogsPage "Showing N of M buffered" footer now
+  renders (closes #237).** The handler previously emitted five fields
+  (`entries`, `limit`, `total`, `buffered`, `has_more`) while the UI
+  typed only `buffered?`/`has_more?` as optional — the readable
+  `entries.length` came through but the derived counts drifted. The
+  handler is now trimmed to the three canonical fields (`total` is the
+  ring buffer depth; clients derive "there is more" from
+  `entries.length >= limit && total > entries.length`), and
+  `LogsPage` + `RequestLogsResponse` were aligned so the footer
+  surfaces real counts instead of the static ring-buffer fallback.
+- **`GET /v1/skills/:id` returns 404 JSON for unknown ids even behind
+  the binary's SPA catch-all (closes #236).** The route is registered
+  in `build_catalog_routes` and the existing lib-level test covered
+  it, but nothing asserted the bin-level composition
+  (`catalog.merge(binary).fallback(serve_frontend)`) didn't accidentally
+  drop the match. A new regression test in `test_http_skills` stands up
+  the full bin-router shape in-process — catalog routes + empty binary
+  merge + 200-text/html SPA fallback — and pins both the JSON 200 for a
+  known id and the `application/json` 404 with the canonical
+  `skill_not_found` envelope for an unknown one.
 - **`GET /v1/tasks` + `GET /v1/runs` now honor the
   `tenant_id`/`workspace_id`/`project_id` query filters (closes
   #234).** `list_tasks_filtered` in the in-memory store was declared

@@ -676,18 +676,16 @@ pub(crate) async fn list_request_logs_handler(
         }
     };
 
-    let total = entries.len();
-    // `has_more` is best-effort: we returned fewer than the ring buffer
-    // holds AND hit the page limit exactly — older entries may exist.
-    let has_more = total == limit && buffered > limit;
+    // `total` is the total number of entries currently held in the ring
+    // buffer (useful for the "Showing N of M buffered" footer). `limit`
+    // echoes the applied page size so clients can derive whether they
+    // hit the pagination ceiling (entries.len() == limit && limit < total).
     (
         StatusCode::OK,
         Json(serde_json::json!({
-            "entries":  entries,
-            "total":    total,
-            "limit":    limit,
-            "buffered": buffered,
-            "has_more": has_more,
+            "entries": entries,
+            "limit":   limit,
+            "total":   buffered,
         })),
     )
 }
