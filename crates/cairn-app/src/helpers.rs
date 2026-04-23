@@ -1559,8 +1559,9 @@ pub(crate) fn event_message(event: &RuntimeEvent) -> String {
         }
         RuntimeEvent::PlanRejected(p) => {
             format!(
-                "Plan {} rejected: {}",
+                "Plan {} rejected by {}: {}",
                 p.plan_run_id,
+                sanitize_for_event_message(p.rejected_by.as_str()),
                 sanitize_for_event_message(&p.reason)
             )
         }
@@ -1717,7 +1718,7 @@ pub(crate) fn runtime_event_to_activity_entry(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use cairn_domain::{PlanApproved, PlanRejected, RunId, SessionId};
+    use cairn_domain::{PlanApproved, PlanProposed, PlanRejected, PlanRevisionRequested, RunId};
 
     fn project_key() -> cairn_domain::tenancy::ProjectKey {
         cairn_domain::tenancy::ProjectKey {
@@ -1741,6 +1742,15 @@ mod tests {
 
     #[test]
     fn plan_events_render_concrete_messages() {
+        let proposed = RuntimeEvent::PlanProposed(PlanProposed {
+            project: project_key(),
+            plan_run_id: RunId::new("run_plan_0"),
+            session_id: cairn_domain::SessionId::new("sess_0"),
+            plan_markdown: "# plan".to_owned(),
+            proposed_at: 0,
+        });
+        assert_eq!(event_message(&proposed), "Plan proposed for run run_plan_0");
+
         let approved = RuntimeEvent::PlanApproved(PlanApproved {
             project: project_key(),
             plan_run_id: RunId::new("run_plan_1"),
@@ -1762,13 +1772,25 @@ mod tests {
         });
         assert_eq!(
             event_message(&rejected),
-            "Plan run_plan_2 rejected: out of scope"
+            "Plan run_plan_2 rejected by bob: out of scope"
         );
 
-        // Injection attempt: CR/LF in reason is neutralized.
+        let revision = RuntimeEvent::PlanRevisionRequested(PlanRevisionRequested {
+            project: project_key(),
+            original_plan_run_id: RunId::new("run_plan_2"),
+            new_plan_run_id: RunId::new("run_plan_3"),
+            reviewer_comments: "tighten scope".to_owned(),
+            requested_at: 0,
+        });
+        assert_eq!(
+            event_message(&revision),
+            "Plan revision requested for run run_plan_2 (new run run_plan_3)"
+        );
+
+        // Injection attempt: CR/LF in reason (and rejected_by) is neutralized.
         let injected = RuntimeEvent::PlanRejected(PlanRejected {
             project: project_key(),
-            plan_run_id: RunId::new("run_plan_3"),
+            plan_run_id: RunId::new("run_plan_4"),
             rejected_by: cairn_domain::OperatorId::new("bob"),
             reason: "bad\nFAKE_LOG_LINE".to_owned(),
             rejected_at: 0,
@@ -1776,12 +1798,8 @@ mod tests {
         assert!(!event_message(&injected).contains('\n'));
 
         // Sentinel: none of these fall through to "unknown".
-        for ev in [&approved, &rejected, &injected] {
+        for ev in [&proposed, &approved, &rejected, &revision, &injected] {
             assert_ne!(event_message(ev), "unknown");
         }
-
-        // Silence unused-imports warning for SessionId import (reserved for
-        // future plan-session tests).
-        let _ = SessionId::new("sess");
     }
 }
