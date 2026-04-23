@@ -47,7 +47,15 @@ export function parseRoute(hash: string): Route {
   if (h.startsWith('eval-results/') && h.length > 'eval-results/'.length) {
     // The link in EvalsPage encodes via encodeURIComponent; decode here so
     // runIds containing reserved characters (/, ?, #, etc.) round-trip.
-    return { kind: 'eval-results', runId: decodeURIComponent(h.slice('eval-results/'.length)) };
+    // Guard against malformed percent-escapes (URIError).
+    const raw = h.slice('eval-results/'.length);
+    let runId: string;
+    try {
+      runId = decodeURIComponent(raw);
+    } catch {
+      return { kind: 'not-found', hash: h };
+    }
+    return { kind: 'eval-results', runId };
   }
   // Empty hash → dashboard; known page → page; anything else → 404
   if (h === '') return { kind: 'page', page: 'dashboard' };

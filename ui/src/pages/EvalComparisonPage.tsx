@@ -7,6 +7,7 @@
 
 import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { useScope } from "../hooks/useScope";
 import {
   ArrowLeft,
   FlaskConical,
@@ -305,9 +306,11 @@ export function EvalComparisonPage({ leftId, rightId }: EvalComparisonPageProps)
   // Single-run results view when both ids match (linked from the EvalsPage
   // "Results" column). Keeps this page as the single home for eval display.
   const singleRunMode = leftId === rightId;
+  const [scope] = useScope();
+  const scopeKey = [scope.tenant_id, scope.workspace_id, scope.project_id] as const;
 
   const { data, isLoading, isError, error } = useQuery({
-    queryKey: ["evals-compare", leftId, rightId],
+    queryKey: ["evals-compare", leftId, rightId, ...scopeKey],
     queryFn:  () => defaultApi.getEvalRuns(500),
     staleTime: 15_000,
   });
@@ -316,7 +319,7 @@ export function EvalComparisonPage({ leftId, rightId }: EvalComparisonPageProps)
   // diffing two runs because the two-run view builds its table locally from
   // fields already present on EvalRunRecord (no extra round-trip needed).
   const backendCompare = useQuery({
-    queryKey: ["evals-compare-backend", leftId],
+    queryKey: ["evals-compare-backend", leftId, ...scopeKey],
     queryFn:  () => defaultApi.getEvalComparison([leftId]),
     enabled:  singleRunMode,
     staleTime: 15_000,

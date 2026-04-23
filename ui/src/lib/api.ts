@@ -1632,11 +1632,21 @@ export function createApiClient(config: ApiClientConfig) {
     getVersionDiff: (assetId: string, versionId: string, compareTo: string): Promise<import("./types").PromptVersionDiff> =>
       get(`/v1/prompts/assets/${encodeURIComponent(assetId)}/versions/${encodeURIComponent(versionId)}/diff?compare_to=${encodeURIComponent(compareTo)}`),
 
-    /** GET /v1/prompts/releases — list all releases. */
-    getPromptReleases: (params?: { limit?: number; offset?: number }): Promise<import("./types").ListResponse<import("./types").PromptReleaseRecord>> => {
+    /** GET /v1/prompts/releases — list releases for the current (or supplied) project scope. */
+    getPromptReleases: (params?: {
+      limit?: number;
+      offset?: number;
+      tenant_id?: string;
+      workspace_id?: string;
+      project_id?: string;
+    }): Promise<import("./types").ListResponse<import("./types").PromptReleaseRecord>> => {
+      const scoped = withScope(params ?? {});
       const qs = new URLSearchParams();
       if (params?.limit  !== undefined) qs.set("limit",  String(params.limit));
       if (params?.offset !== undefined) qs.set("offset", String(params.offset));
+      if (scoped.tenant_id)    qs.set("tenant_id",    scoped.tenant_id);
+      if (scoped.workspace_id) qs.set("workspace_id", scoped.workspace_id);
+      if (scoped.project_id)   qs.set("project_id",   scoped.project_id);
       const q = qs.toString() ? `?${qs}` : "";
       return get(`/v1/prompts/releases${q}`);
     },
