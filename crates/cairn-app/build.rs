@@ -11,6 +11,62 @@
 //! every invocation.
 
 use std::process::Command;
+use std::time::{SystemTime, UNIX_EPOCH};
+
+/// Format the current UTC time as `YYYY-MM-DDTHH:MM:SSZ`.
+///
+/// Implemented directly against `SystemTime` so we don't shell out to `date`
+/// (not portable — fails on Windows) and don't pull in a build-dependency just
+/// for a timestamp. The proleptic Gregorian calendar is correct for all dates
+/// after 1582 and is what ISO-8601 specifies.
+fn iso8601_utc_now() -> String {
+    let secs = match SystemTime::now().duration_since(UNIX_EPOCH) {
+        Ok(d) => d.as_secs(),
+        Err(_) => return "unknown".to_owned(),
+    };
+
+    // Break seconds-since-epoch into YMD HMS (UTC, no leap seconds).
+    let day_secs = 86_400u64;
+    let days = secs / day_secs;
+    let rem = secs % day_secs;
+    let hour = rem / 3600;
+    let min = (rem % 3600) / 60;
+    let sec = rem % 60;
+
+    // 1970-01-01 is day 0. Walk years + months.
+    let mut year: u64 = 1970;
+    let mut days_left = days;
+    loop {
+        let leap = (year % 4 == 0 && year % 100 != 0) || year % 400 == 0;
+        let year_days = if leap { 366 } else { 365 };
+        if days_left < year_days {
+            break;
+        }
+        days_left -= year_days;
+        year += 1;
+    }
+    let leap = (year % 4 == 0 && year % 100 != 0) || year % 400 == 0;
+    let month_lens: [u64; 12] = [
+        31,
+        if leap { 29 } else { 28 },
+        31, 30, 31, 30, 31, 31, 30, 31, 30, 31,
+    ];
+    let mut month: u64 = 0;
+    while month < 12 && days_left >= month_lens[month as usize] {
+        days_left -= month_lens[month as usize];
+        month += 1;
+    }
+    let day = days_left + 1;
+    format!(
+        "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}Z",
+        year,
+        month + 1,
+        day,
+        hour,
+        min,
+        sec,
+    )
+}
 
 fn main() {
     let git_commit = std::env::var("GIT_COMMIT")
@@ -31,18 +87,7 @@ fn main() {
     let build_date = std::env::var("BUILD_DATE")
         .ok()
         .filter(|s| !s.trim().is_empty())
-        .or_else(|| {
-            // `date -u +%Y-%m-%dT%H:%M:%SZ` is available on every target we ship on.
-            Command::new("date")
-                .args(["-u", "+%Y-%m-%dT%H:%M:%SZ"])
-                .output()
-                .ok()
-                .filter(|o| o.status.success())
-                .and_then(|o| String::from_utf8(o.stdout).ok())
-                .map(|s| s.trim().to_owned())
-                .filter(|s| !s.is_empty())
-        })
-        .unwrap_or_else(|| "unknown".to_owned());
+        .unwrap_or_else(iso8601_utc_now);
 
     println!("cargo:rustc-env=GIT_COMMIT={git_commit}");
     println!("cargo:rustc-env=BUILD_DATE={build_date}");

@@ -612,12 +612,15 @@ function EndpointRow({ ep }: { ep: Endpoint }) {
         aria-expanded={expanded}
         onClick={() => setExpanded(v => !v)}
         onKeyDown={e => {
+          // Only toggle on direct keyboard interaction with the row itself;
+          // ignore Enter/Space bubbling up from the nested CopyButton etc.
+          if (e.target !== e.currentTarget) return;
           if (e.key === "Enter" || e.key === " ") {
             e.preventDefault();
             setExpanded(v => !v);
           }
         }}
-        className="w-full flex items-center gap-3 px-4 py-3 text-left group cursor-pointer select-none">
+        className="w-full flex items-center gap-3 px-4 py-3 text-left group cursor-pointer">
         <MethodBadge method={ep.method} />
         <code className="flex-1 text-[13px] font-mono text-gray-800 dark:text-zinc-200 truncate">{ep.path}</code>
         {ep.sse && <span className="text-[10px] font-medium text-sky-400 bg-sky-950/60 border border-sky-800/40 rounded px-1.5 py-0.5 shrink-0">SSE</span>}
