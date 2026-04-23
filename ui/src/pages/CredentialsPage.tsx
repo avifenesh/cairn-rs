@@ -19,13 +19,14 @@ import {
   KeyRound, Lock, Eye, EyeOff, AlertTriangle,
 } from 'lucide-react';
 import { clsx } from 'clsx';
-import { defaultApi } from '../lib/api';
+import { defaultApi, ApiError } from '../lib/api';
 import { useScope } from '../hooks/useScope';
 import { DEFAULT_SCOPE } from '../lib/scope';
 import { useFocusTrap } from '../hooks/useFocusTrap';
 import type { CredentialSummary, StoreCredentialRequest } from '../lib/types';
 import { Badge } from '../components/Badge';
 import { FormField, fieldInputMono } from '../components/FormField';
+import { useToast } from '../components/Toast';
 import { StatCard } from '../components/StatCard';
 import { ds } from '../lib/design-system';
 
@@ -64,6 +65,12 @@ function fmtRelative(ms: number | null | undefined): string {
 
 function typeLabel(credType: string): string {
   return CREDENTIAL_TYPES.find(t => t.value === credType)?.label ?? credType;
+}
+
+function errorMessage(e: unknown, fallback: string): string {
+  if (e instanceof ApiError) return e.message || fallback;
+  if (e instanceof Error) return e.message || fallback;
+  return fallback;
 }
 
 /** Maps credential type to a Badge variant. */
@@ -158,6 +165,7 @@ function AddCredentialModal({
   onCreated: () => void;
 }) {
   const formId = useId();
+  const toast = useToast();
 
   const [form, setForm] = useState<AddCredentialFormState>({
     tenant_id:       initialTenantId,
@@ -175,6 +183,12 @@ function AddCredentialModal({
     onSuccess: () => {
       onCreated();
       onClose();
+    },
+    onError: (e) => {
+      // Surface 400/409/500 from the backend so the modal isn't silent (#162).
+      // The in-modal `mutErr` still renders; this also pushes a toast for
+      // operators who clicked away while waiting on the request.
+      toast.error(errorMessage(e, 'Failed to store credential.'));
     },
   });
 
@@ -246,7 +260,7 @@ function AddCredentialModal({
               type="text"
               value={form.tenant_id}
               onChange={e => set('tenant_id', e.target.value)}
-              placeholder="default"
+              placeholder={DEFAULT_SCOPE.tenant_id}
               className={clsx(
                 fieldInputMono,
                 fieldErr.tenant_id && 'border-red-500/60 focus:border-red-500',
