@@ -221,7 +221,9 @@ export function WorkspacesPage() {
         name: workspaceId,
       }),
     onError: (e: unknown) =>
-      toast.error(e instanceof Error ? e.message : 'Failed to create workspace.'),
+      toast.error(
+        e instanceof Error && e.message ? e.message : 'Failed to create workspace.',
+      ),
   });
 
   const isLoading  = wsLoading;

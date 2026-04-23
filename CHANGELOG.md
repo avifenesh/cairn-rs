@@ -60,8 +60,8 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   Runs — that were permanently pinned to `0` because the list endpoint
   `GET /v1/admin/tenants/:tenant_id/workspaces` only emits the
   `WorkspaceRecord` fields (id, name, timestamps) and no per-workspace
-  aggregates, and the row build-up in `workspaces.useMemo` never
-  populated the counters. The tiles were therefore actively misleading
+  aggregates, and the `workspaces` `useMemo` builder never populated
+  the counters. The tiles were therefore actively misleading
   ("this workspace has zero runs" when it actually has many). Rather
   than extend the store layer across three backends to aggregate
   sessions/runs/projects per workspace for a list page, the tiles (and
