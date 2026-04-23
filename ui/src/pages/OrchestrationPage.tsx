@@ -8,7 +8,7 @@
  */
 
 import type { ReactNode } from "react";
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { ErrorFallback } from "../components/ErrorFallback";
 import {
@@ -20,7 +20,7 @@ import { clsx } from "clsx";
 import { Drawer } from "../components/Drawer";
 import { useToast } from "../components/Toast";
 import { defaultApi } from "../lib/api";
-import { useEventStream } from "../hooks/useEventStream";
+import { useEventStream, MAX_EVENTS as STREAM_BUFFER_MAX } from "../hooks/useEventStream";
 import type {
   SessionRecord, RunRecord, TaskRecord, InterventionAction, InterveneRequest,
 } from "../lib/types";
@@ -641,42 +641,113 @@ export function OrchestrationPage() {
 
   const { events: streamEvents, status: sseStatus } = useEventStream();
 
-  // On new SSE events: refetch relevant data and mark new node IDs as fresh
+  // Dedupe SSE events across renders — the effect below re-runs on every
+  // new streamEvents reference. The previous code read
+  // `streamEvents[length - 1]`, which (because `useEventStream` prepends
+  // frames, newest-first) is actually the OLDEST buffered event — so
+  // that same stale event was reprocessed on every state change
+  // (issue #177). Keying on the server-assigned event id makes each
+  // frame process-once.
+  //
+  // Bounding: `useEventStream` caps its internal buffer, so sizing the
+  // seen-set a few multiples above it keeps dedupe permanently O(buffer)
+  // without dropping valid entries. Pulling the cap from the exported
+  // `MAX_EVENTS` avoids a stale hardcoded value here if the buffer size
+  // ever changes.
+  const SEEN_CAP = STREAM_BUFFER_MAX * 5;
+  const seenEventIds = useRef(new Set<string>());
+  // Track fresh-highlight timeouts so they can be cleared on unmount
+  // (or when superseded for the same id). Previously these leaked: the
+  // effect scheduled a setTimeout per event with no cleanup, so a tab
+  // left open accumulated callbacks indefinitely.
+  const freshTimeouts = useRef(new Map<string, ReturnType<typeof setTimeout>>());
+
+  // On new SSE events: refetch relevant data and mark new node IDs as fresh.
+  // `streamEvents` is newest-first (see `useEventStream`: `[parsed, ...events]`),
+  // so we iterate in reverse to process events in causal order and handle
+  // any that arrived between renders — not just the most recent one.
   useEffect(() => {
     if (streamEvents.length === 0) return;
-    const latest = streamEvents[streamEvents.length - 1];
-    const type   = latest.type;
-    const payload = latest.payload as Record<string, unknown> | null;
 
-    // Derive the new entity ID from the payload
-    let newId: string | null = null;
-    if (type === "session_created")   { newId = (payload as Record<string, unknown> | null)?.session_id as string; }
-    if (type === "run_created")        { newId = (payload as Record<string, unknown> | null)?.run_id     as string; }
-    if (type === "task_created")       { newId = (payload as Record<string, unknown> | null)?.task_id    as string; }
+    let needSessions = false;
+    let needRuns     = false;
+    let needTasks    = false;
 
-    // Trigger refetch
-    if (type.includes("session"))      { void rSessions(); }
-    if (type.includes("run"))          { void rRuns(); }
-    if (type.includes("task"))         { void rTasks(); }
+    for (let i = streamEvents.length - 1; i >= 0; i--) {
+      const ev = streamEvents[i];
+      if (seenEventIds.current.has(ev.id)) continue;
+      seenEventIds.current.add(ev.id);
 
-    // Mark as fresh for 3 s
-    if (newId) {
-      setFreshIds(prev => new Set([...prev, newId as string]));
-      setTimeout(() => {
-        setFreshIds(prev => { const next = new Set(prev); next.delete(newId as string); return next; });
-      }, 3_000);
+      const type    = ev.type;
+      const payload = (ev.payload ?? {}) as Record<string, unknown>;
 
-      // Auto-expand the parent
-      if (type === "run_created") {
-        const sessionId = (payload as Record<string, unknown> | null)?.session_id as string | undefined;
-        if (sessionId) setExpandedSessions(p => new Set([...p, sessionId]));
+      // Accept both snake_case and camelCase — some event emitters
+      // serialize with camelCase and matching both avoids silently
+      // dropping the fresh-highlight + auto-expand for those frames.
+      const sessionId = (payload.session_id ?? payload.sessionId) as string | undefined;
+      const runId     = (payload.run_id     ?? payload.runId)     as string | undefined;
+      const taskId    = (payload.task_id    ?? payload.taskId)    as string | undefined;
+
+      let newId: string | undefined;
+      if (type === "session_created")    newId = sessionId;
+      else if (type === "run_created")   newId = runId;
+      else if (type === "task_created")  newId = taskId;
+
+      if (type.includes("session")) needSessions = true;
+      if (type.includes("run"))     needRuns     = true;
+      if (type.includes("task"))    needTasks    = true;
+
+      // Mark as fresh for 3 s
+      if (newId) {
+        const freshId = newId;
+        setFreshIds(prev => new Set([...prev, freshId]));
+        // Clear any prior timeout for this id before scheduling a new one.
+        const prior = freshTimeouts.current.get(freshId);
+        if (prior !== undefined) clearTimeout(prior);
+        const handle = setTimeout(() => {
+          setFreshIds(prev => { const next = new Set(prev); next.delete(freshId); return next; });
+          freshTimeouts.current.delete(freshId);
+        }, 3_000);
+        freshTimeouts.current.set(freshId, handle);
+
+        // Auto-expand the parent
+        if (type === "run_created" && sessionId) {
+          setExpandedSessions(p => new Set([...p, sessionId]));
+        }
+        if (type === "task_created" && runId) {
+          setExpandedRuns(p => new Set([...p, runId]));
+        }
       }
-      if (type === "task_created") {
-        const runId = (payload as Record<string, unknown> | null)?.run_id as string | undefined;
-        if (runId) setExpandedRuns(p => new Set([...p, runId]));
+    }
+
+    // Coalesce refetches so a burst of events triggers at most one of each.
+    if (needSessions) void rSessions();
+    if (needRuns)     void rRuns();
+    if (needTasks)    void rTasks();
+
+    // Bound the dedupe set: drop the oldest insertion-order entries once
+    // we cross the cap. Set iteration order is insertion order, so this
+    // is a cheap O(overflow) trim and preserves the most recent ids.
+    if (seenEventIds.current.size > SEEN_CAP) {
+      const overflow = seenEventIds.current.size - SEEN_CAP;
+      const it = seenEventIds.current.values();
+      for (let n = 0; n < overflow; n++) {
+        const next = it.next();
+        if (next.done) break;
+        seenEventIds.current.delete(next.value);
       }
     }
   }, [streamEvents, rSessions, rRuns, rTasks]);
+
+  // Clear pending fresh-highlight timeouts on unmount to avoid leaking
+  // callbacks that would run after the component is gone.
+  useEffect(() => {
+    const timeouts = freshTimeouts.current;
+    return () => {
+      for (const handle of timeouts.values()) clearTimeout(handle);
+      timeouts.clear();
+    };
+  }, []);
 
   // Auto-expand active sessions and their running runs on first load
   useEffect(() => {
