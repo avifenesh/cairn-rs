@@ -6,7 +6,7 @@
  * so the scrollbar thumb matches the full data size.
  */
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   RefreshCw, Loader2, AlertTriangle, CheckCircle2,
@@ -326,6 +326,13 @@ export function TracesPage() {
 
   const [filterQuery, setFilterQuery] = useState('');
   const [selected, setSelected]       = useState<LlmCallTrace | null>(null);
+
+  // Drop the selected trace whenever scope changes so the drawer
+  // can't keep showing metadata for a trace that no longer belongs
+  // to the current tenant/workspace/project (cross-scope UI leak).
+  useEffect(() => {
+    setSelected(null);
+  }, [scope.tenant_id, scope.workspace_id, scope.project_id]);
 
   const { data, isLoading, isError, error, refetch, isFetching } = useQuery({
     // Scope is part of the key so switching tenant/workspace/project

@@ -19,6 +19,7 @@ import {
 } from 'lucide-react';
 import { clsx } from 'clsx';
 import { defaultApi } from '../lib/api';
+import { useScope } from '../hooks/useScope';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -272,6 +273,7 @@ export function GlobalSearch({ initialQuery = '', onClose, onBack }: GlobalSearc
   const inputRef                  = useRef<HTMLInputElement>(null);
   const debouncedQuery            = useDebounce(query, 300);
   const enabled                   = debouncedQuery.trim().length >= 2;
+  const [scope]                   = useScope();
 
   useEffect(() => {
     requestAnimationFrame(() => inputRef.current?.focus());
@@ -309,8 +311,16 @@ export function GlobalSearch({ initialQuery = '', onClose, onBack }: GlobalSearc
         retry: false,
       },
       {
-        queryKey: ['traces'],
-        queryFn:  () => defaultApi.getTraces({ limit: 500 }),
+        // Scope tuple is part of the key so switching tenant/workspace/project
+        // doesn't surface cached trace IDs from another scope in the search
+        // results (defaultApi.getTraces folds scope into the request URL).
+        queryKey: ['traces', scope.tenant_id, scope.workspace_id, scope.project_id],
+        queryFn:  () => defaultApi.getTraces({
+          limit:        500,
+          tenant_id:    scope.tenant_id,
+          workspace_id: scope.workspace_id,
+          project_id:   scope.project_id,
+        }),
         enabled,
         staleTime: 60_000,
         retry: false,

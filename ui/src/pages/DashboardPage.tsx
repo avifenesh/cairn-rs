@@ -29,6 +29,7 @@ import { MiniChart } from "../components/MiniChart";
 import { BarChart } from "../components/BarChart";
 import { defaultApi } from "../lib/api";
 import { useAutoRefresh, REFRESH_OPTIONS } from "../hooks/useAutoRefresh";
+import { useScope } from "../hooks/useScope";
 import type { StatCardVariant } from "../components/StatCard";
 import type { CostSummary, HealthCheckEntry, RunRecord, TaskRecord } from "../lib/types";
 
@@ -828,9 +829,17 @@ function fmtTokensShort(n: number): string {
 }
 
 function ModelUsageWidget() {
+  const [scope] = useScope();
   const { data: tracesData, isLoading } = useQuery({
-    queryKey: ["traces-model-usage"],
-    queryFn:  () => defaultApi.getTraces({ limit: 200 }),
+    // Scope tuple is part of the key so switching tenant/workspace/project
+    // doesn't serve cached traces from the previous scope.
+    queryKey: ["traces-model-usage", scope.tenant_id, scope.workspace_id, scope.project_id],
+    queryFn:  () => defaultApi.getTraces({
+      limit:        200,
+      tenant_id:    scope.tenant_id,
+      workspace_id: scope.workspace_id,
+      project_id:   scope.project_id,
+    }),
     refetchInterval: 60_000,
     staleTime: 30_000,
     retry: false,
