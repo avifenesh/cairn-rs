@@ -8,7 +8,7 @@ import { DataTable } from "../components/DataTable";
 import { useTableKeyboard } from "../hooks/useTableKeyboard";
 import { useToast } from "../components/Toast";
 import { CopyButton } from "../components/CopyButton";
-import { defaultApi } from "../lib/api";
+import { defaultApi, ApiError } from "../lib/api";
 import type { RunRecord, RunState } from "../lib/types";
 import { TimelineView, ZoomSelector } from "../components/TimelineView";
 import type { ZoomLevel } from "../components/TimelineView";
@@ -74,11 +74,15 @@ function BatchCreateModal({ onClose, onDone }: BatchCreateModalProps) {
       const sid = sessionId.trim() || `sess_${Date.now()}`;
       const pfx = prefix.trim() || `run-${Date.now()}-`;
 
-      // Ensure session exists before creating runs
+      // Ensure session exists before creating runs. A 409 means the
+      // session already exists — the desired end-state, so swallow it.
+      // Any other failure (auth / scope / validation / network) must
+      // surface through onError so the operator sees the real cause
+      // instead of N confusing "session not found" per-run errors.
       try {
         await defaultApi.createSession({ session_id: sid });
-      } catch {
-        // Session may already exist — that's fine
+      } catch (e) {
+        if (!(e instanceof ApiError && e.status === 409)) throw e;
       }
 
       const runs = Array.from({ length: count }, (_, i) => ({
@@ -222,7 +226,7 @@ export function RunsPage() {
   const kbd = useTableKeyboard({
     items:  filtered,
     getKey: r => r.run_id,
-    onOpen: r => { window.location.hash = `run/${r.run_id}`; },
+    onOpen: r => { window.location.hash = `run/${encodeURIComponent(r.run_id)}`; },
   });
 
   function exportSelected() {
@@ -345,7 +349,7 @@ export function RunsPage() {
             activeIndex={kbd.activeIndex}
             selectedIds={kbd.selectedKeys}
             getRowId={r => r.run_id}
-            onRowClick={r => { window.location.hash = `run/${r.run_id}`; kbd.setActiveIndex(filtered.indexOf(r)); }}
+            onRowClick={r => { window.location.hash = `run/${encodeURIComponent(r.run_id)}`; kbd.setActiveIndex(filtered.indexOf(r)); }}
             columns={[
               { key: 'run_id',    header: 'Run ID',    render: r => <span className="flex items-center gap-1 font-mono text-[12px] text-gray-700 dark:text-zinc-300 whitespace-nowrap group/id" title={r.run_id}>{shortId(r.run_id)}<CopyButton text={r.run_id} label="Copy run ID" size={10} className="opacity-0 group-hover/id:opacity-100" /></span>, sortValue: r => r.run_id },
               { key: 'session',   header: 'Session',   render: r => <span className="flex items-center gap-1 font-mono text-[11px] text-gray-400 dark:text-zinc-500 whitespace-nowrap group/id" title={r.session_id}>{shortId(r.session_id)}<CopyButton text={r.session_id} label="Copy session ID" size={10} className="opacity-0 group-hover/id:opacity-100" /></span> },
