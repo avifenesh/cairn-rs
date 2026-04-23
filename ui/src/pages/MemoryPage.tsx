@@ -9,6 +9,34 @@ import { useScope } from '../hooks/useScope';
 import { useToast } from '../components/Toast';
 import type { MemoryChunkResult, SourceRecord } from '../lib/types';
 
+// ── source_type enum ──────────────────────────────────────────────────────────
+//
+// Mirrors `SourceType` in crates/cairn-memory/src/ingest.rs (serde
+// rename_all = "snake_case"). Keep in sync — the backend rejects any other
+// value with 422.
+const SOURCE_TYPES = [
+  'plain_text',
+  'markdown',
+  'html',
+  'structured_json',
+  'json_structured',
+  'knowledge_pack',
+] as const;
+type SourceTypeValue = typeof SOURCE_TYPES[number];
+
+const SOURCE_TYPE_LABEL: Record<SourceTypeValue, string> = {
+  plain_text:      'Plain text',
+  markdown:        'Markdown',
+  html:            'HTML',
+  structured_json: 'Structured JSON',
+  json_structured: 'JSON structured',
+  knowledge_pack:  'Knowledge pack',
+};
+
+function isSourceType(v: string): v is SourceTypeValue {
+  return (SOURCE_TYPES as readonly string[]).includes(v);
+}
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function truncate(s: string, n: number) {
@@ -137,14 +165,14 @@ function IngestForm() {
   const [sourceId,   setSourceId]   = useState('');
   const [documentId, setDocumentId] = useState('');
   const [content,    setContent]    = useState('');
-  const [sourceType, setSourceType] = useState('');
+  const [sourceType, setSourceType] = useState<SourceTypeValue>('plain_text');
 
   const { mutate, isPending } = useMutation({
     mutationFn: () => defaultApi.ingestMemory({
       source_id:    sourceId.trim(),
       document_id:  documentId.trim(),
       content,
-      ...(sourceType.trim() ? { source_type: sourceType.trim() } : {}),
+      source_type:  sourceType,
       // Pass scope explicitly so the ingest is pinned to the scope the
       // operator saw in the tooltip at submit time — no drift if the
       // active scope in localStorage flips before the mutation resolves.
@@ -209,12 +237,27 @@ function IngestForm() {
         />
       </div>
 
-      <input
-        value={sourceType}
-        onChange={e => setSourceType(e.target.value)}
-        placeholder="source_type (optional: web, file, api, …)"
-        className="w-full rounded-md bg-white dark:bg-zinc-950 border border-gray-200 dark:border-zinc-800 px-3 h-8 text-xs text-gray-800 dark:text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
-      />
+      <div className="flex items-center gap-2">
+        <label
+          htmlFor="memory-ingest-source-type"
+          className="text-[11px] text-gray-500 dark:text-zinc-400 shrink-0 w-24"
+        >
+          Source type
+        </label>
+        <select
+          id="memory-ingest-source-type"
+          value={sourceType}
+          onChange={e => {
+            const next = e.target.value;
+            if (isSourceType(next)) setSourceType(next);
+          }}
+          className="flex-1 rounded-md bg-white dark:bg-zinc-950 border border-gray-200 dark:border-zinc-800 px-3 h-8 text-xs text-gray-800 dark:text-zinc-200 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
+        >
+          {SOURCE_TYPES.map(t => (
+            <option key={t} value={t}>{SOURCE_TYPE_LABEL[t]}</option>
+          ))}
+        </select>
+      </div>
 
       <textarea
         value={content}
