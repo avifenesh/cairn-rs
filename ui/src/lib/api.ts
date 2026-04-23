@@ -964,13 +964,43 @@ export function createApiClient(config: ApiClientConfig) {
     uninstallPlugin: (pluginId: string): Promise<unknown> =>
       del(`/v1/plugins/${encodeURIComponent(pluginId)}/uninstall`),
 
-    /** POST /v1/projects/:project/plugins/:id/enable — enable plugin for project. */
-    enablePluginForProject: (project: string, pluginId: string, body?: unknown): Promise<unknown> =>
-      post(`/v1/projects/${encodeURIComponent(project)}/plugins/${encodeURIComponent(pluginId)}/enable`, body),
+    /**
+     * POST /v1/projects/:project/plugins/:id — enable plugin for project.
+     *
+     * The backend route (`marketplace_routes.rs`) registers this as
+     * `POST /v1/projects/:proj/plugins/:id` with NO `/enable` suffix, and
+     * `:proj` is parsed as "tenant_id/workspace_id/project_id". Sending a
+     * 1-segment id silently falls back to `default_tenant/default_workspace/<id>`
+     * — the same cross-tenant leak that PR #132 closed for TriggersPage.
+     * Axum 0.7 captures a single segment so `/` characters MUST be
+     * percent-encoded on the wire. Callers pass the active scope; the
+     * config-scope fallback mirrors `attachProjectRepo`.
+     */
+    enablePluginForProject: (
+      pluginId: string,
+      scope?: import("./scope").ProjectScope,
+      body?: unknown,
+    ): Promise<unknown> => {
+      const s = scope ?? config.scope ?? DEFAULT_SCOPE;
+      const path = encodeURIComponent(`${s.tenant_id}/${s.workspace_id}/${s.project_id}`);
+      return post(`/v1/projects/${path}/plugins/${encodeURIComponent(pluginId)}`, body);
+    },
 
-    /** DELETE /v1/projects/:project/plugins/:id/disable — disable plugin for project. */
-    disablePluginForProject: (project: string, pluginId: string): Promise<unknown> =>
-      post(`/v1/projects/${encodeURIComponent(project)}/plugins/${encodeURIComponent(pluginId)}/disable`),
+    /**
+     * DELETE /v1/projects/:project/plugins/:id — disable plugin for project.
+     *
+     * Same path contract as enable above; method is DELETE (not POST) and
+     * the URL has no `/disable` suffix. The old code 405'd in the browser
+     * because it POSTed to a path that only accepts DELETE.
+     */
+    disablePluginForProject: (
+      pluginId: string,
+      scope?: import("./scope").ProjectScope,
+    ): Promise<unknown> => {
+      const s = scope ?? config.scope ?? DEFAULT_SCOPE;
+      const path = encodeURIComponent(`${s.tenant_id}/${s.workspace_id}/${s.project_id}`);
+      return del(`/v1/projects/${path}/plugins/${encodeURIComponent(pluginId)}`);
+    },
 
     // ── Plan Review (RFC 018) ──────────────────────────────────────────────────
 
