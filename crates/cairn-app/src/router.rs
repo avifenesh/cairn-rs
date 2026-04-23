@@ -1317,7 +1317,7 @@ impl AppBootstrap {
             )
             .route(
                 "/v1/prompts/releases/:id/request-approval",
-                post(request_approval_handler),
+                post(request_prompt_release_approval_handler),
             )
             // ── Feed ──────────────────────────────────────────────────────────────────
             .route("/v1/feed/:id/read", post(mark_feed_item_read_handler))

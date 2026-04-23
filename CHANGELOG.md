@@ -193,6 +193,21 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **Backend: `POST /v1/prompts/releases/:id/request-approval` routed to
+  the wrong handler (closes #222).** QA2 Slice 9 surfaced a 422 on every
+  "Request Approval" click (`missing field approval_id`). Two routes
+  registered the path — the later (and winning) one dispatched to the
+  generic `request_approval_handler`, which deserializes the body into
+  `RequestApprovalRequest { tenant_id, workspace_id, project_id, approval_id, … }`
+  and 422'd on the empty body the UI posts. Fixed the duplicate route
+  to use `request_prompt_release_approval_handler`, which takes only
+  the path id and looks up the release's project server-side. The UI
+  `requestPromptReleaseApproval` call now also wraps its body via
+  `withScope(…)` for consistency with `createPromptVersion`,
+  `createPromptRelease`, and `getPromptReleases`. `test_http_prompts.rs`
+  now covers the full asset → version → release → request-approval
+  roundtrip as a regression guard.
+
 - **UI: `MemoryPage` — ingest `source_type` is now a dropdown of valid
   enum values (closes #219).** The ingest form shipped a free-text input
   with a placeholder suggesting `web, file, api, …` — none of which are

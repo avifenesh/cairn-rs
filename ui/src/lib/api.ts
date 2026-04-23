@@ -1676,7 +1676,7 @@ export function createApiClient(config: ApiClientConfig) {
 
     /** POST /v1/prompts/releases/:id/request-approval — request approval gate. */
     requestPromptReleaseApproval: (releaseId: string): Promise<unknown> =>
-      post(`/v1/prompts/releases/${encodeURIComponent(releaseId)}/request-approval`, {}),
+      post(`/v1/prompts/releases/${encodeURIComponent(releaseId)}/request-approval`, withScope()),
 
     /** POST /v1/prompts/releases/:id/rollback — roll back to a previous release. */
     rollbackPromptRelease: (releaseId: string, targetReleaseId: string): Promise<import("./types").PromptReleaseRecord> =>
