@@ -116,8 +116,21 @@ pub(crate) fn runtime_error_response(err: cairn_runtime::RuntimeError) -> axum::
             err.to_string(),
         )
         .into_response(),
-        cairn_runtime::RuntimeError::InvalidTransition { .. }
-        | cairn_runtime::RuntimeError::LeaseExpired { .. }
+        // Invalid state transitions (e.g. pause on a non-running run,
+        // resolve an already-decided approval, activate a draft prompt
+        // release) are 409 Conflict, not 422: the request is well-formed
+        // syntactically but the resource is in a state that cannot accept
+        // the operation. Closes #216 — previously `pause` on a pending
+        // run landed in a "fabric layer error" 500 because the FF
+        // suspend-rejection codes were shadowed by `RuntimeError::Internal`;
+        // they now round-trip as `InvalidTransition` and surface as 409.
+        cairn_runtime::RuntimeError::InvalidTransition { .. } => AppApiError::new(
+            StatusCode::CONFLICT,
+            "invalid_state_transition",
+            err.to_string(),
+        )
+        .into_response(),
+        cairn_runtime::RuntimeError::LeaseExpired { .. }
         | cairn_runtime::RuntimeError::Validation { .. } => {
             validation_error_response(err.to_string())
         }

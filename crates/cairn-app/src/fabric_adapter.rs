@@ -186,6 +186,31 @@ fn fabric_err_to_runtime(err: FabricError) -> RuntimeError {
                 id: code,
             }
         }
+        // FF FCALL rejections that mean "resource is not in a state that
+        // accepts this operation" — e.g. pause on a pending run with no
+        // lease (`fence_required`), pause on a terminal run
+        // (`execution_not_active`), or pause on a run whose lease has
+        // moved on (`stale_lease`, `invalid_lease_for_suspend`,
+        // `already_suspended`). These are not server faults; they are
+        // operator-visible state conflicts that the HTTP layer surfaces
+        // as 409 Conflict via `RuntimeError::InvalidTransition`. Closes
+        // #216 — previously these collapsed into a 500.
+        FabricError::Internal(ref msg) if is_suspend_state_conflict(msg) => {
+            let code = msg
+                .rsplit_once(": ")
+                .map(|(_, c)| c.trim().to_owned())
+                .unwrap_or_else(|| "invalid_state".to_owned());
+            tracing::debug!(
+                fabric_err = %msg,
+                code = %code,
+                "fabric suspend/resume state conflict (409 to caller)"
+            );
+            RuntimeError::InvalidTransition {
+                entity: "run",
+                from: code,
+                to: "suspended".into(),
+            }
+        }
         // SEC-007: Valkey / script / bridge / config / internal variants
         // carry FCALL names, key names, and occasionally secret-hash
         // references — none of which should reach the 500 response body.
@@ -196,6 +221,42 @@ fn fabric_err_to_runtime(err: FabricError) -> RuntimeError {
             RuntimeError::Internal("fabric layer error".into())
         }
     }
+}
+
+/// FF typed error codes emitted by `ff_suspend_execution` and
+/// `ff_resume_execution` when the request is rejected because the
+/// execution is not in a state that can accept the transition. Unlike
+/// [`is_claim_contention`], these are operator-visible state conflicts
+/// (rather than caller-retriable races) and map to
+/// `RuntimeError::InvalidTransition` → HTTP 409 via the app's
+/// `runtime_error_response`.
+///
+/// The codes come from `ff-script::flowfabric.lua` — see
+/// `ff_suspend_execution` and `validate_lease_and_mark_expired`.
+fn is_suspend_state_conflict(msg: &str) -> bool {
+    const STATE_CODES: &[&str] = &[
+        // No lease / partial fence triple — run has not been claimed
+        // yet (typical for a pending run the operator tries to pause).
+        "fence_required",
+        "partial_fence_triple",
+        // Run is in a terminal phase (completed, failed, cancelled) or
+        // otherwise not in `active` lifecycle_phase.
+        "execution_not_active",
+        // Lease was revoked before suspend landed.
+        "lease_revoked",
+        // Lease moved on — stale epoch / id / attempt_id.
+        "stale_lease",
+        "invalid_lease_for_suspend",
+        // A suspension is already open for this execution.
+        "already_suspended",
+        // Waitpoint exists but is in an unexpected shape (pending
+        // record without a minted HMAC token, etc.).
+        "waitpoint_not_token_bound",
+    ];
+    let Some((_, code)) = msg.rsplit_once(": ") else {
+        return false;
+    };
+    STATE_CODES.contains(&code.trim())
 }
 
 /// FF typed error codes that represent caller-retriable contention rather

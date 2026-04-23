@@ -120,6 +120,37 @@ where
             });
         }
 
+        // Closes #217: reject duplicate `(tenant_id, provider_id)` so two
+        // back-to-back POSTs with the same provider don't silently
+        // accumulate active credentials (the projection keyed on
+        // credential_id would happily return two rows). A revoked
+        // credential with the same provider_id is allowed — operators
+        // rotate by revoke-then-create, and blocking that would be a
+        // silent regression. Callers who genuinely need to replace an
+        // active credential must revoke it first.
+        //
+        // `list_by_tenant` is the cheapest portable check: the read
+        // model is already built per tenant, and tenants typically carry
+        // O(10) credentials. Switching to a dedicated projection lookup
+        // is a measurable optimization only if a tenant grows past a
+        // few hundred active credentials.
+        let existing = CredentialReadModel::list_by_tenant(
+            self.store.as_ref(),
+            &tenant_id,
+            usize::MAX,
+            0,
+        )
+        .await?;
+        if existing
+            .iter()
+            .any(|c| c.active && c.provider_id == provider_id)
+        {
+            return Err(RuntimeError::Conflict {
+                entity: "credential",
+                id: format!("provider={provider_id} tenant={tenant_id}"),
+            });
+        }
+
         let encrypted_at_ms = now_ms();
         let encrypted_value = encrypt_value(
             &tenant_id,
