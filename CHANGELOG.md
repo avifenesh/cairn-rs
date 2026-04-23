@@ -110,22 +110,23 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
-- **UI: `OrchestrationPage` re-processed every SSE event per render and
-  leaked `setTimeout` callbacks on unmount (#177).** The stream effect
-  depended on the whole `streamEvents` array and read
-  `streamEvents[length - 1]`, but `useEventStream` prepends frames
-  (newest-first), so every render re-handled the OLDEST buffered event
-  — spurious refetches + fresh highlights per unrelated state change —
-  and the 3 s fresh-clear `setTimeout` it scheduled had no cleanup
-  (timeouts accumulated for the life of the tab). Fixed by iterating
-  `streamEvents` in reverse so events are processed exactly once in
-  causal order (dedupe via a `useRef<Set>` of server-assigned event
-  ids, capped at 256 with oldest-insertion-order eviction), tracking
-  pending highlight timeouts in a `useRef<Map>` that clears them on
-  supersede + unmount, and coalescing refetches so an event burst
-  triggers at most one `rSessions`/`rRuns`/`rTasks`. Payload ids read
-  both snake_case and camelCase to match the pattern in
-  `RunDetailPage`. Operator actions wired in PR P are untouched.
+- **UI: `OrchestrationPage` re-processed the oldest buffered SSE event
+  on each SSE update and leaked `setTimeout` callbacks on unmount
+  (#177).** The stream effect depended on the whole `streamEvents`
+  array and read `streamEvents[length - 1]`, but `useEventStream`
+  prepends frames (newest-first), so each new stream frame re-handled
+  the OLDEST buffered event — spurious refetches + fresh highlights
+  per unrelated state change — and the 3 s fresh-clear `setTimeout`
+  it scheduled had no cleanup (timeouts accumulated for the life of
+  the tab). Fixed by iterating `streamEvents` in reverse so events
+  are processed exactly once in causal order (dedupe via a
+  `useRef<Set>` of server-assigned event ids, capped at 256 with
+  oldest-insertion-order eviction), tracking pending highlight
+  timeouts in a `useRef<Map>` that clears them on supersede +
+  unmount, and coalescing refetches so an event burst triggers at
+  most one `rSessions`/`rRuns`/`rTasks`. Payload ids read both
+  snake_case and camelCase to match the pattern in `RunDetailPage`.
+  Operator actions wired in PR P are untouched.
 
 - **UI: `SessionsPage` per-row run count was O(N*M) per render (#180).**
   Replaced the per-row `allRuns.filter(...)` scan with a memoized

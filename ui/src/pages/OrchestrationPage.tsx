@@ -20,7 +20,7 @@ import { clsx } from "clsx";
 import { Drawer } from "../components/Drawer";
 import { useToast } from "../components/Toast";
 import { defaultApi } from "../lib/api";
-import { useEventStream } from "../hooks/useEventStream";
+import { useEventStream, MAX_EVENTS as STREAM_BUFFER_MAX } from "../hooks/useEventStream";
 import type {
   SessionRecord, RunRecord, TaskRecord, InterventionAction, InterveneRequest,
 } from "../lib/types";
@@ -646,10 +646,12 @@ export function OrchestrationPage() {
   // entry even when we had already seen it (issue #177). Keying on the
   // server-assigned event id makes each frame process-once.
   //
-  // Bounding: `useEventStream` caps its internal buffer at MAX_EVENTS=50,
-  // so pruning our seen-set to the same order of magnitude keeps it
-  // permanently O(buffer) without dropping valid dedupe entries.
-  const SEEN_CAP = 256;
+  // Bounding: `useEventStream` caps its internal buffer, so sizing the
+  // seen-set a few multiples above it keeps dedupe permanently O(buffer)
+  // without dropping valid entries. Pulling the cap from the exported
+  // `MAX_EVENTS` avoids a stale hardcoded value here if the buffer size
+  // ever changes.
+  const SEEN_CAP = STREAM_BUFFER_MAX * 5;
   const seenEventIds = useRef(new Set<string>());
   // Track fresh-highlight timeouts so they can be cleared on unmount
   // (or when superseded for the same id). Previously these leaked: the
