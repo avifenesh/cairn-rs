@@ -77,7 +77,11 @@ async fn list_skills_returns_registered_entries() {
     let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
 
     let items = json["items"].as_array().expect("items array");
-    assert_eq!(items.len(), 2, "both registered skills must surface: {json}");
+    assert_eq!(
+        items.len(),
+        2,
+        "both registered skills must surface: {json}"
+    );
     // Catalog.list() sorts by skill_id.
     assert_eq!(items[0]["skill_id"], "coder");
     assert_eq!(items[0]["enabled"], true);
@@ -89,7 +93,9 @@ async fn list_skills_returns_registered_entries() {
     assert_eq!(json["summary"]["enabled"], 1);
     assert_eq!(json["summary"]["disabled"], 1);
 
-    let active = json["currently_active"].as_array().expect("currently_active");
+    let active = json["currently_active"]
+        .as_array()
+        .expect("currently_active");
     assert_eq!(active.len(), 1, "only `coder` is Active");
     assert_eq!(active[0], "coder");
 }
