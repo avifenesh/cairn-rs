@@ -53,6 +53,26 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **DecisionsPage Cache tab crashed with "Objects are not valid as a
+  React child" (closes #240).** The UI `CacheEntry.outcome` type
+  declared `string`, but `GET /v1/decisions/cache` emits the same
+  nested `{outcome, deny_reason?}` struct as `Decision.outcome`, so
+  `OutcomePill` received an object and React bailed. `scope` was
+  similarly a `ProjectScope` object being rendered directly. The
+  `CacheEntry` type now mirrors the wire shape, the outcome column
+  reads `r.outcome.outcome`, and `scope` is folded to a
+  `tenant/workspace/project` label via `scopeLabel`. Row keys moved
+  from the non-existent `key` field to `decision_id`.
+
+- **AuditLog "Older" pagination permanently disabled (closes #239).**
+  The backend returns `cairn_api::ListResponse<T>` which serializes
+  via `#[serde(rename_all = "camelCase")]`, so the wire envelope is
+  `{items, hasMore}`, but `AuditLogResponse` in `ui/src/lib/types.ts`
+  and the reader in `AuditLogPage.tsx` both read `has_more`. The
+  boolean was always `undefined`, so `Older` was always disabled.
+  Types and the reader now use `hasMore` to match the wire
+  contract.
+
 - **Eval `dataset_id` lost on restart (closes #220).** `POST
   /v1/evals/runs` persisted an `EvalRunStarted` event so runs would
   survive a reboot, but the event only carried prompt-asset /
