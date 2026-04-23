@@ -133,13 +133,34 @@ function unwrapRun(data: unknown): RunRecord {
 /**
  * Parse Prometheus exposition format text into a MetricsSnapshot object.
  *
- * The cairn backend emits lines like:
- *   http_requests_total{method="GET",path="/v1/runs",status="200"} 42
- *   http_request_duration_ms_sum{method="GET",path="/v1/runs"} 1234
- *   http_request_duration_ms_count{method="GET",path="/v1/runs"} 42
- *   http_request_duration_ms_bucket{method="GET",path="/v1/runs",le="100"} 40
- *   active_runs_total 3
- *   active_tasks_total 7
+ * The parser recognises two distinct metric families:
+ *
+ * 1. **`/v1/metrics/prometheus` (the cairn-app handler — primary path).**
+ *    Emits direct gauges computed from the live latency reservoir and
+ *    per-path / per-status counters. No histogram buckets.
+ *      cairn_http_requests_total                                 42
+ *      cairn_http_requests_by_path_total{path="/v1/runs"}        42
+ *      cairn_http_latency_ms{quantile="0.50"}                    12
+ *      cairn_http_latency_ms{quantile="0.95"}                    85
+ *      cairn_http_latency_ms{quantile="0.99"}                   140
+ *      cairn_http_latency_ms{quantile="avg"}                     18
+ *      cairn_http_error_rate                                      0.004
+ *      cairn_http_errors_by_status{status="500"}                  2
+ *
+ * 2. **Standard Prometheus histogram + generic counters (defensive
+ *    fallback).** Kept so the parser still works against any upstream
+ *    `text/plain` scrape that emits classical histogram buckets — e.g. a
+ *    future hardening of the endpoint or a proxy that re-exports buckets.
+ *      http_requests_total{method="GET",path="/v1/runs",status="200"} 42
+ *      http_request_duration_ms_sum{method="GET",path="/v1/runs"}   1234
+ *      http_request_duration_ms_count{method="GET",path="/v1/runs"}   42
+ *      http_request_duration_ms_bucket{method="GET",path="/v1/runs",le="100"} 40
+ *      active_runs_total                                              3
+ *      active_tasks_total                                             7
+ *
+ * Both forms accept an optional `cairn_` prefix (see #131). When both a
+ * direct quantile gauge and a bucket series are present, the direct
+ * gauge wins — the reservoir is authoritative.
  */
 function parsePrometheusMetrics(text: string): {
   total_requests: number;
