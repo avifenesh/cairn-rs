@@ -15,6 +15,15 @@
 
 import { ApiError } from "./api";
 
+export type RunAction =
+  | "pause"
+  | "resume"
+  | "orchestrate"
+  | "intervene"
+  | "recover"
+  | "claim"
+  | "diagnose";
+
 export interface FriendlyRunError {
   /** Operator-facing message. */
   message: string;
@@ -25,50 +34,87 @@ export interface FriendlyRunError {
 const RUN_TRANSITION_RE =
   /invalid\s+(run|sandbox)\s+transition(?:\s+for\s+run\s+\S+)?:\s*([A-Za-z0-9_]+)\s*->\s*([A-Za-z0-9_]+)/i;
 
-export function mapRunActionError(err: unknown, fallback: string): string {
-  const friendly = classifyRunError(err, fallback);
-  return friendly.message;
+/**
+ * Convenience wrapper that produces just the string to pass to `toast.error`.
+ * The optional `action` argument lets the classifier pick a verb that matches
+ * what the operator just clicked (e.g. "Cannot resume..." for resume, rather
+ * than always leaning on the target state).
+ */
+export function mapRunActionError(
+  err: unknown,
+  fallback: string,
+  action?: RunAction,
+): string {
+  return classifyRunError(err, fallback, action).message;
 }
 
-export function classifyRunError(err: unknown, fallback: string): FriendlyRunError {
+export function classifyRunError(
+  err: unknown,
+  fallback: string,
+  action?: RunAction,
+): FriendlyRunError {
   if (err instanceof ApiError) {
-    // Explicit 409 code from backend.
-    if (err.code === "invalid_state_transition" || err.status === 409) {
-      const parsed = parseTransitionMessage(err.message);
-      if (parsed) return { message: parsed, isStateTransition: true };
-      return {
-        message: "This run is not in a state that allows this action.",
-        isStateTransition: true,
-      };
+    // Only treat this as a state-machine error when the backend says so
+    // explicitly (code) or the message matches the canonical shape.
+    // Other 409s (e.g. `run_terminal` on inject_message) already carry
+    // actionable copy — don't collapse those.
+    const isTransition =
+      err.code === "invalid_state_transition" ||
+      RUN_TRANSITION_RE.test(err.message);
+    if (isTransition) {
+      const friendly = friendlyTransitionMessage(err.message, action);
+      return { message: friendly, isStateTransition: true };
     }
-    // Authentication / rate-limit / server-error — let the raw (but short)
-    // message through; it is already structured.
     return { message: err.message || fallback, isStateTransition: false };
   }
   if (err instanceof Error) {
-    const parsed = parseTransitionMessage(err.message);
-    if (parsed) return { message: parsed, isStateTransition: true };
+    if (RUN_TRANSITION_RE.test(err.message)) {
+      const friendly = friendlyTransitionMessage(err.message, action);
+      return { message: friendly, isStateTransition: true };
+    }
     return { message: err.message || fallback, isStateTransition: false };
   }
   return { message: fallback, isStateTransition: false };
 }
 
-function parseTransitionMessage(raw: string): string | null {
+/**
+ * Build the user-facing string for a state-transition error. Prefers the
+ * action the operator just took (unambiguous verb) over inferring from the
+ * target state, which can be wrong (e.g. a 409 on Resume also targets
+ * `running` but should say "Cannot resume", not "Cannot orchestrate").
+ */
+function friendlyTransitionMessage(raw: string, action?: RunAction): string {
   const m = RUN_TRANSITION_RE.exec(raw);
-  if (!m) return null;
-  const target = m[3].toLowerCase();
-  // Map known targets to verbs.
-  if (target === "suspended" || target === "paused") {
-    return "Cannot pause: the run is not in a pausable state right now.";
+  const target = m ? m[3].toLowerCase() : "";
+
+  switch (action) {
+    case "pause":
+      return "Cannot pause: the run is not in a pausable state right now.";
+    case "resume":
+      return "Cannot resume: the run is not paused.";
+    case "orchestrate":
+      return "Cannot orchestrate: this run has already finished — create a new run to continue.";
+    case "intervene":
+      return "Cannot intervene: the run is in a terminal state.";
+    case "recover":
+    case "claim":
+    case "diagnose":
+      return "Cannot complete this action in the run's current state.";
+    default:
+      // No action hint — infer from target state. Covers cases where the
+      // error bubbles up from somewhere that didn't pass an action (e.g.
+      // a generic Error from a non-mutation path).
+      if (target === "suspended" || target === "paused") {
+        return "Cannot pause: the run is not in a pausable state right now.";
+      }
+      if (target === "provisioning") {
+        return "Cannot orchestrate: this run has already finished — create a new run to continue.";
+      }
+      if (target === "canceled" || target === "cancelled") {
+        return "Cannot cancel: the run is already in a terminal state.";
+      }
+      return "This run cannot move to that state from its current state.";
   }
-  if (target === "running" || target === "provisioning") {
-    return "Cannot orchestrate: this run has already finished — create a new run to continue.";
-  }
-  if (target === "canceled" || target === "cancelled") {
-    return "Cannot cancel: the run is already in a terminal state.";
-  }
-  // Generic fallback keeps it readable without leaking the raw enum names.
-  return "This run cannot move to that state from its current state.";
 }
 
 /**

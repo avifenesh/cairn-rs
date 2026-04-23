@@ -680,7 +680,7 @@ function InterveneModal({
       onSuccess();
       onClose();
     },
-    onError: (e: unknown) => toast.error(mapRunActionError(e, "Intervene failed.")),
+    onError: (e: unknown) => toast.error(mapRunActionError(e, "Intervene failed.", "intervene")),
   });
 
   const ACTIONS: { id: InterventionAction; label: string; hint: string }[] = [
@@ -768,12 +768,12 @@ function OperatorActions({ runId, run }: { runId: string; run?: RunRecord }) {
   const pauseMut = useMutation({
     mutationFn: () => defaultApi.pauseRun(runId, { reason_kind: "operator_pause", actor: "operator" }),
     onSuccess: () => { toast.success("Run paused."); invalidateRun(); },
-    onError: (e: unknown) => toast.error(mapRunActionError(e, "Pause failed.")),
+    onError: (e: unknown) => toast.error(mapRunActionError(e, "Pause failed.", "pause")),
   });
   const resumeMut = useMutation({
     mutationFn: () => defaultApi.resumeRun(runId, { trigger: "operator_resume", target: "running" }),
     onSuccess: () => { toast.success("Run resumed."); invalidateRun(); },
-    onError: (e: unknown) => toast.error(mapRunActionError(e, "Resume failed.")),
+    onError: (e: unknown) => toast.error(mapRunActionError(e, "Resume failed.", "resume")),
   });
   const recoverMut = useMutation({
     mutationFn: () => defaultApi.recoverRun(runId),
@@ -781,22 +781,22 @@ function OperatorActions({ runId, run }: { runId: string; run?: RunRecord }) {
       toast.success(r.deprecated ? "Recover acknowledged (handled by background scanners)." : "Recovery requested.");
       invalidateRun();
     },
-    onError: (e: unknown) => toast.error(mapRunActionError(e, "Recover failed.")),
+    onError: (e: unknown) => toast.error(mapRunActionError(e, "Recover failed.", "recover")),
   });
   const claimMut = useMutation({
     mutationFn: () => defaultApi.claimRun(runId),
     onSuccess: () => { toast.success("Run claimed for inspection."); invalidateRun(); },
-    onError: (e: unknown) => toast.error(mapRunActionError(e, "Claim failed.")),
+    onError: (e: unknown) => toast.error(mapRunActionError(e, "Claim failed.", "claim")),
   });
   const orchestrateMut = useMutation({
     mutationFn: () => defaultApi.orchestrateRun(runId, {}),
     onSuccess: () => { toast.success("Orchestration step triggered."); invalidateRun(); },
-    onError: (e: unknown) => toast.error(mapRunActionError(e, "Orchestrate failed.")),
+    onError: (e: unknown) => toast.error(mapRunActionError(e, "Orchestrate failed.", "orchestrate")),
   });
   const diagnoseMut = useMutation({
     mutationFn: () => defaultApi.diagnoseRun(runId),
     onSuccess: (data) => { setDiagnoseDrawer({ open: true, data }); },
-    onError: (e: unknown) => toast.error(mapRunActionError(e, "Diagnose failed.")),
+    onError: (e: unknown) => toast.error(mapRunActionError(e, "Diagnose failed.", "diagnose")),
   });
 
   const { data: interventions } = useQuery({

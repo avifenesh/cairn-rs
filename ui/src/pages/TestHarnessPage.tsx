@@ -73,10 +73,18 @@ const PAUSABLE_RUN_STATES = new Set([
 ]);
 
 /**
- * Poll `getRun` until `run.state` is in `pausable` or timeout elapses.
- * Returns the last-known `RunRecord` on success; throws a friendly
- * harness error on timeout rather than letting the downstream pause
- * call surface a raw state-machine error (issue #257).
+ * Run states that are terminal per `cairn-domain::RunState::is_terminal()`.
+ * `dead_lettered` is a TaskState, not a RunState, so it is NOT included.
+ */
+const TERMINAL_RUN_STATES = new Set(["completed", "failed", "canceled"]);
+
+/**
+ * Poll `getRun` until `run.state` is in `PAUSABLE_RUN_STATES` or the
+ * timeout elapses. Returns `{ state, waited_ms }` so the harness step
+ * log shows how long it took to reach a pausable state. On timeout or
+ * terminal state, throws an `Error` with an operator-readable message
+ * rather than letting the downstream pause call surface a raw
+ * state-machine error (issue #257).
  */
 async function waitForPausableState(
   runId: string,
@@ -92,7 +100,7 @@ async function waitForPausableState(
       return { state: r.state, waited_ms: Date.now() - started };
     }
     // Terminal states will never reach pausable — fail fast.
-    if (["completed", "failed", "canceled", "dead_lettered"].includes(r.state)) {
+    if (TERMINAL_RUN_STATES.has(r.state)) {
       throw new Error(`Run reached terminal state '${r.state}' before becoming pausable`);
     }
     await new Promise(res => setTimeout(res, pollIntervalMs));

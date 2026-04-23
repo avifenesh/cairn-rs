@@ -221,7 +221,7 @@ function PageInterveneDrawer({
       onSuccess();
       onClose();
     },
-    onError: (e: unknown) => toast.error(mapRunActionError(e, "Intervene failed.")),
+    onError: (e: unknown) => toast.error(mapRunActionError(e, "Intervene failed.", "intervene")),
   });
 
   return (
@@ -324,22 +324,22 @@ function RunQuickActions({ run, onIntervene, onDiagnosed }: RunQuickActionsProps
   const pauseMut = useMutation({
     mutationFn: () => defaultApi.pauseRun(run.run_id, { reason_kind: "operator_pause", actor: "operator" }),
     onSuccess: () => { toast.success("Run paused."); invalidate(); },
-    onError: (e: unknown) => toast.error(mapRunActionError(e, "Pause failed.")),
+    onError: (e: unknown) => toast.error(mapRunActionError(e, "Pause failed.", "pause")),
   });
   const resumeMut = useMutation({
     mutationFn: () => defaultApi.resumeRun(run.run_id, { trigger: "operator_resume", target: "running" }),
     onSuccess: () => { toast.success("Run resumed."); invalidate(); },
-    onError: (e: unknown) => toast.error(mapRunActionError(e, "Resume failed.")),
+    onError: (e: unknown) => toast.error(mapRunActionError(e, "Resume failed.", "resume")),
   });
   const orchestrateMut = useMutation({
     mutationFn: () => defaultApi.orchestrateRun(run.run_id, {}),
     onSuccess: () => { toast.success("Orchestration step triggered."); invalidate(); },
-    onError: (e: unknown) => toast.error(mapRunActionError(e, "Orchestrate failed.")),
+    onError: (e: unknown) => toast.error(mapRunActionError(e, "Orchestrate failed.", "orchestrate")),
   });
   const diagnoseMut = useMutation({
     mutationFn: () => defaultApi.diagnoseRun(run.run_id),
     onSuccess: (data) => onDiagnosed(run.run_id, data),
-    onError: (e: unknown) => toast.error(mapRunActionError(e, "Diagnose failed.")),
+    onError: (e: unknown) => toast.error(mapRunActionError(e, "Diagnose failed.", "diagnose")),
   });
 
   const canPause  = RUNNING_STATES.has(run.state) && run.state !== "paused";
