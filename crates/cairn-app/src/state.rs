@@ -589,9 +589,8 @@ impl AppState {
                         }
                     }
                     if let Some(rubric_id) = e.rubric_id.as_ref() {
-                        if let Err(err) = self
-                            .evals
-                            .set_rubric_id(&e.eval_run_id, rubric_id.clone())
+                        if let Err(err) =
+                            self.evals.set_rubric_id(&e.eval_run_id, rubric_id.clone())
                         {
                             tracing::warn!(
                                 eval_run_id = %e.eval_run_id,
