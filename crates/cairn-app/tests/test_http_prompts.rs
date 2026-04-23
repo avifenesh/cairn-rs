@@ -7,7 +7,17 @@
 mod support;
 
 use serde_json::json;
+use sha2::{Digest, Sha256};
 use support::live_fabric::LiveHarness;
+
+/// Matches the UI helper `sha256ContentHash` in `PromptsPage.tsx` — returns
+/// `sha256:<64-hex>` so the posted hash exercises the real contract even if
+/// the server ever adds format validation.
+fn content_hash(body: &str) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(body.as_bytes());
+    format!("sha256:{:x}", hasher.finalize())
+}
 
 #[tokio::test]
 async fn prompt_asset_version_and_release_with_server_minted_ids() {
@@ -38,7 +48,9 @@ async fn prompt_asset_version_and_release_with_server_minted_ids() {
     );
 
     // 2. Create a version WITHOUT supplying prompt_version_id — server
-    //    must mint one prefixed with `pv_`.
+    //    must mint one prefixed with `pv_`. Post a real `sha256:<hex>` so
+    //    the test survives any future format validation.
+    let body = "You are a helpful assistant.";
     let res = h
         .client()
         .post(format!(
@@ -50,8 +62,8 @@ async fn prompt_asset_version_and_release_with_server_minted_ids() {
             "tenant_id":    h.tenant,
             "workspace_id": h.workspace,
             "project_id":   h.project,
-            "content":      "You are a helpful assistant.",
-            "content_hash": "sha256:deadbeef",
+            "content":      body,
+            "content_hash": content_hash(body),
         }))
         .send()
         .await

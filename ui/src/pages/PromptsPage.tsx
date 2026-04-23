@@ -10,6 +10,7 @@ import { Card } from "../components/Card";
 import { defaultApi } from "../lib/api";
 import { sectionLabel } from "../lib/design-system";
 import { useToast } from "../components/Toast";
+import { useScope } from "../hooks/useScope";
 import type {
   PromptAssetRecord, PromptVersionRecord, PromptReleaseRecord, PromptVersionDiff,
   PromptKind, PromptReleaseState,
@@ -53,6 +54,17 @@ const shortId = (id: string) =>
   id.length > 20 ? `${id.slice(0, 10)}…${id.slice(-6)}` : id;
 
 const shortHash = (h: string) => h.slice(0, 8);
+
+/**
+ * Scope key for TanStack Query cache keys.
+ *
+ * Prompt data is project-scoped on the backend; without this, switching scope
+ * from the scope switcher leaves the previous project's assets/versions/releases
+ * cached under the same key, surfacing stale (or cross-project) data.
+ */
+function scopeKey(scope: { tenant_id: string; workspace_id: string; project_id: string }): string {
+  return `${scope.tenant_id}:${scope.workspace_id}:${scope.project_id}`;
+}
 
 /**
  * Prefixed SHA-256 digest via SubtleCrypto.
@@ -488,10 +500,11 @@ function ReleaseControls({ release }: { release: PromptReleaseRecord }) {
 // ── Asset item ────────────────────────────────────────────────────────────────
 
 function AssetItem({
-  asset, releases,
+  asset, releases, sk,
 }: {
   asset: PromptAssetRecord;
   releases: PromptReleaseRecord[];
+  sk: string;
 }) {
   const [expanded, setExpanded] = useState(false);
   const qc    = useQueryClient();
@@ -504,7 +517,7 @@ function AssetItem({
   const latestRelease = assetReleases[0];
 
   const { data: versionsData, isLoading: versionsLoading } = useQuery({
-    queryKey: ["prompt-versions", asset.prompt_asset_id],
+    queryKey: ["prompt-versions", sk, asset.prompt_asset_id],
     queryFn: () => defaultApi.getPromptVersions(asset.prompt_asset_id, { limit: 20 }),
     enabled: expanded,
     staleTime: 60_000,
@@ -522,7 +535,7 @@ function AssetItem({
       }),
     onSuccess: () => {
       toast.success("Release created.");
-      void qc.invalidateQueries({ queryKey: ["prompt-releases"] });
+      void qc.invalidateQueries({ queryKey: ["prompt-releases", sk] });
     },
     onError: () => toast.error("Failed to create release."),
   });
@@ -624,7 +637,7 @@ function AssetItem({
 
 // ── New Prompt form ───────────────────────────────────────────────────────────
 
-function NewPromptForm({ onClose }: { onClose: () => void }) {
+function NewPromptForm({ onClose, sk }: { onClose: () => void; sk: string }) {
   const qc    = useQueryClient();
   const toast = useToast();
   const [id,   setId]   = useState("");
@@ -649,12 +662,14 @@ function NewPromptForm({ onClose }: { onClose: () => void }) {
         name: name.trim(),
         kind,
       });
-      const body = initialBody.trim();
-      if (body.length === 0) return { asset, version: null as null };
+      // Only trim for the emptiness check — send the untouched textarea
+      // value so the stored prompt body matches what the author typed,
+      // including any intentional leading/trailing whitespace or newlines.
+      if (initialBody.trim().length === 0) return { asset, version: null as null };
       try {
-        const content_hash = await sha256ContentHash(body);
+        const content_hash = await sha256ContentHash(initialBody);
         const version = await defaultApi.createPromptVersion(asset.prompt_asset_id, {
-          content: body,
+          content: initialBody,
           content_hash,
         });
         return { asset, version };
@@ -669,14 +684,14 @@ function NewPromptForm({ onClose }: { onClose: () => void }) {
       } else {
         toast.success(`Prompt asset “${result.asset.prompt_asset_id}” created.`);
       }
-      void qc.invalidateQueries({ queryKey: ["prompt-assets"] });
-      void qc.invalidateQueries({ queryKey: ["prompt-versions", result.asset.prompt_asset_id] });
+      void qc.invalidateQueries({ queryKey: ["prompt-assets", sk] });
+      void qc.invalidateQueries({ queryKey: ["prompt-versions", sk, result.asset.prompt_asset_id] });
       onClose();
     },
     onError: (err: unknown) => {
       if (err && typeof err === "object" && "assetCreated" in err) {
         toast.error("Asset created, but initial version failed. Add a version from the asset view.");
-        void qc.invalidateQueries({ queryKey: ["prompt-assets"] });
+        void qc.invalidateQueries({ queryKey: ["prompt-assets", sk] });
         onClose();
       } else {
         toast.error("Failed to create prompt asset.");
@@ -768,15 +783,17 @@ function NewPromptForm({ onClose }: { onClose: () => void }) {
 export function PromptsPage() {
   const [showNew, setShowNew] = useState(false);
   const [filter, setFilter]  = useState<"all" | "active" | "draft">("all");
+  const [scope] = useScope();
+  const sk = scopeKey(scope);
 
   const { data: assetsData, isLoading: assetsLoading, isError, error, refetch, isFetching } = useQuery({
-    queryKey: ["prompt-assets"],
+    queryKey: ["prompt-assets", sk],
     queryFn: () => defaultApi.getPromptAssets({ limit: 100 }),
     refetchInterval: 60_000,
   });
 
   const { data: releasesData } = useQuery({
-    queryKey: ["prompt-releases"],
+    queryKey: ["prompt-releases", sk],
     queryFn: () => defaultApi.getPromptReleases({ limit: 200 }),
     refetchInterval: 60_000,
     retry: false,
@@ -868,7 +885,7 @@ export function PromptsPage() {
       {/* Content */}
       <div className="flex-1 overflow-y-auto px-5 py-4 space-y-3 max-w-4xl mx-auto w-full">
         {/* New Prompt form */}
-        {showNew && <NewPromptForm onClose={() => setShowNew(false)} />}
+        {showNew && <NewPromptForm sk={sk} onClose={() => setShowNew(false)} />}
 
         {/* Asset list */}
         {assetsLoading ? (
@@ -891,6 +908,7 @@ export function PromptsPage() {
               key={asset.prompt_asset_id}
               asset={asset}
               releases={releases}
+              sk={sk}
             />
           ))
         )}
