@@ -203,6 +203,13 @@ export function ProjectDashboardPage({ projectId }: ProjectDashboardPageProps) {
     refetchInterval: 15_000,
   });
 
+  // `/v1/costs` is tenant-scoped on the backend (SessionCostRecord has
+  // tenant_id but no project_id/workspace_id — see
+  // `SessionCostReadModel::list_by_tenant`). The handler derives the tenant
+  // from the authenticated bearer token (`TenantScope`), NOT from any query
+  // param. The UI's `tenantId` state is purely for runs/tasks/approvals
+  // scoping — it does not influence `/v1/costs`. Labels below call this out
+  // as "authenticated tenant" and "not project-scoped" (issue #144).
   const { data: costsList, isLoading: costsLoading } = useQuery({
     queryKey: ["proj-costs"],
     queryFn:  () => defaultApi.getCosts(),
@@ -350,15 +357,15 @@ export function ProjectDashboardPage({ projectId }: ProjectDashboardPageProps) {
             loading={isLoading}
           />
           <StatCard
-            label="Total Spend"
+            label="Tenant Spend"
             value={fmtMicros(costs.total_cost_micros)}
-            description="server-wide (no project filter)"
+            description="authenticated tenant — not project-scoped"
             loading={costsLoading}
           />
           <StatCard
-            label="Provider Calls"
+            label="Tenant Provider Calls"
             value={costs.total_provider_calls.toLocaleString()}
-            description="server-wide"
+            description="authenticated tenant — not project-scoped"
             loading={costsLoading}
           />
         </div>
@@ -534,7 +541,7 @@ export function ProjectDashboardPage({ projectId }: ProjectDashboardPageProps) {
                 { icon: Layers,    label: "Runs",      value: allRuns.length,     sub: `${activeRuns.length} active`      },
                 { icon: ListChecks, label: "Tasks",    value: allTasks.length,    sub: `${activeTasks.length} active`     },
                 { icon: AlertTriangle, label: "Approvals", value: allApprovals.length, sub: "pending" },
-                { icon: Coins,     label: "Spend",     value: fmtMicros(costs.total_cost_micros), sub: "server-wide" },
+                { icon: Coins,     label: "Spend",     value: fmtMicros(costs.total_cost_micros), sub: "tenant-wide" },
                 { icon: Clock,     label: "Oldest run", value: allRuns.length > 0
                     ? fmtAge(Math.min(...allRuns.map(r => r.created_at)))
                     : "—",

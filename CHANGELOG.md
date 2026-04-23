@@ -128,6 +128,45 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `GET /v1/events/recent?limit=5` probe via `getRecentEvents` that
   asserts the response is an array and each returned record has a
   non-empty `event_type`. Description updated to match.
+- **UI: `AgentTemplatesPage` navigated after a 500 ms `setTimeout` (#161).**
+  After `instantiateAgentTemplate` succeeded the page slept 500 ms before
+  routing to the new run, hoping the backend had finished creating it —
+  a pure race. The endpoint returns the `run_id` synchronously in its
+  201 response, so the page now navigates immediately on success. No
+  more stale-detail flash, no more missed-run when the handler is slow.
+- **UI: `ProjectDashboardPage` rendered tenant-wide cost widgets as if
+  they were project-scoped (#144).** `/v1/costs` is tenant-scoped on the
+  backend (`SessionCostRecord` has `tenant_id` only; no workspace/project
+  fields on the event or projection), so the "Total Spend" and "Provider
+  Calls" cards aggregated across every workspace and project in the
+  tenant while the labels suggested a single project. The cards are now
+  labeled "Tenant Spend" / "Tenant Provider Calls" with a description
+  that says "authenticated tenant — not project-scoped"; the Resources
+  summary sub-label reads "tenant-wide". The copy avoids interpolating
+  the UI's `tenantId` state because the backend derives the tenant from
+  the bearer token (`TenantScope`) and ignores any UI-side tenant
+  filter, so hardcoding a tenant id in copy would mis-attribute spend
+  whenever the scope selector and the bearer token disagree. Proper
+  project-scoped cost filtering needs a backend change (event shape
+  extension + projection); tracked separately.
+- **UI: `OrchestrationPage` re-processed the oldest buffered SSE event
+  on each SSE update and leaked `setTimeout` callbacks on unmount
+  (#177).** The stream effect depended on the whole `streamEvents`
+  array and read `streamEvents[length - 1]`, but `useEventStream`
+  prepends frames (newest-first), so each new stream frame re-handled
+  the OLDEST buffered event — spurious refetches + fresh highlights
+  per unrelated state change — and the 3 s fresh-clear `setTimeout`
+  it scheduled had no cleanup (timeouts accumulated for the life of
+  the tab). Fixed by iterating `streamEvents` in reverse so events
+  are processed exactly once in causal order (dedupe via a
+  `useRef<Set>` of server-assigned event ids, capped at
+  `STREAM_BUFFER_MAX * 5` (currently 250) with
+  oldest-insertion-order eviction), tracking pending highlight
+  timeouts in a `useRef<Map>` that clears them on supersede +
+  unmount, and coalescing refetches so an event burst triggers at
+  most one `rSessions`/`rRuns`/`rTasks`. Payload ids read both
+  snake_case and camelCase to match the pattern in `RunDetailPage`.
+  Operator actions wired in PR P are untouched.
 - **UI: `PlaygroundPage` model picker excluded Anthropic-native providers (#160).** The registry-derived model list filtered out providers whose `api_format` was `anthropic`, silently hiding every Anthropic-native connection even though the backend `chat/stream` handler routes through the native adapter. Removed the adapter-kind filter so all available registered providers contribute their models to the picker. Closes #160.
 - **UI: `DecisionsPage` row-level Invalidate button was invisible (#153).**
   The per-row "Invalidate" button in the cache tab used Tailwind's
