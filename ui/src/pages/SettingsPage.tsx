@@ -1139,18 +1139,26 @@ function ModelPicker({ local, setLocal }: { local: string; setLocal: (v: string)
   // connection serves. Operators would pick a model the runtime can't
   // resolve and hit the misleading 503 loop (#156). Two-gate filter:
   //   1. registry entry must be `available: true` (provider reachable)
-  //   2. AND at least one active connection's `supported_models` lists it
-  // If the tenant has no connections at all, we keep the registry list
-  // with a disclaimer so fresh installs can still see what's available.
-  const registeredModels: Set<string> = new Set(
-    (connData?.items ?? []).flatMap((c) => c.supported_models ?? []),
+  //   2. AND at least one **active** connection's `supported_models`
+  //      lists it, using case-insensitive comparison (backend model
+  //      matching is case-insensitive — e.g. "GPT-4o" vs "gpt-4o").
+  // Disabled connections are ignored. If the tenant has no active
+  // connections at all, we fall back to the registry list with a
+  // disclaimer so fresh installs can still see what's available.
+  const activeConnections = (connData?.items ?? []).filter(
+    (c) => c.status === "active",
   );
-  const hasAnyConnection = (connData?.items ?? []).length > 0;
+  const registeredModels: Set<string> = new Set(
+    activeConnections.flatMap((c) =>
+      (c.supported_models ?? []).map((m) => m.toLowerCase()),
+    ),
+  );
+  const hasAnyConnection = activeConnections.length > 0;
 
   const models: string[] = (registry ?? [])
     .filter((entry) => entry.available)
     .flatMap((entry) => entry.models?.map((m) => m.id) ?? [])
-    .filter((id) => !hasAnyConnection || registeredModels.has(id))
+    .filter((id) => !hasAnyConnection || registeredModels.has(id.toLowerCase()))
     .filter((m, i, arr) => arr.indexOf(m) === i)
     .sort();
 

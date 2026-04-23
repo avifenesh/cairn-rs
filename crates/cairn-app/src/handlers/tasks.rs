@@ -32,6 +32,7 @@ use crate::state::AppState;
 use crate::TaskRecordDoc;
 use crate::{
     append_runtime_event, audit_actor_id, current_event_head, publish_runtime_frames_since,
+    DEFAULT_PROJECT_ID, DEFAULT_TENANT_ID, DEFAULT_WORKSPACE_ID,
 };
 
 // ── Constants ────────────────────────────────────────────────────────────────
@@ -58,11 +59,18 @@ async fn load_task_visible_to_tenant(
 
 // ── DTOs ─────────────────────────────────────────────────────────────────────
 
-#[derive(Clone, Debug, serde::Deserialize)]
+#[derive(Clone, Debug, Default, serde::Deserialize)]
 pub(crate) struct TaskListQuery {
-    pub(crate) tenant_id: String,
-    pub(crate) workspace_id: String,
-    pub(crate) project_id: String,
+    // Scope fields are optional at the HTTP boundary: bare calls
+    // (e.g. first-load UI without localStorage scope) fall back to
+    // the default tenant/workspace/project rather than 422-ing on
+    // missing query params.
+    #[serde(default)]
+    pub(crate) tenant_id: Option<String>,
+    #[serde(default)]
+    pub(crate) workspace_id: Option<String>,
+    #[serde(default)]
+    pub(crate) project_id: Option<String>,
     pub(crate) run_id: Option<String>,
     pub(crate) state: Option<String>,
     pub(crate) limit: Option<usize>,
@@ -72,9 +80,18 @@ pub(crate) struct TaskListQuery {
 impl TaskListQuery {
     pub(crate) fn project(&self) -> ProjectKey {
         ProjectKey::new(
-            self.tenant_id.as_str(),
-            self.workspace_id.as_str(),
-            self.project_id.as_str(),
+            self.tenant_id
+                .as_deref()
+                .filter(|s| !s.is_empty())
+                .unwrap_or(DEFAULT_TENANT_ID),
+            self.workspace_id
+                .as_deref()
+                .filter(|s| !s.is_empty())
+                .unwrap_or(DEFAULT_WORKSPACE_ID),
+            self.project_id
+                .as_deref()
+                .filter(|s| !s.is_empty())
+                .unwrap_or(DEFAULT_PROJECT_ID),
         )
     }
 

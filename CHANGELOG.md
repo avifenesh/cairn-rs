@@ -90,6 +90,24 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   legacy `CostSummary` shape client-side, and wired it through both
   pages. TestHarnessPage's "Cost summary" probe updated to assert `items`
   instead of the removed top-level field.
+- **Admin-token reads of `GET /v1/sessions/:id` (and the session's
+  activity / active-runs / cost / llm-traces / events subresources) no
+  longer return a spurious 404 on non-default tenants.** The handlers
+  filtered by `tenant_scope.tenant_id()` without honouring
+  `TenantScope.is_admin`, so admin-token callers got 404 for every
+  session whose tenant differed from the admin's default-tenant
+  binding — cascading into SessionDetailPage rendering "No traces" for
+  every session. Handlers now mirror the `is_admin || tenant_match`
+  pattern already used in `tasks.rs`/`runs.rs`/`approvals.rs`. Closes
+  #164.
+- **Bare list calls to `GET /v1/runs`, `GET /v1/sessions`, and
+  `GET /v1/tasks` no longer return 422 when `tenant_id` /
+  `workspace_id` / `project_id` query params are missing or empty.**
+  The three query structs now declare the scope fields as
+  `Option<String>` with a `#[serde(default)]` and fall back to
+  `DEFAULT_TENANT_ID` / `DEFAULT_WORKSPACE_ID` / `DEFAULT_PROJECT_ID`
+  when absent. The incognito / first-load UI path (and any quick curl
+  probe) now gets 200 with the default-scope results. Closes #165.
 - **`TasksPage`: removed duplicate unstyled Refresh button.** A merge-conflict
   artifact left two Refresh buttons in the toolbar — one unstyled, one
   properly styled. The unstyled duplicate has been removed; the styled

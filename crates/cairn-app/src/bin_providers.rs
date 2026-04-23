@@ -38,12 +38,17 @@ pub(crate) struct PlaygroundScopeQuery {
 impl PlaygroundScopeQuery {
     /// Resolve the effective tenant for a playground call.
     ///
-    /// Rules:
-    /// - admin service account: use `?tenant_id=` when provided, else
-    ///   the `DEFAULT_TENANT_ID` (admin has no intrinsic tenant scope)
-    /// - operator (per-tenant) caller: always use the authenticated
-    ///   tenant. `?tenant_id=` that matches is a no-op; mismatched
-    ///   values are rejected with 403 to prevent cross-tenant reads
+    /// Rules (implemented by the match below):
+    /// - Operator caller, no `?tenant_id=` → authenticated tenant.
+    /// - Operator caller, `?tenant_id=T` matching the authenticated
+    ///   tenant → authenticated tenant (no-op override).
+    /// - Operator caller, `?tenant_id=T` mismatched → **403**. Non-admin
+    ///   callers can never read another tenant's providers.
+    /// - Admin caller, `?tenant_id=T` → `T` (cross-tenant tooling).
+    /// - Admin caller, no `?tenant_id=`, with an attached tenant
+    ///   (ServiceAccount has `tenant` set) → that tenant.
+    /// - Admin caller, no attached tenant (`AuthPrincipal::System`) and
+    ///   no override → `DEFAULT_TENANT_ID`.
     #[allow(clippy::result_large_err)] // axum Response is the natural error shape
     pub(crate) fn resolve_tenant(
         &self,
@@ -1321,6 +1326,47 @@ pub(crate) async fn chat_stream_handler(
         }
     }
 
+    // Issue #156: if the tenant has active connections but the registry
+    // returned `Ok(None)` above (no connection serves this model), DO NOT
+    // fall through to the global static fallbacks — that would silently
+    // route the request to whatever env-configured provider happens to be
+    // present and mask the real problem. Emit the actionable 422 now.
+    if has_active_connections {
+        let summaries = state
+            .runtime
+            .provider_registry
+            .active_connection_summaries(&tenant_id)
+            .await
+            .unwrap_or_default();
+        let conn_list: Vec<serde_json::Value> = summaries
+            .iter()
+            .map(|(id, models)| {
+                serde_json::json!({
+                    "connection_id": id,
+                    "supported_models": models,
+                })
+            })
+            .collect();
+        return (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            axum::Json(serde_json::json!({
+                "error": format!(
+                    "No registered connection for tenant '{}' supports model '{}'. \
+                     Register with POST /v1/providers/connections with supported_models \
+                     including '{}', or call GET /v1/providers/connections/:id/discover-models \
+                     to refresh.",
+                    tenant_id.as_str(),
+                    model_id,
+                    model_id,
+                ),
+                "tenant_id": tenant_id.as_str(),
+                "requested_model": model_id,
+                "active_connections": conn_list,
+            })),
+        )
+            .into_response();
+    }
+
     if is_bedrock_model {
         if let Some(ref bedrock) = state.bedrock {
             return stream_generation_provider_as_sse(
@@ -1361,46 +1407,11 @@ pub(crate) async fn chat_stream_handler(
             ),
             or_.api_key.as_str().to_owned(),
         )
-    } else if has_active_connections {
-        // Tenant has active connections, but none served the requested
-        // model and no env-var static fallback exists either. Return a
-        // precise 422 so the operator knows to widen `supported_models`
-        // or re-run discover-models — not the misleading "no provider
-        // configured" 503 (issue #156).
-        let summaries = state
-            .runtime
-            .provider_registry
-            .active_connection_summaries(&tenant_id)
-            .await
-            .unwrap_or_default();
-        let conn_list: Vec<serde_json::Value> = summaries
-            .iter()
-            .map(|(id, models)| {
-                serde_json::json!({
-                    "connection_id": id,
-                    "supported_models": models,
-                })
-            })
-            .collect();
-        return (
-            StatusCode::UNPROCESSABLE_ENTITY,
-            axum::Json(serde_json::json!({
-                "error": format!(
-                    "No registered connection for tenant '{}' supports model '{}'. \
-                     Register with POST /v1/providers/connections with supported_models \
-                     including '{}', or call GET /v1/providers/connections/:id/discover-models \
-                     to refresh.",
-                    tenant_id.as_str(),
-                    model_id,
-                    model_id,
-                ),
-                "tenant_id": tenant_id.as_str(),
-                "requested_model": model_id,
-                "active_connections": conn_list,
-            })),
-        )
-            .into_response();
     } else {
+        // Reached only when the tenant has NO active connections AND no
+        // env-var static fallback is configured — the genuine "nothing
+        // wired up" case. When active connections exist but don't serve
+        // the model, control returned above with the actionable 422.
         return (
                 StatusCode::SERVICE_UNAVAILABLE,
                 axum::Json(serde_json::json!({
