@@ -89,10 +89,11 @@ const LOG_INTERVAL: Duration = Duration::from_secs(60);
 /// that breaks the plateau.
 const MAX_RSS_GROWTH_PCT: f64 = 40.0;
 
-/// Steady-state fd variance bound. We skip the first
-/// `FD_WARMUP_SAMPLES` to let subsystem init (Valkey pools, subscribers,
-/// tokio-metrics, etc.) settle, then assert that
-/// `max(fd) - min(fd)` across the remaining samples is `<= MAX_STEADY_STATE_FD_DELTA`.
+/// Steady-state fd variance bound. We skip a warmup window
+/// (`FD_WARMUP_DURATION`) to let subsystem init (Valkey pools,
+/// subscribers, tokio-metrics, etc.) settle, then assert that
+/// `max(fd) - min(fd)` across the remaining samples is
+/// `<= MAX_STEADY_STATE_FD_DELTA`.
 ///
 /// Why not a baseline→end %-growth bound? It conflates one-time
 /// startup fd cost with actual leak growth and is brittle at small
@@ -100,7 +101,11 @@ const MAX_RSS_GROWTH_PCT: f64 = 40.0;
 /// variance directly tests "no growth after warmup" — the semantic
 /// property we actually care about. See commit body for the
 /// 2026-04-22 30min trace that motivated this change.
-const FD_WARMUP_SAMPLES: usize = 10;
+///
+/// Warmup is defined as a `Duration` so the semantics stay stable if
+/// `SAMPLE_INTERVAL` changes; steady-state samples are those whose
+/// `elapsed_s` is at least `FD_WARMUP_DURATION`.
+const FD_WARMUP_DURATION: Duration = Duration::from_secs(150);
 const MAX_STEADY_STATE_FD_DELTA: usize = 5;
 
 /// Resolve `~/.cairn-secrets/openrouter.key`. Returns `None` if `$HOME`
@@ -570,9 +575,10 @@ async fn cairn_app_sustains_1hr_real_llm_soak() {
     //    "no growth in the steady state", which is what "no leak"
     //    actually means — a baseline→end % bound conflates startup
     //    cost with leak growth and is brittle at small baselines.
+    let warmup_secs = FD_WARMUP_DURATION.as_secs();
     let steady: Vec<usize> = samples
         .iter()
-        .skip(FD_WARMUP_SAMPLES)
+        .filter(|s| s.elapsed_s >= warmup_secs)
         .map(|s| s.fd_count)
         .collect();
     if let (Some(&min_fd), Some(&max_fd)) = (steady.iter().min(), steady.iter().max()) {
@@ -580,7 +586,7 @@ async fn cairn_app_sustains_1hr_real_llm_soak() {
         assert!(
             delta <= MAX_STEADY_STATE_FD_DELTA,
             "fd steady-state delta {delta} (min={min_fd}, max={max_fd}) over \
-             {MAX_STEADY_STATE_FD_DELTA} after skipping {FD_WARMUP_SAMPLES} warmup samples \
+             {MAX_STEADY_STATE_FD_DELTA} after skipping {warmup_secs}s warmup \
              (baseline={baseline_fd}, end={end_fd}). Samples: {:?}",
             samples
                 .iter()
@@ -589,8 +595,9 @@ async fn cairn_app_sustains_1hr_real_llm_soak() {
         );
     } else {
         panic!(
-            "not enough samples to evaluate fd steady-state variance: \
-             have {}, need > {FD_WARMUP_SAMPLES}. Samples: {:?}",
+            "not enough post-warmup samples to evaluate fd steady-state \
+             variance: have {} total samples, need at least one with \
+             elapsed_s >= {warmup_secs}s. Samples: {:?}",
             samples.len(),
             samples
                 .iter()
