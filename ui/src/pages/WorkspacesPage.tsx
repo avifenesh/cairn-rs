@@ -260,17 +260,26 @@ export function WorkspacesPage() {
 
   // Issue #218 — soft-delete mutation. Backend returns 204 and marks the
   // workspace `archived_at`; default list endpoint filters it out.
+  // The invalidation must catch EVERY workspaces query (not just the
+  // current tenant's) because tenant-overview and sidebar widgets also
+  // key their own cached list on `['workspaces', ...]`.
   const deleteWorkspace = useMutation({
     mutationFn: (workspaceId: string) =>
       defaultApi.deleteWorkspace(scope.tenant_id, workspaceId),
     onSuccess: async (_, workspaceId) => {
-      await qc.invalidateQueries({ queryKey: ['workspaces', scope.tenant_id] });
       toast.success(`Workspace ${workspaceId} deleted.`);
     },
     onError: (e: unknown) =>
       toast.error(
         e instanceof Error && e.message ? e.message : 'Failed to delete workspace.',
       ),
+    // `onSettled` runs on both success and error so a transient failure
+    // refetches the list (revealing the stale row is in fact still
+    // present) instead of leaving the UI out-of-sync with the server.
+    onSettled: () =>
+      qc.invalidateQueries({
+        predicate: (q) => q.queryKey[0] === 'workspaces',
+      }),
   });
 
   const isLoading  = wsLoading;

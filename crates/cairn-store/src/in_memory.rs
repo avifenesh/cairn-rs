@@ -1525,9 +1525,16 @@ impl InMemoryStore {
                 );
             }
             RuntimeEvent::WorkspaceArchived(e) => {
+                // Defense-in-depth: only archive when the event's
+                // `tenant_id` matches the stored record. The service
+                // layer validates ownership before emitting, but a
+                // replay with a mismatched event must not touch
+                // another tenant's workspace.
                 if let Some(ws) = state.workspaces.get_mut(e.workspace_id.as_str()) {
-                    ws.archived_at = Some(e.archived_at);
-                    ws.updated_at = e.archived_at;
+                    if ws.tenant_id == e.tenant_id {
+                        ws.archived_at = Some(e.archived_at);
+                        ws.updated_at = e.archived_at;
+                    }
                 }
             }
             RuntimeEvent::ProjectCreated(e) => {

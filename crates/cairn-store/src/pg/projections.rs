@@ -428,13 +428,19 @@ impl PgSyncProjection {
             }
 
             RuntimeEvent::WorkspaceArchived(e) => {
+                // `tenant_id` is included in the WHERE clause as
+                // defense-in-depth: the service layer already refuses
+                // cross-tenant archives before emitting, but if a replay
+                // ever presents a mismatched event we'd rather no-op than
+                // archive another tenant's row.
                 sqlx::query(
                     "UPDATE workspaces
                         SET archived_at = $1, updated_at = $1
-                      WHERE workspace_id = $2",
+                      WHERE workspace_id = $2 AND tenant_id = $3",
                 )
                 .bind(e.archived_at as i64)
                 .bind(e.workspace_id.as_str())
+                .bind(e.tenant_id.as_str())
                 .execute(&mut **tx)
                 .await
                 .map_err(|err| StoreError::Internal(err.to_string()))?;
