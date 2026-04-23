@@ -24,6 +24,13 @@ const KIND_LABEL: Record<PromptKind, string> = {
   router:        "router",
 };
 
+const PROMPT_KINDS = Object.keys(KIND_LABEL) as PromptKind[];
+
+/** Runtime guard — DOM `<select>` values are untrusted strings. */
+function isPromptKind(value: string): value is PromptKind {
+  return (PROMPT_KINDS as string[]).includes(value);
+}
+
 /** Human-readable label for a `PromptReleaseState`. */
 const RELEASE_LABEL: Record<PromptReleaseState, string> = {
   draft:    "draft",
@@ -293,11 +300,27 @@ function ReleaseControls({ release }: { release: PromptReleaseRecord }) {
     onError:   () => toast.error("Failed to reject release."),
   });
 
+  const demote = useMutation({
+    mutationFn: () => defaultApi.transitionPromptRelease(release.prompt_release_id, "approved"),
+    onSuccess: () => { toast.success("Release demoted to approved."); invalidate(); },
+    onError:   () => toast.error("Failed to demote release."),
+  });
+
   const archive = useMutation({
     mutationFn: () => defaultApi.transitionPromptRelease(release.prompt_release_id, "archived"),
     onSuccess: () => { toast.success("Release archived."); invalidate(); },
     onError:   () => toast.error("Failed to archive release."),
   });
+
+  // Any pending transition locks out competing buttons so we never
+  // fire overlapping mutations into the same release.
+  const anyPending =
+    reqApproval.isPending
+    || approve.isPending
+    || reject.isPending
+    || activate.isPending
+    || demote.isPending
+    || archive.isPending;
 
   return (
     <div className="flex items-center gap-2 flex-wrap">
@@ -315,26 +338,46 @@ function ReleaseControls({ release }: { release: PromptReleaseRecord }) {
         </span>
       )}
 
-      {/* State-driven action buttons. Transitions mirror
-          `PromptReleaseState::can_transition_to` in cairn-evals. */}
+      {/* State-driven action buttons. Every transition fired here is
+          one `PromptReleaseState::can_transition_to` permits in cairn-evals:
+          draft       -> proposed (Request Approval) / approved (Approve) / archived
+          proposed    -> approved / rejected / archived
+          approved    -> active (Activate) / archived
+          active      -> approved (Demote) / archived
+          rejected    -> archived
+          A single `anyPending` gate prevents overlapping mutations. */}
       {release.state === "draft" && (
-        <button
-          onClick={() => reqApproval.mutate()}
-          disabled={reqApproval.isPending}
-          className="flex items-center gap-1 rounded px-2 py-0.5 text-[10px] font-medium
-                     bg-amber-900/40 text-amber-300 border border-amber-800/40
-                     hover:bg-amber-900/70 transition-colors disabled:opacity-40"
-        >
-          {reqApproval.isPending ? <Loader2 size={9} className="animate-spin" /> : null}
-          Request Approval
-        </button>
+        <>
+          <button
+            onClick={() => reqApproval.mutate()}
+            disabled={anyPending}
+            className="flex items-center gap-1 rounded px-2 py-0.5 text-[10px] font-medium
+                       bg-amber-900/40 text-amber-300 border border-amber-800/40
+                       hover:bg-amber-900/70 transition-colors disabled:opacity-40"
+          >
+            {reqApproval.isPending ? <Loader2 size={9} className="animate-spin" /> : null}
+            Request Approval
+          </button>
+          {/* Rust matrix permits draft -> approved directly; expose it
+              for operators who self-approve without a separate reviewer. */}
+          <button
+            onClick={() => approve.mutate()}
+            disabled={anyPending}
+            className="flex items-center gap-1 rounded px-2 py-0.5 text-[10px] font-medium
+                       bg-blue-900/40 text-blue-300 border border-blue-800/40
+                       hover:bg-blue-900/70 transition-colors disabled:opacity-40"
+          >
+            {approve.isPending ? <Loader2 size={9} className="animate-spin" /> : <Check size={9} />}
+            Approve
+          </button>
+        </>
       )}
 
       {release.state === "proposed" && (
         <>
           <button
             onClick={() => approve.mutate()}
-            disabled={approve.isPending}
+            disabled={anyPending}
             className="flex items-center gap-1 rounded px-2 py-0.5 text-[10px] font-medium
                        bg-blue-900/40 text-blue-300 border border-blue-800/40
                        hover:bg-blue-900/70 transition-colors disabled:opacity-40"
@@ -344,7 +387,7 @@ function ReleaseControls({ release }: { release: PromptReleaseRecord }) {
           </button>
           <button
             onClick={() => reject.mutate()}
-            disabled={reject.isPending}
+            disabled={anyPending}
             className="flex items-center gap-1 rounded px-2 py-0.5 text-[10px] font-medium
                        bg-red-900/40 text-red-300 border border-red-800/40
                        hover:bg-red-900/70 transition-colors disabled:opacity-40"
@@ -358,7 +401,7 @@ function ReleaseControls({ release }: { release: PromptReleaseRecord }) {
       {release.state === "approved" && (
         <button
           onClick={() => activate.mutate()}
-          disabled={activate.isPending}
+          disabled={anyPending}
           className="flex items-center gap-1 rounded px-2 py-0.5 text-[10px] font-medium
                      bg-emerald-900/40 text-emerald-300 border border-emerald-800/40
                      hover:bg-emerald-900/70 transition-colors disabled:opacity-40"
@@ -371,27 +414,41 @@ function ReleaseControls({ release }: { release: PromptReleaseRecord }) {
       )}
 
       {release.state === "active" && (
-        <div className="flex items-center gap-2">
-          <input
-            type="range" min={0} max={100} step={5}
-            value={rollout}
-            onChange={(e) => setRollout(Number(e.target.value))}
-            className="w-24 accent-indigo-500 cursor-pointer"
-          />
-          <span className="text-[10px] font-mono text-gray-500 dark:text-zinc-400 w-8 text-right tabular-nums">
-            {rollout}%
-          </span>
+        <>
+          <div className="flex items-center gap-2">
+            <input
+              type="range" min={0} max={100} step={5}
+              value={rollout}
+              onChange={(e) => setRollout(Number(e.target.value))}
+              className="w-24 accent-indigo-500 cursor-pointer"
+            />
+            <span className="text-[10px] font-mono text-gray-500 dark:text-zinc-400 w-8 text-right tabular-nums">
+              {rollout}%
+            </span>
+            <button
+              onClick={() => applyRollout.mutate()}
+              disabled={applyRollout.isPending || rollout === (release.rollout_percent ?? 0)}
+              className="flex items-center gap-1 rounded px-2 py-0.5 text-[10px] font-medium
+                         bg-indigo-900/40 text-indigo-300 border border-indigo-800/40
+                         hover:bg-indigo-900/70 transition-colors disabled:opacity-40"
+            >
+              {applyRollout.isPending ? <Loader2 size={9} className="animate-spin" /> : <Check size={9} />}
+              Apply
+            </button>
+          </div>
+          {/* Rust permits active -> approved to pull a release out of
+              rotation without archiving it. */}
           <button
-            onClick={() => applyRollout.mutate()}
-            disabled={applyRollout.isPending || rollout === (release.rollout_percent ?? 0)}
+            onClick={() => demote.mutate()}
+            disabled={anyPending}
             className="flex items-center gap-1 rounded px-2 py-0.5 text-[10px] font-medium
-                       bg-indigo-900/40 text-indigo-300 border border-indigo-800/40
-                       hover:bg-indigo-900/70 transition-colors disabled:opacity-40"
+                       bg-blue-900/40 text-blue-300 border border-blue-800/40
+                       hover:bg-blue-900/70 transition-colors disabled:opacity-40"
           >
-            {applyRollout.isPending ? <Loader2 size={9} className="animate-spin" /> : <Check size={9} />}
-            Apply
+            {demote.isPending ? <Loader2 size={9} className="animate-spin" /> : <Pause size={9} />}
+            Demote
           </button>
-        </div>
+        </>
       )}
 
       {(release.state === "draft"
@@ -401,7 +458,7 @@ function ReleaseControls({ release }: { release: PromptReleaseRecord }) {
         || release.state === "rejected") && (
         <button
           onClick={() => archive.mutate()}
-          disabled={archive.isPending}
+          disabled={anyPending}
           className="flex items-center gap-1 rounded px-2 py-0.5 text-[10px] font-medium
                      bg-zinc-800/60 text-zinc-400 border border-zinc-700/40
                      hover:bg-zinc-800 transition-colors disabled:opacity-40"
@@ -610,11 +667,15 @@ function NewPromptForm({ onClose }: { onClose: () => void }) {
         <div>
           <label className="text-[10px] text-gray-400 dark:text-zinc-500 block mb-1">Kind</label>
           <select
-            value={kind} onChange={(e) => setKind(e.target.value as PromptKind)}
+            value={kind}
+            onChange={(e) => {
+              const next = e.target.value;
+              if (isPromptKind(next)) setKind(next);
+            }}
             className="w-full rounded border border-gray-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 text-[12px] text-gray-700 dark:text-zinc-300
                        px-2 py-1.5 focus:outline-none focus:border-indigo-500 transition-colors"
           >
-            {(Object.keys(KIND_LABEL) as PromptKind[]).map((k) => (
+            {PROMPT_KINDS.map((k) => (
               <option key={k} value={k}>{KIND_LABEL[k]}</option>
             ))}
           </select>
