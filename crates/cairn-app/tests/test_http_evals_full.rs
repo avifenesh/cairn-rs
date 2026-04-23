@@ -42,7 +42,12 @@ async fn eval_run_full_contract_roundtrip() {
         .send()
         .await
         .expect("create dataset reaches server");
-    assert_eq!(res.status().as_u16(), 201, "create dataset: {}", res.text().await.unwrap_or_default());
+    assert_eq!(
+        res.status().as_u16(),
+        201,
+        "create dataset: {}",
+        res.text().await.unwrap_or_default()
+    );
     let dataset: Value = res.json().await.expect("dataset json");
     let dataset_id = dataset
         .get("dataset_id")
@@ -62,7 +67,12 @@ async fn eval_run_full_contract_roundtrip() {
         .send()
         .await
         .expect("create rubric reaches server");
-    assert_eq!(res.status().as_u16(), 201, "create rubric: {}", res.text().await.unwrap_or_default());
+    assert_eq!(
+        res.status().as_u16(),
+        201,
+        "create rubric: {}",
+        res.text().await.unwrap_or_default()
+    );
     let rubric: Value = res.json().await.expect("rubric json");
     let rubric_id = rubric
         .get("rubric_id")
@@ -83,7 +93,12 @@ async fn eval_run_full_contract_roundtrip() {
         .send()
         .await
         .expect("create baseline reaches server");
-    assert_eq!(res.status().as_u16(), 201, "create baseline: {}", res.text().await.unwrap_or_default());
+    assert_eq!(
+        res.status().as_u16(),
+        201,
+        "create baseline: {}",
+        res.text().await.unwrap_or_default()
+    );
     let baseline: Value = res.json().await.expect("baseline json");
     let baseline_id = baseline
         .get("baseline_id")
@@ -134,9 +149,11 @@ async fn eval_run_full_contract_roundtrip() {
         .await
         .expect("create run w/ dangling rubric reaches server");
     assert_eq!(
-        res.status().as_u16(), 404,
+        res.status().as_u16(),
+        404,
         "dangling rubric_id must 404, got {}: {}",
-        res.status(), res.text().await.unwrap_or_default(),
+        res.status(),
+        res.text().await.unwrap_or_default(),
     );
 
     // ── 4. Real eval-run create with all linked artifacts.
@@ -161,7 +178,8 @@ async fn eval_run_full_contract_roundtrip() {
         .await
         .expect("create run reaches server");
     assert_eq!(
-        res.status().as_u16(), 201,
+        res.status().as_u16(),
+        201,
         "create run: {}",
         res.text().await.unwrap_or_default(),
     );
@@ -202,7 +220,12 @@ async fn eval_run_full_contract_roundtrip() {
         .send()
         .await
         .expect("compare reaches server");
-    assert_eq!(res.status().as_u16(), 200, "compare: {}", res.text().await.unwrap_or_default());
+    assert_eq!(
+        res.status().as_u16(),
+        200,
+        "compare: {}",
+        res.text().await.unwrap_or_default()
+    );
     let compare: Value = res.json().await.expect("compare json");
     let run_ids = compare
         .get("run_ids")
@@ -210,10 +233,7 @@ async fn eval_run_full_contract_roundtrip() {
         .expect("compare.run_ids[]");
     assert_eq!(run_ids.len(), 1);
     assert!(
-        compare
-            .get("rows")
-            .and_then(|v| v.as_array())
-            .is_some(),
+        compare.get("rows").and_then(|v| v.as_array()).is_some(),
         "compare.rows[] present: {compare}",
     );
 }
