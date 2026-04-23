@@ -19,6 +19,11 @@ use std::time::{SystemTime, UNIX_EPOCH};
 /// (not portable — fails on Windows) and don't pull in a build-dependency just
 /// for a timestamp. The proleptic Gregorian calendar is correct for all dates
 /// after 1582 and is what ISO-8601 specifies.
+/// Proleptic Gregorian leap-year rule.
+fn is_leap(year: u64) -> bool {
+    (year.is_multiple_of(4) && !year.is_multiple_of(100)) || year.is_multiple_of(400)
+}
+
 fn iso8601_utc_now() -> String {
     let secs = match SystemTime::now().duration_since(UNIX_EPOCH) {
         Ok(d) => d.as_secs(),
@@ -37,7 +42,7 @@ fn iso8601_utc_now() -> String {
     let mut year: u64 = 1970;
     let mut days_left = days;
     loop {
-        let leap = (year % 4 == 0 && year % 100 != 0) || year % 400 == 0;
+        let leap = is_leap(year);
         let year_days = if leap { 366 } else { 365 };
         if days_left < year_days {
             break;
@@ -45,11 +50,20 @@ fn iso8601_utc_now() -> String {
         days_left -= year_days;
         year += 1;
     }
-    let leap = (year % 4 == 0 && year % 100 != 0) || year % 400 == 0;
+    let leap = is_leap(year);
     let month_lens: [u64; 12] = [
         31,
         if leap { 29 } else { 28 },
-        31, 30, 31, 30, 31, 31, 30, 31, 30, 31,
+        31,
+        30,
+        31,
+        30,
+        31,
+        31,
+        30,
+        31,
+        30,
+        31,
     ];
     let mut month: u64 = 0;
     while month < 12 && days_left >= month_lens[month as usize] {
