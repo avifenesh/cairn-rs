@@ -82,8 +82,9 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   catalog with an explicit "register a provider to use this model"
   disclaimer.
 - **UI: `CostsPage` + `ProjectDashboardPage` stat cards no longer stuck
-  at 0.** `GET /v1/costs` returns `{items, has_more}` (a list of
-  per-session cost records); the UI was typed as a flat `CostSummary` and
+  at 0.** `GET /v1/costs` returns `{items, hasMore}` (the standard
+  `ListResponse<T>` camelCase envelope — a list of per-session cost
+  records); the UI was typed as a flat `CostSummary` and
   `total_cost_micros` was `undefined` on every page. Added a
   `CostListResponse` / `SessionCostRecord` pair to `types.ts`, a
   `summariseCostItems()` helper in `api.ts` that folds items into the

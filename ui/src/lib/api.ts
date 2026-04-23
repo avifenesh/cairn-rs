@@ -618,7 +618,8 @@ export function createApiClient(config: ApiClientConfig) {
     // ── Costs ─────────────────────────────────────────────────────────────────
 
     /** GET /v1/costs — list of per-session cost records for the active tenant.
-     *  Returns `{ items, has_more }`. Callers typically pass this through
+     *  Returns `{ items, hasMore }` (backend `ListResponse<T>` uses
+     *  camelCase on the wire). Callers typically pass this through
      *  `summariseCostItems` to get a `CostSummary` for stat-card rendering. */
     getCosts: (): Promise<import("./types").CostListResponse> => get("/v1/costs"),
 

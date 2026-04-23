@@ -1352,12 +1352,33 @@ pub(crate) async fn chat_stream_handler(
     // route the request to whatever env-configured provider happens to be
     // present and mask the real problem. Emit the actionable 422 now.
     if has_active_connections {
-        let summaries = state
+        let summaries = match state
             .runtime
             .provider_registry
             .active_connection_summaries(&tenant_id)
             .await
-            .unwrap_or_default();
+        {
+            Ok(summaries) => summaries,
+            Err(err) => {
+                // Surface the store/runtime failure instead of
+                // silently returning an empty `active_connections`
+                // list in the 422 body — that would make the error
+                // message claim "no connection serves this model"
+                // when the real cause is the store itself.
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    axum::Json(serde_json::json!({
+                        "error": format!(
+                            "Failed to load active connection summaries for tenant '{}': {err}",
+                            tenant_id.as_str(),
+                        ),
+                        "tenant_id": tenant_id.as_str(),
+                        "requested_model": model_id,
+                    })),
+                )
+                    .into_response();
+            }
+        };
         let conn_list: Vec<serde_json::Value> = summaries
             .iter()
             .map(|(id, models)| {

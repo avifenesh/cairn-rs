@@ -428,12 +428,16 @@ export interface SessionCostRecord {
   token_out?: number;
 }
 
-/** GET /v1/costs response shape — `{ items, has_more }` list.
- *  Stat cards sum across `items[]` client-side (pre-fix the UI assumed a
- *  flat summary object and every stat rendered 0 — issue #158). */
+/** GET /v1/costs response shape — `{ items, hasMore }` list.
+ *  The backend's `ListResponse<T>` serialises with
+ *  `#[serde(rename_all = "camelCase")]`, so the pagination flag lands
+ *  as `hasMore` on the wire even though the Rust struct uses
+ *  `has_more`. Stat cards sum across `items[]` client-side (pre-fix
+ *  the UI assumed a flat summary object and every stat rendered 0 —
+ *  issue #158). */
 export interface CostListResponse {
   items: SessionCostRecord[];
-  has_more: boolean;
+  hasMore: boolean;
 }
 
 /** Derived aggregate used by CostsPage stat cards, computed client-side
