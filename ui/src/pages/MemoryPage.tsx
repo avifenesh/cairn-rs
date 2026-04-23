@@ -228,7 +228,7 @@ export function MemoryPage() {
   const inputRef = useRef<HTMLInputElement>(null);
   const [scope] = useScope();
 
-  const { data: searchData, isFetching, isError: isSearchError, error: _searchError } = useQuery({
+  const { data: searchData, isFetching, isError: isSearchError, error: searchError } = useQuery({
     queryKey: ['memory-search', scope.tenant_id, scope.workspace_id, scope.project_id, submitted],
     queryFn: () => defaultApi.searchMemory({
       tenant_id:    scope.tenant_id,
@@ -339,13 +339,32 @@ export function MemoryPage() {
               <Loader2 size={12} className="animate-spin" /> Searching…
             </div>
           ) : isSearchError ? (
-            <FeatureEmptyState
-              icon={<Database size={20} className="text-gray-400 dark:text-zinc-500" />}
-              title="No embedding provider configured"
-              description="Memory search requires an embedding provider to generate vector representations. Add one on the Providers page, then ingest documents with the form above."
-              actionLabel="Go to Providers"
-              actionHref="#providers"
-            />
+            // Distinguish "no embedding provider configured" (the common
+            // first-run case — backend returns 503 / provider_unavailable)
+            // from generic errors (network, 4xx, 5xx). Showing the provider
+            // hint on every failure masked real bugs — now we only show it
+            // when the error genuinely points at missing provider config.
+            (() => {
+              const errMsg = searchError instanceof Error ? searchError.message : String(searchError ?? '');
+              const isProviderUnavailable =
+                /provider/i.test(errMsg) && /(unavailable|not configured|missing|no embedding|embedding)/i.test(errMsg);
+              return isProviderUnavailable ? (
+                <FeatureEmptyState
+                  icon={<Database size={20} className="text-gray-400 dark:text-zinc-500" />}
+                  title="No embedding provider configured"
+                  description="Memory search requires an embedding provider to generate vector representations. Add one on the Providers page, then ingest documents with the form above."
+                  actionLabel="Go to Providers"
+                  actionHref="#providers"
+                />
+              ) : (
+                <div className="px-4 py-6 text-center">
+                  <p className="text-[12px] font-medium text-red-400">Search failed</p>
+                  <p className="mt-1 text-[11px] text-gray-400 dark:text-zinc-500 font-mono break-words">
+                    {errMsg || 'Unknown error'}
+                  </p>
+                </div>
+              );
+            })()
           ) : results.length === 0 ? (
             <div className="px-4 py-8 text-center text-xs text-gray-400 dark:text-zinc-600">
               No results for "{submitted}"
