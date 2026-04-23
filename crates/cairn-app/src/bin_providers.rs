@@ -44,6 +44,7 @@ impl PlaygroundScopeQuery {
     /// - operator (per-tenant) caller: always use the authenticated
     ///   tenant. `?tenant_id=` that matches is a no-op; mismatched
     ///   values are rejected with 403 to prevent cross-tenant reads
+    #[allow(clippy::result_large_err)] // axum Response is the natural error shape
     pub(crate) fn resolve_tenant(
         &self,
         authenticated: Option<&cairn_domain::TenantId>,
@@ -823,13 +824,11 @@ pub(crate) async fn ollama_generate_handler(
     let model_id = body.model.as_deref().unwrap_or(&default_model).to_owned();
 
     let is_admin = cairn_app::is_admin_principal(&principal);
-    let tenant_id = match scope.resolve_tenant(
-        auth_tenant.as_ref().map(|axum::Extension(t)| t),
-        is_admin,
-    ) {
-        Ok(t) => t,
-        Err(resp) => return resp,
-    };
+    let tenant_id =
+        match scope.resolve_tenant(auth_tenant.as_ref().map(|axum::Extension(t)| t), is_admin) {
+            Ok(t) => t,
+            Err(resp) => return resp,
+        };
     let provider: Arc<dyn cairn_domain::providers::GenerationProvider> = match state
         .runtime
         .provider_registry
@@ -1020,13 +1019,11 @@ pub(crate) async fn ollama_embed_handler(
         .to_owned();
 
     let is_admin = cairn_app::is_admin_principal(&principal);
-    let tenant_id = match scope.resolve_tenant(
-        auth_tenant.as_ref().map(|axum::Extension(t)| t),
-        is_admin,
-    ) {
-        Ok(t) => t,
-        Err(resp) => return resp,
-    };
+    let tenant_id =
+        match scope.resolve_tenant(auth_tenant.as_ref().map(|axum::Extension(t)| t), is_admin) {
+            Ok(t) => t,
+            Err(resp) => return resp,
+        };
     let embedder: Arc<dyn cairn_domain::providers::EmbeddingProvider> = match state
         .runtime
         .provider_registry
@@ -1239,13 +1236,11 @@ pub(crate) async fn chat_stream_handler(
     let default_stream = state.runtime.runtime_config.default_stream_model().await;
     let model_id = body.model.as_deref().unwrap_or(&default_stream).to_owned();
     let is_admin = cairn_app::is_admin_principal(&principal);
-    let tenant_id = match scope.resolve_tenant(
-        auth_tenant.as_ref().map(|axum::Extension(t)| t),
-        is_admin,
-    ) {
-        Ok(t) => t,
-        Err(resp) => return resp,
-    };
+    let tenant_id =
+        match scope.resolve_tenant(auth_tenant.as_ref().map(|axum::Extension(t)| t), is_admin) {
+            Ok(t) => t,
+            Err(resp) => return resp,
+        };
     let messages: Vec<serde_json::Value> = body
         .messages
         .unwrap_or_else(|| vec![serde_json::json!({"role": "user", "content": body.prompt})]);
