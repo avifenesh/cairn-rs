@@ -965,6 +965,31 @@ pub(crate) async fn memory_ingest_handler(
     State(state): State<Arc<AppState>>,
     Json(body): Json<MemoryIngestRequest>,
 ) -> impl IntoResponse {
+    // Validate required ids up front (closes #238). Previously an empty
+    // source_id silently minted a blank-id source; malformed JSON under
+    // a structured source_type was accepted and only failed later at
+    // retrieval time.
+    if body.source_id.trim().is_empty() {
+        return bad_request_response("source_id must not be empty");
+    }
+    if body.document_id.trim().is_empty() {
+        return bad_request_response("document_id must not be empty");
+    }
+    // Structured-JSON source types must carry a parseable JSON payload.
+    // Covers both `structured_json` and `json_structured` aliases;
+    // rejecting here surfaces the operator's mistake as a 422 instead
+    // of a late chunker failure.
+    if matches!(
+        body.source_type,
+        Some(SourceType::StructuredJson) | Some(SourceType::JsonStructured)
+    ) {
+        if let Err(err) = serde_json::from_str::<serde_json::Value>(&body.content) {
+            return bad_request_response(format!(
+                "content is not valid JSON for structured source_type: {err}"
+            ));
+        }
+    }
+
     let project = body.project();
     let source_id = SourceId::new(body.source_id);
     let document_id = KnowledgeDocumentId::new(body.document_id);

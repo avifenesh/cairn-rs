@@ -435,7 +435,7 @@ export function MemoryPage() {
                 <span className="text-[10px] text-gray-400 dark:text-zinc-600 uppercase tracking-wider">Score</span>
               </div>
               {results.map((r, i) => (
-                <ResultRow key={r.chunk.chunk_id} result={r} rank={i + 1} even={i % 2 === 0} />
+                <ResultRow key={`${r.chunk.chunk_id}-${i + 1}`} result={r} rank={i + 1} even={i % 2 === 0} />
               ))}
             </div>
           )}

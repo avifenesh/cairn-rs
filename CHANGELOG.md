@@ -11,6 +11,17 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **`DELETE /v1/admin/tenants/:t/sessions/:s` admin soft-delete (closes
+  #229).** Previously there was no way to remove a session short of
+  wiping the event log — stray / mistyped session ids accumulated in
+  the projection forever. The new route mirrors PR BB's workspace
+  pattern exactly: it verifies the session belongs to the supplied
+  tenant, calls `SessionService::archive` (which issues the
+  fabric-side cancel + `cairn.archived` tag write and emits a
+  `SessionArchived` bridge event), and returns 204. Cross-tenant
+  DELETE by id is refused with 404 so a mistyped `:tenant_id` cannot
+  silently archive another tenant's session.
+
 - **Traces page detail drawer + cross-entity links + scope-aware query
   (closes #241).** `TracesPage` now opens a right-side `Drawer` when an
   operator clicks (or keyboards onto) any row, surfacing the full
@@ -53,6 +64,38 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **`PUT /v1/settings/defaults/:scope/:scope_id/:key` now validates the
+  value server-side (closes #228).** Before this the endpoint accepted
+  anything — empty string, 10k-character garbage, `nonsense-model-id`
+  — and returned 200, leaving the typo to surface later as an opaque
+  provider-layer failure. Validation is per-key: model-id keys
+  (`brain_model`, `generate_model`, `stream_model`, `embed_model`) must
+  resolve in the static provider registry AND be listed as supported
+  by at least one active provider connection (mirrors PR #185's
+  UI-side filter, now enforced server-side); numeric keys (`max_tokens`,
+  `timeout_ms`, `temperature`) are parsed and range-checked; string
+  values are capped at 256 chars for model ids and 4096 chars for
+  prompt-like keys. All failures surface as 422 with a specific error
+  message.
+
+- **`POST /v1/sessions` now rejects duplicate / empty / oversized
+  `session_id` (closes #229).** Previously a dup silently returned 201
+  (UI couldn't distinguish a new session from a collision), and empty
+  or 10k-character session ids also succeeded. The handler now
+  pre-checks for an existing session via `SessionService::get` and
+  returns 409 on collision (mirrors PR BA/#217's
+  `CredentialServiceImpl::store` pattern), rejects empty `session_id`
+  with 422, and caps length at 256 characters.
+
+- **`POST /v1/memory/ingest` now validates `source_id` and structured
+  JSON payloads (closes #238).** An empty `source_id` used to silently
+  mint a blank-id source; `source_type: "structured_json"` accepted
+  arbitrary non-JSON content and only failed later at retrieval time.
+  Both now 422 at ingest, with the JSON parse error surfaced in the
+  response body. The accompanying UI fix changes
+  `MemoryPage`'s search-result React key from the bare `chunk_id` to
+  `${chunk_id}-${rank}` so duplicate chunks across pages no longer
+  trigger React's duplicate-key warning.
 - **ApprovalsPage rows now navigate to the linked run on click
   (closes #231).** Clicking (or pressing Enter/Space on) an approval
   row whose `run_id` is populated now routes to `#run/:id`; rows

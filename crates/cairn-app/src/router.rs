@@ -419,6 +419,10 @@ impl AppBootstrap {
                         HttpMethod::Delete,
                         "/v1/admin/tenants/:tenant_id/workspaces/:workspace_id",
                     ) => router.route(&path, delete(delete_workspace_handler)),
+                    (
+                        HttpMethod::Delete,
+                        "/v1/admin/tenants/:tenant_id/sessions/:session_id",
+                    ) => router.route(&path, delete(delete_session_admin_handler)),
                     (HttpMethod::Get, "/v1/admin/tenants/:tenant_id/operator-profiles") => {
                         router.route(&path, get(list_operator_profiles_handler))
                     }
@@ -1214,6 +1218,10 @@ impl AppBootstrap {
             .route(
                 "/v1/admin/tenants/:tenant_id/workspaces/:workspace_id",
                 delete(delete_workspace_handler),
+            )
+            .route(
+                "/v1/admin/tenants/:tenant_id/sessions/:session_id",
+                delete(delete_session_admin_handler),
             )
             .route(
                 "/v1/admin/tenants/:tenant_id/operator-profiles",
