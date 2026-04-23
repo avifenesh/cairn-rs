@@ -460,6 +460,25 @@ function ConnectionRow({
     onError: () => toast.error(`Failed to test ${record.provider_connection_id}`),
   });
 
+  const discoverConn = useMutation({
+    mutationFn: async () => {
+      const ids = await defaultApi.discoverModelIds(record.provider_connection_id);
+      if (ids.length === 0) {
+        throw new Error("provider returned an empty model list");
+      }
+      await defaultApi.updateProviderConnection(record.provider_connection_id, {
+        supported_models: ids,
+      });
+      return ids;
+    },
+    onSuccess: (ids) => {
+      toast.success(`Discovered ${ids.length} model(s) on ${record.provider_connection_id}.`);
+      onUpdated();
+    },
+    onError: (e) =>
+      toast.error(`Discover failed on ${record.provider_connection_id}: ${e instanceof Error ? e.message : "error"}`),
+  });
+
   const familyColor: Record<string, string> = {
     openai:                "text-sky-400 bg-sky-950/40 border-sky-800/40",
     anthropic:             "text-violet-400 bg-violet-950/40 border-violet-800/40",
@@ -511,7 +530,12 @@ function ConnectionRow({
         <td className="px-3 h-10">
           <div className="flex items-center gap-1 flex-wrap">
             {record.supported_models.length === 0 ? (
-              <span className="text-[10px] text-gray-300 dark:text-zinc-600 italic">none</span>
+              <span
+                className="text-[10px] text-amber-500 italic"
+                title="This connection won't serve any chat/generate calls until models are registered. Click Discover or edit the row."
+              >
+                no models registered
+              </span>
             ) : (
               record.supported_models.slice(0, 3).map(m => (
                 <span key={m} className="flex items-center gap-0.5 text-[10px] font-mono text-gray-500 dark:text-zinc-400 bg-gray-100 dark:bg-zinc-800 border border-gray-200 dark:border-zinc-700 rounded px-1.5 py-0.5">
@@ -540,6 +564,24 @@ function ConnectionRow({
             >
               {testConn.isPending ? <Loader2 size={10} className="animate-spin" /> : <Zap size={10} />}
               Test
+            </button>
+            <button
+              onClick={() => discoverConn.mutate()}
+              disabled={discoverConn.isPending}
+              className={clsx(
+                "flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium transition-colors",
+                discoverConn.isPending
+                  ? "text-gray-400 dark:text-zinc-600"
+                  : record.supported_models.length === 0
+                    ? "text-amber-500 hover:text-amber-400 hover:bg-amber-950/30"
+                    : "text-emerald-400 hover:text-emerald-300 hover:bg-emerald-950/30",
+              )}
+              title={record.supported_models.length === 0
+                ? "No models registered — click to auto-discover from the provider"
+                : "Re-run discovery and replace supported_models"}
+            >
+              {discoverConn.isPending ? <Loader2 size={10} className="animate-spin" /> : <RefreshCw size={10} />}
+              Discover
             </button>
             <button
               onClick={() => setExpanded(v => !v)}
@@ -692,7 +734,7 @@ function AddProviderModal({ onClose, onCreated }: AddProviderModalProps) {
         credentialId = stored.id;
       }
 
-      return defaultApi.createProviderConnection({
+      const created = await defaultApi.createProviderConnection({
         tenant_id: scope.tenant_id,
         provider_connection_id: connectionId.trim(),
         provider_family: family.trim(),
@@ -701,6 +743,36 @@ function AddProviderModal({ onClose, onCreated }: AddProviderModalProps) {
         credential_id: credentialId,
         endpoint_url: baseUrl.trim() || undefined,
       });
+
+      // Issue #156 / closed-loop UX: if the operator didn't enter any
+      // models manually, kick off auto-discovery against the freshly
+      // registered connection. A connection with empty supported_models
+      // silently fails every chat/generate resolve — so we refuse to
+      // leave the wizard in that state without at least trying to fill
+      // it in. Failure is non-fatal (auth not yet active, endpoint
+      // temporarily unreachable, etc.): surface a warning toast and let
+      // the operator add IDs by hand on the row.
+      if (models.length === 0) {
+        try {
+          const discovered = await defaultApi.discoverModelIds(connectionId.trim());
+          if (discovered.length > 0) {
+            await defaultApi.updateProviderConnection(connectionId.trim(), {
+              supported_models: discovered,
+            });
+            toast.success(`Discovered ${discovered.length} model(s) on "${connectionId}".`);
+          } else {
+            toast.warning(
+              `No models discovered on "${connectionId}" — add IDs manually on the row.`,
+            );
+          }
+        } catch (e) {
+          toast.warning(
+            `Discover failed on "${connectionId}" (${e instanceof Error ? e.message : "error"}). Add model IDs manually on the row.`,
+          );
+        }
+      }
+
+      return created;
     },
     onSuccess: () => {
       toast.success(`Provider "${connectionId}" registered.`);
@@ -876,8 +948,8 @@ function AddProviderModal({ onClose, onCreated }: AddProviderModalProps) {
               <div>
                 <p className="text-[12px] text-gray-700 dark:text-zinc-300 font-medium">Add models</p>
                 <p className="text-[11px] text-gray-400 dark:text-zinc-500 mt-1 leading-relaxed">
-                  Enter the model IDs served through this connection.
-                  {" Discovery from the base URL is coming — enter IDs manually for now."}
+                  Enter the model IDs served through this connection, or leave this blank
+                  — we will call the provider&apos;s <code className="text-gray-500 dark:text-zinc-400 font-mono text-[10px]">/models</code> endpoint right after registration and fill it in automatically.
                 </p>
               </div>
 
@@ -909,10 +981,10 @@ function AddProviderModal({ onClose, onCreated }: AddProviderModalProps) {
 
               {/* Discovery notice */}
               <div className="flex items-center gap-2 px-3 py-2 rounded-md bg-gray-50/60 dark:bg-zinc-900/60 border border-gray-200/60 dark:border-zinc-800/60 border-dashed">
-                <Zap size={12} className="text-gray-400 dark:text-zinc-600 shrink-0" />
-                <span className="text-[11px] text-gray-400 dark:text-zinc-600">
-                  Auto-discover coming soon — will call{" "}
-                  <code className="text-gray-400 dark:text-zinc-500 font-mono text-[10px]">GET /v1/providers/connections/:id/discover-models</code>
+                <Zap size={12} className="text-emerald-400 shrink-0" />
+                <span className="text-[11px] text-gray-500 dark:text-zinc-400">
+                  Auto-discovery runs on registration when this list is empty — calls{" "}
+                  <code className="text-gray-400 dark:text-zinc-500 font-mono text-[10px]">GET /v1/providers/connections/:id/discover-models</code>.
                 </span>
               </div>
 
