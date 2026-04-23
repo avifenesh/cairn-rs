@@ -91,6 +91,16 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   for up to 10 seconds after the cancel succeeded. The mutation now
   also invalidates `["run-detail", runId]`, matching the pattern
   established in #131 for plan approve / reject / revise.
+- **UI: `PromptsPage` enum values now match the Rust domain (#150).** The
+  kind dropdown and release-state badges used values (`user`, `assistant`,
+  `pending_approval`, `released`, `rolling_out`, `rolled_back`) that the
+  backend's `PromptKind` / `PromptReleaseState` enums do not recognize, so
+  action buttons fired transition requests the server rejected. Kinds are
+  now `system`, `user_template`, `tool_prompt`, `critic`, `router` and
+  release states are `draft`, `proposed`, `approved`, `active`, `rejected`,
+  `archived`, all exported as typed literal unions in `ui/src/lib/types.ts`
+  and mirrored by state-driven buttons that only fire transitions allowed
+  by `PromptReleaseState::can_transition_to` in `cairn-evals`.
 - **UI: `SessionDetailPage` silently dropped runs past the first 500 (#170).**
   The page fetched `GET /v1/runs?limit=500` and filtered by
   `session_id` client-side, so on projects with more than 500 total

@@ -651,14 +651,45 @@ export interface TracesResponse {
 
 // ── Prompts (RFC 006) ─────────────────────────────────────────────────────────
 
+/**
+ * Mirrors `cairn_evals::prompts::assets::PromptKind`
+ * (serde `rename_all = "snake_case"`).
+ */
+export type PromptKind =
+  | "system"
+  | "user_template"
+  | "tool_prompt"
+  | "critic"
+  | "router";
+
+/**
+ * Mirrors `cairn_evals::prompts::assets::PromptAssetStatus`
+ * (serde `rename_all = "snake_case"`).
+ */
+export type PromptAssetStatus = "active" | "deprecated" | "archived";
+
+/**
+ * Mirrors `cairn_evals::prompts::releases::PromptReleaseState`
+ * (serde `rename_all = "snake_case"`). Single canonical lifecycle
+ * field per RFC 006; V1 does not introduce a parallel
+ * `approval_state`.
+ */
+export type PromptReleaseState =
+  | "draft"
+  | "proposed"
+  | "approved"
+  | "active"
+  | "rejected"
+  | "archived";
+
 /** GET /v1/prompts/assets */
 export interface PromptAssetRecord {
   prompt_asset_id: string;
   project: ProjectKey;
   name: string;
-  kind: string;
+  kind: PromptKind;
   scope?: string;
-  status?: string;
+  status?: PromptAssetStatus;
   created_at: number;
   updated_at?: number;
 }
@@ -689,7 +720,7 @@ export interface PromptReleaseRecord {
   project: ProjectKey;
   prompt_asset_id: string;
   prompt_version_id: string;
-  state: string;
+  state: PromptReleaseState;
   rollout_percent?: number | null;
   routing_slot?: string | null;
   task_type?: string | null;
