@@ -443,7 +443,7 @@ function CatalogCard({ entry }: { entry: CatalogEntry }) {
   });
 
   const enableMut = useMutation({
-    mutationFn: () => defaultApi.enablePluginForProject(entry.id, undefined, scope),
+    mutationFn: () => defaultApi.enablePluginForProject(entry.id, scope),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['catalog'] }),
     onError: toastErr('enable plugin'),
   });

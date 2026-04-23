@@ -929,8 +929,8 @@ export function createApiClient(config: ApiClientConfig) {
      */
     enablePluginForProject: (
       pluginId: string,
-      body?: unknown,
       scope?: import("./scope").ProjectScope,
+      body?: unknown,
     ): Promise<unknown> => {
       const s = scope ?? config.scope ?? DEFAULT_SCOPE;
       const path = encodeURIComponent(`${s.tenant_id}/${s.workspace_id}/${s.project_id}`);
