@@ -991,9 +991,10 @@ export function PlaygroundPage() {
   ].filter((v): v is string => typeof v === "string" && v.length > 0);
 
   // Build model list from available providers in the registry.
-  // Skip "anthropic" (non-OpenAI wire format — needs native adapter).
+  // All adapter types are supported: the backend chat/stream handler routes
+  // through the appropriate native adapter (openai, anthropic, bedrock, ollama).
   const registryModels: string[] = (registryData ?? [])
-    .filter(p => p.available && p.api_format !== "anthropic")
+    .filter(p => p.available)
     .flatMap(p => {
       // If the provider has known models, list them. Otherwise expose the default.
       if (p.models.length > 0) return p.models.map(m => m.id);

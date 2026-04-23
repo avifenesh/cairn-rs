@@ -110,30 +110,28 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
-- **Public-facing polish: real build info, no nested-button warning, no
-  fake release notes (#141, #142, #145).**
-  - `/v1/system/info` no longer emits the placeholder strings `"dev"` and
-    `"(build date not embedded)"`. A new `crates/cairn-app/build.rs`
-    populates `GIT_COMMIT` (short 12-char SHA via `git rev-parse`) and
-    `BUILD_DATE` (UTC ISO-8601) at build time; CI may pre-set either env
-    var to override. Fallback is the literal `"unknown"`. `DeploymentPage`
-    additionally hides the Git-commit / Build-date rows when the value is
-    a legacy placeholder, so older backends don't leak embarrassing copy.
-  - `ApiDocsPage` endpoint row no longer wraps `<CopyButton>` (a
-    `<button>`) inside an outer `<button>` — the outer element is now a
-    `<div role="button" tabIndex={0}>` with Enter/Space key handling and
-    `aria-expanded`, resolving the React/Vite `<button> cannot contain a
-    nested <button>` console warning.
-  - `ProfilePage` drops the hardcoded "Release Notes" block that
-    contradicted live `/v1/system/info` (claimed "Postgres default store"
-    and "13 LLM providers" regardless of the actual deployment). The
-    `About` section now pulls `version`, `deployment_mode`, and
-    `store_type` from `/v1/system/info` so the surfaced values match the
-    running binary instead of stale hardcoded strings.
-  - `/v1/system/info.rust_version` now reports `rustc --version` captured
-    at build time, not the crate version — the field name never matched
-    its value.
-
+<<<<<<< HEAD
+- **UI: `AgentTemplatesPage` navigated after a 500 ms `setTimeout` (#161).**
+  After `instantiateAgentTemplate` succeeded the page slept 500 ms before
+  routing to the new run, hoping the backend had finished creating it —
+  a pure race. The endpoint returns the `run_id` synchronously in its
+  201 response, so the page now navigates immediately on success. No
+  more stale-detail flash, no more missed-run when the handler is slow.
+- **UI: `ProjectDashboardPage` rendered tenant-wide cost widgets as if
+  they were project-scoped (#144).** `/v1/costs` is tenant-scoped on the
+  backend (`SessionCostRecord` has `tenant_id` only; no workspace/project
+  fields on the event or projection), so the "Total Spend" and "Provider
+  Calls" cards aggregated across every workspace and project in the
+  tenant while the labels suggested a single project. The cards are now
+  labeled "Tenant Spend" / "Tenant Provider Calls" with a description
+  that says "authenticated tenant — not project-scoped"; the Resources
+  summary sub-label reads "tenant-wide". The copy avoids interpolating
+  the UI's `tenantId` state because the backend derives the tenant from
+  the bearer token (`TenantScope`) and ignores any UI-side tenant
+  filter, so hardcoding a tenant id in copy would mis-attribute spend
+  whenever the scope selector and the bearer token disagree. Proper
+  project-scoped cost filtering needs a backend change (event shape
+  extension + projection); tracked separately.
 - **UI: `OrchestrationPage` re-processed the oldest buffered SSE event
   on each SSE update and leaked `setTimeout` callbacks on unmount
   (#177).** The stream effect depended on the whole `streamEvents`
@@ -152,6 +150,8 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   most one `rSessions`/`rRuns`/`rTasks`. Payload ids read both
   snake_case and camelCase to match the pattern in `RunDetailPage`.
   Operator actions wired in PR P are untouched.
+=======
+- **UI: `PlaygroundPage` model picker excluded Anthropic-native providers (#160).** The registry-derived model list filtered out providers whose `api_format` was `anthropic`, silently hiding every Anthropic-native connection even though the backend `chat/stream` handler routes through the native adapter. Removed the adapter-kind filter so all available registered providers contribute their models to the picker. Closes #160.
 - **UI: `DecisionsPage` row-level Invalidate button was invisible (#153).**
   The per-row "Invalidate" button in the cache tab used Tailwind's
   `opacity-0 group-hover:opacity-100` reveal pattern, but the shared
@@ -176,6 +176,7 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   placeholder stays in sync with the canonical default tenant id
   (`default_tenant`) — the PR #132 cleanup missed this one field.
   Closes #162.
+>>>>>>> origin/main
 - **UI: `RunDetailPage` plan-mode detection used a loose substring match (#178).**
   The `isPlanMode` check in `ui/src/pages/RunDetailPage.tsx` used a loose
   substring match (`runModeType.includes("plan")`), so runs with names or
