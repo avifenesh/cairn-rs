@@ -126,7 +126,8 @@ pub const OPENAPI_JSON: &str = r##"{
           "task_id":      { "type": "string", "nullable": true },
           "requirement":  { "type": "string", "enum": ["required","advisory"] },
           "decision":     { "type": "string", "enum": ["approved","rejected"], "nullable": true },
-          "created_at":   { "type": "integer" }
+          "created_at":   { "type": "integer" },
+          "updated_at":   { "type": "integer" }
         }
       },
       "ListResponse": {
