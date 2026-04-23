@@ -123,9 +123,12 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   Calls" cards aggregated across every workspace and project in the
   tenant while the labels suggested a single project. The cards are now
   labeled "Tenant Spend" / "Tenant Provider Calls" with a description
-  that names the current tenant and explicitly calls out that they are
-  not project-scoped; the Resources summary matches. The query key now
-  includes the tenant so switching tenants triggers a refetch. Proper
+  that says "authenticated tenant — not project-scoped"; the Resources
+  summary sub-label reads "tenant-wide". The copy avoids interpolating
+  the UI's `tenantId` state because the backend derives the tenant from
+  the bearer token (`TenantScope`) and ignores any UI-side tenant
+  filter, so hardcoding a tenant id in copy would mis-attribute spend
+  whenever the scope selector and the bearer token disagree. Proper
   project-scoped cost filtering needs a backend change (event shape
   extension + projection); tracked separately.
 - **UI: `OrchestrationPage` re-processed the oldest buffered SSE event

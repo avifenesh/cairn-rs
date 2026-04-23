@@ -205,11 +205,13 @@ export function ProjectDashboardPage({ projectId }: ProjectDashboardPageProps) {
 
   // `/v1/costs` is tenant-scoped on the backend (SessionCostRecord has
   // tenant_id but no project_id/workspace_id — see
-  // `SessionCostReadModel::list_by_tenant`). We key the query by tenant so the
-  // stat cards refresh when the operator switches tenants. Labels below call
-  // this out as "Tenant-wide" — not project-scoped (issue #144).
+  // `SessionCostReadModel::list_by_tenant`). The handler derives the tenant
+  // from the authenticated bearer token (`TenantScope`), NOT from any query
+  // param. The UI's `tenantId` state is purely for runs/tasks/approvals
+  // scoping — it does not influence `/v1/costs`. Labels below call this out
+  // as "authenticated tenant" and "not project-scoped" (issue #144).
   const { data: costsList, isLoading: costsLoading } = useQuery({
-    queryKey: ["proj-costs", tenantId],
+    queryKey: ["proj-costs"],
     queryFn:  () => defaultApi.getCosts(),
     refetchInterval: 60_000,
   });
@@ -357,13 +359,13 @@ export function ProjectDashboardPage({ projectId }: ProjectDashboardPageProps) {
           <StatCard
             label="Tenant Spend"
             value={fmtMicros(costs.total_cost_micros)}
-            description={`tenant "${tenantId}" — not project-scoped`}
+            description="authenticated tenant — not project-scoped"
             loading={costsLoading}
           />
           <StatCard
             label="Tenant Provider Calls"
             value={costs.total_provider_calls.toLocaleString()}
-            description={`tenant "${tenantId}" — not project-scoped`}
+            description="authenticated tenant — not project-scoped"
             loading={costsLoading}
           />
         </div>
