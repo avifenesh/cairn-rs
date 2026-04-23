@@ -11,6 +11,7 @@ import { useToast } from '../components/Toast';
 import { defaultApi } from '../lib/api';
 import { sectionLabel } from '../lib/design-system';
 import { useFocusTrap } from '../hooks/useFocusTrap';
+import { useScope } from '../hooks/useScope';
 import type { PluginManifest, PluginCapability, PluginDetailResponse, CatalogEntry } from '../lib/types';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -414,7 +415,14 @@ function CatalogCard({ entry }: { entry: CatalogEntry }) {
   const queryClient = useQueryClient();
   const toast = useToast();
   const [showCreds, setShowCreds] = useState(false);
-  const [enableProject, setEnableProject] = useState('');
+  // Per-project enable/disable targets the active tenant/workspace/project.
+  // Previously this page asked the user to free-text a `project_id` into an
+  // input, which the backend interpreted as 1-segment and silently fell
+  // back to `default_tenant/default_workspace/<id>` — a cross-tenant leak
+  // identical to the one PR #132 closed for TriggersPage. We now read the
+  // scope from `useScope()` (same pattern as ProjectReposPage/TriggersPage)
+  // and let the api.ts helper percent-encode the slash-path.
+  const [scope] = useScope();
 
   // Toast on error for all four catalog actions. Previously these mutations
   // swallowed failures entirely — the operator got no feedback when an
@@ -435,16 +443,13 @@ function CatalogCard({ entry }: { entry: CatalogEntry }) {
   });
 
   const enableMut = useMutation({
-    mutationFn: (project: string) => defaultApi.enablePluginForProject(project, entry.id),
-    onSuccess: () => {
-      setEnableProject('');
-      queryClient.invalidateQueries({ queryKey: ['catalog'] });
-    },
+    mutationFn: () => defaultApi.enablePluginForProject(entry.id, undefined, scope),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['catalog'] }),
     onError: toastErr('enable plugin'),
   });
 
   const disableMut = useMutation({
-    mutationFn: (project: string) => defaultApi.disablePluginForProject(project, entry.id),
+    mutationFn: () => defaultApi.disablePluginForProject(entry.id, scope),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['catalog'] }),
     onError: toastErr('disable plugin'),
   });
@@ -514,31 +519,33 @@ function CatalogCard({ entry }: { entry: CatalogEntry }) {
           </div>
         </div>
 
-        {/* Per-project enable/disable — shown when installed */}
+        {/* Per-project enable/disable — shown when installed. Target is the
+            active scope from useScope(); no free-text input (see PR #132). */}
         {isInstalled && (
           <div className="mt-3 pt-3 border-t border-gray-200 dark:border-zinc-800">
             <p className="text-[10px] text-gray-400 dark:text-zinc-600 uppercase tracking-wider mb-2">Per-Project</p>
             <div className="flex items-center gap-2">
-              <input
-                type="text"
-                value={enableProject}
-                onChange={e => setEnableProject(e.target.value)}
-                placeholder="project_id"
-                className="flex-1 bg-white dark:bg-zinc-950 border border-gray-200 dark:border-zinc-800 rounded px-2.5 py-1.5 text-[11px] text-gray-700 dark:text-zinc-300 font-mono focus:outline-none focus:border-indigo-500"
-              />
+              <div className="flex-1 min-w-0 text-[11px] text-gray-500 dark:text-zinc-400">
+                Scope:{' '}
+                <span className="font-mono text-gray-700 dark:text-zinc-300 truncate">
+                  {scope.tenant_id}/{scope.workspace_id}/{scope.project_id}
+                </span>
+              </div>
               <button
-                onClick={() => enableProject.trim() && enableMut.mutate(enableProject.trim())}
-                disabled={enableMut.isPending || !enableProject.trim()}
+                onClick={() => enableMut.mutate()}
+                disabled={enableMut.isPending}
                 className="flex items-center gap-1 px-2 py-1.5 rounded bg-emerald-600/80 text-white text-[11px] hover:bg-emerald-500 disabled:opacity-50 transition-colors"
               >
-                <Power size={10} /> Enable
+                {enableMut.isPending ? <Loader2 size={10} className="animate-spin" /> : <Power size={10} />}
+                Enable
               </button>
               <button
-                onClick={() => enableProject.trim() && disableMut.mutate(enableProject.trim())}
-                disabled={disableMut.isPending || !enableProject.trim()}
+                onClick={() => disableMut.mutate()}
+                disabled={disableMut.isPending}
                 className="flex items-center gap-1 px-2 py-1.5 rounded bg-gray-200 dark:bg-zinc-700 text-gray-700 dark:text-zinc-300 text-[11px] hover:bg-gray-300 dark:hover:bg-zinc-600 disabled:opacity-50 transition-colors"
               >
-                <PowerOff size={10} /> Disable
+                {disableMut.isPending ? <Loader2 size={10} className="animate-spin" /> : <PowerOff size={10} />}
+                Disable
               </button>
             </div>
           </div>

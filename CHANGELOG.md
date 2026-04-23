@@ -49,6 +49,24 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **UI: `PluginsPage` per-project enable/disable (405 → 200).** The
+  Marketplace tab called `POST /v1/projects/:id/plugins/:pluginId/enable`
+  and `POST …/disable`, but the real routes in `marketplace_routes.rs`
+  are `POST /v1/projects/:proj/plugins/:id` (enable) and
+  `DELETE /v1/projects/:proj/plugins/:id` (disable) — no `/enable` or
+  `/disable` suffix, and disable is DELETE, not POST. Every operator
+  click therefore 405'd. Additionally the `:proj` path param is parsed
+  as `"tenant/workspace/project"` and silently falls back to
+  `default_tenant/default_workspace/<id>` for 1-segment input — the
+  same cross-tenant leak PR #132 closed for `TriggersPage`. Fix: (a)
+  `defaultApi.enablePluginForProject` / `disablePluginForProject` now
+  use the correct URL and HTTP method and accept a `ProjectScope`
+  (percent-encoded slash path, mirror of `attachProjectRepo`); (b)
+  `PluginsPage` drops the free-text `project_id` input and reads the
+  active scope from `useScope()`, matching `TriggersPage` /
+  `ProjectReposPage`. Locked down by
+  `test_http_plugin_lifecycle.rs` (catalog → install → enable →
+  disable roundtrip plus negative assertions on the old URL shapes).
 - **UI: global 401 interceptor.** When an operator's token is rotated
   (via `POST /v1/admin/rotate-token`) or expires mid-session, the app
   used to turn into a wall of red error badges on every page because
