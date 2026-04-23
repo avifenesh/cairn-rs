@@ -63,6 +63,14 @@ function RowActions({ approval }: { approval: ApprovalRecord }) {
     onSuccess: (_, decision) => {
       toast.success(decision === "approved" ? "Approval granted." : "Approval denied.");
       void qc.invalidateQueries({ queryKey: ["approvals"] });
+      // Resolving an approval can change the owning run's state + event
+      // stream (and therefore the runs list). Invalidate run-scoped caches
+      // so navigating back to the run views doesn't show stale data.
+      void qc.invalidateQueries({ queryKey: ["runs"] });
+      if (approval.run_id) {
+        void qc.invalidateQueries({ queryKey: ["run-detail", approval.run_id] });
+        void qc.invalidateQueries({ queryKey: ["run-events", approval.run_id] });
+      }
     },
     onError: () => toast.error("Failed to resolve — try again."),
   });
