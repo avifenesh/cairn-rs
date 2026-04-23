@@ -34,7 +34,10 @@ interface StreamState {
 
 // ── Store ─────────────────────────────────────────────────────────────────────
 
-const MAX_EVENTS = 50;
+/** Max events retained in the shared ring buffer — exported so
+ *  downstream dedupe caches can size themselves relative to the buffer
+ *  rather than hardcoding a stale value. */
+export const MAX_EVENTS = 50;
 const BASE_DELAY_MS = 200;
 const MAX_DELAY_MS = 30_000;
 
