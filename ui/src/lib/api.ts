@@ -1460,8 +1460,11 @@ export function createApiClient(config: ApiClientConfig) {
       content_hash: string;
       content?: string;
       template_vars?: import("./types").PromptTemplateVar[];
+      tenant_id?: string;
+      workspace_id?: string;
+      project_id?: string;
     }): Promise<import("./types").PromptVersionRecord> =>
-      post(`/v1/prompts/assets/${encodeURIComponent(assetId)}/versions`, body),
+      post(`/v1/prompts/assets/${encodeURIComponent(assetId)}/versions`, withScope(body)),
 
     /** GET /v1/prompts/assets/:id/versions/:vid/diff — diff two versions. */
     getVersionDiff: (assetId: string, versionId: string, compareTo: string): Promise<import("./types").PromptVersionDiff> =>
@@ -1482,8 +1485,11 @@ export function createApiClient(config: ApiClientConfig) {
       prompt_asset_id: string;
       prompt_version_id: string;
       release_tag?: string;
+      tenant_id?: string;
+      workspace_id?: string;
+      project_id?: string;
     }): Promise<import("./types").PromptReleaseRecord> =>
-      post("/v1/prompts/releases", body),
+      post("/v1/prompts/releases", withScope(body)),
 
     /** POST /v1/prompts/releases/:id/activate — activate a release. */
     activatePromptRelease: (releaseId: string): Promise<import("./types").PromptReleaseRecord> =>
