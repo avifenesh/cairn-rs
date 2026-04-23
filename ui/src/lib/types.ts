@@ -1031,6 +1031,57 @@ export interface StoreCredentialRequest {
   key_id?: string;
 }
 
+// ── Runtime message channels (/v1/channels — ChannelService CRUD) ────────────
+
+/**
+ * A named, capacity-bounded pub/sub channel scoped to a single project.
+ * Mirrors `cairn_domain::ChannelRecord` — distinct from the notification
+ * `NotificationChannel` below. (Issue #139.)
+ */
+export interface Channel {
+  channel_id: string;
+  project: {
+    tenant_id: string;
+    workspace_id: string;
+    project_id: string;
+  };
+  name: string;
+  capacity: number;
+  created_at: number;
+  updated_at: number;
+}
+
+/** One message inside a runtime Channel. Mirrors `cairn_domain::ChannelMessage`. */
+export interface ChannelMessage {
+  channel_id: string;
+  message_id: string;
+  sender_id: string;
+  body: string;
+  sent_at_ms: number;
+  consumed_by: string | null;
+  consumed_at_ms: number | null;
+}
+
+/** POST /v1/channels body. */
+export interface CreateChannelRequest {
+  tenant_id: string;
+  workspace_id: string;
+  project_id: string;
+  name: string;
+  capacity: number;
+}
+
+/** POST /v1/channels/:id/send body. */
+export interface SendChannelMessageRequest {
+  sender_id: string;
+  body: string;
+}
+
+/** POST /v1/channels/:id/send response. */
+export interface SendChannelMessageResponse {
+  message_id: string;
+}
+
 // ── Notification channels (RFC 007/014) ───────────────────────────────────────
 
 /** Channel kind — mirrors cairn_channels::ChannelKind + pagerduty extension */
