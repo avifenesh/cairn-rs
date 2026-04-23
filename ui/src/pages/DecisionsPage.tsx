@@ -225,6 +225,7 @@ export function DecisionsPage() {
         <DataTable<CacheEntry>
           data={cacheEntries}
           getRowId={e => e.key}
+          rowClassName="group"
           columns={[
             { key: "kind", header: "Kind", render: r => <code className="text-[11px] bg-gray-100 dark:bg-zinc-800 px-1.5 py-0.5 rounded font-mono">{r.kind_tag}</code> },
             { key: "outcome", header: "Outcome", render: r => <OutcomePill outcome={r.outcome} />, sortValue: r => r.outcome },
