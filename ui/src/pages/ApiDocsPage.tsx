@@ -89,6 +89,12 @@ const DOMAINS: DomainGroup[] = [
         pathParams: [{ name: "id", type: "string", description: "Session ID", example: "sess_..." }],
         responseDesc: '{ version, type: "session_export", exported_at, data: { session, runs, tasks, events } }',
       },
+      {
+        id: "list-session-runs", method: "GET", path: "/v1/sessions/:id/runs",
+        description: "List runs that belong to a session, most recent first.",
+        pathParams: [{ name: "id", type: "string", description: "Session ID", example: "sess_..." }],
+        responseDesc: "Array of RunRecord",
+      },
     ],
   },
   {
@@ -110,6 +116,36 @@ const DOMAINS: DomainGroup[] = [
       { id: "export-run",    method: "GET",  path: "/v1/runs/:id/export",       description: "Export run + tasks + events as a JSON bundle.", pathParams: [{ name: "id", type: "string", description: "Run ID", example: "run_..." }], responseDesc: '{ version, type: "run_export", data: { run, tasks, events } }' },
       { id: "pause-run",     method: "POST", path: "/v1/runs/:id/pause",        description: "Pause a running run.", pathParams: [{ name: "id", type: "string", description: "Run ID", example: "run_..." }], bodyExample: '{ "detail": "Manual pause" }', responseDesc: "Updated RunRecord" },
       { id: "resume-run",    method: "POST", path: "/v1/runs/:id/resume",       description: "Resume a paused run.", pathParams: [{ name: "id", type: "string", description: "Run ID", example: "run_..." }], bodyExample: '{}', responseDesc: "Updated RunRecord" },
+      { id: "orchestrate-run", method: "POST", path: "/v1/runs/:id/orchestrate", description: "Kick the orchestrator loop for a run (operator mutation).", pathParams: [{ name: "id", type: "string", description: "Run ID", example: "run_..." }], bodyExample: '{}', responseDesc: "Updated RunRecord" },
+      { id: "diagnose-run",  method: "POST", path: "/v1/runs/:id/diagnose",     description: "Trigger a diagnose pass on a stuck run.", pathParams: [{ name: "id", type: "string", description: "Run ID", example: "run_..." }], bodyExample: '{}', responseDesc: "Diagnosis summary" },
+      { id: "intervene-run", method: "POST", path: "/v1/runs/:id/intervene",    description: "Operator intervention: inject guidance or correction into an active run.", pathParams: [{ name: "id", type: "string", description: "Run ID", example: "run_..." }], bodyExample: '{ "guidance": "please use the other provider" }', responseDesc: "Updated RunRecord" },
+      { id: "spawn-subagent", method: "POST", path: "/v1/runs/:id/spawn",       description: "Spawn a subagent run beneath a parent run.", pathParams: [{ name: "id", type: "string", description: "Parent run ID", example: "run_..." }], bodyExample: '{ "goal": "gather context on module X" }', responseDesc: "New child RunRecord" },
+      { id: "list-children", method: "GET",  path: "/v1/runs/:id/children",     description: "List direct child runs spawned from this run.", pathParams: [{ name: "id", type: "string", description: "Parent run ID", example: "run_..." }], responseDesc: "Array of RunRecord (children)" },
+      { id: "replay-run",    method: "GET",  path: "/v1/runs/:id/replay",       description: "Replay a run's event log for deterministic playback / debugging.", pathParams: [{ name: "id", type: "string", description: "Run ID", example: "run_..." }], responseDesc: "Ordered replay event stream" },
+      { id: "replay-to-ckpt",method: "POST", path: "/v1/runs/:id/replay-to-checkpoint", description: "Replay up to a specific checkpoint and fork execution from there.", pathParams: [{ name: "id", type: "string", description: "Run ID", example: "run_..." }], bodyExample: '{ "checkpoint_id": "ckpt_..." }', responseDesc: "New RunRecord forked at checkpoint" },
+    ],
+  },
+  {
+    id: "workers", label: "Workers & Fleet", dot: "bg-cyan-500",
+    endpoints: [
+      { id: "list-workers",  method: "GET", path: "/v1/workers",      description: "List all registered workers with current status and lease info.", responseDesc: "Array of WorkerRecord" },
+      { id: "get-worker",    method: "GET", path: "/v1/workers/:id",  description: "Fetch a single worker by ID.", pathParams: [{ name: "id", type: "string", description: "Worker ID", example: "worker_..." }], responseDesc: "WorkerRecord" },
+      { id: "get-fleet",     method: "GET", path: "/v1/fleet",        description: "Fleet-wide operator view: aggregated worker health, load, and lease state.", responseDesc: "FleetOverview" },
+    ],
+  },
+  {
+    id: "repos", label: "Repos", dot: "bg-fuchsia-500",
+    endpoints: [
+      { id: "list-repos",    method: "GET",    path: "/v1/projects/:project/repos", description: "List allowlisted repos for a project.", pathParams: [{ name: "project", type: "string", description: "Project ID", example: "default" }], responseDesc: '{ project, repos: RepoAllowlistEntry[] }' },
+      { id: "add-repo",      method: "POST",   path: "/v1/projects/:project/repos", description: "Add a repo to the project allowlist.", pathParams: [{ name: "project", type: "string", description: "Project ID", example: "default" }], bodyExample: '{ "owner": "avifenesh", "repo": "cairn" }', responseDesc: "RepoAllowlistEntry" },
+      { id: "get-repo",      method: "GET",    path: "/v1/projects/:project/repos/:owner/:repo", description: "Get a single repo allowlist entry.", pathParams: [{ name: "project", type: "string", description: "Project ID", example: "default" }, { name: "owner", type: "string", description: "Repo owner", example: "avifenesh" }, { name: "repo", type: "string", description: "Repo name", example: "cairn" }], responseDesc: "RepoAllowlistEntry" },
+      { id: "remove-repo",   method: "DELETE", path: "/v1/projects/:project/repos/:owner/:repo", description: "Remove a repo from the project allowlist.", pathParams: [{ name: "project", type: "string", description: "Project ID", example: "default" }, { name: "owner", type: "string", description: "Repo owner", example: "avifenesh" }, { name: "repo", type: "string", description: "Repo name", example: "cairn" }], responseDesc: "204 No Content" },
+    ],
+  },
+  {
+    id: "skills", label: "Skills", dot: "bg-lime-500",
+    endpoints: [
+      { id: "list-skills", method: "GET", path: "/v1/skills", description: "List skills available in the catalog.", responseDesc: "Array of SkillRecord" },
     ],
   },
   {
@@ -148,6 +184,7 @@ const DOMAINS: DomainGroup[] = [
       { id: "get-costs",     method: "GET", path: "/v1/costs",     description: "Aggregate token and cost totals.", responseDesc: "CostSummary" },
       { id: "get-dashboard", method: "GET", path: "/v1/dashboard", description: "Operator overview: runs, tasks, approvals, cost, health.", responseDesc: "DashboardOverview" },
       { id: "get-stats",     method: "GET", path: "/v1/stats",     description: "Real-time system-wide counters.", responseDesc: "SystemStats — { total_events, active_runs, pending_approvals, uptime_seconds }" },
+      { id: "metrics-prom",  method: "GET", path: "/v1/metrics/prometheus", description: "Prometheus-format metrics scrape endpoint. Exposes direct quantile gauges (p50/p95/p99) for latency — not histogram buckets.", responseDesc: "text/plain (Prometheus exposition format)" },
     ],
   },
   {

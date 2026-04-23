@@ -76,6 +76,19 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **UI: `ApiDocsPage` endpoint catalog had drifted (#148).** Audited
+  every documented entry against `router.rs` + `bin_router.rs` and added
+  14 missing real routes: run operator mutations
+  (`orchestrate`/`diagnose`/`intervene`/`spawn`/`children`),
+  `GET /v1/runs/:id/replay`, `POST /v1/runs/:id/replay-to-checkpoint`,
+  `GET /v1/sessions/:id/runs`, workers/fleet
+  (`/v1/workers`, `/v1/workers/:id`, `/v1/fleet`), project repo
+  allowlist (`/v1/projects/:project/repos` GET/POST +
+  `/v1/projects/:project/repos/:owner/:repo` GET/DELETE), the skills
+  catalog (`/v1/skills`), and `/v1/metrics/prometheus`. No existing
+  entries were fakes once cross-checked — the `/v1/events/stream` case
+  flagged in the QA slice was already fixed in an earlier PR.
+
 - **UI: `MetricsPage` percentiles were always zero (#159).** The API
   client's `getMetrics` fetched `/v1/metrics` (JSON counters-only,
   no histogram buckets), so `p50_latency_ms` / `p95_latency_ms` /
