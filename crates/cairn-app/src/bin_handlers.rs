@@ -539,8 +539,7 @@ pub(crate) async fn batch_create_runs_handler(
                     // (mirrors the single-run `POST /v1/runs` branch in
                     // handlers/runs.rs so batch callers keep parity).
                     let mode_key = format!("run:{}:run_mode", record.run_id.as_str());
-                    let mode_value = serde_json::to_value(mode)
-                        .unwrap_or(serde_json::Value::Null);
+                    let mode_value = serde_json::to_value(mode).unwrap_or(serde_json::Value::Null);
                     if let Err(e) = state
                         .runtime
                         .defaults
@@ -552,9 +551,7 @@ pub(crate) async fn batch_create_runs_handler(
                         )
                         .await
                     {
-                        results.push(
-                            serde_json::json!({ "ok": false, "error": e.to_string() }),
-                        );
+                        results.push(serde_json::json!({ "ok": false, "error": e.to_string() }));
                         continue;
                     }
                 }
