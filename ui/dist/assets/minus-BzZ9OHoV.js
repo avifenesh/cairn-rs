@@ -1,1 +1,0 @@
-import{n as e}from"./clsx-1x2H0FXB.js";var t=e(`minus`,[[`path`,{d:`M5 12h14`,key:`1ays0h`}]]);export{t};
