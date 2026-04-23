@@ -656,6 +656,99 @@ export interface SourceQualityRecord {
   chunk_count: number;
 }
 
+/** GET /v1/sources/:id — detailed source response. */
+export interface SourceDetailResponse {
+  source_id: string;
+  project: { tenant_id: string; workspace_id: string; project_id: string };
+  active: boolean;
+  document_count: number;
+  chunk_count: number;
+  /**
+   * Epoch milliseconds of the most recent ingest, or null if the source has
+   * never been ingested. The backend field is `last_ingested_at_ms` in the
+   * Rust `SourceSummary`; the HTTP handler drops the `_ms` suffix on this
+   * DTO but the units are still milliseconds since the Unix epoch. Parse
+   * with `new Date(ms)` — never treat this as seconds or an ISO string.
+   */
+  last_ingested_at: number | null;
+  name: string | null;
+  description: string | null;
+}
+
+/** POST /v1/sources — create source request body. */
+export interface CreateSourceRequest {
+  tenant_id: string;
+  workspace_id: string;
+  project_id: string;
+  source_id: string;
+  name?: string;
+  description?: string;
+}
+
+/** PUT /v1/sources/:id — update source request body.
+ *
+ * Backend (`crates/cairn-app/src/handlers/memory.rs::UpdateSourceRequest`)
+ * uses `Option<String>`, so the wire accepts either an explicit string, an
+ * explicit `null` (to clear the field), or omission. `defaultApi.updateSource`
+ * always serialises `null` when the caller passes `undefined`, so the TS
+ * type must allow `string | null`.
+ */
+export interface UpdateSourceRequest {
+  tenant_id: string;
+  workspace_id: string;
+  project_id: string;
+  name?: string | null;
+  description?: string | null;
+}
+
+/** POST /v1/memory/ingest — response body. */
+export interface MemoryIngestResponse {
+  ok: boolean;
+  document_id: string;
+  source_id: string;
+  chunk_count: number;
+}
+
+/** POST /v1/memory/ingest — ingest a document into a source. */
+export interface MemoryIngestRequest {
+  tenant_id: string;
+  workspace_id: string;
+  project_id: string;
+  source_id: string;
+  document_id: string;
+  content: string;
+  source_type?: string;
+}
+
+/** One entry from GET /v1/sources/:id/chunks. */
+export interface SourceChunkView {
+  chunk_id: string;
+  text_preview: string;
+  credibility_score: number | null;
+}
+
+/** POST /v1/sources/:id/refresh-schedule body. */
+export interface CreateRefreshScheduleRequest {
+  interval_ms: number;
+  refresh_url?: string | null;
+}
+
+/** Response from refresh-schedule GET/POST. */
+export interface RefreshScheduleResponse {
+  schedule_id: string;
+  source_id: string;
+  interval_ms: number;
+  last_refresh_ms: number | null;
+  enabled: boolean;
+  refresh_url: string | null;
+}
+
+/** Response from POST /v1/sources/process-refresh (all due). */
+export interface ProcessRefreshResponse {
+  processed_count: number;
+  schedule_ids: string[];
+}
+
 // ── Recent events ─────────────────────────────────────────────────────────────
 
 /** One entry from GET /v1/events/recent. */
