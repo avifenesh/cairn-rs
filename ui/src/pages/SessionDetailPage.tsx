@@ -108,13 +108,15 @@ export function SessionDetailPage({ sessionId, onBack }: SessionDetailPageProps)
   });
   const session = sessions?.find(s => s.session_id === sessionId);
 
-  // All runs — filter client-side for this session.
-  const { data: allRuns, isLoading: runsLoading } = useQuery({
-    queryKey: ["runs"],
-    queryFn: () => defaultApi.getRuns({ limit: 500 }),
+  // Runs for this session — server-side filter via /v1/sessions/:id/runs.
+  // Avoids the pre-#170 bug where a global getRuns({limit:500}) silently
+  // dropped older runs once a project passed 500 total runs.
+  const { data: sessionRuns, isLoading: runsLoading } = useQuery({
+    queryKey: ["session-runs", sessionId],
+    queryFn: () => defaultApi.getSessionRuns(sessionId, { limit: 500 }),
     staleTime: 30_000,
   });
-  const runs = (allRuns ?? []).filter(r => r.session_id === sessionId);
+  const runs = sessionRuns ?? [];
   const activeRuns = runs.filter(r => r.state === "running" || r.state === "pending").length;
 
   // LLM traces for this session.

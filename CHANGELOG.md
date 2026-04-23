@@ -49,6 +49,16 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **UI: `SessionDetailPage` silently dropped runs past the first 500 (#170).**
+  The page fetched `GET /v1/runs?limit=500` and filtered by
+  `session_id` client-side, so on projects with more than 500 total
+  runs older session runs were cut out before the filter ran and
+  simply disappeared from the detail view. The page now calls
+  `GET /v1/sessions/:id/runs` (which already filters server-side) via a
+  new `defaultApi.getSessionRuns` helper. Integration coverage in
+  `crates/cairn-app/tests/test_http_session_detail.rs` asserts that a
+  session's runs are returned in full and that sibling-session runs
+  under the same project scope do not leak into the list.
 - **UI: `PluginsPage` per-project enable/disable (405 → 200).** The
   Marketplace tab called `POST /v1/projects/:id/plugins/:pluginId/enable`
   and `POST …/disable`, but the real routes in `marketplace_routes.rs`
