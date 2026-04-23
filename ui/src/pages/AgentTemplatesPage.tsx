@@ -117,7 +117,7 @@ function InstantiateModal({ template, onClose, onDone }: InstantiateModalProps) 
             <button
               onClick={() => mutation.mutate()}
               disabled={mutation.isPending || !goal.trim()}
-              className="flex items-center gap-1.5 px-4 py-1.5 rounded-md bg-indigo-600 hover:bg-indigo-500 disabled:bg-gray-100 dark:bg-zinc-800 disabled:text-gray-400 dark:text-zinc-600 text-white text-[12px] font-medium transition-colors"
+              className="flex items-center gap-1.5 px-4 py-1.5 rounded-md bg-indigo-600 hover:bg-indigo-500 text-white text-[12px] font-medium transition-colors shadow-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 focus-visible:ring-offset-2 focus-visible:ring-offset-white dark:focus-visible:ring-offset-zinc-950 disabled:bg-gray-300 dark:disabled:bg-zinc-700 disabled:text-gray-500 dark:disabled:text-zinc-500 disabled:cursor-not-allowed disabled:shadow-none"
             >
               {mutation.isPending
                 ? <><Loader2 size={12} className="animate-spin" /> Starting…</>
@@ -212,7 +212,7 @@ function TemplateCard({ template, onInstantiate, recentRunId }: TemplateCardProp
         )}
         <button
           onClick={() => onInstantiate(template)}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-indigo-600 hover:bg-indigo-500 text-white text-[12px] font-medium transition-colors"
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-indigo-600 hover:bg-indigo-500 text-white text-[12px] font-medium transition-colors shadow-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 focus-visible:ring-offset-2 focus-visible:ring-offset-white dark:focus-visible:ring-offset-zinc-950"
         >
           <Play size={11} /> Instantiate
         </button>

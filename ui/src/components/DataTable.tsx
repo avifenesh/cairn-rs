@@ -270,12 +270,12 @@ export function DataTable<T>({
                     rowClassName,
                     onRowClick ? 'cursor-pointer' : '',
                     isActive
-                      ? 'bg-zinc-700/70 ring-1 ring-inset ring-zinc-500/60'
+                      ? 'bg-gray-200 dark:bg-zinc-700/70 ring-1 ring-inset ring-indigo-400/60 dark:ring-zinc-500/60 text-gray-900 dark:text-zinc-100'
                       : isSelected
-                        ? 'bg-indigo-950/40 hover:bg-indigo-950/60'
+                        ? 'bg-indigo-600/15 dark:bg-indigo-950/40 hover:bg-indigo-600/20 dark:hover:bg-indigo-950/60 text-gray-900 dark:text-zinc-100'
                         : i % 2 === 0
-                          ? 'bg-gray-50 dark:bg-zinc-900 hover:bg-white/5'
-                          : 'bg-gray-50/50 dark:bg-zinc-900/50 hover:bg-white/5',
+                          ? 'bg-gray-50 dark:bg-zinc-900 hover:bg-gray-100 dark:hover:bg-zinc-800/70 text-gray-700 dark:text-zinc-300 hover:text-gray-900 dark:hover:text-zinc-100'
+                          : 'bg-gray-50/50 dark:bg-zinc-900/50 hover:bg-gray-100 dark:hover:bg-zinc-800/70 text-gray-700 dark:text-zinc-300 hover:text-gray-900 dark:hover:text-zinc-100',
                   )}
                 >
                   {columns.map(col => (
