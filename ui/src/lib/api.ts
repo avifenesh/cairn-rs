@@ -1155,6 +1155,60 @@ export function createApiClient(config: ApiClientConfig) {
     /** POST /v1/webhooks/github/queue/:issue/retry — retry a failed issue. */
     retryGitHubIssue: (issue: number): Promise<{ status: string }> =>
       post(`/v1/webhooks/github/queue/${issue}/retry`, {}),
+
+    // ── Project repos (RFC 016) ─────────────────────────────────────────────
+    //
+    // The backend (`crates/cairn-app/src/repo_routes.rs`) parses `:project`
+    // as `tenant_id/workspace_id/project_id` and silently falls back to the
+    // DEFAULT_* constants when it cannot split on `/`. Sending a plain
+    // `project_id` therefore cross-leaks — always send the full slash path.
+    // Axum 0.7's `:project` captures a single segment, so the `/` chars must
+    // be percent-encoded via `encodeURIComponent`. See FE audit 2026-04-22
+    // and PR #132 (TriggersPage) for the same pattern.
+
+    /** GET /v1/projects/:project/repos — list repos attached to a project. */
+    listProjectRepos: async (
+      scope?: import("./scope").ProjectScope,
+    ): Promise<import("./types").ProjectRepoEntry[]> => {
+      const s = scope ?? config.scope ?? DEFAULT_SCOPE;
+      const path = encodeURIComponent(`${s.tenant_id}/${s.workspace_id}/${s.project_id}`);
+      const raw = await get<{ project: string; repos: import("./types").ProjectRepoEntry[] }>(
+        `/v1/projects/${path}/repos`,
+      );
+      return raw.repos ?? [];
+    },
+
+    /** POST /v1/projects/:project/repos — attach a repo to a project. */
+    attachProjectRepo: (
+      body: { repo_id: string },
+      scope?: import("./scope").ProjectScope,
+    ): Promise<import("./types").ProjectRepoMutation> => {
+      const s = scope ?? config.scope ?? DEFAULT_SCOPE;
+      const path = encodeURIComponent(`${s.tenant_id}/${s.workspace_id}/${s.project_id}`);
+      return post(`/v1/projects/${path}/repos`, body);
+    },
+
+    /** GET /v1/projects/:project/repos/:owner/:repo — repo detail. */
+    getProjectRepo: (
+      owner: string,
+      repo: string,
+      scope?: import("./scope").ProjectScope,
+    ): Promise<import("./types").ProjectRepoDetail> => {
+      const s = scope ?? config.scope ?? DEFAULT_SCOPE;
+      const path = encodeURIComponent(`${s.tenant_id}/${s.workspace_id}/${s.project_id}`);
+      return get(`/v1/projects/${path}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`);
+    },
+
+    /** DELETE /v1/projects/:project/repos/:owner/:repo — detach a repo. */
+    detachProjectRepo: (
+      owner: string,
+      repo: string,
+      scope?: import("./scope").ProjectScope,
+    ): Promise<void> => {
+      const s = scope ?? config.scope ?? DEFAULT_SCOPE;
+      const path = encodeURIComponent(`${s.tenant_id}/${s.workspace_id}/${s.project_id}`);
+      return del(`/v1/projects/${path}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`);
+    },
   };
 }
 

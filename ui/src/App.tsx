@@ -39,6 +39,7 @@ const SourcesPage        = lazy(() => import('./pages/SourcesPage').then(m => ({
 const CredentialsPage    = lazy(() => import('./pages/CredentialsPage').then(m => ({ default: m.CredentialsPage })));
 const ChannelsPage       = lazy(() => import('./pages/ChannelsPage').then(m => ({ default: m.ChannelsPage })));
 const IntegrationsPage   = lazy(() => import('./pages/IntegrationsPage').then(m => ({ default: m.IntegrationsPage })));
+const ProjectReposPage   = lazy(() => import('./pages/ProjectReposPage').then(m => ({ default: m.ProjectReposPage })));
 const LogsPage           = lazy(() => import('./pages/LogsPage').then(m => ({ default: m.LogsPage })));
 const AuditLogPage       = lazy(() => import('./pages/AuditLogPage').then(m => ({ default: m.AuditLogPage })));
 const SettingsPage         = lazy(() => import('./pages/SettingsPage').then(m => ({ default: m.SettingsPage })));
@@ -146,6 +147,7 @@ function renderRoute(route: Route): React.ReactNode {
       case 'credentials': return <CredentialsPage />;
       case 'channels':      return <ChannelsPage />;
       case 'integrations': return <IntegrationsPage />;
+      case 'project-repos': return <ProjectReposPage />;
       case 'logs':        return <LogsPage />;
       case 'metrics':        return <MetricsPage />;
       case 'test-harness':  return <TestHarnessPage />;
