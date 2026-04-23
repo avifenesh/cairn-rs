@@ -906,11 +906,12 @@ export interface ChangelogEntry {
  *
  * The backend (`cairn-runtime::fleet::WorkerState::status`) is typed as
  * `String`, but the value set is closed: only "active", "suspended", or
- * "offline" are ever emitted. We widen with `string` in a trailing
- * branch so a future backend addition does not hard-break the UI, but
- * call sites should match on the known values first.
+ * "offline" are ever emitted. The `string & {}` branch preserves
+ * forward-compatibility without collapsing the union to bare `string`
+ * — call sites keep literal autocomplete on the known values while
+ * still accepting a future backend addition without a type break.
  */
-export type WorkerStatus = "active" | "suspended" | "offline" | string;
+export type WorkerStatus = "active" | "suspended" | "offline" | (string & {});
 
 /** Live health snapshot for a registered external worker. */
 export interface WorkerHealth {
