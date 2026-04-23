@@ -72,14 +72,30 @@ interface Decision {
   created_at: number;
 }
 
+interface CacheScope {
+  level: string;
+  tenant_id: string;
+  workspace_id: string;
+  project_id: string;
+}
+
 interface CacheEntry {
-  key: string;
   decision_id: string;
-  outcome: string;
+  // Backend emits a nested `{outcome, deny_reason?}` struct (same shape as
+  // `Decision.outcome`), not a bare string — rendering the object directly
+  // crashed OutcomePill with "Objects are not valid as a React child".
+  outcome: { outcome: string; deny_reason?: string };
   kind_tag: string;
-  scope: string;
+  // Backend emits a `ProjectScope` object, not a string — rendering the
+  // object directly would crash React with "Objects are not valid as a
+  // React child".
+  scope: CacheScope;
   expires_at: number;
   hit_count: number;
+}
+
+function scopeLabel(s: CacheScope): string {
+  return `${s.tenant_id}/${s.workspace_id}/${s.project_id}`;
 }
 
 // ── Outcome pill (matches session/run state pill pattern) ────────────────────
@@ -224,21 +240,21 @@ export function DecisionsPage() {
       ) : (
         <DataTable<CacheEntry>
           data={cacheEntries}
-          getRowId={e => e.key}
+          getRowId={e => e.decision_id}
           rowClassName="group"
           columns={[
             { key: "kind", header: "Kind", render: r => <code className="text-[11px] bg-gray-100 dark:bg-zinc-800 px-1.5 py-0.5 rounded font-mono">{r.kind_tag}</code> },
-            { key: "outcome", header: "Outcome", render: r => <OutcomePill outcome={r.outcome} />, sortValue: r => r.outcome },
-            { key: "scope", header: "Scope", render: r => <span className="text-[11px] text-gray-400 dark:text-zinc-500">{r.scope}</span> },
+            { key: "outcome", header: "Outcome", render: r => <OutcomePill outcome={r.outcome.outcome} />, sortValue: r => r.outcome.outcome },
+            { key: "scope", header: "Scope", render: r => <span className="text-[11px] text-gray-400 dark:text-zinc-500">{scopeLabel(r.scope)}</span>, sortValue: r => scopeLabel(r.scope) },
             { key: "hits", header: "Hits", render: r => <span className="text-[11px] text-gray-400 dark:text-zinc-500 tabular-nums">{r.hit_count}</span>, sortValue: r => r.hit_count },
             { key: "expires", header: "Expires", render: r => <span className="text-[11px] text-gray-400 dark:text-zinc-500 tabular-nums">{fmtRelative(r.expires_at)}</span>, sortValue: r => r.expires_at },
             { key: "actions", header: "", render: r => (
               <button onClick={() => invalidateMut.mutate(r.decision_id)} title="Invalidate" className="p-1 rounded hover:bg-gray-100 dark:hover:bg-zinc-800 text-red-400 opacity-0 group-hover:opacity-100 transition-all"><Trash2 size={12} /></button>
             )},
           ]}
-          filterFn={(r, q) => r.kind_tag.includes(q) || r.outcome.includes(q) || r.scope.includes(q)}
-          csvRow={r => [r.key, r.kind_tag, r.outcome, r.scope, r.hit_count, r.expires_at]}
-          csvHeaders={["Key", "Kind", "Outcome", "Scope", "Hits", "Expires"]}
+          filterFn={(r, q) => r.kind_tag.includes(q) || r.outcome.outcome.includes(q) || scopeLabel(r.scope).includes(q)}
+          csvRow={r => [r.decision_id, r.kind_tag, r.outcome.outcome, scopeLabel(r.scope), r.hit_count, r.expires_at]}
+          csvHeaders={["Decision ID", "Kind", "Outcome", "Scope", "Hits", "Expires"]}
           filename="decision-cache"
           emptyText="Cache is empty — no learned rules yet. Cached decisions reduce operator re-prompts."
         />
