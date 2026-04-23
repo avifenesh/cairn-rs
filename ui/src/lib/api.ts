@@ -575,19 +575,25 @@ export function createApiClient(config: ApiClientConfig) {
     recoverRun: (runId: string): Promise<import("./types").RecoverRunResponse> =>
       post(`/v1/runs/${encodeURIComponent(runId)}/recover`),
 
-    /** GET /v1/runs/:id/replay — replay events (optionally from a checkpoint). */
+    /**
+     * Replay a run.
+     *
+     *  - `GET /v1/runs/:id/replay` — summary replay (optionally windowed
+     *    by `from_position` / `to_position`).
+     *  - `POST /v1/runs/:id/replay-to-checkpoint?checkpoint_id=…` —
+     *    replay up to a specific checkpoint.
+     */
     replayRun: (
       runId: string,
       query?: { from_position?: number; to_position?: number; checkpoint_id?: string },
     ): Promise<import("./types").ReplayResult> => {
+      if (query?.checkpoint_id) {
+        const qs = new URLSearchParams({ checkpoint_id: query.checkpoint_id }).toString();
+        return post(`/v1/runs/${encodeURIComponent(runId)}/replay-to-checkpoint?${qs}`);
+      }
       const params = new URLSearchParams();
       if (query?.from_position !== undefined) params.set("from_position", String(query.from_position));
       if (query?.to_position !== undefined) params.set("to_position", String(query.to_position));
-      if (query?.checkpoint_id) {
-        // Separate endpoint accepts `?checkpoint_id=...`.
-        const qs = new URLSearchParams({ checkpoint_id: query.checkpoint_id }).toString();
-        return get(`/v1/runs/${encodeURIComponent(runId)}/replay-to-checkpoint?${qs}`);
-      }
       const qs = params.toString();
       return get(`/v1/runs/${encodeURIComponent(runId)}/replay${qs ? `?${qs}` : ""}`);
     },

@@ -132,6 +132,22 @@ fn unwrap_run(body: Value) -> Value {
     }
 }
 
+/// Read a `reqwest::Response` once and return `(status, body_text)`. The
+/// format-arg of `assert_eq!` is only evaluated on failure, so the existing
+/// pattern (`res.text().await` inside the format string) is correct, but
+/// reading the body up front makes it easy to reuse it for both the panic
+/// message and JSON parsing without worrying about `res` being consumed.
+async fn read_once(res: reqwest::Response) -> (u16, String) {
+    let status = res.status().as_u16();
+    let body = res.text().await.unwrap_or_default();
+    (status, body)
+}
+
+fn parse_json(body: &str) -> Value {
+    serde_json::from_str(body)
+        .unwrap_or_else(|err| panic!("response body is not valid JSON: {err}\nbody={body}"))
+}
+
 /// Contract test: pause and resume endpoints are wired end-to-end, accept
 /// the documented request shape, and do not 404 (which would indicate the
 /// route disappeared or the handler can no longer resolve the run).
@@ -164,9 +180,12 @@ async fn pause_and_resume_endpoints_are_wired() {
         .send()
         .await
         .expect("POST /v1/runs/:id/pause reaches server");
-    let status = res.status().as_u16();
-    assert_ne!(status, 404, "pause endpoint must be wired, got 404");
-    let body: Value = res.json().await.expect("pause body is json");
+    let (status, body_text) = read_once(res).await;
+    assert_ne!(
+        status, 404,
+        "pause endpoint must be wired, got 404; body={body_text}"
+    );
+    let body = parse_json(&body_text);
     if status == 200 {
         let paused = unwrap_run(body.clone());
         assert_eq!(
@@ -194,9 +213,12 @@ async fn pause_and_resume_endpoints_are_wired() {
         .send()
         .await
         .expect("POST /v1/runs/:id/resume reaches server");
-    let status = res.status().as_u16();
-    assert_ne!(status, 404, "resume endpoint must be wired, got 404");
-    let body: Value = res.json().await.expect("resume body is json");
+    let (status, body_text) = read_once(res).await;
+    assert_ne!(
+        status, 404,
+        "resume endpoint must be wired, got 404; body={body_text}"
+    );
+    let body = parse_json(&body_text);
     if status == 200 {
         let resumed = unwrap_run(body.clone());
         let state = resumed.get("state").and_then(|s| s.as_str()).unwrap_or("");
@@ -233,13 +255,9 @@ async fn spawn_subagent_appears_in_children_list() {
         .send()
         .await
         .expect("POST /v1/runs/:id/spawn reaches server");
-    assert_eq!(
-        res.status().as_u16(),
-        201,
-        "spawn: {}",
-        res.text().await.unwrap_or_default(),
-    );
-    let spawn_body: Value = res.json().await.expect("spawn json");
+    let (status, body_text) = read_once(res).await;
+    assert_eq!(status, 201, "spawn: {body_text}");
+    let spawn_body = parse_json(&body_text);
     assert_eq!(
         spawn_body.get("child_run_id").and_then(|s| s.as_str()),
         Some(child_run_id.as_str()),
@@ -260,13 +278,9 @@ async fn spawn_subagent_appears_in_children_list() {
         .send()
         .await
         .expect("GET /v1/runs/:id/children reaches server");
-    assert_eq!(
-        res.status().as_u16(),
-        200,
-        "list children: {}",
-        res.text().await.unwrap_or_default(),
-    );
-    let body: Value = res.json().await.expect("children json");
+    let (status, body_text) = read_once(res).await;
+    assert_eq!(status, 200, "list children: {body_text}");
+    let body = parse_json(&body_text);
     let items = body
         .as_array()
         .cloned()
@@ -302,13 +316,9 @@ async fn intervene_records_intervention() {
         .send()
         .await
         .expect("POST /v1/runs/:id/intervene reaches server");
-    assert_eq!(
-        res.status().as_u16(),
-        200,
-        "intervene: {}",
-        res.text().await.unwrap_or_default(),
-    );
-    let body: Value = res.json().await.expect("intervene json");
+    let (status, body_text) = read_once(res).await;
+    assert_eq!(status, 200, "intervene: {body_text}");
+    let body = parse_json(&body_text);
     assert_eq!(
         body.get("ok").and_then(|v| v.as_bool()),
         Some(true),
@@ -329,13 +339,9 @@ async fn intervene_records_intervention() {
         .send()
         .await
         .expect("GET /v1/runs/:id/interventions reaches server");
-    assert_eq!(
-        res.status().as_u16(),
-        200,
-        "list interventions: {}",
-        res.text().await.unwrap_or_default(),
-    );
-    let body: Value = res.json().await.expect("interventions json");
+    let (status, body_text) = read_once(res).await;
+    assert_eq!(status, 200, "list interventions: {body_text}");
+    let body = parse_json(&body_text);
     let items = body
         .as_array()
         .cloned()

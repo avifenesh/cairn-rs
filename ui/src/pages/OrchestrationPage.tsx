@@ -7,6 +7,7 @@
  * Tree is an indented collapsible list — no graph library required.
  */
 
+import type { ReactNode } from "react";
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { ErrorFallback } from "../components/ErrorFallback";
@@ -180,22 +181,34 @@ function TaskRow({ task, fresh }: { task: TaskRecord; fresh: boolean }) {
 const RUNNING_STATES = new Set(["pending", "running", "waiting_approval", "waiting_dependency"]);
 const TERMINAL_STATES = new Set(["completed", "failed", "canceled"]);
 
-function SimpleInterveneDrawer({
-  runId, open, onClose, onSuccess,
+/**
+ * Page-level intervention drawer. Single instance per page keyed by the
+ * currently-selected run id — avoids rendering one drawer per row
+ * (flagged by Gemini review) and keeps intervention UI in sync with the
+ * richer `InterveneModal` on `RunDetailPage` (same 4 actions, including
+ * `inject_message`).
+ */
+function PageInterveneDrawer({
+  runId, onClose, onSuccess,
 }: {
-  runId: string;
-  open: boolean;
+  runId: string | null;
   onClose: () => void;
   onSuccess: () => void;
 }) {
   const [action, setAction] = useState<InterventionAction>("force_restart");
   const [reason, setReason] = useState("");
+  const [messageBody, setMessageBody] = useState("");
   const toast = useToast();
-  useEffect(() => { if (open) { setReason(""); setAction("force_restart"); } }, [open]);
+  const open = runId !== null;
+  useEffect(() => {
+    if (open) { setReason(""); setMessageBody(""); setAction("force_restart"); }
+  }, [open]);
 
   const mut = useMutation({
     mutationFn: () => {
+      if (!runId) throw new Error("no run selected");
       const body: InterveneRequest = { action, reason };
+      if (action === "inject_message") body.message_body = messageBody;
       return defaultApi.interveneRun(runId, body);
     },
     onSuccess: () => {
@@ -207,7 +220,12 @@ function SimpleInterveneDrawer({
   });
 
   return (
-    <Drawer open={open} onClose={onClose} title={`Intervene on ${runId.slice(0, 20)}…`} width="w-[26rem]">
+    <Drawer
+      open={open}
+      onClose={onClose}
+      title={runId ? `Intervene on ${runId.slice(0, 20)}…` : "Intervene"}
+      width="w-[26rem]"
+    >
       <div className="space-y-3">
         <label className="block">
           <span className="text-[11px] text-gray-500 dark:text-zinc-400 uppercase tracking-wider">Action</span>
@@ -219,6 +237,7 @@ function SimpleInterveneDrawer({
             <option value="force_complete">Force complete</option>
             <option value="force_fail">Force fail</option>
             <option value="force_restart">Force restart</option>
+            <option value="inject_message">Inject message</option>
           </select>
         </label>
         <label className="block">
@@ -230,10 +249,21 @@ function SimpleInterveneDrawer({
             className="mt-1 w-full h-20 bg-gray-50 dark:bg-zinc-950 border border-gray-300 dark:border-zinc-700 rounded-md px-3 py-2 text-[12px] text-gray-700 dark:text-zinc-300 resize-none focus:outline-none focus:border-indigo-500"
           />
         </label>
+        {action === "inject_message" && (
+          <label className="block">
+            <span className="text-[11px] text-gray-500 dark:text-zinc-400 uppercase tracking-wider">Message body</span>
+            <textarea
+              value={messageBody}
+              onChange={e => setMessageBody(e.target.value)}
+              placeholder="Operator message to inject…"
+              className="mt-1 w-full h-20 bg-gray-50 dark:bg-zinc-950 border border-gray-300 dark:border-zinc-700 rounded-md px-3 py-2 text-[12px] text-gray-700 dark:text-zinc-300 resize-none focus:outline-none focus:border-indigo-500"
+            />
+          </label>
+        )}
         <div className="flex items-center gap-2 pt-2">
           <button
             onClick={() => mut.mutate()}
-            disabled={mut.isPending || !reason.trim()}
+            disabled={mut.isPending || !reason.trim() || (action === "inject_message" && !messageBody.trim())}
             className="flex items-center gap-1.5 px-3 py-1.5 rounded bg-indigo-600 text-white text-[12px] font-medium hover:bg-indigo-500 disabled:opacity-50"
           >
             {mut.isPending ? <Loader2 size={11} className="animate-spin" /> : <MessageSquare size={11} />}
@@ -248,11 +278,38 @@ function SimpleInterveneDrawer({
   );
 }
 
-function RunQuickActions({ run }: { run: RunRecord }) {
+/** Page-level diagnosis drawer. Single instance, controlled by the
+ *  selected run id + its last-known diagnosis payload. */
+function PageDiagnosisDrawer({
+  runId, data, onClose,
+}: {
+  runId: string | null;
+  data: unknown;
+  onClose: () => void;
+}) {
+  return (
+    <Drawer
+      open={runId !== null}
+      onClose={onClose}
+      title={runId ? `Diagnosis — ${runId.slice(0, 20)}…` : "Diagnosis"}
+      width="w-[28rem]"
+    >
+      <pre className="text-[11px] font-mono text-gray-700 dark:text-zinc-300 bg-gray-50 dark:bg-zinc-950/50 rounded-md p-3 overflow-auto whitespace-pre-wrap break-all">
+        {data === undefined ? "—" : JSON.stringify(data, null, 2)}
+      </pre>
+    </Drawer>
+  );
+}
+
+interface RunQuickActionsProps {
+  run: RunRecord;
+  onIntervene: (runId: string) => void;
+  onDiagnosed: (runId: string, data: unknown) => void;
+}
+
+function RunQuickActions({ run, onIntervene, onDiagnosed }: RunQuickActionsProps) {
   const queryClient = useQueryClient();
   const toast = useToast();
-  const [interveneOpen, setInterveneOpen] = useState(false);
-  const [diagDrawer, setDiagDrawer] = useState<{ open: boolean; data?: unknown }>({ open: false });
 
   const invalidate = () => {
     void queryClient.invalidateQueries({ queryKey: ["orch-runs"] });
@@ -276,7 +333,7 @@ function RunQuickActions({ run }: { run: RunRecord }) {
   });
   const diagnoseMut = useMutation({
     mutationFn: () => defaultApi.diagnoseRun(run.run_id),
-    onSuccess: (data) => setDiagDrawer({ open: true, data }),
+    onSuccess: (data) => onDiagnosed(run.run_id, data),
     onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Diagnose failed."),
   });
 
@@ -288,7 +345,7 @@ function RunQuickActions({ run }: { run: RunRecord }) {
     onClick: () => void,
     disabled: boolean,
     pending: boolean,
-    icon: React.ReactNode,
+    icon: ReactNode,
     title: string,
   ) => (
     <button
@@ -307,18 +364,7 @@ function RunQuickActions({ run }: { run: RunRecord }) {
       {iconBtn(() => resumeMut.mutate(),      !canResume,     resumeMut.isPending,      <Play size={11} />,         canResume ? "Resume run" : "Run is not paused")}
       {iconBtn(() => orchestrateMut.mutate(), isTerminal,     orchestrateMut.isPending, <Sparkles size={11} />,     "Orchestrate next step")}
       {iconBtn(() => diagnoseMut.mutate(),    false,          diagnoseMut.isPending,    <Stethoscope size={11} />,  "Diagnose run")}
-      {iconBtn(() => setInterveneOpen(true),  isTerminal,     false,                    <MessageSquare size={11} />,"Intervene")}
-      <SimpleInterveneDrawer
-        runId={run.run_id}
-        open={interveneOpen}
-        onClose={() => setInterveneOpen(false)}
-        onSuccess={invalidate}
-      />
-      <Drawer open={diagDrawer.open} onClose={() => setDiagDrawer({ open: false })} title={`Diagnosis — ${run.run_id.slice(0, 20)}…`} width="w-[28rem]">
-        <pre className="text-[11px] font-mono text-gray-700 dark:text-zinc-300 bg-gray-50 dark:bg-zinc-950/50 rounded-md p-3 overflow-auto whitespace-pre-wrap break-all">
-          {diagDrawer.data === undefined ? "—" : JSON.stringify(diagDrawer.data, null, 2)}
-        </pre>
-      </Drawer>
+      {iconBtn(() => onIntervene(run.run_id), isTerminal,     false,                    <MessageSquare size={11} />,"Intervene")}
     </div>
   );
 }
@@ -327,12 +373,15 @@ function RunQuickActions({ run }: { run: RunRecord }) {
 
 function RunRow({
   item, expanded, onToggle, fresh, freshTaskIds,
+  onIntervene, onDiagnosed,
 }: {
   item:         RunWithTasks;
   expanded:     boolean;
   onToggle:     () => void;
   fresh:        boolean;
   freshTaskIds: Set<string>;
+  onIntervene:  (runId: string) => void;
+  onDiagnosed:  (runId: string, data: unknown) => void;
 }) {
   const { run, tasks } = item;
   const isActive  = ["running","pending","paused","waiting_approval","waiting_dependency"].includes(run.state);
@@ -383,7 +432,7 @@ function RunRow({
         </div>
 
         {/* Operator quick actions (issues #166/#173) */}
-        <RunQuickActions run={run} />
+        <RunQuickActions run={run} onIntervene={onIntervene} onDiagnosed={onDiagnosed} />
       </div>
 
       {/* Task list */}
@@ -407,6 +456,7 @@ function RunRow({
 function SessionRow({
   node, expandedRuns, onToggleSession, onToggleRun,
   expandedSession, fresh, freshRunIds, freshTaskIds,
+  onIntervene, onDiagnosed,
 }: {
   node:            SessionNode;
   expandedSession: boolean;
@@ -416,6 +466,8 @@ function SessionRow({
   fresh:           boolean;
   freshRunIds:     Set<string>;
   freshTaskIds:    Set<string>;
+  onIntervene:     (runId: string) => void;
+  onDiagnosed:     (runId: string, data: unknown) => void;
 }) {
   const { session, runs } = node;
   const activeRuns = runs.filter(r => ["running","pending","paused","waiting_approval","waiting_dependency"].includes(r.run.state)).length;
@@ -484,6 +536,8 @@ function SessionRow({
                 onToggle={() => onToggleRun(item.run.run_id)}
                 fresh={freshRunIds.has(item.run.run_id)}
                 freshTaskIds={freshTaskIds}
+                onIntervene={onIntervene}
+                onDiagnosed={onDiagnosed}
               />
             ))
           )}
@@ -534,13 +588,30 @@ function StatsStrip({ nodes }: { nodes: SessionNode[] }) {
 // ── Page ──────────────────────────────────────────────────────────────────────
 
 export function OrchestrationPage() {
-  useQueryClient(); // keep for future query invalidation
+  const queryClient = useQueryClient();
 
   // Expand state — auto-expand active sessions/runs
   const [expandedSessions, setExpandedSessions] = useState<Set<string>>(new Set());
   const [expandedRuns,     setExpandedRuns]      = useState<Set<string>>(new Set());
   // Brief "fresh" highlight for SSE-triggered new nodes
   const [freshIds, setFreshIds] = useState<Set<string>>(new Set());
+
+  // Page-level drawer state for intervene / diagnose. Keeping a single
+  // instance of each drawer at the page level avoids mounting one drawer
+  // per run row in the orchestration tree (flagged by Gemini review).
+  const [interveneRunId, setInterveneRunId] = useState<string | null>(null);
+  const [diagnosisRunId, setDiagnosisRunId] = useState<string | null>(null);
+  const [diagnosisData, setDiagnosisData]   = useState<unknown>(undefined);
+
+  const handleIntervene = useCallback((runId: string) => setInterveneRunId(runId), []);
+  const handleDiagnosed = useCallback((runId: string, data: unknown) => {
+    setDiagnosisData(data);
+    setDiagnosisRunId(runId);
+  }, []);
+  const invalidateOrchestrationQueries = useCallback(() => {
+    void queryClient.invalidateQueries({ queryKey: ["orch-runs"] });
+    void queryClient.invalidateQueries({ queryKey: ["orch-tasks"] });
+  }, [queryClient]);
 
   // ── Queries ─────────────────────────────────────────────────────────────────
 
@@ -754,6 +825,8 @@ export function OrchestrationPage() {
                     fresh={freshSessionIds.has(node.session.session_id)}
                     freshRunIds={freshRunIds}
                     freshTaskIds={freshTaskIds}
+                    onIntervene={handleIntervene}
+                    onDiagnosed={handleDiagnosed}
                   />
                 ))}
               </div>
@@ -793,6 +866,18 @@ export function OrchestrationPage() {
           </>
         )}
       </div>
+
+      {/* Page-level intervene + diagnosis drawers (single instance). */}
+      <PageInterveneDrawer
+        runId={interveneRunId}
+        onClose={() => setInterveneRunId(null)}
+        onSuccess={invalidateOrchestrationQueries}
+      />
+      <PageDiagnosisDrawer
+        runId={diagnosisRunId}
+        data={diagnosisData}
+        onClose={() => { setDiagnosisRunId(null); setDiagnosisData(undefined); }}
+      />
 
       {/* Footer: update cadence */}
       <div className="flex items-center gap-2 px-4 py-2 border-t border-gray-200 dark:border-zinc-800 shrink-0 text-[10px] text-gray-300 dark:text-zinc-600">

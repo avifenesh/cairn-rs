@@ -445,11 +445,25 @@ export type OrchestrateResult = Record<string, unknown>;
  */
 export type DiagnoseResult = Record<string, unknown>;
 
+/** One entry in `ReplayResult.final_task_states`. */
+export interface ReplayTaskStateView {
+  task_id: string;
+  state: string;
+}
+
 /**
- * Response for GET /v1/runs/:id/replay — a series of events starting from
- * the requested checkpoint (or the start of the run). Opaque shape.
+ * Response for `GET /v1/runs/:id/replay` and
+ * `POST /v1/runs/:id/replay-to-checkpoint` — mirrors `ReplayResult` in
+ * `crates/cairn-app/src/helpers.rs`. This is a compact summary of the
+ * replay (event count, terminal run state, terminal task states, and the
+ * number of checkpoints encountered), not the raw event stream.
  */
-export type ReplayResult = Record<string, unknown>;
+export interface ReplayResult {
+  events_replayed: number;
+  final_run_state: string | null;
+  final_task_states: ReplayTaskStateView[];
+  checkpoints_found: number;
+}
 
 /**
  * Response for POST /v1/runs/:id/recover. The endpoint is a 202-Accepted
