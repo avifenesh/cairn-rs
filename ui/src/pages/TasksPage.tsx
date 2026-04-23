@@ -115,11 +115,23 @@ const STATE_CONFIG: Partial<Record<TaskState, StateConfig>> = {
     cardBorder: "border-gray-200/30 dark:border-zinc-800/30", cardBg: "bg-gray-50/40 dark:bg-zinc-900/40",
     headBg: "bg-gray-100/30 dark:bg-zinc-800/30", headText: "text-gray-400 dark:text-zinc-500",
   },
+  retryable_failed: {
+    label: "Retryable Failed", dot: "bg-orange-400",
+    badge: "text-orange-400 bg-orange-400/10",
+    cardBorder: "border-orange-900/40", cardBg: "bg-gray-50/60 dark:bg-zinc-900/60",
+    headBg: "bg-orange-950/20", headText: "text-orange-400",
+  },
+  dead_lettered: {
+    label: "Dead Lettered", dot: "bg-rose-600",
+    badge: "text-rose-400 bg-rose-400/10",
+    cardBorder: "border-rose-900/40", cardBg: "bg-gray-50/60 dark:bg-zinc-900/60",
+    headBg: "bg-rose-950/20", headText: "text-rose-400",
+  },
 };
 
 const BOARD_COLUMNS: TaskState[] = [
   "queued", "leased", "running", "paused", "waiting_dependency",
-  "completed", "failed", "canceled",
+  "retryable_failed", "completed", "failed", "dead_lettered", "canceled",
 ];
 
 // ── Lifecycle diagram (pure SVG) ──────────────────────────────────────────────
@@ -406,7 +418,7 @@ function BoardView({ tasks }: { tasks: TaskRecord[] }) {
 
   // Sort within each column: most recent first for terminal states, oldest first for active
   for (const [state, col] of Object.entries(byState) as [TaskState, TaskRecord[]][]) {
-    const terminal = state === "completed" || state === "failed" || state === "canceled";
+    const terminal = state === "completed" || state === "failed" || state === "canceled" || state === "dead_lettered" || state === "retryable_failed";
     col.sort((a, b) => terminal
       ? b.updated_at - a.updated_at
       : a.created_at - b.created_at,
@@ -743,6 +755,11 @@ export function TasksPage() {
             activeIndex={kbd.activeIndex}
             selectedIds={kbd.selectedKeys}
             getRowId={t => t.task_id}
+            onRowClick={r => {
+              if (r.parent_run_id) {
+                window.location.hash = `run/${r.parent_run_id}`;
+              }
+            }}
             columns={[
               { key: "task_id",    header: "Task ID",    render: r => <span className="flex items-center gap-1 font-mono text-xs text-gray-700 dark:text-zinc-300 whitespace-nowrap group/id" title={r.task_id}>{shortId(r.task_id)}<CopyButton text={r.task_id} label="Copy task ID" size={10} className="opacity-0 group-hover/id:opacity-100" /></span>,                sortValue: r => r.task_id },
               { key: "run",        header: "Run",         render: r => r.parent_run_id ? <span className="font-mono text-[11px] text-gray-400 dark:text-zinc-500 whitespace-nowrap" title={r.parent_run_id}>{shortId(r.parent_run_id)}</span> : <span className="text-gray-300 dark:text-zinc-600">—</span> },
