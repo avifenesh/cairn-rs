@@ -171,6 +171,45 @@ fn fabric_err_to_runtime(err: FabricError) -> RuntimeError {
         // suffix. Keep the list tight — only FF-documented contention codes
         // belong here; anything else stays Internal so legitimate bugs don't
         // get hidden behind a 409.
+        // FF FCALL rejections that mean "resource is not in a state that
+        // accepts this operation" — e.g. pause on a pending run with no
+        // lease (`fence_required`), pause on a terminal run
+        // (`execution_not_active`), or pause on a run whose lease has
+        // moved on (`stale_lease`, `invalid_lease_for_suspend`,
+        // `already_suspended`). These are not server faults; they are
+        // operator-visible state conflicts that the HTTP layer surfaces
+        // as 409 Conflict via `RuntimeError::InvalidTransition`. Closes
+        // #216 — previously these collapsed into a 500.
+        //
+        // Ordered BEFORE `is_claim_contention` because `execution_not_active`
+        // appears in both shapes: it is a retriable race from the claim
+        // path's perspective (someone completed the execution out from
+        // under us) but a permanent state-conflict from the suspend/resume
+        // path's perspective (you're asking to pause a terminal run).
+        // Disambiguate on the FCALL name prefix so suspend/resume
+        // rejections can't be misclassified as retriable claim contention.
+        FabricError::Internal(ref msg) if is_suspend_state_conflict(msg) => {
+            let code = msg
+                .rsplit_once(": ")
+                .map(|(_, c)| c.trim().to_owned())
+                .unwrap_or_else(|| "invalid_state".to_owned());
+            let to = if msg.starts_with("ff_resume_execution") {
+                "active"
+            } else {
+                "suspended"
+            };
+            tracing::debug!(
+                fabric_err = %msg,
+                code = %code,
+                to = %to,
+                "fabric suspend/resume state conflict (409 to caller)"
+            );
+            RuntimeError::InvalidTransition {
+                entity: "run",
+                from: code,
+                to: to.to_owned(),
+            }
+        }
         FabricError::Internal(ref msg) if is_claim_contention(msg) => {
             tracing::debug!(fabric_err = %msg, "fabric claim contention (409 to caller)");
             // SEC-007: the 409 body must not leak the FF FCALL name.
@@ -184,31 +223,6 @@ fn fabric_err_to_runtime(err: FabricError) -> RuntimeError {
             RuntimeError::Conflict {
                 entity: "execution",
                 id: code,
-            }
-        }
-        // FF FCALL rejections that mean "resource is not in a state that
-        // accepts this operation" — e.g. pause on a pending run with no
-        // lease (`fence_required`), pause on a terminal run
-        // (`execution_not_active`), or pause on a run whose lease has
-        // moved on (`stale_lease`, `invalid_lease_for_suspend`,
-        // `already_suspended`). These are not server faults; they are
-        // operator-visible state conflicts that the HTTP layer surfaces
-        // as 409 Conflict via `RuntimeError::InvalidTransition`. Closes
-        // #216 — previously these collapsed into a 500.
-        FabricError::Internal(ref msg) if is_suspend_state_conflict(msg) => {
-            let code = msg
-                .rsplit_once(": ")
-                .map(|(_, c)| c.trim().to_owned())
-                .unwrap_or_else(|| "invalid_state".to_owned());
-            tracing::debug!(
-                fabric_err = %msg,
-                code = %code,
-                "fabric suspend/resume state conflict (409 to caller)"
-            );
-            RuntimeError::InvalidTransition {
-                entity: "run",
-                from: code,
-                to: "suspended".into(),
             }
         }
         // SEC-007: Valkey / script / bridge / config / internal variants
@@ -253,6 +267,11 @@ fn is_suspend_state_conflict(msg: &str) -> bool {
         // record without a minted HMAC token, etc.).
         "waitpoint_not_token_bound",
     ];
+    // Gate on the FCALL name so we don't swallow a shared code
+    // (`execution_not_active`) emitted from the claim path.
+    if !msg.starts_with("ff_suspend_execution") && !msg.starts_with("ff_resume_execution") {
+        return false;
+    }
     let Some((_, code)) = msg.rsplit_once(": ") else {
         return false;
     };

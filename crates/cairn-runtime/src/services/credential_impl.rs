@@ -129,6 +129,19 @@ where
         // silent regression. Callers who genuinely need to replace an
         // active credential must revoke it first.
         //
+        // Concurrency caveat (acknowledged): this is a read-then-write
+        // sequence, so two simultaneous `store` calls on the same
+        // `(tenant_id, provider_id)` can both pass the pre-check and
+        // both append. We close most of that window below by
+        // re-reading the projection AFTER append and, if a duplicate
+        // slipped in, emitting a `CredentialRevoked` event for our just-
+        // written record and returning 409 to the caller. This keeps
+        // the happy path O(1) write and hardens the race without
+        // requiring a per-backend unique index (portable-DB rule in
+        // CLAUDE.md — Postgres v1 target but must work on SQLite/
+        // InMemory too). A dedicated projection-level unique index is
+        // the correct long-term home for this; tracked as follow-up.
+        //
         // `list_by_tenant` is the cheapest portable check: the read
         // model is already built per tenant, and tenants typically carry
         // O(10) credentials. Switching to a dedicated projection lookup
@@ -157,15 +170,50 @@ where
         )?;
         let credential_id = CredentialId::new(format!("cred_{encrypted_at_ms}"));
         let event = make_envelope(RuntimeEvent::CredentialStored(CredentialStored {
-            tenant_id,
+            tenant_id: tenant_id.clone(),
             credential_id: credential_id.clone(),
-            provider_id,
+            provider_id: provider_id.clone(),
             encrypted_value,
             key_id,
             key_version: Some("v1".to_owned()),
             encrypted_at_ms,
         }));
         self.store.append(&[event]).await?;
+
+        // Post-append race resolution: re-read and check whether another
+        // concurrent `store` for the same (tenant_id, provider_id) also
+        // slipped past the pre-check. The event log is append-ordered so
+        // at this point both writers have landed and can see each other.
+        // Whichever writer's credential_id sorts later revokes itself and
+        // returns 409; the other keeps its record. Deterministic tie-break
+        // (`credential_id` ordering) means both writers agree on the
+        // winner without a second round-trip or cross-writer coordination.
+        let post =
+            CredentialReadModel::list_by_tenant(self.store.as_ref(), &tenant_id, usize::MAX, 0)
+                .await?;
+        let actives: Vec<&CredentialRecord> = post
+            .iter()
+            .filter(|c| c.active && c.provider_id == provider_id)
+            .collect();
+        if actives.len() > 1 {
+            let our_is_loser = actives
+                .iter()
+                .map(|c| c.id.as_str())
+                .any(|id| id > credential_id.as_str());
+            if our_is_loser {
+                let revoke_event =
+                    make_envelope(RuntimeEvent::CredentialRevoked(CredentialRevoked {
+                        tenant_id: tenant_id.clone(),
+                        credential_id: credential_id.clone(),
+                        revoked_at_ms: now_ms(),
+                    }));
+                self.store.append(&[revoke_event]).await?;
+                return Err(RuntimeError::Conflict {
+                    entity: "credential",
+                    id: format!("provider={provider_id} tenant={tenant_id}"),
+                });
+            }
+        }
 
         CredentialReadModel::get(self.store.as_ref(), &credential_id)
             .await?
