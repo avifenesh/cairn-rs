@@ -109,7 +109,7 @@ pub(crate) struct CreatePromptReleaseRequest {
     pub(crate) tenant_id: Option<String>,
     pub(crate) workspace_id: Option<String>,
     pub(crate) project_id: Option<String>,
-    /// Optional — server mints `rel_<uuid>` when absent.
+    /// Optional — server mints `rel_<uuid>` when absent or empty.
     #[serde(default)]
     pub(crate) prompt_release_id: Option<String>,
     pub(crate) prompt_asset_id: String,

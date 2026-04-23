@@ -51,7 +51,7 @@ async fn prompt_asset_version_and_release_with_server_minted_ids() {
             "workspace_id": h.workspace,
             "project_id":   h.project,
             "content":      "You are a helpful assistant.",
-            "content_hash": "deadbeef",
+            "content_hash": "sha256:deadbeef",
         }))
         .send()
         .await

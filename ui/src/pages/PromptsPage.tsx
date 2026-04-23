@@ -54,13 +54,19 @@ const shortId = (id: string) =>
 
 const shortHash = (h: string) => h.slice(0, 8);
 
-/** SHA-256 hex digest via SubtleCrypto — matches backend `content_hash` format. */
-async function sha256Hex(text: string): Promise<string> {
+/**
+ * Prefixed SHA-256 digest via SubtleCrypto.
+ *
+ * Returns `"sha256:<hex>"` to match the backend `content_hash` convention used
+ * by cairn-evals fixtures (see `crates/cairn-store/tests/prompt_lifecycle.rs`).
+ */
+async function sha256ContentHash(text: string): Promise<string> {
   const bytes = new TextEncoder().encode(text);
   const digest = await crypto.subtle.digest("SHA-256", bytes);
-  return Array.from(new Uint8Array(digest))
+  const hex = Array.from(new Uint8Array(digest))
     .map((b) => b.toString(16).padStart(2, "0"))
     .join("");
+  return `sha256:${hex}`;
 }
 
 // ── Kind badge ────────────────────────────────────────────────────────────────
@@ -646,7 +652,7 @@ function NewPromptForm({ onClose }: { onClose: () => void }) {
       const body = initialBody.trim();
       if (body.length === 0) return { asset, version: null as null };
       try {
-        const content_hash = await sha256Hex(body);
+        const content_hash = await sha256ContentHash(body);
         const version = await defaultApi.createPromptVersion(asset.prompt_asset_id, {
           content: body,
           content_hash,
