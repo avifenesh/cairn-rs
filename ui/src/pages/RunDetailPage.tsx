@@ -316,10 +316,16 @@ function PlanArtifactPanel({ runId, run }: { runId: string; run?: import("../lib
     typeof run.mode.type === "string" ? run.mode.type :
     "";
 
-  // Check if mode is plan by looking at run metadata
+  // Check if mode is plan by looking at run metadata.
+  // Use an exact match on the RunMode discriminator — never a substring check
+  // ("deploy-plan", "reviewplan" would match spuriously). Rust's
+  // cairn_domain::RunMode is a tagged enum that serializes as `{"type":"plan"}`;
+  // the API layer may also surface a bare `"plan"` string for legacy/compat
+  // rows. `runModeType` (extracted above) normalizes both into a single string
+  // so `runModeType === "plan"` covers both shapes. `hasPlan` keeps
+  // plan-artifact-only legacy rows rendering correctly.
   const isPlanMode = run && (
     runModeType === "plan" ||
-    runModeType.includes("plan") ||
     hasPlan
   );
 
@@ -498,7 +504,18 @@ function PlanArtifactPanel({ runId, run }: { runId: string; run?: import("../lib
 const RUNNING_STATES = new Set([
   "pending", "running", "waiting_approval", "waiting_dependency",
 ]);
-const TERMINAL_STATES = new Set(["completed", "failed", "canceled"]);
+// Mirrors `cairn_domain::RunState::is_terminal()` (completed|failed|canceled)
+// and defensively includes `dead_lettered` — the backend never emits it for a
+// Run today, but if a DLQ'd task bubbles up as a run-level state string we
+// must treat it as terminal, not "still running". `retryable_failed` is
+// intentionally excluded: it is semantically pending-retry, not terminal,
+// matching `TaskState::is_terminal()` in crates/cairn-domain/src/lifecycle.rs.
+const TERMINAL_STATES = new Set([
+  "completed",
+  "failed",
+  "canceled",
+  "dead_lettered",
+]);
 
 function confirmAction(label: string, runId: string): boolean {
   // Match the existing "confirm" pattern used by cancelRun above — keep it
@@ -1080,7 +1097,7 @@ export function RunDetailPage({ runId, onBack }: RunDetailPageProps) {
     },
   });
 
-  const isTerminal = run && ["completed", "failed", "canceled"].includes(run.state);
+  const isTerminal = run && TERMINAL_STATES.has(run.state);
   const duration = run ? fmtDuration(run.created_at, isTerminal ? run.updated_at : undefined) : "—";
 
   // The backend returns a zero-valued RunCostRecord (HTTP 200) for runs with no cost
@@ -1221,7 +1238,7 @@ export function RunDetailPage({ runId, onBack }: RunDetailPageProps) {
           <Section title="Task Execution Timeline">
             <GanttView
               runStart={run.created_at}
-              runEnd={run && ["completed","failed","canceled"].includes(run.state) ? run.updated_at : undefined}
+              runEnd={run && TERMINAL_STATES.has(run.state) ? run.updated_at : undefined}
               tasks={safeTasks}
             />
           </Section>

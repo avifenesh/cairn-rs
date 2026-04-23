@@ -134,6 +134,25 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
     at build time, not the crate version — the field name never matched
     its value.
 
+- **UI: `RunDetailPage` plan-mode detection used a loose substring match (#178).**
+  The `isPlanMode` check in `ui/src/pages/RunDetailPage.tsx` used a loose
+  substring match (`runModeType.includes("plan")`), so runs with names or
+  mode strings that merely contained the substring `plan` (e.g.
+  `"deploy-plan"`, `"reviewplan"`) triggered the Plan Mode review panel
+  spuriously. Replaced with an exact match on the typed
+  `cairn_domain::RunMode` discriminator (`runModeType === "plan"`), with
+  the existing `hasPlan` fallback retained for legacy plan-artifact rows.
+- **UI: `RunDetailPage` terminal-state set missed `dead_lettered` (#178).**
+  The page-local `TERMINAL_STATES` set used for disabling operator
+  actions, stamping the run-end on the Gantt chart, and choosing the
+  "running"/"total" task stat label only listed `completed | failed |
+  canceled`. Aligned with `cairn_domain::RunState::is_terminal()` and
+  defensively added `dead_lettered` (bubbled up from
+  `TaskState::DeadLettered` if a DLQ'd row is ever surfaced as a
+  run-level state); `retryable_failed` is intentionally excluded
+  because it is pending-retry, not terminal. The two inline duplicate
+  literals lower in the file now reuse the named set so the three sites
+  can't drift apart.
 - **UI: `TriggersPage` swallowed backend failures on raw `fetch` calls (#154).**
   Replaced the 5 raw `fetch` calls (list triggers, list run-templates,
   enable/disable/delete trigger) with new `defaultApi.listTriggers` /
