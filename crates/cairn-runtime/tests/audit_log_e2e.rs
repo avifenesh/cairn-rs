@@ -405,7 +405,10 @@ async fn list_by_tenant_honors_since_and_before_bounds() {
     assert_eq!(all.len(), 6);
 
     // ── limit cap ────────────────────────────────────────────────────────
-    let first_3 = store.list_by_tenant(&tenant(), None, None, 3).await.unwrap();
+    let first_3 = store
+        .list_by_tenant(&tenant(), None, None, 3)
+        .await
+        .unwrap();
     assert_eq!(first_3.len(), 3, "limit must cap the response");
 
     // ── since_ms (inclusive lower bound) ─────────────────────────────────
