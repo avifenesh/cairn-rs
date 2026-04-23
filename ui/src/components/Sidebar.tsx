@@ -32,6 +32,7 @@ import {
   Zap,
   CheckSquare,
   Bot,
+  FolderGit2,
 } from 'lucide-react';
 import { clsx } from 'clsx';
 import { useQuery } from '@tanstack/react-query';
@@ -73,6 +74,7 @@ export type NavPage =
   | 'decisions'
   | 'deployment'
   | 'integrations'
+  | 'project-repos'
   | 'profile';
 
 // ── Nav structure ─────────────────────────────────────────────────────────────
@@ -135,6 +137,7 @@ const NAV_GROUPS: NavGroup[] = [
       { id: 'credentials',  label: 'Credentials',  icon: KeyRound     },
       { id: 'deployment',   label: 'Deployment',   icon: ServerCrash  },
       { id: 'integrations',  label: 'Integrations',  icon: Cable    },
+      { id: 'project-repos', label: 'Project Repos', icon: FolderGit2 },
       { id: 'channels',     label: 'Channels',     icon: Bell     },
       { id: 'playground',    label: 'Playground',    icon: Terminal  },
       { id: 'test-harness',  label: 'Test Harness',  icon: TestTube  },

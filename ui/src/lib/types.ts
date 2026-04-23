@@ -968,3 +968,40 @@ export interface FleetReport {
   /** Workers that reported a heartbeat recently. */
   healthy: number;
 }
+
+// ── Project repos (RFC 016 — repo allowlist) ─────────────────────────────────
+
+/** One entry in a project's repo allowlist. Mirrors
+ *  `crates/cairn-app/src/repo_routes.rs :: RepoAllowlistEntryResponse`. */
+export interface ProjectRepoEntry {
+  /** Canonical "owner/repo" identifier. */
+  repo_id: string;
+  /** "present" once the local clone cache has hydrated; "missing" otherwise. */
+  clone_status: string;
+  added_by?: string | null;
+  added_at?: number | null;
+  last_used_at?: number | null;
+}
+
+/** Response from `POST /v1/projects/:project/repos` (`RepoMutationResponse`). */
+export interface ProjectRepoMutation {
+  project: string;
+  repo_id: string;
+  allowlisted: boolean;
+  clone_status: string;
+  clone_created: boolean;
+}
+
+/** Response from `GET /v1/projects/:project/repos/:owner/:repo`
+ *  (`RepoDetailResponse`). */
+export interface ProjectRepoDetail {
+  project: string;
+  repo_id: string;
+  allowlisted: boolean;
+  clone_status: string;
+  added_by?: string | null;
+  added_at?: number | null;
+  last_used_at?: number | null;
+  recent_sandbox_usage: string[];
+  recent_register_repo_decisions: string[];
+}
