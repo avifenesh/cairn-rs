@@ -193,6 +193,15 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **UI: `MemoryPage` — ingest `source_type` is now a dropdown of valid
+  enum values (closes #219).** The ingest form shipped a free-text input
+  with a placeholder suggesting `web, file, api, …` — none of which are
+  valid; the backend rejected every submission with 422. Replaced with
+  a `<select>` populated from the real `SourceType` enum (`plain_text`,
+  `markdown`, `html`, `structured_json`, `json_structured`,
+  `knowledge_pack`), defaulting to `plain_text`. The request field name
+  is unchanged so the API contract is untouched.
+
 - **UI: `PromptsPage` — create initial version alongside asset (#150).**
   `NewPromptForm` previously only posted to `/v1/prompts/assets`, leaving
   authors with an asset they could not release without a curl step. The
