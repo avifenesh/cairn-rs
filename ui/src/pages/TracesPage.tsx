@@ -84,6 +84,10 @@ function TraceRow({
       style={{ height: DEFAULT_ROW_HEIGHT }}
       onClick={() => onOpen(trace)}
       onKeyDown={e => {
+        // Only act on the row itself — keydown bubbles from the inner
+        // session/run `<a>` links, and we don't want Enter-on-link to
+        // both navigate and open the drawer.
+        if (e.target !== e.currentTarget) return;
         if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onOpen(trace); }
       }}
       tabIndex={0}

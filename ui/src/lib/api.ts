@@ -957,9 +957,11 @@ export function createApiClient(config: ApiClientConfig) {
 
     /** GET /v1/traces — all recent LLM call traces (operator view).
      *
-     * Scope params are folded in via `withScope()` so switching
-     * tenant/workspace/project invalidates the browser cache key and
-     * sends the scope down for forward-compatible backend filtering.
+     * Scope params are folded in via `withScope()` so the request URL
+     * carries the current tenant/workspace/project for
+     * forward-compatible backend filtering. Callers that want their
+     * React-Query cache to invalidate on scope change must also
+     * include scope in their `queryKey` (see `TracesPage`).
      */
     getTraces: (
       params?: {
@@ -971,7 +973,7 @@ export function createApiClient(config: ApiClientConfig) {
     ): Promise<import("./types").TracesResponse> => {
       const merged = withScope(params);
       const qs = new URLSearchParams();
-      qs.set("limit", String(params?.limit ?? 500));
+      qs.set("limit", String(merged.limit ?? 500));
       if (merged.tenant_id)    qs.set("tenant_id",    merged.tenant_id);
       if (merged.workspace_id) qs.set("workspace_id", merged.workspace_id);
       if (merged.project_id)   qs.set("project_id",   merged.project_id);
