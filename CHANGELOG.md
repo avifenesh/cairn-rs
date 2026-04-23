@@ -9,6 +9,25 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- **`ProjectReposPage` — attach/detach GitHub repos per project.** New
+  operator page under the Infrastructure group that consumes the RFC 016
+  `/v1/projects/:project/repos` surface (`GET` / `POST` / `GET :owner/:repo`
+  / `DELETE`). Operators can now allowlist a repo against the current
+  project scope straight from the UI, which unblocks the dogfood workflow
+  of kicking off issue-sync runs against a real GitHub repo. The page is
+  scope-aware (`useScope`), slash-path-encodes the project segment the
+  same way `TriggersPage` does (PR #132), and invalidates the
+  `["project-repos", projectPath]` query on every mutation. Four new
+  typed API client methods — `listProjectRepos`, `attachProjectRepo`,
+  `getProjectRepo`, `detachProjectRepo` — and matching `ProjectRepoEntry`
+  / `ProjectRepoMutation` / `ProjectRepoDetail` TypeScript types land in
+  `ui/src/lib/{api,types}.ts`. Integration coverage added at
+  `crates/cairn-app/tests/test_http_project_repos.rs`
+  (attach → list → get → detach → list-empty roundtrip + malformed-id
+  400 contract).
+
 ### Fixed
 
 - **UI: global 401 interceptor.** When an operator's token is rotated
