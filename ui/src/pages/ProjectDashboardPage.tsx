@@ -203,8 +203,13 @@ export function ProjectDashboardPage({ projectId }: ProjectDashboardPageProps) {
     refetchInterval: 15_000,
   });
 
+  // `/v1/costs` is tenant-scoped on the backend (SessionCostRecord has
+  // tenant_id but no project_id/workspace_id — see
+  // `SessionCostReadModel::list_by_tenant`). We key the query by tenant so the
+  // stat cards refresh when the operator switches tenants. Labels below call
+  // this out as "Tenant-wide" — not project-scoped (issue #144).
   const { data: costsList, isLoading: costsLoading } = useQuery({
-    queryKey: ["proj-costs"],
+    queryKey: ["proj-costs", tenantId],
     queryFn:  () => defaultApi.getCosts(),
     refetchInterval: 60_000,
   });
@@ -350,15 +355,15 @@ export function ProjectDashboardPage({ projectId }: ProjectDashboardPageProps) {
             loading={isLoading}
           />
           <StatCard
-            label="Total Spend"
+            label="Tenant Spend"
             value={fmtMicros(costs.total_cost_micros)}
-            description="server-wide (no project filter)"
+            description={`tenant "${tenantId}" — not project-scoped`}
             loading={costsLoading}
           />
           <StatCard
-            label="Provider Calls"
+            label="Tenant Provider Calls"
             value={costs.total_provider_calls.toLocaleString()}
-            description="server-wide"
+            description={`tenant "${tenantId}" — not project-scoped`}
             loading={costsLoading}
           />
         </div>
@@ -534,7 +539,7 @@ export function ProjectDashboardPage({ projectId }: ProjectDashboardPageProps) {
                 { icon: Layers,    label: "Runs",      value: allRuns.length,     sub: `${activeRuns.length} active`      },
                 { icon: ListChecks, label: "Tasks",    value: allTasks.length,    sub: `${activeTasks.length} active`     },
                 { icon: AlertTriangle, label: "Approvals", value: allApprovals.length, sub: "pending" },
-                { icon: Coins,     label: "Spend",     value: fmtMicros(costs.total_cost_micros), sub: "server-wide" },
+                { icon: Coins,     label: "Spend",     value: fmtMicros(costs.total_cost_micros), sub: "tenant-wide" },
                 { icon: Clock,     label: "Oldest run", value: allRuns.length > 0
                     ? fmtAge(Math.min(...allRuns.map(r => r.created_at)))
                     : "—",

@@ -110,6 +110,24 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **UI: `AgentTemplatesPage` navigated after a 500 ms `setTimeout` (#161).**
+  After `instantiateAgentTemplate` succeeded the page slept 500 ms before
+  routing to the new run, hoping the backend had finished creating it —
+  a pure race. The endpoint returns the `run_id` synchronously in its
+  201 response, so the page now navigates immediately on success. No
+  more stale-detail flash, no more missed-run when the handler is slow.
+- **UI: `ProjectDashboardPage` rendered tenant-wide cost widgets as if
+  they were project-scoped (#144).** `/v1/costs` is tenant-scoped on the
+  backend (`SessionCostRecord` has `tenant_id` only; no workspace/project
+  fields on the event or projection), so the "Total Spend" and "Provider
+  Calls" cards aggregated across every workspace and project in the
+  tenant while the labels suggested a single project. The cards are now
+  labeled "Tenant Spend" / "Tenant Provider Calls" with a description
+  that names the current tenant and explicitly calls out that they are
+  not project-scoped; the Resources summary matches. The query key now
+  includes the tenant so switching tenants triggers a refetch. Proper
+  project-scoped cost filtering needs a backend change (event shape
+  extension + projection); tracked separately.
 - **UI: `OrchestrationPage` re-processed the oldest buffered SSE event
   on each SSE update and leaked `setTimeout` callbacks on unmount
   (#177).** The stream effect depended on the whole `streamEvents`

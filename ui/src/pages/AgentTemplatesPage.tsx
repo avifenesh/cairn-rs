@@ -236,8 +236,9 @@ export function AgentTemplatesPage() {
   const handleDone = (templateId: string, runId: string) => {
     setRecentRuns(prev => ({ ...prev, [templateId]: runId }));
     setModal(null);
-    // Navigate to the run detail page
-    setTimeout(() => { window.location.hash = `run/${runId}`; }, 500);
+    // Navigate immediately: `instantiateAgentTemplate` is synchronous and the
+    // 201 response already contains the created run_id (issue #161 — no race).
+    window.location.hash = `run/${runId}`;
   };
 
   return (
