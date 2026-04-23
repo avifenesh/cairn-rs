@@ -591,11 +591,7 @@ pub(crate) async fn list_audit_log_handler(
             Ok(mut items) => {
                 let has_more = items.len() > limit;
                 items.truncate(limit);
-                (
-                    StatusCode::OK,
-                    Json(ListResponse { has_more, items }),
-                )
-                    .into_response()
+                (StatusCode::OK, Json(ListResponse { has_more, items })).into_response()
             }
             Err(err) => runtime_error_response(err.into()),
         }
