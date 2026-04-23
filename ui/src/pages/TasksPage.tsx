@@ -117,15 +117,19 @@ const STATE_CONFIG: Partial<Record<TaskState, StateConfig>> = {
   },
   retryable_failed: {
     label: "Retryable Failed", dot: "bg-orange-400",
-    badge: "text-orange-400 bg-orange-400/10",
-    cardBorder: "border-orange-900/40", cardBg: "bg-gray-50/60 dark:bg-zinc-900/60",
-    headBg: "bg-orange-950/20", headText: "text-orange-400",
+    badge: "text-orange-500 dark:text-orange-400 bg-orange-400/10",
+    cardBorder: "border-orange-200/40 dark:border-orange-900/40",
+    cardBg: "bg-gray-50/60 dark:bg-zinc-900/60",
+    headBg: "bg-orange-100/40 dark:bg-orange-950/20",
+    headText: "text-orange-600 dark:text-orange-400",
   },
   dead_lettered: {
-    label: "Dead Lettered", dot: "bg-rose-600",
-    badge: "text-rose-400 bg-rose-400/10",
-    cardBorder: "border-rose-900/40", cardBg: "bg-gray-50/60 dark:bg-zinc-900/60",
-    headBg: "bg-rose-950/20", headText: "text-rose-400",
+    label: "Dead Lettered", dot: "bg-rose-500",
+    badge: "text-rose-500 dark:text-rose-400 bg-rose-400/10",
+    cardBorder: "border-rose-200/40 dark:border-rose-900/40",
+    cardBg: "bg-gray-50/60 dark:bg-zinc-900/60",
+    headBg: "bg-rose-100/40 dark:bg-rose-950/20",
+    headText: "text-rose-600 dark:text-rose-400",
   },
 };
 
@@ -307,7 +311,7 @@ function LifecycleBanner() {
 function TaskCard({ task, cfg }: { task: TaskRecord; cfg: StateConfig }) {
   function handleClick() {
     if (task.parent_run_id) {
-      window.location.hash = `run/${task.parent_run_id}`;
+      window.location.hash = `run/${encodeURIComponent(task.parent_run_id)}`;
     }
   }
 
@@ -418,8 +422,19 @@ function BoardView({ tasks }: { tasks: TaskRecord[] }) {
 
   // Sort within each column: most recent first for terminal states, oldest first for active
   for (const [state, col] of Object.entries(byState) as [TaskState, TaskRecord[]][]) {
-    const terminal = state === "completed" || state === "failed" || state === "canceled" || state === "dead_lettered" || state === "retryable_failed";
-    col.sort((a, b) => terminal
+    // Failed-like and terminal states sort by most-recent-change first so
+    // operators see newly-failed / newly-dead-lettered work at the top.
+    // Active states sort oldest-first so long-waiting work is visible.
+    // Note: `retryable_failed` is included here even though it isn't a
+    // terminal state in the Rust lifecycle (see TaskState::is_terminal) —
+    // for kanban sorting it behaves like the other failed-like buckets.
+    const sortByUpdatedAt =
+      state === "completed" ||
+      state === "failed" ||
+      state === "canceled" ||
+      state === "dead_lettered" ||
+      state === "retryable_failed";
+    col.sort((a, b) => sortByUpdatedAt
       ? b.updated_at - a.updated_at
       : a.created_at - b.created_at,
     );
@@ -756,8 +771,14 @@ export function TasksPage() {
             selectedIds={kbd.selectedKeys}
             getRowId={t => t.task_id}
             onRowClick={r => {
+              // Skip navigation when the user is selecting text inside the
+              // row (common when copying an ID visually). Clicks on the
+              // inline CopyButton and RowActions buttons already call
+              // stopPropagation() so they won't reach this handler.
+              const sel = typeof window !== "undefined" ? window.getSelection() : null;
+              if (sel && sel.toString().length > 0) return;
               if (r.parent_run_id) {
-                window.location.hash = `run/${r.parent_run_id}`;
+                window.location.hash = `run/${encodeURIComponent(r.parent_run_id)}`;
               }
             }}
             columns={[

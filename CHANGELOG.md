@@ -84,7 +84,7 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `retryable_failed` ("Retryable Failed") and `dead_lettered`
   ("Dead Lettered") kanban columns so tasks that drop into the
   retry/dead-letter queues are visible alongside the other states. The
-  Rust `TaskState` enum in `cairn-domain/src/lifecycle.rs` already
+  Rust `TaskState` enum in `crates/cairn-domain/src/lifecycle.rs` already
   supports both variants; the UI now renders them.
 - **UI: `ApiDocsPage` endpoint catalog had drifted (#148).** Audited
   every documented entry against `router.rs` + `bin_router.rs` and added
