@@ -1,4 +1,4 @@
-import { useRef } from 'react';
+import { useMemo, useRef } from 'react';
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
 import { ChevronRight, RefreshCw, Plus, Upload } from 'lucide-react';
 import { DataTable } from '../components/DataTable';
@@ -92,7 +92,14 @@ export function SessionsPage() {
   });
 
   const list = sessions ?? [];
-  const runCountFor = (id: string) => (allRuns ?? []).filter(r => r.session_id === id).length;
+  const runsBySession = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const r of allRuns ?? []) {
+      m.set(r.session_id, (m.get(r.session_id) ?? 0) + 1);
+    }
+    return m;
+  }, [allRuns]);
+  const runCountFor = (id: string) => runsBySession.get(id) ?? 0;
   const activeNow   = list.filter(s => s.state === 'open').length;
 
   /** Parse a JSON file chosen by the user and POST it to /v1/sessions/import. */
