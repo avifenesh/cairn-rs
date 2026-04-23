@@ -592,7 +592,7 @@ export function EvalsPage() {
           onClick={() => void refetch()}
           disabled={isFetching}
           className="flex items-center gap-1.5 rounded border border-gray-200 dark:border-zinc-800 bg-gray-50 dark:bg-zinc-900
-                     text-gray-400 dark:text-zinc-500 text-[12px] px-2.5 py-1 hover:text-gray-800 dark:hover:text-zinc-200 hover:bg-gray-100 dark:hover:bg-gray-100 dark:bg-zinc-800
+                     text-gray-500 dark:text-zinc-400 text-[12px] px-2.5 py-1 hover:text-gray-900 dark:hover:text-zinc-100 hover:bg-gray-100 dark:hover:bg-zinc-800
                      disabled:opacity-40 transition-colors"
         >
           <RefreshCw size={11} className={clsx(isFetching && "animate-spin")} />
@@ -679,10 +679,10 @@ export function EvalsPage() {
                     className={clsx(
                       "border-b border-gray-200/40 dark:border-zinc-800/40 h-9 transition-colors",
                       isSelected
-                        ? "bg-indigo-950/30"
+                        ? "bg-indigo-600/15 dark:bg-indigo-500/20 hover:bg-indigo-600/20 dark:hover:bg-indigo-500/25 text-gray-900 dark:text-zinc-100"
                         : idx % 2 !== 0
-                        ? "bg-gray-50/20 dark:bg-zinc-900/20 hover:bg-gray-50/50 dark:bg-zinc-900/50"
-                        : "hover:bg-gray-50/50 dark:bg-zinc-900/50",
+                        ? "bg-gray-50/20 dark:bg-zinc-900/20 hover:bg-gray-100 dark:hover:bg-zinc-800/70 text-gray-700 dark:text-zinc-300 hover:text-gray-900 dark:hover:text-zinc-100"
+                        : "hover:bg-gray-100 dark:hover:bg-zinc-800/70 text-gray-700 dark:text-zinc-300 hover:text-gray-900 dark:hover:text-zinc-100",
                     )}
                   >
                     {/* Checkbox */}
