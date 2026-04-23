@@ -465,6 +465,10 @@ pub(crate) struct CreateRunBody {
     pub(crate) session_id: Option<String>,
     pub(crate) run_id: Option<String>,
     pub(crate) parent_run_id: Option<String>,
+    /// RFC 018: optional execution mode (direct/plan/execute). Matches the
+    /// single-run `POST /v1/runs` shape so batch callers keep feature parity.
+    #[serde(default)]
+    pub(crate) mode: Option<cairn_domain::decisions::RunMode>,
 }
 
 // ── Batch handlers ────────────────────────────────────────────────────────────
@@ -529,7 +533,33 @@ pub(crate) async fn batch_create_runs_handler(
             .start(&project, &session_id, run_id, parent_run_id)
             .await
         {
-            Ok(record) => results.push(serde_json::json!({ "ok": true,  "run": record })),
+            Ok(record) => {
+                if let Some(mode) = run_body.mode.as_ref() {
+                    // RFC 018: persist the per-run execution mode default
+                    // (mirrors the single-run `POST /v1/runs` branch in
+                    // handlers/runs.rs so batch callers keep parity).
+                    let mode_key = format!("run:{}:run_mode", record.run_id.as_str());
+                    let mode_value = serde_json::to_value(mode)
+                        .unwrap_or(serde_json::Value::Null);
+                    if let Err(e) = state
+                        .runtime
+                        .defaults
+                        .set(
+                            cairn_domain::tenancy::Scope::Project,
+                            project.project_id.to_string(),
+                            mode_key,
+                            mode_value,
+                        )
+                        .await
+                    {
+                        results.push(
+                            serde_json::json!({ "ok": false, "error": e.to_string() }),
+                        );
+                        continue;
+                    }
+                }
+                results.push(serde_json::json!({ "ok": true,  "run": record }));
+            }
             Err(e) => results.push(serde_json::json!({ "ok": false, "error": e.to_string() })),
         }
     }
