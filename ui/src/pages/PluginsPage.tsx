@@ -411,18 +411,24 @@ function CredentialWizardModal({
 
 // ── Marketplace Catalog Card ─────────────────────────────────────────────────
 
-function CatalogCard({ entry }: { entry: CatalogEntry }) {
+function CatalogCard({
+  entry,
+  scope,
+}: {
+  entry: CatalogEntry;
+  // Per-project enable/disable targets the active tenant/workspace/project.
+  // Previously this page asked the user to free-text a `project_id` into an
+  // input, which the backend interpreted as 1-segment and silently fell back
+  // to `default_tenant/default_workspace/<id>` — a cross-tenant leak
+  // identical to the one PR #132 closed for TriggersPage. Scope is now
+  // owned by `PluginsPage` (single `useScope()` call) and passed down so
+  // every card renders with the same value and we don't reread localStorage
+  // per entry. The api.ts helper percent-encodes the slash-path on the wire.
+  scope: import('../lib/scope').ProjectScope;
+}) {
   const queryClient = useQueryClient();
   const toast = useToast();
   const [showCreds, setShowCreds] = useState(false);
-  // Per-project enable/disable targets the active tenant/workspace/project.
-  // Previously this page asked the user to free-text a `project_id` into an
-  // input, which the backend interpreted as 1-segment and silently fell
-  // back to `default_tenant/default_workspace/<id>` — a cross-tenant leak
-  // identical to the one PR #132 closed for TriggersPage. We now read the
-  // scope from `useScope()` (same pattern as ProjectReposPage/TriggersPage)
-  // and let the api.ts helper percent-encode the slash-path.
-  const [scope] = useScope();
 
   // Toast on error for all four catalog actions. Previously these mutations
   // swallowed failures entirely — the operator got no feedback when an
@@ -568,6 +574,10 @@ export function PluginsPage() {
   const [showModal, setShowModal] = useState(false);
   const [tab, setTab] = useState<'marketplace' | 'registered'>('marketplace');
   const queryClient = useQueryClient();
+  // Single scope read for the whole page; passed down to each CatalogCard
+  // so we avoid one localStorage round-trip per card and keep the page
+  // consistent if scope ever changes mid-render.
+  const [scope] = useScope();
 
   const { data, isLoading, isError, error, refetch, isFetching } = useQuery({
     queryKey: ['plugins'],
@@ -671,7 +681,7 @@ export function PluginsPage() {
             </div>
           ) : (
             catalogEntries.map(entry => (
-              <CatalogCard key={entry.id} entry={entry} />
+              <CatalogCard key={entry.id} entry={entry} scope={scope} />
             ))
           )
         ) : (

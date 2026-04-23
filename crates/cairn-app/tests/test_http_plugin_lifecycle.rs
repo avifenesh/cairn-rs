@@ -19,8 +19,14 @@ mod support;
 use serde_json::Value;
 use support::live_fabric::LiveHarness;
 
-/// URL-encode the `tenant/workspace/project` triple into one Axum path
-/// segment. Mirrors `encodeURIComponent` in `ui/src/lib/api.ts`.
+/// Percent-encode the `tenant/workspace/project` triple into one Axum path
+/// segment. Mirrors `encodeURIComponent` in `ui/src/lib/api.ts`. The
+/// `LiveHarness` generates ids via `format!("t_{uuid-hex}")` etc., so the
+/// only character that needs encoding is `/` itself (`%2F`); replacing
+/// inline is therefore exactly equivalent to a full `encodeURIComponent`
+/// pass for our inputs. If the harness ever loosens its id alphabet this
+/// helper must switch to a real percent-encoder
+/// (c.f. `test_http_worker_registry.rs`).
 fn project_path(h: &LiveHarness) -> String {
     format!("{}%2F{}%2F{}", h.tenant, h.workspace, h.project)
 }
@@ -122,9 +128,12 @@ async fn plugin_catalog_install_enable_disable_roundtrip() {
         res.text().await.unwrap_or_default(),
     );
 
-    // 6. Disable via POST (the old broken FE call) must NOT succeed —
-    //    Axum should answer 405 because the path exists but only binds
-    //    POST (enable) and DELETE (disable).
+    // 6. Disable via POST with the `/disable` suffix (the old broken FE
+    //    call) must NOT succeed — the URL is wrong (no such path binds
+    //    `/disable`) AND the method is wrong (backend uses DELETE, not
+    //    POST). In practice Axum returns 404 because the path doesn't
+    //    exist; we accept 405 too for forward-compat if the router ever
+    //    registers the suffix under a different method.
     let res = h
         .client()
         .post(format!(
