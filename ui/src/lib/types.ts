@@ -1084,6 +1084,13 @@ export interface RequestLogsResponse {
   entries: RequestLogEntry[];
   total:   number;
   limit:   number;
+  /** Total entries currently held in the in-memory ring buffer. */
+  buffered?: number;
+  /**
+   * Best-effort hint: the requested limit was reached AND the ring buffer has
+   * more entries. Clients may widen the time range or bump the page size.
+   */
+  has_more?: boolean;
 }
 
 // ── Notifications ─────────────────────────────────────────────────────────────

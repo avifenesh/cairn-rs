@@ -4039,6 +4039,7 @@ impl crate::projections::AuditLogReadModel for InMemoryStore {
         &self,
         tenant_id: &cairn_domain::TenantId,
         since_ms: Option<u64>,
+        before_ms: Option<u64>,
         limit: usize,
     ) -> Result<Vec<cairn_domain::AuditLogEntry>, StoreError> {
         let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
@@ -4050,6 +4051,11 @@ impl crate::projections::AuditLogReadModel for InMemoryStore {
                     if &a.tenant_id == tenant_id {
                         if let Some(since) = since_ms {
                             if a.occurred_at_ms < since {
+                                return None;
+                            }
+                        }
+                        if let Some(before) = before_ms {
+                            if a.occurred_at_ms >= before {
                                 return None;
                             }
                         }

@@ -108,16 +108,36 @@ impl RequestLogBuffer {
         self.entries.push_back(entry);
     }
 
-    /// Return the last `n` entries whose level matches the filter (empty = all).
-    pub fn tail(&self, n: usize, level_filter: &[&str]) -> Vec<&RequestLogEntry> {
+    /// Return the last `n` entries whose level matches the filter (empty = all)
+    /// and whose `start_time_unix_ns` is `>= since_ns` (when provided).
+    pub fn tail(
+        &self,
+        n: usize,
+        level_filter: &[&str],
+        since_ns: Option<u64>,
+    ) -> Vec<&RequestLogEntry> {
         self.entries
             .iter()
             .rev()
             .filter(|e| level_filter.is_empty() || level_filter.contains(&e.level))
+            .filter(|e| match since_ns {
+                Some(s) => e.start_time_unix_ns >= s,
+                None => true,
+            })
             .take(n)
             .collect::<Vec<_>>()
             .into_iter()
             .rev()
             .collect()
+    }
+
+    /// Total number of entries currently buffered (pre-filter). Useful for UI
+    /// "showing N of M" hints.
+    pub fn len(&self) -> usize {
+        self.entries.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
     }
 }

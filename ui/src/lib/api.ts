@@ -1021,8 +1021,19 @@ export function createApiClient(config: ApiClientConfig) {
     getChangelog: (): Promise<import("./types").ChangelogEntry[]> =>
       get('/v1/changelog'),
 
-    getAuditLog: (limit = 100): Promise<import("./types").AuditLogResponse> =>
-      get(`/v1/admin/audit-log?limit=${limit}`),
+    getAuditLog: (params?: {
+      limit?: number;
+      /** Inclusive lower bound on `occurred_at_ms`. */
+      since_ms?: number;
+      /** Exclusive upper bound on `occurred_at_ms` — cursor for older pages. */
+      before_ms?: number;
+    }): Promise<import("./types").AuditLogResponse> => {
+      const qs = new URLSearchParams();
+      qs.set("limit", String(params?.limit ?? 100));
+      if (params?.since_ms  !== undefined) qs.set("since_ms",  String(params.since_ms));
+      if (params?.before_ms !== undefined) qs.set("before_ms", String(params.before_ms));
+      return get(`/v1/admin/audit-log?${qs}`);
+    },
 
     // ── Memory / Knowledge ───────────────────────────────────────────────────
 
@@ -1506,10 +1517,13 @@ export function createApiClient(config: ApiClientConfig) {
     getRequestLogs: (params?: {
       limit?: number;
       level?: string;
+      /** Lower bound on entry timestamp in Unix-ms (for "last hour" filter). */
+      since_ms?: number;
     }): Promise<import("./types").RequestLogsResponse> => {
       const qs = new URLSearchParams();
-      if (params?.limit  !== undefined) qs.set("limit", String(params.limit));
-      if (params?.level)               qs.set("level", params.level);
+      if (params?.limit    !== undefined) qs.set("limit",    String(params.limit));
+      if (params?.level)                  qs.set("level",    params.level);
+      if (params?.since_ms !== undefined) qs.set("since_ms", String(params.since_ms));
       const q = qs.toString() ? `?${qs}` : "";
       return get(`/v1/admin/logs${q}`);
     },
