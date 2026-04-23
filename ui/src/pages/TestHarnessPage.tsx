@@ -7,7 +7,7 @@
  * created by earlier ones (e.g. session_id → create run → claim task).
  */
 
-import { useState, useRef, useCallback, useMemo } from "react";
+import { useState, useRef, useCallback, useMemo, useEffect } from "react";
 import {
   FlaskConical, Play, CheckCircle2, XCircle, Loader2, ChevronDown,
   ChevronRight, Clock, Zap, AlertTriangle,
@@ -276,10 +276,17 @@ function buildScenarios(scope: ProjectScope): ScenarioDef[] {
       {
         id: "event_log",
         label: "Event log",
-        description: "GET /v1/events?limit=5",
+        description: "GET /v1/events/recent?limit=5",
         run: async () => {
-          const r = await defaultApi.getRunEvents("__nonexistent__").catch(() => []);
-          return { ok: true, type: Array.isArray(r) ? "array" : typeof r };
+          const r = await defaultApi.getRecentEvents(5);
+          if (!Array.isArray(r)) throw new Error("expected array of recent events");
+          // Assert shape when events exist — each must have a non-empty event_type.
+          for (const ev of r) {
+            if (typeof ev.event_type !== "string" || ev.event_type.length === 0) {
+              throw new Error(`event missing event_type: ${JSON.stringify(ev)}`);
+            }
+          }
+          return { count: r.length, sample: r[0] ?? null };
         },
       },
       {
@@ -389,7 +396,17 @@ function StepRow({
 
 type ScenarioResults = Map<string, StepResult>;
 
-function ScenarioCard({ scenario }: { scenario: ScenarioDef }) {
+function ScenarioCard({
+  scenario,
+  runNonce = 0,
+  onComplete,
+}: {
+  scenario:    ScenarioDef;
+  /** When this value changes to a non-zero value, the card runs its scenario. */
+  runNonce?:   number;
+  /** Called once the triggered run finishes, with per-scenario pass/fail + timing. */
+  onComplete?: (result: { pass: boolean; ms: number }) => void;
+}) {
   const [results,  setResults]  = useState<ScenarioResults>(new Map());
   const [running,  setRunning]  = useState(false);
   const [expanded, setExpanded] = useState(false);
@@ -409,8 +426,8 @@ function ScenarioCard({ scenario }: { scenario: ScenarioDef }) {
                                                         ? "pass"     :
                                                           "idle";
 
-  const runScenario = useCallback(async () => {
-    if (running) return;
+  const runScenario = useCallback(async (): Promise<{ pass: boolean; ms: number }> => {
+    if (running) return { pass: false, ms: 0 };
     abortRef.current = false;
     setRunning(true);
     setExpanded(true);
@@ -418,6 +435,8 @@ function ScenarioCard({ scenario }: { scenario: ScenarioDef }) {
 
     const ctx: Record<string, unknown> = {};
     const newResults = new Map<string, StepResult>();
+    const suiteT0 = performance.now();
+    let suitePass = true;
 
     for (const step of scenario.steps) {
       if (abortRef.current) {
@@ -440,6 +459,7 @@ function ScenarioCard({ scenario }: { scenario: ScenarioDef }) {
       } catch (e: unknown) {
         status = "fail";
         error  = e instanceof Error ? e.message : String(e);
+        suitePass = false;
         // Abort remaining steps on first failure
         abortRef.current = true;
       }
@@ -456,7 +476,23 @@ function ScenarioCard({ scenario }: { scenario: ScenarioDef }) {
     }
 
     setRunning(false);
+    return { pass: suitePass, ms: Math.round(performance.now() - suiteT0) };
   }, [running, scenario.steps]);
+
+  // Drive scenario from parent's "Run All" by watching nonce changes.
+  // Nonce 0 = no trigger yet; any increment fires the scenario once.
+  useEffect(() => {
+    if (runNonce === 0) return;
+    let cancelled = false;
+    (async () => {
+      const result = await runScenario();
+      if (!cancelled) onComplete?.(result);
+    })();
+    return () => { cancelled = true; };
+    // We intentionally key only on runNonce — runScenario/onComplete change by identity
+    // every render and would re-fire the effect otherwise.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [runNonce]);
 
   function resetScenario() {
     abortRef.current = true;
@@ -649,44 +685,47 @@ export function TestHarnessPage() {
   const [suiteResults,  setSuiteResults]  = useState<SuiteResult[]>([]);
   const [runningAll,    setRunningAll]    = useState(false);
   const [groupFilter,   setGroupFilter]   = useState<string>("All");
-  // Expose refs to each scenario card's run fn via a different pattern:
-  // We drive "Run All" by re-mounting with a key, not by calling internal fns.
-  const [runAllKey, setRunAllKey] = useState(0);
-  const [autoRunIds, setAutoRunIds] = useState<Set<string>>(new Set());
+  /**
+   * Per-scenario run nonce. "Run All" bumps the nonce for each visible
+   * scenario in sequence; each card watches its own nonce and actually
+   * invokes its internal runScenario, so step cards reflect live progress.
+   * A nonce of 0 means "never triggered".
+   */
+  const [runNonces, setRunNonces] = useState<Record<string, number>>({});
+  /** Resolver for the currently-awaited scenario run, keyed by scenario id. */
+  const pendingResolverRef = useRef<{ id: string; resolve: (r: { pass: boolean; ms: number }) => void } | null>(null);
 
   const scenarios = useMemo(() => buildScenarios(scope), [scope]);
   const groups = ["All", ...Array.from(new Set(scenarios.map(s => s.group)))];
   const visible = groupFilter === "All" ? scenarios : scenarios.filter(s => s.group === groupFilter);
 
+  const handleScenarioComplete = useCallback((scenarioId: string, result: { pass: boolean; ms: number }) => {
+    const pending = pendingResolverRef.current;
+    if (pending && pending.id === scenarioId) {
+      pendingResolverRef.current = null;
+      pending.resolve(result);
+    }
+  }, []);
+
   async function handleRunAll() {
+    if (runningAll) return;
     setRunningAll(true);
     setSuiteResults([]);
 
     const results: SuiteResult[] = [];
 
     for (const scenario of visible) {
-      setAutoRunIds(prev => new Set([...prev, scenario.id]));
-      // We can't call internal state setters from outside; instead we run the
-      // logic here and show aggregate results.  Individual cards update independently.
-      const ctx: Record<string, unknown> = {};
-      const t0 = performance.now();
-      let pass = true;
-
-      for (const step of scenario.steps) {
-        try {
-          await step.run(ctx);
-        } catch {
-          pass = false;
-          break;
-        }
-      }
-
-      results.push({ scenario: scenario.label.slice(0, 20), pass, ms: Math.round(performance.now() - t0) });
+      // Wait for this scenario's card to finish before starting the next,
+      // so shared-server resources aren't hammered in parallel.
+      const done = new Promise<{ pass: boolean; ms: number }>(resolve => {
+        pendingResolverRef.current = { id: scenario.id, resolve };
+      });
+      setRunNonces(prev => ({ ...prev, [scenario.id]: (prev[scenario.id] ?? 0) + 1 }));
+      const { pass, ms } = await done;
+      results.push({ scenario: scenario.label.slice(0, 20), pass, ms });
       setSuiteResults([...results]);
     }
 
-    setRunAllKey(k => k + 1);
-    setAutoRunIds(new Set());
     setRunningAll(false);
   }
 
@@ -769,8 +808,10 @@ export function TestHarnessPage() {
         {/* Scenario cards */}
         {visible.map(scenario => (
           <ScenarioCard
-            key={`${scenario.id}-${runAllKey}-${autoRunIds.has(scenario.id)}`}
+            key={scenario.id}
             scenario={scenario}
+            runNonce={runNonces[scenario.id] ?? 0}
+            onComplete={r => handleScenarioComplete(scenario.id, r)}
           />
         ))}
       </div>

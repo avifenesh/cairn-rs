@@ -1215,7 +1215,7 @@ pub(crate) async fn export_otlp_handler(
     let limit = q.limit.unwrap_or(200).min(2_000);
 
     let entries: Vec<cairn_app::tokens::RequestLogEntry> = match state.request_log.read() {
-        Ok(log) => log.tail(limit, &[]).into_iter().cloned().collect(),
+        Ok(log) => log.tail(limit, &[], None).into_iter().cloned().collect(),
         Err(_) => vec![],
     };
 

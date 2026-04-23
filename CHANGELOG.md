@@ -11,32 +11,19 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
-- **`MemoryPage` now has an in-UI ingest form.** Closes #152. The page used
-  to instruct operators to curl `POST /v1/memory/ingest` by hand; it now
-  renders a form with source_id / document_id / optional source_type /
-  content fields, wired via TanStack Query mutation against
-  `defaultApi.ingestMemory`. Scope is inferred from `useScope()`. Errors
-  surface via `useToast().error(message)`; on success the `memory-search`
-  and `sources` queries are invalidated so the search results and source
-  panel refresh without a full page reload.
-- **`SourcesPage` gained full CRUD + schedule + chunk inspection.** New
-  toolbar buttons for "New Source" and "Process Due" (all-schedule
-  sweep), plus per-row Edit, Delete, View Chunks, and Refresh Schedule
-  actions. Each action is a focused modal following the existing design
-  system (`ds.modal.*`, `useFocusTrap`, `useToast`). Mutations invalidate
-  `['sources']`, `['source', id]`, `['source', id, 'chunks']`, and
-  `['source', id, 'schedule']` as appropriate.
-- **`defaultApi.ingestMemory` / `createSource` / `getSource` /
-  `updateSource` / `deleteSource` / `getSourceChunks` /
-  `getSourceRefreshSchedule` / `setSourceRefreshSchedule` /
-  `processSourceRefresh`** on the TypeScript API client, with matching
-  `CreateSourceRequest`, `UpdateSourceRequest`, `MemoryIngestRequest`,
-  `SourceDetailResponse`, `SourceChunkView`, `CreateRefreshScheduleRequest`,
-  `RefreshScheduleResponse`, and `ProcessRefreshResponse` types
-  mirroring the Rust handler shapes exactly.
-- **`test_http_sources_crud.rs`** integration test covering the full
-  roundtrip over `LiveHarness`: create → ingest → list → chunks → update
-  → schedule → process-refresh → delete.
+- **LogsPage + AuditLogPage — time-range filter, page-size control, and
+  cursor pagination (closes #163).** Both pages previously hardcoded a
+  single fetch (500 / 200 entries) with no way to scroll into older
+  history. The admin request-log handler now accepts `since_ms`; the
+  audit-log handler now accepts `before_ms` (exclusive upper bound) in
+  addition to the existing `since_ms`/`limit`, with the limit clamped to
+  `[1, 1000]`. The UI gains last-15m / 1h / 24h / 7d / all time-range
+  dropdowns, a 50/100/250/500 page-size picker, and — for the audit log
+  — prev / next / jump-to-newest pagination driven by a `before_ms`
+  cursor stack. The request-log response now also returns `buffered` +
+  `has_more` so the footer can show "showing N of M" and surface a
+  hint when the page was truncated.
+
 - **`GET /v1/skills` + `GET /v1/skills/:id` — real skills catalog wiring.**
   Replaces the hard-coded empty stub
   (`list_skills_preserved_handler` in `handlers/memory.rs`) with a
@@ -161,6 +148,45 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   every `RecentEvent` that arrived with only the numeric field.
   Hash navigation from the Run / Task rows is now URL-encoded, to
   match the rest of the UI's routing pattern.
+- **UI: `TestHarnessPage` "Run All Scenarios" no-op'd scenario cards (#143).**
+  The page-level Run All handler ran its own private copy of each
+  scenario's steps against the server and then bumped a `runAllKey`
+  to remount cards. Cards themselves never executed — step rows
+  stayed idle ("0/N steps") while the summary banner reported
+  green. Rewired Run All so each `ScenarioCard` accepts a per-card
+  `runNonce` prop; the parent increments nonces sequentially and
+  awaits an `onComplete` callback from the card's real
+  `runScenario` before moving to the next. Step rows now reflect
+  live per-step progress during Run All, and the summary reflects
+  what the cards actually saw. Closes #143.
+- **UI: `TestHarnessPage` "Event log" step was a sham (#143).**
+  The `event_log` step called `getRunEvents("__nonexistent__")`
+  with a blanket `.catch(() => [])` and reported pass regardless
+  of server state — it asserted nothing. Replaced with a real
+  `GET /v1/events/recent?limit=5` probe via `getRecentEvents` that
+  asserts the response is an array and each returned record has a
+  non-empty `event_type`. Description updated to match.
+- **UI: `AgentTemplatesPage` navigated after a 500 ms `setTimeout` (#161).**
+  After `instantiateAgentTemplate` succeeded the page slept 500 ms before
+  routing to the new run, hoping the backend had finished creating it —
+  a pure race. The endpoint returns the `run_id` synchronously in its
+  201 response, so the page now navigates immediately on success. No
+  more stale-detail flash, no more missed-run when the handler is slow.
+- **UI: `ProjectDashboardPage` rendered tenant-wide cost widgets as if
+  they were project-scoped (#144).** `/v1/costs` is tenant-scoped on the
+  backend (`SessionCostRecord` has `tenant_id` only; no workspace/project
+  fields on the event or projection), so the "Total Spend" and "Provider
+  Calls" cards aggregated across every workspace and project in the
+  tenant while the labels suggested a single project. The cards are now
+  labeled "Tenant Spend" / "Tenant Provider Calls" with a description
+  that says "authenticated tenant — not project-scoped"; the Resources
+  summary sub-label reads "tenant-wide". The copy avoids interpolating
+  the UI's `tenantId` state because the backend derives the tenant from
+  the bearer token (`TenantScope`) and ignores any UI-side tenant
+  filter, so hardcoding a tenant id in copy would mis-attribute spend
+  whenever the scope selector and the bearer token disagree. Proper
+  project-scoped cost filtering needs a backend change (event shape
+  extension + projection); tracked separately.
 - **UI: `OrchestrationPage` re-processed the oldest buffered SSE event
   on each SSE update and leaked `setTimeout` callbacks on unmount
   (#177).** The stream effect depended on the whole `streamEvents`
@@ -179,6 +205,31 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   most one `rSessions`/`rRuns`/`rTasks`. Payload ids read both
   snake_case and camelCase to match the pattern in `RunDetailPage`.
   Operator actions wired in PR P are untouched.
+- **UI: `PlaygroundPage` model picker excluded Anthropic-native providers (#160).** The registry-derived model list filtered out providers whose `api_format` was `anthropic`, silently hiding every Anthropic-native connection even though the backend `chat/stream` handler routes through the native adapter. Removed the adapter-kind filter so all available registered providers contribute their models to the picker. Closes #160.
+- **UI: `DecisionsPage` row-level Invalidate button was invisible (#153).**
+  The per-row "Invalidate" button in the cache tab used Tailwind's
+  `opacity-0 group-hover:opacity-100` reveal pattern, but the shared
+  `DataTable` `<tr>` did not declare the `group` class, so the
+  `group-hover:` variant never activated and the button stayed
+  permanently hidden. Added an opt-in `rowClassName` prop to
+  `DataTable` (keeps the shared component free of implicit Tailwind
+  scopes) and pass `rowClassName="group"` from `DecisionsPage` for
+  the cache tab so hover-revealed row actions become visible on
+  hover. Closes #153.
+- **UI: `CredentialsPage` Add-Credential modal missing toast on store error + stale `default` placeholder (#162).**
+  The `storeCredential` mutation only declared `onSuccess`, so any
+  failure (invalid provider, encryption key lookup miss, transport
+  error) was only shown via the modal's inline `mutErr` text and did
+  not surface through the shared toast — inconsistent with the rest
+  of the app (ApprovalsPage, DecisionsPage) where operator-initiated
+  mutations always raise a toast on failure. Added an `onError`
+  handler that surfaces the error message via `useToast()`, matching
+  the `ApprovalsPage` pattern. Also replaced a stale
+  `placeholder="default"` string literal on the Tenant input with
+  `DEFAULT_SCOPE.tenant_id` from `ui/src/lib/scope.ts` so the
+  placeholder stays in sync with the canonical default tenant id
+  (`default_tenant`) — the PR #132 cleanup missed this one field.
+  Closes #162.
 - **UI: `RunDetailPage` plan-mode detection used a loose substring match (#178).**
   The `isPlanMode` check in `ui/src/pages/RunDetailPage.tsx` used a loose
   substring match (`runModeType.includes("plan")`), so runs with names or

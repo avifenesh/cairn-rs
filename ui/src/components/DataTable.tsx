@@ -60,6 +60,12 @@ export interface DataTableProps<T> {
   onRowClick?:   (row: T, index: number) => void;
   /** Derive a stable string key from a row (required when selectedIds is set). */
   getRowId?:     (row: T) => string;
+  /**
+   * Extra class applied to every `<tr>`. Opt-in; keeps the shared DataTable
+   * free of implicit Tailwind scopes. Pass `"group"` (or a named group) when
+   * the row contains children that rely on `group-hover:*` reveal patterns.
+   */
+  rowClassName?: string;
 }
 
 type SortDir = 'asc' | 'desc';
@@ -112,6 +118,7 @@ export function DataTable<T>({
   selectedIds,
   onRowClick,
   getRowId,
+  rowClassName,
 }: DataTableProps<T>) {
   const [query,      setQuery]      = useState('');
   const [sortKey,    setSortKey]    = useState<string | null>(null);
@@ -260,6 +267,7 @@ export function DataTable<T>({
                   onClick={() => onRowClick?.(row, absIdx)}
                   className={clsx(
                     'border-b border-gray-200/50 dark:border-zinc-800/50 last:border-0 transition-colors',
+                    rowClassName,
                     onRowClick ? 'cursor-pointer' : '',
                     isActive
                       ? 'bg-zinc-700/70 ring-1 ring-inset ring-zinc-500/60'

@@ -5,6 +5,8 @@ import {
   RefreshCw,
   ChevronDown,
   ChevronRight,
+  ChevronLeft,
+  ChevronsLeft,
 } from "lucide-react";
 import { clsx } from "clsx";
 import { ErrorFallback } from "../components/ErrorFallback";
@@ -112,19 +114,68 @@ function EmptyState({ filtered }: { filtered: boolean }) {
   );
 }
 
+// ── Time-range + page-size controls ───────────────────────────────────────────
+
+type TimeRange = "1h" | "24h" | "7d" | "30d" | "all";
+
+const TIME_RANGE_MS: Record<Exclude<TimeRange, "all">, number> = {
+  "1h":       60 * 60 * 1000,
+  "24h":  24 * 60 * 60 * 1000,
+  "7d":    7 * 24 * 60 * 60 * 1000,
+  "30d":  30 * 24 * 60 * 60 * 1000,
+};
+
+const PAGE_SIZES = [50, 100, 250, 500] as const;
+type PageSize = typeof PAGE_SIZES[number];
+
 // ── Main page ─────────────────────────────────────────────────────────────────
 
 export function AuditLogPage() {
   const [actionFilter, setActionFilter]   = useState<string>("all");
   const [outcomeFilter, setOutcomeFilter] = useState<AuditOutcome | "all">("all");
+  const [pageSize,  setPageSize]  = useState<PageSize>(100);
+  const [timeRange, setTimeRange] = useState<TimeRange>("24h");
+  // Cursor stack for prev/next — each element is the `before_ms` that
+  // returned the page. Empty stack = newest page.
+  const [cursorStack, setCursorStack] = useState<number[]>([]);
+  const beforeMs = cursorStack[cursorStack.length - 1];
+
+  // Compute since_ms from the selected range (10s bucket for query stability).
+  const sinceMs = timeRange === "all"
+    ? undefined
+    : Math.floor((Date.now() - TIME_RANGE_MS[timeRange]) / 10_000) * 10_000;
 
   const { data, isLoading, isError, error, refetch, isFetching } = useQuery({
-    queryKey: ["audit-log"],
-    queryFn:  () => defaultApi.getAuditLog(200),
-    refetchInterval: 30_000,
+    queryKey: ["audit-log", pageSize, timeRange, beforeMs ?? null],
+    queryFn:  () => defaultApi.getAuditLog({
+      limit:     pageSize,
+      since_ms:  sinceMs,
+      before_ms: beforeMs,
+    }),
+    refetchInterval: cursorStack.length === 0 ? 30_000 : false,
   });
 
   const entries = data?.items ?? [];
+  const hasMore = Boolean(data?.has_more);
+  const atNewest = cursorStack.length === 0;
+
+  // Reset paging when filters that change the result set flip.
+  function resetPaging() {
+    setCursorStack([]);
+  }
+
+  function goOlder() {
+    const last = entries[entries.length - 1];
+    if (last) setCursorStack(stack => [...stack, last.occurred_at_ms]);
+  }
+
+  function goNewer() {
+    setCursorStack(stack => stack.slice(0, -1));
+  }
+
+  function goNewest() {
+    setCursorStack([]);
+  }
 
   // Derive unique action names for the filter dropdown.
   const allActions = [...new Set(entries.map((e) => e.action))].sort();
@@ -177,6 +228,32 @@ export function AuditLogPage() {
           <option value="all">All outcomes</option>
           <option value="success">Success</option>
           <option value="failure">Failure</option>
+        </select>
+
+        {/* Time-range filter */}
+        <select
+          value={timeRange}
+          onChange={(e) => { setTimeRange(e.target.value as TimeRange); resetPaging(); }}
+          aria-label="Time range"
+          className={ds.input.select}
+        >
+          <option value="1h">Last hour</option>
+          <option value="24h">Last 24h</option>
+          <option value="7d">Last 7 days</option>
+          <option value="30d">Last 30 days</option>
+          <option value="all">All time</option>
+        </select>
+
+        {/* Page-size dropdown */}
+        <select
+          value={pageSize}
+          onChange={(e) => { setPageSize(Number(e.target.value) as PageSize); resetPaging(); }}
+          aria-label="Page size"
+          className={ds.input.select}
+        >
+          {PAGE_SIZES.map((n) => (
+            <option key={n} value={n}>{n}/page</option>
+          ))}
         </select>
 
         <button
@@ -241,6 +318,57 @@ export function AuditLogPage() {
             </tbody>
           </table>
         )}
+      </div>
+
+      {/* Pagination footer */}
+      <div className="flex items-center gap-2 px-3 h-9 border-t border-gray-200 dark:border-zinc-800 shrink-0
+                      bg-gray-50 dark:bg-zinc-900 text-[11px] text-gray-500 dark:text-zinc-400 tabular-nums">
+        <span>
+          {atNewest ? "Newest page" : `Page ${cursorStack.length + 1}`}
+          {entries.length > 0 && ` • ${entries.length} entries`}
+        </span>
+        <div className="ml-auto flex items-center gap-1">
+          <button
+            onClick={goNewest}
+            disabled={atNewest || isFetching}
+            aria-label="Jump to newest"
+            className={clsx(
+              "flex items-center gap-1 h-6 px-2 rounded border transition-colors",
+              atNewest
+                ? "text-gray-300 dark:text-zinc-700 border-gray-100 dark:border-zinc-800 cursor-not-allowed"
+                : "text-gray-500 dark:text-zinc-400 border-gray-200 dark:border-zinc-800 hover:bg-gray-100 dark:hover:bg-zinc-800",
+            )}
+          >
+            <ChevronsLeft size={12} />
+            Newest
+          </button>
+          <button
+            onClick={goNewer}
+            disabled={atNewest || isFetching}
+            className={clsx(
+              "flex items-center gap-1 h-6 px-2 rounded border transition-colors",
+              atNewest
+                ? "text-gray-300 dark:text-zinc-700 border-gray-100 dark:border-zinc-800 cursor-not-allowed"
+                : "text-gray-500 dark:text-zinc-400 border-gray-200 dark:border-zinc-800 hover:bg-gray-100 dark:hover:bg-zinc-800",
+            )}
+          >
+            <ChevronLeft size={12} />
+            Newer
+          </button>
+          <button
+            onClick={goOlder}
+            disabled={!hasMore || entries.length === 0 || isFetching}
+            className={clsx(
+              "flex items-center gap-1 h-6 px-2 rounded border transition-colors",
+              !hasMore || entries.length === 0
+                ? "text-gray-300 dark:text-zinc-700 border-gray-100 dark:border-zinc-800 cursor-not-allowed"
+                : "text-gray-500 dark:text-zinc-400 border-gray-200 dark:border-zinc-800 hover:bg-gray-100 dark:hover:bg-zinc-800",
+            )}
+          >
+            Older
+            <ChevronRight size={12} />
+          </button>
+        </div>
       </div>
     </div>
   );
