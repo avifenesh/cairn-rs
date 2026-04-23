@@ -318,11 +318,17 @@ function PlanArtifactPanel({ runId, run }: { runId: string; run?: import("../lib
     hasPlan
   );
 
+  // Approve/reject/revise must also invalidate `run-events` (so the timeline
+  // rerenders with the plan-state event) and `approvals` (so any pending
+  // approval row on the Approvals tab disappears immediately instead of
+  // waiting for the next poll).
   const approveMut = useMutation({
     mutationFn: () => defaultApi.approvePlan(runId, { approved_by: "operator" }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["run-plan", runId] });
       queryClient.invalidateQueries({ queryKey: ["runs"] });
+      queryClient.invalidateQueries({ queryKey: ["run-events", runId] });
+      queryClient.invalidateQueries({ queryKey: ["approvals"] });
     },
   });
 
@@ -332,6 +338,8 @@ function PlanArtifactPanel({ runId, run }: { runId: string; run?: import("../lib
       setShowReject(false);
       queryClient.invalidateQueries({ queryKey: ["run-plan", runId] });
       queryClient.invalidateQueries({ queryKey: ["runs"] });
+      queryClient.invalidateQueries({ queryKey: ["run-events", runId] });
+      queryClient.invalidateQueries({ queryKey: ["approvals"] });
     },
   });
 
@@ -341,6 +349,8 @@ function PlanArtifactPanel({ runId, run }: { runId: string; run?: import("../lib
       setShowRevise(false);
       queryClient.invalidateQueries({ queryKey: ["run-plan", runId] });
       queryClient.invalidateQueries({ queryKey: ["runs"] });
+      queryClient.invalidateQueries({ queryKey: ["run-events", runId] });
+      queryClient.invalidateQueries({ queryKey: ["approvals"] });
     },
   });
 
@@ -612,15 +622,17 @@ export function RunDetailPage({ runId, onBack }: RunDetailPageProps) {
               )}
               <button
                 onClick={() => {
-                  void defaultApi.exportRun(runId).then(data => {
-                    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-                    const url  = URL.createObjectURL(blob);
-                    const a    = document.createElement('a');
-                    a.href     = url;
-                    a.download = `run-${runId}.json`;
-                    a.click();
-                    URL.revokeObjectURL(url);
-                  });
+                  void defaultApi.exportRun(runId)
+                    .then(data => {
+                      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+                      const url  = URL.createObjectURL(blob);
+                      const a    = document.createElement('a');
+                      a.href     = url;
+                      a.download = `run-${runId}.json`;
+                      a.click();
+                      URL.revokeObjectURL(url);
+                    })
+                    .catch(e => toast.error(`Export failed: ${e instanceof Error ? e.message : String(e)}`));
                 }}
                 title="Export run as JSON"
                 className="flex items-center gap-1.5 rounded px-2.5 py-1.5 text-[12px] font-medium
