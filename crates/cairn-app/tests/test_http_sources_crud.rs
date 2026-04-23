@@ -7,6 +7,7 @@
 
 mod support;
 
+use percent_encoding::{utf8_percent_encode, NON_ALPHANUMERIC};
 use serde_json::{json, Value};
 use support::live_fabric::LiveHarness;
 
@@ -15,8 +16,10 @@ async fn sources_crud_and_memory_ingest_roundtrip() {
     let h = LiveHarness::setup().await;
     let base = &h.base_url;
     let source_id = "docs/handbook-test";
-    // Axum path segments must not contain `/`; mirror the UI's encodeURIComponent.
-    let encoded_source_id = source_id.replace('/', "%2F");
+    // Full percent-encoding of the path segment — mirrors `encodeURIComponent`
+    // on the UI side, and stays honest against arbitrary operator-supplied
+    // IDs (slashes, spaces, hashes, question marks, etc.).
+    let encoded_source_id = utf8_percent_encode(source_id, NON_ALPHANUMERIC).to_string();
 
     // 1. Create source.
     let res = h
@@ -128,6 +131,14 @@ async fn sources_crud_and_memory_ingest_roundtrip() {
     );
 
     // 6. Set refresh schedule.
+    //
+    // Scope travels via *query params* here, not in the JSON body — this
+    // matches the handler signature in
+    // `crates/cairn-app/src/handlers/memory.rs::create_source_refresh_schedule_handler`
+    // which takes `Query<OptionalProjectScopedQuery>` + a scope-free
+    // `CreateRefreshScheduleRequest`. Changing the wire contract is
+    // outside this PR's scope (it would break existing callers); the
+    // UI's `setSourceRefreshSchedule` in `ui/src/lib/api.ts` matches.
     let res = h
         .client()
         .post(format!(
@@ -163,9 +174,17 @@ async fn sources_crud_and_memory_ingest_roundtrip() {
     );
 
     // 8. Delete (deactivate) the source.
+    //
+    // The current `delete_source_handler` ignores scope and keys only
+    // on `source_id`, but we still pass scope query-params so the test
+    // stays forward-compatible with a future scoped-delete contract
+    // (and so CI fails loudly if someone drops scope from the UI).
     let res = h
         .client()
-        .delete(format!("{base}/v1/sources/{}", encoded_source_id))
+        .delete(format!(
+            "{base}/v1/sources/{}?tenant_id={}&workspace_id={}&project_id={}",
+            encoded_source_id, h.tenant, h.workspace, h.project,
+        ))
         .bearer_auth(&h.admin_token)
         .send()
         .await

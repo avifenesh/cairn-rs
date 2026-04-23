@@ -546,6 +546,14 @@ export interface UpdateSourceRequest {
   description?: string;
 }
 
+/** POST /v1/memory/ingest — response body. */
+export interface MemoryIngestResponse {
+  ok: boolean;
+  document_id: string;
+  source_id: string;
+  chunk_count: number;
+}
+
 /** POST /v1/memory/ingest — ingest a document into a source. */
 export interface MemoryIngestRequest {
   tenant_id: string;

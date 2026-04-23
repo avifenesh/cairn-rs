@@ -110,7 +110,7 @@ function SourceRow({ source, even }: { source: SourceRecord; even: boolean }) {
 
 // ── Ingest form ───────────────────────────────────────────────────────────────
 
-function IngestForm({ onIngested }: { onIngested: () => void }) {
+function IngestForm() {
   const toast = useToast();
   const qc    = useQueryClient();
   const [scope] = useScope();
@@ -127,13 +127,17 @@ function IngestForm({ onIngested }: { onIngested: () => void }) {
       content,
       ...(sourceType.trim() ? { source_type: sourceType.trim() } : {}),
     }),
-    onSuccess: () => {
-      toast.success(`Ingested document ${documentId} into source ${sourceId}.`);
+    onSuccess: (res) => {
+      toast.success(
+        `Ingested document ${res.document_id} into source ${res.source_id} (${res.chunk_count} chunk${res.chunk_count === 1 ? '' : 's'}).`,
+      );
       setDocumentId('');
       setContent('');
+      // Invalidate both queries. The page-level `useQuery(['sources'])`
+      // will refetch automatically; we do NOT also call `refetchSources()`
+      // from the parent, to avoid duplicate network requests.
       qc.invalidateQueries({ queryKey: ['memory-search'] });
       qc.invalidateQueries({ queryKey: ['sources'] });
-      onIngested();
     },
     onError: (e: unknown) => {
       toast.error(e instanceof Error ? e.message : 'Ingest failed.');
@@ -289,7 +293,7 @@ export function MemoryPage() {
       </form>
 
       {/* ── Ingest form ─────────────────────────────────────────────────── */}
-      <IngestForm onIngested={() => refetchSources()} />
+      <IngestForm />
 
       {/* ── Search results ──────────────────────────────────────────────── */}
       {submitted && (

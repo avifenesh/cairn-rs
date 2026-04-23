@@ -532,6 +532,7 @@ dependencies = [
  "libc",
  "mime_guess",
  "opentelemetry-proto",
+ "percent-encoding",
  "prost",
  "reqwest",
  "rust-embed",

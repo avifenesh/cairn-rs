@@ -942,7 +942,7 @@ export function createApiClient(config: ApiClientConfig) {
       tenant_id?: string;
       workspace_id?: string;
       project_id?: string;
-    }): Promise<unknown> => {
+    }): Promise<import("./types").MemoryIngestResponse> => {
       const merged = withScope(body);
       return post("/v1/memory/ingest", {
         tenant_id:    merged.tenant_id    ?? DEFAULT_SCOPE.tenant_id,
