@@ -1546,11 +1546,22 @@ pub(crate) fn event_message(event: &RuntimeEvent) -> String {
         | RuntimeEvent::SpendAlertTriggered(_)
         | RuntimeEvent::OutcomeRecorded(_)
         | RuntimeEvent::ScheduledTaskCreated(_)
-        | RuntimeEvent::PlanProposed(_)
-        | RuntimeEvent::PlanApproved(_)
-        | RuntimeEvent::PlanRejected(_)
-        | RuntimeEvent::PlanRevisionRequested(_)
         | RuntimeEvent::RecoverySummaryEmitted(_) => "unknown".to_string(),
+        RuntimeEvent::PlanProposed(p) => {
+            format!("Plan proposed for run {}", p.plan_run_id)
+        }
+        RuntimeEvent::PlanApproved(p) => {
+            format!("Plan {} approved by {}", p.plan_run_id, p.approved_by)
+        }
+        RuntimeEvent::PlanRejected(p) => {
+            format!("Plan {} rejected: {}", p.plan_run_id, p.reason)
+        }
+        RuntimeEvent::PlanRevisionRequested(p) => {
+            format!(
+                "Plan revision requested for run {} (new run {})",
+                p.original_plan_run_id, p.new_plan_run_id
+            )
+        }
     }
 }
 

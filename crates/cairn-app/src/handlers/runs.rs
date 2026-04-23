@@ -874,7 +874,11 @@ pub(crate) async fn intervene_run_handler(
 ) -> impl IntoResponse {
     let run_id = RunId::new(id);
     let run = match state.runtime.runs.get(&run_id).await {
-        Ok(Some(run)) if run.project.tenant_id == *tenant_scope.tenant_id() => run,
+        Ok(Some(run))
+            if tenant_scope.is_admin || run.project.tenant_id == *tenant_scope.tenant_id() =>
+        {
+            run
+        }
         Ok(Some(_)) | Ok(None) => {
             return AppApiError::new(StatusCode::NOT_FOUND, "not_found", "run not found")
                 .into_response();
@@ -1543,7 +1547,11 @@ pub(crate) async fn spawn_subagent_run_handler(
 ) -> impl IntoResponse {
     let parent_run_id = RunId::new(id);
     let parent_run = match state.runtime.runs.get(&parent_run_id).await {
-        Ok(Some(run)) if run.project.tenant_id == *tenant_scope.tenant_id() => run,
+        Ok(Some(run))
+            if tenant_scope.is_admin || run.project.tenant_id == *tenant_scope.tenant_id() =>
+        {
+            run
+        }
         Ok(Some(_)) | Ok(None) => {
             return AppApiError::new(StatusCode::NOT_FOUND, "not_found", "run not found")
                 .into_response();
