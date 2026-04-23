@@ -97,6 +97,15 @@ async fn list_skills_returns_registered_entries() {
         .as_array()
         .expect("currently_active");
     assert_eq!(active.len(), 1, "only `coder` is Active");
+    // Legacy camelCase alias must still be emitted for byte-for-byte
+    // compatibility with the previous stub response shape.
+    let active_camel = json["currentlyActive"]
+        .as_array()
+        .expect("currentlyActive alias");
+    assert_eq!(
+        active_camel, active,
+        "camelCase alias must mirror snake_case"
+    );
     assert_eq!(active[0], "coder");
 }
 

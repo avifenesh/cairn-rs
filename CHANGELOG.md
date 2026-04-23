@@ -24,8 +24,10 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   skill metadata (skill id, version badge, tag pills) instead of
   dumping opaque `Record<string, unknown>` entries. The catalog
   starts empty; workers register skills via the domain API. The
-  previous stub's `{items: [], summary: {0,0,0}}` response is
-  preserved byte-for-byte when no skills are registered.
+  previous stub's `{items: [], summary: {0,0,0}, currently_active: [],
+  currentlyActive: []}` response is preserved byte-for-byte when no
+  skills are registered — both the snake_case and legacy camelCase
+  `currentlyActive` alias are still emitted.
   Integration tests at `crates/cairn-app/tests/test_http_skills.rs`
   cover list, tag-filter, detail, 404, and empty-state paths. Closes #147.
 - **`RunDetailPage` + `OrchestrationPage` — operator run-mutation actions.**

@@ -45,12 +45,22 @@ pub(crate) struct SkillsSummary {
 /// Response body for `GET /v1/skills`.
 ///
 /// Shape matches `ui/src/lib/types.ts::SkillsResponse`.
+///
+/// `currently_active` is also emitted as `currentlyActive` for byte-for-byte
+/// backwards compatibility with the previous stub, which wrote both field
+/// names into the response (the UI reads either). Dropping the camelCase
+/// duplicate would silently break any out-of-tree client that still keys on
+/// it, so we keep both.
 #[derive(Clone, Debug, Serialize)]
 pub(crate) struct ListSkillsResponse {
     pub items: Vec<SkillSummary>,
     pub summary: SkillsSummary,
     /// IDs of skills currently reported as Active by the domain catalog.
     pub currently_active: Vec<String>,
+    /// Legacy camelCase alias for `currently_active`. Serialized verbatim
+    /// from the same list so the two fields can never drift.
+    #[serde(rename = "currentlyActive")]
+    pub currently_active_camel: Vec<String>,
 }
 
 pub(crate) async fn list_skills_handler(
@@ -72,15 +82,23 @@ pub(crate) async fn list_skills_handler(
     let catalog = state.skill_catalog.read().await;
     let all: Vec<&Skill> = catalog.list(&tag_refs);
 
-    let items: Vec<SkillSummary> = all.iter().map(|s| SkillSummary::from(*s)).collect();
+    // Single pass over the catalog: build summaries, count enabled, and
+    // collect currently-active IDs in one scan. Avoids three separate
+    // iterations over `all`.
+    let mut items: Vec<SkillSummary> = Vec::with_capacity(all.len());
+    let mut enabled = 0usize;
+    let mut currently_active: Vec<String> = Vec::new();
+    for skill in &all {
+        if skill.enabled {
+            enabled += 1;
+        }
+        if matches!(skill.status, SkillStatus::Active) {
+            currently_active.push(skill.skill_id.clone());
+        }
+        items.push(SkillSummary::from(*skill));
+    }
     let total = items.len();
-    let enabled = items.iter().filter(|s| s.enabled).count();
     let disabled = total.saturating_sub(enabled);
-    let currently_active: Vec<String> = all
-        .iter()
-        .filter(|s| matches!(s.status, SkillStatus::Active))
-        .map(|s| s.skill_id.clone())
-        .collect();
 
     let body = ListSkillsResponse {
         items,
@@ -89,6 +107,7 @@ pub(crate) async fn list_skills_handler(
             enabled,
             disabled,
         },
+        currently_active_camel: currently_active.clone(),
         currently_active,
     };
     (StatusCode::OK, Json(body)).into_response()
