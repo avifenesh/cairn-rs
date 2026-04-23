@@ -123,6 +123,7 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **UI: `IntegrationsPage` — replaced raw `fetch()` on the GitHub queue concurrency PUT with `defaultApi.setGitHubQueueConcurrency` (routed through `apiFetch`, which throws on non-2xx), and added `onError` toast handlers to the concurrency, skip, and retry mutations so server-side failures surface instead of silently disappearing (#155).**
 - **UI: `TestHarnessPage` "Run All Scenarios" no-op'd scenario cards (#143).**
   The page-level Run All handler ran its own private copy of each
   scenario's steps against the server and then bumped a `runAllKey`

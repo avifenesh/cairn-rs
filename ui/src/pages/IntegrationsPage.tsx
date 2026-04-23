@@ -317,6 +317,10 @@ export function IntegrationsPage() {
   const skipMut = useMutation({
     mutationFn: (issue: number) => defaultApi.skipGitHubIssue(issue),
     onSuccess: () => void qc.invalidateQueries({ queryKey: ["github-queue"] }),
+    onError: (err: unknown) => {
+      const msg = err instanceof Error ? err.message : String(err);
+      toast.error(`Failed to skip: ${msg}`);
+    },
   });
 
   const retryMut = useMutation({
@@ -324,6 +328,19 @@ export function IntegrationsPage() {
     onSuccess: () => {
       toast.success("Issue re-queued");
       void qc.invalidateQueries({ queryKey: ["github-queue"] });
+    },
+    onError: (err: unknown) => {
+      const msg = err instanceof Error ? err.message : String(err);
+      toast.error(`Failed to retry: ${msg}`);
+    },
+  });
+
+  const concurrencyMut = useMutation({
+    mutationFn: (value: number) => defaultApi.setGitHubQueueConcurrency(value),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ["github-queue"] }),
+    onError: (err: unknown) => {
+      const msg = err instanceof Error ? err.message : String(err);
+      toast.error(`Failed to update concurrency: ${msg}`);
     },
   });
 
@@ -371,14 +388,7 @@ export function IntegrationsPage() {
                     value={maxConcurrent}
                     onChange={(e) => {
                       const val = Number(e.target.value);
-                      fetch("/v1/webhooks/github/queue/concurrency", {
-                        method: "PUT",
-                        headers: {
-                          "Authorization": `Bearer ${localStorage.getItem("cairn_token") ?? ""}`,
-                          "Content-Type": "application/json",
-                        },
-                        body: JSON.stringify({ max_concurrent: val }),
-                      }).then(() => void qc.invalidateQueries({ queryKey: ["github-queue"] }));
+                      concurrencyMut.mutate(val);
                     }}
                     className={clsx(
                       "rounded border px-1.5 py-0.5 text-[11px]",
