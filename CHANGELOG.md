@@ -110,6 +110,11 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **UI: `SessionsPage` per-row run count was O(N*M) per render (#180).**
+  Replaced the per-row `allRuns.filter(...)` scan with a memoized
+  `Map<session_id, count>` computed once from `allRuns`, collapsing
+  per-render work from O(sessions * runs) to O(runs) build + O(1)
+  lookup.
 - **UI: `ApprovalsPage` 24h stats double-counted pending requests (#176).**
   The "Approved (24h)" and "Rejected (24h)" stat cards filtered resolved
   approvals by `created_at`, so approvals requested within the last 24h
