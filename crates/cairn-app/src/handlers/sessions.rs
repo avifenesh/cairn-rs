@@ -504,6 +504,10 @@ pub(crate) async fn list_session_events_handler(
         .into_response()
 }
 
+/// Max length for a caller-supplied `session_id`. Keeps the HTTP body
+/// bounded and prevents unbounded growth in projections / logs.
+const SESSION_ID_MAX_LEN: usize = 256;
+
 #[utoipa::path(
     post,
     path = "/v1/sessions",
@@ -513,6 +517,7 @@ pub(crate) async fn list_session_events_handler(
         (status = 201, description = "Session created", body = SessionRecordDoc),
         (status = 400, description = "Invalid request", body = ApiError),
         (status = 401, description = "Unauthorized", body = ApiError),
+        (status = 409, description = "Session already exists", body = ApiError),
         (status = 422, description = "Unprocessable entity", body = ApiError),
         (status = 500, description = "Internal server error", body = ApiError)
     )
@@ -522,16 +527,74 @@ pub(crate) async fn create_session_handler(
     project_scope: ProjectJson<CreateSessionRequest>,
 ) -> impl IntoResponse {
     let body = project_scope.into_inner();
+
+    // Validate session_id shape (closes #229 — previously empty and
+    // 10k-char ids both returned 201).
+    let sid = body.session_id.trim();
+    if sid.is_empty() {
+        return bad_request_response("session_id must not be empty");
+    }
+    if body.session_id.len() > SESSION_ID_MAX_LEN {
+        return bad_request_response(format!(
+            "session_id exceeds max length {SESSION_ID_MAX_LEN}"
+        ));
+    }
+
+    let session_id = SessionId::new(body.session_id.clone());
+
+    // Reject duplicates with 409 instead of silently returning 201
+    // (closes #229). Mirrors `CredentialServiceImpl::store`.
+    match state.runtime.sessions.get(&session_id).await {
+        Ok(Some(_)) => {
+            return AppApiError::new(
+                StatusCode::CONFLICT,
+                "conflict",
+                format!("session already exists: {}", session_id.as_str()),
+            )
+            .into_response();
+        }
+        Ok(None) => {}
+        Err(err) => return runtime_error_response(err),
+    }
+
     match state
         .runtime
         .sessions
-        .create(
-            &CreateSessionRequest::project(&body),
-            SessionId::new(body.session_id),
-        )
+        .create(&CreateSessionRequest::project(&body), session_id)
         .await
     {
         Ok(session) => (StatusCode::CREATED, Json(session)).into_response(),
+        Err(err) => runtime_error_response(err),
+    }
+}
+
+/// `DELETE /v1/admin/tenants/:tenant_id/sessions/:session_id` — admin
+/// soft-delete. Mirrors PR BB's workspace pattern exactly: archive the
+/// session via `SessionService::archive`, which issues the fabric-side
+/// cancel + `cairn.archived` tag write and emits a `SessionArchived`
+/// bridge event. Returns 204 on success, 404 when the session doesn't
+/// belong to the supplied tenant (admin bypasses only the scope read
+/// check; cross-tenant DELETE is still refused by id).
+pub(crate) async fn delete_session_admin_handler(
+    State(state): State<Arc<AppState>>,
+    Path((tenant_id, session_id)): Path<(String, String)>,
+) -> impl IntoResponse {
+    let session_id = SessionId::new(session_id);
+
+    // Enforce tenant-ownership: admin token may address any tenant, but
+    // the URL's :tenant_id must actually own the session. Prevents a
+    // mistyped path from silently archiving the wrong tenant's session.
+    match state.runtime.sessions.get(&session_id).await {
+        Ok(Some(record)) if record.project.tenant_id.as_str() == tenant_id => {}
+        Ok(Some(_)) | Ok(None) => {
+            return AppApiError::new(StatusCode::NOT_FOUND, "not_found", "session not found")
+                .into_response();
+        }
+        Err(err) => return runtime_error_response(err),
+    }
+
+    match state.runtime.sessions.archive(&session_id).await {
+        Ok(_) => StatusCode::NO_CONTENT.into_response(),
         Err(err) => runtime_error_response(err),
     }
 }

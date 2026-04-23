@@ -26,7 +26,9 @@ use cairn_api::{CriticalEventSummary, DashboardOverview};
 use cairn_domain::{
     ProjectId, ProjectKey, RunId, RunState, RuntimeEvent, SessionId, TenantId, WorkspaceId,
 };
-use cairn_runtime::{DefaultsService, LicenseService, ProviderBindingService};
+use cairn_runtime::{
+    DefaultsService, LicenseService, ProviderBindingService, ProviderConnectionService,
+};
 use cairn_store::{EventLog, StoredEvent};
 use cairn_tools::{PluginHost, PluginRegistry};
 
@@ -907,6 +909,128 @@ pub(crate) async fn get_tls_settings_handler(
     }
 }
 
+/// Known model-id keys. Values for these keys must resolve to a real
+/// model in the static provider registry AND be listed in at least one
+/// active provider connection's `supported_models` (mirrors the PR #185
+/// UI-side filter, now enforced server-side). Closes #228.
+const MODEL_ID_KEYS: &[&str] = &[
+    "brain_model",
+    "generate_model",
+    "stream_model",
+    "embed_model",
+];
+
+/// Numeric keys: parsed and range-checked. Keys outside this list and
+/// `MODEL_ID_KEYS` fall through to the generic string-length cap.
+const NUMERIC_KEYS: &[(&str, f64, f64)] = &[
+    ("max_tokens", 1.0, 1_000_000.0),
+    ("timeout_ms", 1.0, 3_600_000.0),
+    ("temperature", 0.0, 2.0),
+];
+
+/// Per-key cap on JSON-string length. Model ids are short; free-form
+/// prompt-like keys get a wider budget.
+const MODEL_ID_MAX_LEN: usize = 256;
+const PROMPT_LIKE_MAX_LEN: usize = 4096;
+
+async fn validate_setting_value(
+    state: &AppState,
+    key: &str,
+    value: &serde_json::Value,
+) -> Result<(), axum::response::Response> {
+    // Numeric keys: reject non-numbers, enforce range.
+    if let Some((_, min, max)) = NUMERIC_KEYS.iter().find(|(k, _, _)| *k == key) {
+        let n = value
+            .as_f64()
+            .ok_or_else(|| bad_request_response(format!("{key} must be a number")))?;
+        if !n.is_finite() || n < *min || n > *max {
+            return Err(bad_request_response(format!(
+                "{key} must be within [{min}, {max}]"
+            )));
+        }
+        return Ok(());
+    }
+
+    // Model-id keys: must be non-empty string in registry AND supported
+    // by at least one active provider connection for the tenant scope.
+    if MODEL_ID_KEYS.contains(&key) {
+        let model_id = value
+            .as_str()
+            .ok_or_else(|| bad_request_response(format!("{key} must be a string")))?;
+        if model_id.is_empty() {
+            return Err(bad_request_response(format!("{key} must not be empty")));
+        }
+        if model_id.len() > MODEL_ID_MAX_LEN {
+            return Err(bad_request_response(format!(
+                "{key} exceeds max length {MODEL_ID_MAX_LEN}"
+            )));
+        }
+        // Registry membership: either auto-resolve via `resolve_model_string`
+        // (accepts `provider/model` or bare model id) or a literal id listed
+        // in some provider's models table.
+        let in_registry = cairn_domain::provider_registry::resolve_model_string(model_id).is_some()
+            || cairn_domain::provider_registry::all()
+                .iter()
+                .any(|p| p.models.iter().any(|m| m.id == model_id));
+        if !in_registry {
+            return Err(AppApiError::new(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "unknown_model",
+                format!("{key}={model_id} is not in the provider registry"),
+            )
+            .into_response());
+        }
+        // Active connections: at least one registered provider connection
+        // (any tenant) must list this model as supported. We check the
+        // cached registry snapshot plus the connection records.
+        let snapshot = state.runtime.provider_registry.snapshot();
+        let supported_by_cached = snapshot
+            .connections
+            .iter()
+            .any(|c| c.model == model_id);
+        if !supported_by_cached {
+            // Fall back to the broader provider_connections read model:
+            // caching is populated lazily, so an un-exercised connection
+            // may not appear in the snapshot even though it's configured.
+            // List connections for the default tenant (best-effort — the
+            // runtime treats system-scope tenant as default).
+            let tenant = TenantId::new(DEFAULT_TENANT_ID);
+            let any_supports = state
+                .runtime
+                .provider_connections
+                .list(&tenant, 200, 0)
+                .await
+                .map(|records| {
+                    records
+                        .iter()
+                        .any(|r| r.supported_models.iter().any(|m| m == model_id))
+                })
+                .unwrap_or(false);
+            if !any_supports {
+                return Err(AppApiError::new(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    "model_not_active",
+                    format!(
+                        "{key}={model_id} is in the registry but not supported by any active provider connection",
+                    ),
+                )
+                .into_response());
+            }
+        }
+        return Ok(());
+    }
+
+    // Generic string-length cap for everything else.
+    if let Some(s) = value.as_str() {
+        if s.len() > PROMPT_LIKE_MAX_LEN {
+            return Err(bad_request_response(format!(
+                "{key} exceeds max length {PROMPT_LIKE_MAX_LEN}"
+            )));
+        }
+    }
+    Ok(())
+}
+
 pub(crate) async fn set_default_setting_handler(
     State(state): State<Arc<AppState>>,
     Path((scope, scope_id, key)): Path<(String, String, String)>,
@@ -915,6 +1039,12 @@ pub(crate) async fn set_default_setting_handler(
     let Some(scope) = parse_scope_name(&scope) else {
         return bad_request_response("invalid scope");
     };
+
+    // Per-key validation (closes #228). Unknown/empty/oversized values
+    // now 422 instead of silently persisting.
+    if let Err(resp) = validate_setting_value(state.as_ref(), &key, &body.value).await {
+        return resp;
+    }
 
     match state
         .runtime
