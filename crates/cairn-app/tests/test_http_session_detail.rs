@@ -112,8 +112,7 @@ async fn list_session_runs_returns_all_runs_unfiltered() {
     // `session_id` is percent-encoded; validation in cairn-app only
     // rejects control chars, so `/` and other reserved chars are
     // legal session ids and must not break routing.
-    let mut url = reqwest::Url::parse(&format!("{}/", h.base_url))
-        .expect("base_url parses as URL");
+    let mut url = reqwest::Url::parse(&format!("{}/", h.base_url)).expect("base_url parses as URL");
     {
         let mut segments = url
             .path_segments_mut()
