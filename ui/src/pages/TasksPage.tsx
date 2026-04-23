@@ -565,6 +565,7 @@ export function TasksPage() {
       if (failed.length > 0) toast.error(`${failed.length} task${failed.length !== 1 ? "s" : ""} could not be cancelled.`);
       kbd.clearSelection();
       void qc.invalidateQueries({ queryKey: ["tasks"] });
+      void qc.invalidateQueries({ queryKey: ["run-tasks"] });
     },
     onError: () => toast.error("Batch cancel failed."),
   });
@@ -692,13 +693,6 @@ export function TasksPage() {
               Clear
             </button>
           )}
-          <button
-            onClick={() => refetch()}
-            disabled={isFetching}
-          >
-            <RefreshCw size={11} className={isFetching ? "animate-spin" : ""} />
-            Refresh
-          </button>
         </div>
         <div className="flex items-center gap-1">
           <div className="relative">

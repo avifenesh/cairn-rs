@@ -71,7 +71,7 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   model '<m>'. Active connections: [...]. Register with POST
   /v1/providers/connections with supported_models including '<m>', or
   call discover-models to refresh."` — instead of the old 503 that
-  pointed at env vars. Issues #156, #157, #158.
+  pointed at env vars. Closes #156. Closes #157. Closes #158.
 - **UI: `ModelPicker` on SettingsPage filtered to reachable + registered
   models.** The picker used to list every registry catalog entry
   regardless of `available=true` and whether any registered connection
@@ -80,7 +80,7 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   true` models that are served by at least one registered connection for
   the active scope; when no connection exists, it falls back to the
   catalog with an explicit "register a provider to use this model"
-  disclaimer. Issue #158.
+  disclaimer.
 - **UI: `CostsPage` + `ProjectDashboardPage` stat cards no longer stuck
   at 0.** `GET /v1/costs` returns `{items, has_more}` (a list of
   per-session cost records); the UI was typed as a flat `CostSummary` and
@@ -89,7 +89,18 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `summariseCostItems()` helper in `api.ts` that folds items into the
   legacy `CostSummary` shape client-side, and wired it through both
   pages. TestHarnessPage's "Cost summary" probe updated to assert `items`
-  instead of the removed top-level field. Issue #158.
+  instead of the removed top-level field.
+- **`TasksPage`: removed duplicate unstyled Refresh button.** A merge-conflict
+  artifact left two Refresh buttons in the toolbar — one unstyled, one
+  properly styled. The unstyled duplicate has been removed; the styled
+  Refresh button (with auto-refresh interval selector) remains. Closes #172.
+- **`TasksPage`: batch cancel now invalidates `run-tasks`.** The
+  `cancelSelected` mutation invalidated `['tasks']` on success but not
+  the `['run-tasks']` prefix key, so `RunDetailPage` showed stale task
+  state after a batch cancel because queries like `['run-tasks', runId]`
+  were not refreshed. Now mirrors the `claim` / `release` mutation
+  pattern and invalidates both `['tasks']` and the `['run-tasks']`
+  prefix key. Closes #171.
 - **UI: global 401 interceptor.** When an operator's token is rotated
   (via `POST /v1/admin/rotate-token`) or expires mid-session, the app
   used to turn into a wall of red error badges on every page because
