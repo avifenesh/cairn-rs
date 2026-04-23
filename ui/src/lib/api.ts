@@ -133,13 +133,34 @@ function unwrapRun(data: unknown): RunRecord {
 /**
  * Parse Prometheus exposition format text into a MetricsSnapshot object.
  *
- * The cairn backend emits lines like:
- *   http_requests_total{method="GET",path="/v1/runs",status="200"} 42
- *   http_request_duration_ms_sum{method="GET",path="/v1/runs"} 1234
- *   http_request_duration_ms_count{method="GET",path="/v1/runs"} 42
- *   http_request_duration_ms_bucket{method="GET",path="/v1/runs",le="100"} 40
- *   active_runs_total 3
- *   active_tasks_total 7
+ * The parser recognises two distinct metric families:
+ *
+ * 1. **`/v1/metrics/prometheus` (the cairn-app handler — primary path).**
+ *    Emits direct gauges computed from the live latency reservoir and
+ *    per-path / per-status counters. No histogram buckets.
+ *      cairn_http_requests_total                                 42
+ *      cairn_http_requests_by_path_total{path="/v1/runs"}        42
+ *      cairn_http_latency_ms{quantile="0.50"}                    12
+ *      cairn_http_latency_ms{quantile="0.95"}                    85
+ *      cairn_http_latency_ms{quantile="0.99"}                   140
+ *      cairn_http_latency_ms{quantile="avg"}                     18
+ *      cairn_http_error_rate                                      0.004
+ *      cairn_http_errors_by_status{status="500"}                  2
+ *
+ * 2. **Standard Prometheus histogram + generic counters (defensive
+ *    fallback).** Kept so the parser still works against any upstream
+ *    `text/plain` scrape that emits classical histogram buckets — e.g. a
+ *    future hardening of the endpoint or a proxy that re-exports buckets.
+ *      http_requests_total{method="GET",path="/v1/runs",status="200"} 42
+ *      http_request_duration_ms_sum{method="GET",path="/v1/runs"}   1234
+ *      http_request_duration_ms_count{method="GET",path="/v1/runs"}   42
+ *      http_request_duration_ms_bucket{method="GET",path="/v1/runs",le="100"} 40
+ *      active_runs_total                                              3
+ *      active_tasks_total                                             7
+ *
+ * Both forms accept an optional `cairn_` prefix (see #131). When both a
+ * direct quantile gauge and a bucket series are present, the direct
+ * gauge wins — the reservoir is authoritative.
  */
 function parsePrometheusMetrics(text: string): {
   total_requests: number;
@@ -163,6 +184,17 @@ function parsePrometheusMetrics(text: string): {
 
   // Histogram buckets keyed by path: { le_value => cumulative_count }
   const bucketsByPath: Record<string, { le: number; count: number }[]> = {};
+
+  // Direct quantile/gauge values emitted by `/v1/metrics/prometheus`
+  // (cairn_http_latency_ms{quantile="0.50|0.95|0.99|avg"}). These take
+  // precedence over histogram-bucket-derived percentiles when present —
+  // the Rust handler computes them from the live reservoir and doesn't
+  // emit `*_bucket` series.
+  let quantileP50: number | null = null;
+  let quantileP95: number | null = null;
+  let quantileP99: number | null = null;
+  let quantileAvg: number | null = null;
+  let directErrorRate: number | null = null;
 
   function parseLabels(labelsStr: string | undefined): Record<string, string> {
     const labels: Record<string, string> = {};
@@ -234,6 +266,39 @@ function parsePrometheusMetrics(text: string): {
     if (metricName === 'active_tasks_total' || metricName === 'cairn_active_tasks_total') {
       requestsByPath['active_tasks (gauge)'] = value;
     }
+
+    // cairn_http_latency_ms{quantile="0.50|0.95|0.99|avg"} — direct gauges
+    // from the `/v1/metrics/prometheus` handler (no histogram buckets).
+    if (metricName === 'cairn_http_latency_ms' || metricName === 'http_latency_ms') {
+      if (labels.quantile === '0.50') quantileP50 = value;
+      else if (labels.quantile === '0.95') quantileP95 = value;
+      else if (labels.quantile === '0.99') quantileP99 = value;
+      else if (labels.quantile === 'avg')  quantileAvg = value;
+    }
+
+    // cairn_http_requests_by_path_total{path="…"} — per-path request counts
+    // (the handler keeps this separate from the unlabelled `*_requests_total`).
+    if (metricName === 'cairn_http_requests_by_path_total' ||
+        metricName === 'http_requests_by_path_total') {
+      if (labels.path) {
+        requestsByPath[labels.path] = (requestsByPath[labels.path] ?? 0) + value;
+      }
+    }
+
+    // cairn_http_error_rate — gauge, fraction in [0,1].
+    if (metricName === 'cairn_http_error_rate' || metricName === 'http_error_rate') {
+      directErrorRate = value;
+    }
+
+    // cairn_http_errors_by_status{status="…"} — counters.
+    if (metricName === 'cairn_http_errors_by_status' ||
+        metricName === 'http_errors_by_status') {
+      if (labels.status) {
+        errorsByStatus[labels.status] =
+          (errorsByStatus[labels.status] ?? 0) + value;
+        totalErrors += value;
+      }
+    }
   }
 
   // Compute avg latency from sum/count.
@@ -263,16 +328,20 @@ function parsePrometheusMetrics(text: string): {
     return sortedLe[sortedLe.length - 1] ?? 0;
   }
 
-  const p50 = percentileFromBuckets(0.5);
-  const p95 = percentileFromBuckets(0.95);
-  const p99 = percentileFromBuckets(0.99);
+  // Prefer directly-emitted quantile gauges (from `/v1/metrics/prometheus`)
+  // over bucket-derived approximations when both are available.
+  const p50 = quantileP50 ?? percentileFromBuckets(0.5);
+  const p95 = quantileP95 ?? percentileFromBuckets(0.95);
+  const p99 = quantileP99 ?? percentileFromBuckets(0.99);
+  const avgLatencyFinal = quantileAvg ?? avgLatency;
 
-  const errorRate = totalRequests > 0 ? totalErrors / totalRequests : 0;
+  const errorRate = directErrorRate ??
+    (totalRequests > 0 ? totalErrors / totalRequests : 0);
 
   return {
     total_requests: totalRequests,
     requests_by_path: requestsByPath,
-    avg_latency_ms: avgLatency,
+    avg_latency_ms: avgLatencyFinal,
     p50_latency_ms: p50,
     p95_latency_ms: p95,
     p99_latency_ms: p99,
@@ -706,9 +775,13 @@ export function createApiClient(config: ApiClientConfig) {
 
     // ── API metrics ──────────────────────────────────────────────────────────
 
-    /** GET /v1/metrics — rolling request metrics from the tracing middleware.
-     *  The backend may return JSON or Prometheus text/plain format.
-     *  This method handles both and normalises into a MetricsSnapshot object.
+    /** GET /v1/metrics/prometheus — rolling request metrics in Prometheus
+     *  text exposition format. This endpoint emits direct quantile gauges
+     *  (`cairn_http_latency_ms{quantile="0.50|0.95|0.99|avg"}`) plus per-path
+     *  and per-status counters, so the UI can render p50/p95/p99 latency —
+     *  which the JSON `/v1/metrics` endpoint does not provide. The response
+     *  is always `text/plain`, but the JSON fallback below is kept as
+     *  defensive compatibility.
      */
     getMetrics: async (): Promise<{
       total_requests:   number;
@@ -720,7 +793,7 @@ export function createApiClient(config: ApiClientConfig) {
       error_rate:       number;
       errors_by_status: Record<string, number>;
     }> => {
-      const url = `${config.baseUrl}/v1/metrics`;
+      const url = `${config.baseUrl}/v1/metrics/prometheus`;
       const response = await fetch(url, {
         method: "GET",
         headers: { Authorization: `Bearer ${config.token}` },
