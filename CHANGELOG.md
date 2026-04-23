@@ -157,7 +157,14 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   *tenant_scope.tenant_id()`, matching the existing pattern at
   `runs.rs:775`. Spawn keeps the strict parent-child project match on
   the child session lookup — admin does not enable cross-tenant child
-  spawning.
+  spawning. Downstream event-stamping and notification sites inside
+  `intervene_run_handler` (5 sites: `append_run_intervention_event`,
+  `OperatorIntervention.tenant_id` for `force_fail` / `force_restart`,
+  and `notify_if_applicable`) now read the run's actual tenant from
+  `run.project.tenant_id` instead of `tenant_scope.tenant_id()`, so
+  an admin crossing tenants does not mislabel intervention events
+  or misroute SSE notifications (fixed pre-merge after Cursor Bugbot
+  flagged the regression on the first admin-bypass pass).
 - **Backend: `event_message()` no longer renders Plan* events as
   `"unknown"`.** `PlanProposed`, `PlanApproved`, `PlanRejected`, and
   `PlanRevisionRequested` had entries in `event_type()` but fell into

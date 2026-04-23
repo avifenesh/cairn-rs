@@ -894,7 +894,7 @@ pub(crate) async fn intervene_run_handler(
                     if let Err(err) = append_run_intervention_event(
                         &state,
                         &run_id,
-                        tenant_scope.tenant_id(),
+                        &run.project.tenant_id,
                         "force_complete",
                         &body.reason,
                     )
@@ -932,7 +932,7 @@ pub(crate) async fn intervene_run_handler(
                 operator_event_envelope(RuntimeEvent::OperatorIntervention(
                     cairn_domain::OperatorIntervention {
                         run_id: Some(run_id.clone()),
-                        tenant_id: tenant_scope.tenant_id().clone(),
+                        tenant_id: run.project.tenant_id.clone(),
                         action: "force_fail".to_owned(),
                         reason: body.reason,
                         intervened_at_ms: now_ms(),
@@ -946,7 +946,7 @@ pub(crate) async fn intervene_run_handler(
                         .runtime
                         .notifications
                         .notify_if_applicable(
-                            tenant_scope.tenant_id(),
+                            &run.project.tenant_id,
                             "run.failed",
                             serde_json::json!({ "run_id": run_id.as_str() }),
                         )
@@ -996,7 +996,7 @@ pub(crate) async fn intervene_run_handler(
                 operator_event_envelope(RuntimeEvent::OperatorIntervention(
                     cairn_domain::OperatorIntervention {
                         run_id: Some(run_id.clone()),
-                        tenant_id: tenant_scope.tenant_id().clone(),
+                        tenant_id: run.project.tenant_id.clone(),
                         action: "force_restart".to_owned(),
                         reason: body.reason,
                         intervened_at_ms: now_ms(),
@@ -1067,7 +1067,7 @@ pub(crate) async fn intervene_run_handler(
                     if let Err(err) = append_run_intervention_event(
                         &state,
                         &run_id,
-                        tenant_scope.tenant_id(),
+                        &run.project.tenant_id,
                         "inject_message",
                         &body.reason,
                     )
