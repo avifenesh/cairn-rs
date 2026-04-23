@@ -145,6 +145,36 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **Backend: admin bypass on `POST /v1/runs/:id/spawn` and
+  `POST /v1/runs/:id/intervene`.** Both handlers compared the run's
+  `project.tenant_id` to the principal's tenant without an admin
+  short-circuit, so the `admin` service account (hard-bound to
+  `TenantId("default")`) returned a `404` with error code `"not_found"`
+  and message `"run not found"` for any run in another tenant —
+  inconsistent with `replay_to_checkpoint` and other
+  sibling handlers that already honor `tenant_scope.is_admin`. Surfaced
+  while wiring the run-detail operator pages (PR P / PR O'). Both
+  handlers now read `tenant_scope.is_admin || run.project.tenant_id ==
+  *tenant_scope.tenant_id()`, matching the existing pattern at
+  `runs.rs:775`. Spawn keeps the strict parent-child project match on
+  the child session lookup — admin does not enable cross-tenant child
+  spawning. Downstream event-stamping and notification sites inside
+  `intervene_run_handler` (5 sites: `append_run_intervention_event`,
+  `OperatorIntervention.tenant_id` for `force_fail` / `force_restart`,
+  and `notify_if_applicable`) now read the run's actual tenant from
+  `run.project.tenant_id` instead of `tenant_scope.tenant_id()`, so
+  an admin crossing tenants does not mislabel intervention events
+  or misroute SSE notifications (fixed pre-merge after Cursor Bugbot
+  flagged the regression on the first admin-bypass pass).
+- **Backend: `event_message()` no longer renders Plan* events as
+  `"unknown"`.** `PlanProposed`, `PlanApproved`, `PlanRejected`, and
+  `PlanRevisionRequested` had entries in `event_type()` but fell into
+  the catch-all fallthrough arm in `event_message()`, so every plan
+  lifecycle event showed up in SSE frames and audit payloads with a
+  message of `"unknown"`. Added dedicated arms that include the plan
+  run id plus the relevant actor / reason / revision id so operators
+  can read the message without decoding the event payload.
+
 - **UI: `DashboardPage` — real widgets, no placeholders (#179).** Three
   bugs fixed in one pass: (A) the Runs / Tasks tabs rendered empty or
   dummy content — now render compact, live tables driven by
