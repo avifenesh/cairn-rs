@@ -10,6 +10,7 @@ import { Card } from "../components/Card";
 import { defaultApi } from "../lib/api";
 import { sectionLabel } from "../lib/design-system";
 import { useToast } from "../components/Toast";
+import { useScope } from "../hooks/useScope";
 import type {
   PromptAssetRecord, PromptVersionRecord, PromptReleaseRecord, PromptVersionDiff,
   PromptKind, PromptReleaseState,
@@ -54,8 +55,38 @@ const shortId = (id: string) =>
 
 const shortHash = (h: string) => h.slice(0, 8);
 
-function makeReleaseId(assetId: string): string {
-  return `rel-${assetId.slice(0, 8)}-${Date.now().toString(36)}`;
+/**
+ * Scope key for TanStack Query cache keys.
+ *
+ * The three prompt endpoints actually scope differently on the backend —
+ * `/v1/prompts/assets` lists by workspace (tenant + workspace),
+ * `/v1/prompts/releases` lists by project (tenant + workspace + project), and
+ * `/v1/prompts/assets/:id/versions` is asset-scoped (the asset itself carries
+ * the workspace). Rather than maintain three sub-keys per endpoint, we key
+ * all three caches on the full `tenant:workspace:project` triple. Over-keying
+ * by `project_id` on the workspace-scoped endpoints is safe: all calls
+ * originating from a given active scope share the same triple, so cache hits
+ * still work within that scope, and switching scope correctly invalidates
+ * every prompt cache — even the over-keyed workspace-level ones — preventing
+ * cross-project bleed-through.
+ */
+function scopeKey(scope: { tenant_id: string; workspace_id: string; project_id: string }): string {
+  return `${scope.tenant_id}:${scope.workspace_id}:${scope.project_id}`;
+}
+
+/**
+ * Prefixed SHA-256 digest via SubtleCrypto.
+ *
+ * Returns `"sha256:<hex>"` to match the backend `content_hash` convention used
+ * by cairn-evals fixtures (see `crates/cairn-store/tests/prompt_lifecycle.rs`).
+ */
+async function sha256ContentHash(text: string): Promise<string> {
+  const bytes = new TextEncoder().encode(text);
+  const digest = await crypto.subtle.digest("SHA-256", bytes);
+  const hex = Array.from(new Uint8Array(digest))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+  return `sha256:${hex}`;
 }
 
 // ── Kind badge ────────────────────────────────────────────────────────────────
@@ -266,8 +297,13 @@ function ReleaseControls({ release }: { release: PromptReleaseRecord }) {
   const toast = useToast();
   const [rollout, setRollout] = useState(release.rollout_percent ?? 0);
 
+  // Match any scope suffix — e.g. `["prompt-releases", "tenant:ws:proj"]`.
+  // Using a predicate instead of a bare key so the control keeps working
+  // if the caller (PromptsPage) switches to a per-tenant key shape later.
   const invalidate = () => {
-    void qc.invalidateQueries({ queryKey: ["prompt-releases"] });
+    void qc.invalidateQueries({
+      predicate: (q) => Array.isArray(q.queryKey) && q.queryKey[0] === "prompt-releases",
+    });
   };
 
   const activate = useMutation({
@@ -477,10 +513,11 @@ function ReleaseControls({ release }: { release: PromptReleaseRecord }) {
 // ── Asset item ────────────────────────────────────────────────────────────────
 
 function AssetItem({
-  asset, releases,
+  asset, releases, sk,
 }: {
   asset: PromptAssetRecord;
   releases: PromptReleaseRecord[];
+  sk: string;
 }) {
   const [expanded, setExpanded] = useState(false);
   const qc    = useQueryClient();
@@ -493,7 +530,7 @@ function AssetItem({
   const latestRelease = assetReleases[0];
 
   const { data: versionsData, isLoading: versionsLoading } = useQuery({
-    queryKey: ["prompt-versions", asset.prompt_asset_id],
+    queryKey: ["prompt-versions", sk, asset.prompt_asset_id],
     queryFn: () => defaultApi.getPromptVersions(asset.prompt_asset_id, { limit: 20 }),
     enabled: expanded,
     staleTime: 60_000,
@@ -506,13 +543,12 @@ function AssetItem({
   const createRelease = useMutation({
     mutationFn: (versionId: string) =>
       defaultApi.createPromptRelease({
-        prompt_release_id: makeReleaseId(asset.prompt_asset_id),
         prompt_asset_id:   asset.prompt_asset_id,
         prompt_version_id: versionId,
       }),
     onSuccess: () => {
       toast.success("Release created.");
-      void qc.invalidateQueries({ queryKey: ["prompt-releases"] });
+      void qc.invalidateQueries({ queryKey: ["prompt-releases", sk] });
     },
     onError: () => toast.error("Failed to create release."),
   });
@@ -614,12 +650,13 @@ function AssetItem({
 
 // ── New Prompt form ───────────────────────────────────────────────────────────
 
-function NewPromptForm({ onClose }: { onClose: () => void }) {
+function NewPromptForm({ onClose, sk }: { onClose: () => void; sk: string }) {
   const qc    = useQueryClient();
   const toast = useToast();
   const [id,   setId]   = useState("");
   const [name, setName] = useState("");
   const [kind, setKind] = useState<PromptKind>("system");
+  const [initialBody, setInitialBody] = useState("");
 
   // Close on Escape
   useEffect(() => {
@@ -628,14 +665,51 @@ function NewPromptForm({ onClose }: { onClose: () => void }) {
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
 
+  // Single mutation: create asset, then (if body non-empty) create initial version.
+  // Sequential: version depends on the returned asset_id, and a failure mid-flow
+  // must not block asset discovery — we toast a partial-success message.
   const create = useMutation({
-    mutationFn: () => defaultApi.createPromptAsset({ prompt_asset_id: id.trim(), name: name.trim(), kind }),
-    onSuccess: () => {
-      toast.success("Prompt asset created.");
-      void qc.invalidateQueries({ queryKey: ["prompt-assets"] });
+    mutationFn: async () => {
+      const asset = await defaultApi.createPromptAsset({
+        prompt_asset_id: id.trim(),
+        name: name.trim(),
+        kind,
+      });
+      // Only trim for the emptiness check — send the untouched textarea
+      // value so the stored prompt body matches what the author typed,
+      // including any intentional leading/trailing whitespace or newlines.
+      if (initialBody.trim().length === 0) return { asset, version: null as null };
+      try {
+        const content_hash = await sha256ContentHash(initialBody);
+        const version = await defaultApi.createPromptVersion(asset.prompt_asset_id, {
+          content: initialBody,
+          content_hash,
+        });
+        return { asset, version };
+      } catch (err) {
+        // Asset is created; bubble a partial-success so the operator knows.
+        throw Object.assign(new Error("version_failed"), { assetCreated: true, cause: err });
+      }
+    },
+    onSuccess: (result) => {
+      if (result.version) {
+        toast.success(`Prompt asset “${result.asset.prompt_asset_id}” created with initial version.`);
+      } else {
+        toast.success(`Prompt asset “${result.asset.prompt_asset_id}” created.`);
+      }
+      void qc.invalidateQueries({ queryKey: ["prompt-assets", sk] });
+      void qc.invalidateQueries({ queryKey: ["prompt-versions", sk, result.asset.prompt_asset_id] });
       onClose();
     },
-    onError: () => toast.error("Failed to create prompt asset."),
+    onError: (err: unknown) => {
+      if (err && typeof err === "object" && "assetCreated" in err) {
+        toast.error("Asset created, but initial version failed. Add a version from the asset view.");
+        void qc.invalidateQueries({ queryKey: ["prompt-assets", sk] });
+        onClose();
+      } else {
+        toast.error("Failed to create prompt asset.");
+      }
+    },
   });
 
   const valid = id.trim().length > 0 && name.trim().length > 0;
@@ -684,6 +758,19 @@ function NewPromptForm({ onClose }: { onClose: () => void }) {
           </select>
         </div>
       </div>
+      <div>
+        <label className="text-[10px] text-gray-400 dark:text-zinc-500 block mb-1">
+          Initial version <span className="text-gray-300 dark:text-zinc-600">(optional — leave blank to author later)</span>
+        </label>
+        <textarea
+          value={initialBody}
+          onChange={(e) => setInitialBody(e.target.value)}
+          placeholder="You are a helpful assistant…"
+          rows={5}
+          className="w-full rounded border border-gray-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 text-[12px] text-gray-800 dark:text-zinc-200
+                     font-mono px-2 py-1.5 focus:outline-none focus:border-indigo-500 transition-colors resize-y"
+        />
+      </div>
       <div className="flex items-center gap-2 justify-end">
         <button onClick={onClose}
           className="px-3 py-1.5 rounded text-[12px] text-gray-400 dark:text-zinc-500 hover:text-gray-700 dark:hover:text-zinc-300 transition-colors">
@@ -709,15 +796,17 @@ function NewPromptForm({ onClose }: { onClose: () => void }) {
 export function PromptsPage() {
   const [showNew, setShowNew] = useState(false);
   const [filter, setFilter]  = useState<"all" | "active" | "draft">("all");
+  const [scope] = useScope();
+  const sk = scopeKey(scope);
 
   const { data: assetsData, isLoading: assetsLoading, isError, error, refetch, isFetching } = useQuery({
-    queryKey: ["prompt-assets"],
+    queryKey: ["prompt-assets", sk],
     queryFn: () => defaultApi.getPromptAssets({ limit: 100 }),
     refetchInterval: 60_000,
   });
 
   const { data: releasesData } = useQuery({
-    queryKey: ["prompt-releases"],
+    queryKey: ["prompt-releases", sk],
     queryFn: () => defaultApi.getPromptReleases({ limit: 200 }),
     refetchInterval: 60_000,
     retry: false,
@@ -809,7 +898,7 @@ export function PromptsPage() {
       {/* Content */}
       <div className="flex-1 overflow-y-auto px-5 py-4 space-y-3 max-w-4xl mx-auto w-full">
         {/* New Prompt form */}
-        {showNew && <NewPromptForm onClose={() => setShowNew(false)} />}
+        {showNew && <NewPromptForm sk={sk} onClose={() => setShowNew(false)} />}
 
         {/* Asset list */}
         {assetsLoading ? (
@@ -832,6 +921,7 @@ export function PromptsPage() {
               key={asset.prompt_asset_id}
               asset={asset}
               releases={releases}
+              sk={sk}
             />
           ))
         )}
