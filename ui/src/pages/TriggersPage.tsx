@@ -91,7 +91,15 @@ export function TriggersPage() {
   // DEFAULT_* constants when it cannot split on `/`. Sending just
   // `scope.project_id` therefore leaks triggers across tenants — always
   // send the full slash path. See FE audit 2026-04-22 (CRITICAL).
-  const projectPath = `${scope.tenant_id}/${scope.workspace_id}/${scope.project_id}`;
+  //
+  // Axum 0.7's `:project` param captures a single path segment, so the
+  // literal `/` characters MUST be percent-encoded (to `%2F`) on the
+  // wire; the server decodes them back to `/` before handing the
+  // segment to `parse_project_scope`. Using plain slashes here would
+  // route to a completely different (non-existent) path and return 404.
+  const projectPath = encodeURIComponent(
+    `${scope.tenant_id}/${scope.workspace_id}/${scope.project_id}`,
+  );
   const qc = useQueryClient();
   const toast = useToast();
 
