@@ -29,6 +29,21 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **`GET /v1/tasks` + `GET /v1/runs` now honor the
+  `tenant_id`/`workspace_id`/`project_id` query filters (closes
+  #234).** `list_tasks_filtered` in the in-memory store was declared
+  with underscore-prefixed scope arguments and returned every task in
+  the store regardless of the caller's requested scope, so an admin
+  querying `/v1/tasks?tenant_id=A&workspace_id=B&project_id=C` got
+  tasks from other tenants mixed into the response — a cross-tenant
+  leak on the operator list surfaces. The project key is now applied
+  alongside the existing `run_id` and `state` narrowing predicates
+  (mirroring the run-list contract from #184), with a new integration
+  test seeding entities in two tenants and asserting neither leaks
+  into the other's list. The run-list path was already wired
+  correctly; the new test locks in that behavior too so a future
+  refactor can't silently regress it the way #234 did.
+
 - **DecisionsPage Cache tab crashed with "Objects are not valid as a
   React child" (closes #240).** The UI `CacheEntry.outcome` type
   declared `string`, but `GET /v1/decisions/cache` emits the same
