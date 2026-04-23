@@ -58,6 +58,9 @@ where
             prompt_version_id: None,
             prompt_release_id: None,
             created_by: None,
+            dataset_id: None,
+            rubric_id: None,
+            baseline_id: None,
         }));
 
         self.store.append(&[event]).await?;

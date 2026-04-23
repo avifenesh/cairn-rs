@@ -572,6 +572,17 @@ impl AppState {
                         e.prompt_release_id.clone(),
                         e.created_by.clone(),
                     );
+                    // Re-bind dataset/rubric/baseline links (issue #223) so
+                    // operator-provided artifact bindings survive restart.
+                    if let Some(dataset_id) = e.dataset_id.clone() {
+                        let _ = self.evals.set_dataset_id(&e.eval_run_id, dataset_id);
+                    }
+                    if let Some(rubric_id) = e.rubric_id.clone() {
+                        let _ = self.evals.set_rubric_id(&e.eval_run_id, rubric_id);
+                    }
+                    if let Some(baseline_id) = e.baseline_id.clone() {
+                        let _ = self.evals.set_baseline_id(&e.eval_run_id, baseline_id);
+                    }
                     created += 1;
                 }
                 cairn_domain::RuntimeEvent::EvalRunCompleted(e) => {

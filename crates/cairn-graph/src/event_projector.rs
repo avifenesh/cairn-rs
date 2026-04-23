@@ -694,6 +694,9 @@ mod tests {
                 prompt_version_id: None,
                 prompt_release_id: None,
                 created_by: None,
+                dataset_id: None,
+                rubric_id: None,
+                baseline_id: None,
             })),
             make_stored(RuntimeEvent::EvalRunCompleted(EvalRunCompleted {
                 project: ProjectKey::new("t", "w", "p"),
@@ -736,6 +739,9 @@ mod tests {
                 prompt_version_id: None,
                 prompt_release_id: None,
                 created_by: None,
+                dataset_id: None,
+                rubric_id: None,
+                baseline_id: None,
             })),
             make_stored(RuntimeEvent::EvalRunCompleted(EvalRunCompleted {
                 project: ProjectKey::new("t", "w", "p"),

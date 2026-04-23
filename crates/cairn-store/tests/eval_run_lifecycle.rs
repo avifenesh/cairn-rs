@@ -46,6 +46,9 @@ fn start_event(id: &str, subject_kind: &str, ts: u64) -> EventEnvelope<RuntimeEv
             prompt_version_id: None,
             prompt_release_id: None,
             created_by: None,
+            dataset_id: None,
+            rubric_id: None,
+            baseline_id: None,
         }),
     )
 }
@@ -235,6 +238,9 @@ async fn list_by_project_returns_runs_in_order() {
                 prompt_version_id: None,
                 prompt_release_id: None,
                 created_by: None,
+                dataset_id: None,
+                rubric_id: None,
+                baseline_id: None,
             }),
         )])
         .await
@@ -308,6 +314,9 @@ async fn eval_run_links_to_prompt_asset_id() {
                     prompt_version_id: None,
                     prompt_release_id: None,
                     created_by: None,
+                    dataset_id: None,
+                    rubric_id: None,
+                    baseline_id: None,
                 }),
             ),
             ev(
@@ -377,6 +386,9 @@ async fn eval_run_list_is_project_scoped() {
                     prompt_version_id: None,
                     prompt_release_id: None,
                     created_by: None,
+                    dataset_id: None,
+                    rubric_id: None,
+                    baseline_id: None,
                 }),
             ),
         ])

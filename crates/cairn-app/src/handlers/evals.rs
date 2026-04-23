@@ -601,12 +601,12 @@ pub(crate) async fn create_eval_run_handler(
             .as_deref()
             .map(cairn_domain::OperatorId::new),
     );
-    // Link the dataset picked in the form to the freshly-minted run so the
-    // operator can see (and downstream services can honour) the binding.
-    // We already validated dataset existence above and just minted the run,
+    // Link the dataset/rubric/baseline picked in the form to the freshly-minted
+    // run so the operator can see (and downstream services can honour) the
+    // binding. We already validated existence above and just minted the run,
     // so a failure here is an internal inconsistency: surface it as 500
     // rather than silently drop the link (which would violate the
-    // round-trip contract asserted by test_http_evals_full.rs).
+    // round-trip contract asserted by test_http_evals_full.rs / issue #223).
     if let Some(dataset_id) = body.dataset_id.as_deref() {
         if let Err(err) = state
             .evals
@@ -624,8 +624,45 @@ pub(crate) async fn create_eval_run_handler(
             )
             .into_response();
         }
-        // Re-fetch with the fresh dataset_id so the response body reflects
-        // the binding.
+    }
+    if let Some(rubric_id) = body.rubric_id.as_deref() {
+        if let Err(err) = state
+            .evals
+            .set_rubric_id(&eval_run_id, rubric_id.to_owned())
+        {
+            tracing::error!(
+                %eval_run_id,
+                rubric_id = %rubric_id,
+                "failed to attach rubric to freshly-created eval run: {err}"
+            );
+            return AppApiError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "internal_error",
+                format!("failed to attach rubric to eval run: {err}"),
+            )
+            .into_response();
+        }
+    }
+    if let Some(baseline_id) = body.baseline_id.as_deref() {
+        if let Err(err) = state
+            .evals
+            .set_baseline_id(&eval_run_id, baseline_id.to_owned())
+        {
+            tracing::error!(
+                %eval_run_id,
+                baseline_id = %baseline_id,
+                "failed to attach baseline to freshly-created eval run: {err}"
+            );
+            return AppApiError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "internal_error",
+                format!("failed to attach baseline to eval run: {err}"),
+            )
+            .into_response();
+        }
+    }
+    // Re-fetch so the response body reflects any bindings applied above.
+    if body.dataset_id.is_some() || body.rubric_id.is_some() || body.baseline_id.is_some() {
         if let Some(updated) = state.evals.get(&eval_run_id) {
             run = updated;
         }
@@ -652,6 +689,9 @@ pub(crate) async fn create_eval_run_handler(
                 .created_by
                 .as_deref()
                 .map(cairn_domain::OperatorId::new),
+            dataset_id: body.dataset_id.clone(),
+            rubric_id: body.rubric_id.clone(),
+            baseline_id: body.baseline_id.clone(),
         }),
     );
     // Best-effort: log warning but don't fail the request if event write fails.

@@ -61,6 +61,14 @@ pub struct EvalRun {
     /// Optional dataset ID used for rubric scoring.
     pub dataset_id: Option<String>,
     pub dataset_source: Option<DatasetSource>,
+    /// Rubric this run is scored against (issue #223). Set at create-time via
+    /// POST /v1/evals/runs; surfaced on the run record so the UI can pin the
+    /// selection without re-reading rubric state.
+    #[serde(default)]
+    pub rubric_id: Option<String>,
+    /// Baseline this run is compared against (issue #223).
+    #[serde(default)]
+    pub baseline_id: Option<String>,
     /// Aggregated metrics from this run.
     pub metrics: EvalMetrics,
     /// Supplemental plugin metrics.

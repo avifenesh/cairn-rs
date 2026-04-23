@@ -1104,6 +1104,16 @@ pub struct EvalRunStarted {
     pub prompt_release_id: Option<PromptReleaseId>,
     #[serde(default)]
     pub created_by: Option<OperatorId>,
+    /// Dataset id attached at run-create time (issue #220/#223). Persisted so
+    /// the linkage survives restart and event-log replay.
+    #[serde(default)]
+    pub dataset_id: Option<String>,
+    /// Rubric id attached at run-create time (issue #223).
+    #[serde(default)]
+    pub rubric_id: Option<String>,
+    /// Baseline id attached at run-create time (issue #223).
+    #[serde(default)]
+    pub baseline_id: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
