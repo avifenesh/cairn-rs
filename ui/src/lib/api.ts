@@ -1634,6 +1634,63 @@ export function createApiClient(config: ApiClientConfig) {
       const path = encodeURIComponent(`${s.tenant_id}/${s.workspace_id}/${s.project_id}`);
       return del(`/v1/projects/${path}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`);
     },
+
+    // ── Triggers & run templates (RFC 022) ────────────────────────────────────
+    //
+    // Same slash-path scope contract as project repos / plugins above: the
+    // backend parses `:project` as "tenant_id/workspace_id/project_id" and
+    // silently falls back to DEFAULT_* when it cannot split on `/`. Always
+    // send the full scope, percent-encoded. See PR #132 (TriggersPage) and
+    // issue #154 for the raw-fetch regression this closes.
+
+    /** GET /v1/projects/:project/triggers — list triggers for a project.
+     *  Callers provide their own row type; shapes live in TriggersPage. */
+    listTriggers: <T = unknown>(
+      scope?: import("./scope").ProjectScope,
+    ): Promise<T[]> => {
+      const s = scope ?? config.scope ?? DEFAULT_SCOPE;
+      const path = encodeURIComponent(`${s.tenant_id}/${s.workspace_id}/${s.project_id}`);
+      return getList<T>(`/v1/projects/${path}/triggers`);
+    },
+
+    /** GET /v1/projects/:project/run-templates — list run templates for a project. */
+    listRunTemplates: <T = unknown>(
+      scope?: import("./scope").ProjectScope,
+    ): Promise<T[]> => {
+      const s = scope ?? config.scope ?? DEFAULT_SCOPE;
+      const path = encodeURIComponent(`${s.tenant_id}/${s.workspace_id}/${s.project_id}`);
+      return getList<T>(`/v1/projects/${path}/run-templates`);
+    },
+
+    /** POST /v1/projects/:project/triggers/:id/enable — enable a trigger. */
+    enableTrigger: (
+      triggerId: string,
+      scope?: import("./scope").ProjectScope,
+    ): Promise<unknown> => {
+      const s = scope ?? config.scope ?? DEFAULT_SCOPE;
+      const path = encodeURIComponent(`${s.tenant_id}/${s.workspace_id}/${s.project_id}`);
+      return post(`/v1/projects/${path}/triggers/${encodeURIComponent(triggerId)}/enable`);
+    },
+
+    /** POST /v1/projects/:project/triggers/:id/disable — disable a trigger. */
+    disableTrigger: (
+      triggerId: string,
+      scope?: import("./scope").ProjectScope,
+    ): Promise<unknown> => {
+      const s = scope ?? config.scope ?? DEFAULT_SCOPE;
+      const path = encodeURIComponent(`${s.tenant_id}/${s.workspace_id}/${s.project_id}`);
+      return post(`/v1/projects/${path}/triggers/${encodeURIComponent(triggerId)}/disable`);
+    },
+
+    /** DELETE /v1/projects/:project/triggers/:id — delete a trigger. */
+    deleteTrigger: (
+      triggerId: string,
+      scope?: import("./scope").ProjectScope,
+    ): Promise<unknown> => {
+      const s = scope ?? config.scope ?? DEFAULT_SCOPE;
+      const path = encodeURIComponent(`${s.tenant_id}/${s.workspace_id}/${s.project_id}`);
+      return del(`/v1/projects/${path}/triggers/${encodeURIComponent(triggerId)}`);
+    },
   };
 }
 
