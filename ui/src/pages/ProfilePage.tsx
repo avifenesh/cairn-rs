@@ -333,7 +333,7 @@ function AboutSection() {
     refetchInterval: 30_000,
   });
   const { data: info } = useQuery({
-    queryKey: ['systemInfo'],
+    queryKey: ['system-info'],
     queryFn:  () => defaultApi.getSystemInfo(),
     // Version / deployment / store are fixed for a running binary — treat
     // them as effectively immutable within a session. Prevents needless

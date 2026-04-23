@@ -135,8 +135,12 @@ fn main() {
 
     // Anchor the git-dir lookup to `CARGO_MANIFEST_DIR` instead of a hardcoded
     // `../../.git`, which depended on the crate layout and on Cargo's CWD when
-    // running the build script. Walk upward until we find `.git` — works from
-    // any workspace layout and from crates vendored into a parent repo.
+    // running the build script. Walk upward until we find `.git`.
+    //
+    // `.git` can be either a directory (normal checkout) or a file whose
+    // contents are `gitdir: <path>` — that's how submodules and `git worktree`
+    // store per-worktree refs. Resolve the file-case to the real dir so HEAD
+    // lookups still land on the right file.
     let git_dir = std::env::var_os("CARGO_MANIFEST_DIR")
         .map(std::path::PathBuf::from)
         .and_then(|mut p| loop {
@@ -146,6 +150,23 @@ fn main() {
             }
             if !p.pop() {
                 break None;
+            }
+        })
+        .and_then(|p| {
+            if p.is_file() {
+                // worktree / submodule: parse `gitdir: <path>` pointer
+                let contents = std::fs::read_to_string(&p).ok()?;
+                let rest = contents.trim().strip_prefix("gitdir:")?.trim();
+                let real = std::path::PathBuf::from(rest);
+                let resolved = if real.is_absolute() {
+                    real
+                } else {
+                    // relative to the directory containing the `.git` file
+                    p.parent().map(|d| d.join(&real)).unwrap_or(real)
+                };
+                resolved.exists().then_some(resolved)
+            } else {
+                Some(p)
             }
         });
     let Some(git_dir) = git_dir else {
