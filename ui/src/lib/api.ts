@@ -1081,7 +1081,15 @@ export function createApiClient(config: ApiClientConfig) {
       return get(`/v1/graph/execution-trace/${encodeURIComponent(params.run_id)}?${qs}`);
     },
 
-    /** GET /v1/graph/dependency-path/:node_id — upstream/downstream dependency path. */
+    /**
+     * GET /v1/graph/dependency-path/:run_id — downstream dependency path.
+     *
+     * The backend path-param is named `:run_id` but the handler treats it
+     * as a generic `node_id` (it is fed straight into
+     * `GraphQuery::DependencyPath { node_id }`), so any graph node works.
+     * Direction is fixed to `downstream` on the server today; there is no
+     * upstream toggle exposed by this route.
+     */
     getGraphDependencyPath: (params: {
       node_id: string;
       max_depth?: number;
