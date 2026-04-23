@@ -9,13 +9,13 @@
 import { useState, useMemo } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
-  Layers, Plus, Check, RefreshCw, ArrowRight,
-  FolderOpen, Play, MonitorPlay, Clock,
+  Layers, Plus, Check, RefreshCw, ArrowRight, Clock,
 } from 'lucide-react';
 import { clsx } from 'clsx';
 import { defaultApi } from '../lib/api';
 import { useScope, DEFAULT_SCOPE } from '../hooks/useScope';
 import { ErrorFallback } from '../components/ErrorFallback';
+import { useToast } from '../components/Toast';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -23,9 +23,6 @@ interface WorkspaceInfo {
   workspace_id: string;
   tenant_id:    string;
   name:         string;
-  project_ids:  Set<string>;
-  sessions:     number;
-  runs:         number;
   latest_at:    number;   // unix ms of most-recent activity
 }
 
@@ -60,8 +57,6 @@ function WorkspaceCard({
   isActive: boolean;
   onActivate: () => void;
 }) {
-  const projectCount = ws.project_ids.size;
-
   return (
     <button
       onClick={onActivate}
@@ -73,7 +68,7 @@ function WorkspaceCard({
       )}
     >
       {/* Header */}
-      <div className="flex items-start justify-between gap-3 mb-3">
+      <div className="flex items-start justify-between gap-3">
         <div className="flex items-center gap-2.5 min-w-0">
           <div className={clsx(
             'shrink-0 w-8 h-8 rounded-lg flex items-center justify-center',
@@ -103,23 +98,8 @@ function WorkspaceCard({
         )}
       </div>
 
-      {/* Stats row */}
-      <div className="grid grid-cols-3 gap-2">
-        {[
-          { icon: FolderOpen, label: 'Projects', value: projectCount },
-          { icon: MonitorPlay, label: 'Sessions', value: ws.sessions },
-          { icon: Play,       label: 'Runs',     value: ws.runs      },
-        ].map(({ icon: Icon, label, value }) => (
-          <div key={label} className="rounded-lg bg-white dark:bg-zinc-950/60 border border-gray-200/60 dark:border-zinc-800/60 px-2.5 py-2 text-center">
-            <Icon size={11} className="mx-auto mb-1 text-gray-400 dark:text-zinc-600" />
-            <p className="text-[16px] font-semibold text-gray-800 dark:text-zinc-200 tabular-nums leading-none">{value}</p>
-            <p className="text-[9px] text-gray-400 dark:text-zinc-600 uppercase tracking-wider mt-0.5">{label}</p>
-          </div>
-        ))}
-      </div>
-
       {/* Footer */}
-      <div className="flex items-center gap-1.5 mt-3 pt-2.5 border-t border-gray-200/50 dark:border-zinc-800/50">
+      <div className="flex items-center gap-1.5 mt-4 pt-2.5 border-t border-gray-200/50 dark:border-zinc-800/50">
         <Clock size={10} className="text-gray-300 dark:text-zinc-600 shrink-0" />
         <span className="text-[10px] text-gray-400 dark:text-zinc-600">
           {fmtRelative(ws.latest_at)}
@@ -217,6 +197,7 @@ function NewWorkspaceForm({
 export function WorkspacesPage() {
   const [scope, setScope]     = useScope();
   const qc                    = useQueryClient();
+  const toast                 = useToast();
   const [showNew, setShowNew] = useState(false);
   const [filter, setFilter]   = useState('');
 
@@ -239,6 +220,8 @@ export function WorkspacesPage() {
         workspace_id: workspaceId,
         name: workspaceId,
       }),
+    onError: (e: unknown) =>
+      toast.error(e instanceof Error ? e.message : 'Failed to create workspace.'),
   });
 
   const isLoading  = wsLoading;
@@ -255,9 +238,6 @@ export function WorkspacesPage() {
           workspace_id: wsId,
           tenant_id:    tenantId,
           name,
-          project_ids:  new Set(),
-          sessions:     0,
-          runs:         0,
           latest_at:    latestAt,
         });
       }
@@ -318,11 +298,6 @@ export function WorkspacesPage() {
     return <ErrorFallback error={workspaceError} resource="workspaces" onRetry={() => void refetchWorkspaces()} />;
   }
 
-  // Aggregate stats across all discovered workspaces.
-  const totalProjects  = new Set(workspaces.flatMap(ws => [...ws.project_ids])).size;
-  const totalSessions  = workspaces.reduce((s, ws) => s + ws.sessions, 0);
-  const totalRuns      = workspaces.reduce((s, ws) => s + ws.runs, 0);
-
   return (
     <div className="flex flex-col h-full bg-white dark:bg-zinc-950 overflow-y-auto">
       <div className="max-w-5xl mx-auto px-5 py-5 space-y-6 w-full">
@@ -367,20 +342,11 @@ export function WorkspacesPage() {
           </div>
         </div>
 
-        {/* Summary stats */}
+        {/* Summary stat */}
         {!isLoading && workspaces.length > 0 && (
-          <div className="grid grid-cols-4 gap-3">
-            {[
-              { label: 'Workspaces', value: workspaces.length, color: 'border-l-indigo-500' },
-              { label: 'Projects',   value: totalProjects,      color: 'border-l-violet-500' },
-              { label: 'Sessions',   value: totalSessions,      color: 'border-l-blue-500'   },
-              { label: 'Runs',       value: totalRuns,          color: 'border-l-emerald-500' },
-            ].map(({ label, value, color }) => (
-              <div key={label} className={clsx('rounded-lg border border-gray-200 dark:border-zinc-800 border-l-2 bg-gray-50 dark:bg-zinc-900 px-4 py-3', color)}>
-                <p className="text-[10px] text-gray-400 dark:text-zinc-500 uppercase tracking-wider">{label}</p>
-                <p className="text-[22px] font-semibold text-gray-900 dark:text-zinc-100 tabular-nums leading-tight mt-1">{value}</p>
-              </div>
-            ))}
+          <div className="rounded-lg border border-gray-200 dark:border-zinc-800 border-l-2 border-l-indigo-500 bg-gray-50 dark:bg-zinc-900 px-4 py-3 inline-block">
+            <p className="text-[10px] text-gray-400 dark:text-zinc-500 uppercase tracking-wider">Workspaces</p>
+            <p className="text-[22px] font-semibold text-gray-900 dark:text-zinc-100 tabular-nums leading-tight mt-1">{workspaces.length}</p>
           </div>
         )}
 
@@ -418,16 +384,14 @@ export function WorkspacesPage() {
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
             {[1, 2, 3].map(i => (
               <div key={i} className="rounded-xl border border-gray-200 dark:border-zinc-800 bg-gray-50 dark:bg-zinc-900 p-4 animate-pulse">
-                <div className="flex items-center gap-2.5 mb-3">
+                <div className="flex items-center gap-2.5">
                   <div className="w-8 h-8 rounded-lg bg-gray-100 dark:bg-zinc-800" />
                   <div className="space-y-1.5 flex-1">
                     <div className="h-3 w-32 rounded bg-gray-100 dark:bg-zinc-800" />
                     <div className="h-2 w-20 rounded bg-gray-100 dark:bg-zinc-800" />
                   </div>
                 </div>
-                <div className="grid grid-cols-3 gap-2">
-                  {[1, 2, 3].map(j => <div key={j} className="h-14 rounded-lg bg-gray-100 dark:bg-zinc-800" />)}
-                </div>
+                <div className="h-3 w-24 rounded bg-gray-100 dark:bg-zinc-800 mt-4" />
               </div>
             ))}
           </div>
