@@ -142,8 +142,15 @@ export function SessionDetailPage({ sessionId, onBack }: SessionDetailPageProps)
         all.push(...chunk);
         if (chunk.length < SESSION_RUNS_PAGE_SIZE) break;
         offset += chunk.length;
-        // Final iteration returned a full page — there may be more.
-        if (page === SESSION_RUNS_MAX_PAGES - 1) truncated = true;
+        if (page === SESSION_RUNS_MAX_PAGES - 1) {
+          // Final allowed page came back full — it's either an exact
+          // multiple of the cap (no more rows) or we hit the client
+          // limit. Probe with `limit:1` at the next offset to
+          // distinguish, so the "older runs exist" banner only fires
+          // when more data actually lives on the server.
+          const probe = await defaultApi.getSessionRuns(sessionId, { limit: 1, offset });
+          truncated = probe.length > 0;
+        }
       }
       return { runs: all, truncated };
     },
