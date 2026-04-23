@@ -118,6 +118,42 @@ async fn discover_preview_returns_models_without_registering_connection() {
 }
 
 #[tokio::test]
+async fn discover_preview_rejects_unknown_api_key_ref_with_404() {
+    // Addresses Bugbot high-severity finding: unscoped credential lookups
+    // must NOT silently succeed. An unknown credential_id must 404, never
+    // fall through to an unauthenticated provider probe.
+    let h = LiveHarness::setup().await;
+    let mock_url = spawn_openai_compat_mock().await;
+
+    let r = h
+        .client()
+        .post(format!(
+            "{}/v1/providers/connections/discover-preview",
+            h.base_url,
+        ))
+        .bearer_auth(&h.admin_token)
+        .json(&json!({
+            "adapter_type": "openai_compat",
+            "endpoint_url": mock_url,
+            "api_key_ref": "cred_nonexistent_xyz",
+        }))
+        .send()
+        .await
+        .expect("discover-preview reaches server");
+
+    assert_eq!(
+        r.status().as_u16(),
+        404,
+        "unknown api_key_ref must 404, not leak into unauthenticated probe",
+    );
+    let body: Value = r.json().await.expect("json");
+    assert_eq!(
+        body.get("error").and_then(|v| v.as_str()),
+        Some("credential_not_found"),
+    );
+}
+
+#[tokio::test]
 async fn discover_preview_rejects_missing_endpoint_for_openai_compat() {
     let h = LiveHarness::setup().await;
 

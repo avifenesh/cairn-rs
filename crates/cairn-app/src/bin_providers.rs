@@ -307,9 +307,14 @@ pub(crate) struct DiscoverPreviewRequest {
 /// body instead of a registered connection + query params. Nothing is persisted
 /// — it's purely a read-side call against the provider.
 ///
+/// Tenancy: `api_key_ref` lookups are scoped to the caller's `TenantScope`
+/// (admin tokens may cross tenants). Supplying another tenant's credential
+/// ID as a non-admin caller returns `403 forbidden_cross_tenant_credential`.
+///
 /// Returns `{ provider, endpoint, models: DiscoveredModel[] }` on success.
 pub(crate) async fn discover_models_preview_handler(
     State(state): State<AppState>,
+    tenant_scope: cairn_app::extractors::TenantScope,
     Json(body): Json<DiscoverPreviewRequest>,
 ) -> impl IntoResponse {
     let adapter_type = body
@@ -335,7 +340,11 @@ pub(crate) async fn discover_models_preview_handler(
             .into_response();
     }
 
-    // Resolve API key: inline value wins, else fall back to credential reference.
+    // Resolve API key: inline value wins, else fall back to credential
+    // reference. The credential path validates tenant ownership and
+    // surfaces decryption failures as 5xx instead of silently continuing
+    // unauthenticated — per Bugbot rules, handlers must not `.ok()` away
+    // store errors and must never leak another tenant's secret material.
     let api_key = match body
         .api_key
         .as_deref()
@@ -363,8 +372,75 @@ pub(crate) async fn discover_models_preview_handler(
                     .get(&cairn_domain::CredentialId::new(cred_id))
                     .await
                 {
-                    Ok(Some(record)) if record.active => decrypt_provider_credential(&record).ok(),
-                    _ => None,
+                    Ok(Some(record)) if record.active => {
+                        // Tenant guard: a non-admin caller may only
+                        // reference credentials owned by their own tenant.
+                        // Admin tokens bypass this check so operators with
+                        // cross-tenant tooling can still run previews.
+                        if !tenant_scope.is_admin
+                            && record.tenant_id.as_str() != tenant_scope.tenant_id().as_str()
+                        {
+                            return (
+                                StatusCode::FORBIDDEN,
+                                axum::Json(serde_json::json!({
+                                    "error": "forbidden_cross_tenant_credential",
+                                    "detail": "api_key_ref refers to a credential owned by a different tenant",
+                                })),
+                            )
+                                .into_response();
+                        }
+                        match decrypt_provider_credential(&record) {
+                            Ok(plaintext) => Some(plaintext),
+                            Err(e) => {
+                                tracing::error!(
+                                    credential_id = %cred_id,
+                                    "discover-preview: credential decryption failed: {e}",
+                                );
+                                return (
+                                    StatusCode::INTERNAL_SERVER_ERROR,
+                                    axum::Json(serde_json::json!({
+                                        "error": "credential_decrypt_failed",
+                                        "detail": format!("credential decryption failed: {e}"),
+                                    })),
+                                )
+                                    .into_response();
+                            }
+                        }
+                    }
+                    Ok(Some(_)) => {
+                        return (
+                            StatusCode::GONE,
+                            axum::Json(serde_json::json!({
+                                "error": "credential_revoked",
+                                "detail": "api_key_ref points to a revoked credential",
+                            })),
+                        )
+                            .into_response();
+                    }
+                    Ok(None) => {
+                        return (
+                            StatusCode::NOT_FOUND,
+                            axum::Json(serde_json::json!({
+                                "error": "credential_not_found",
+                                "detail": "api_key_ref does not resolve to any credential",
+                            })),
+                        )
+                            .into_response();
+                    }
+                    Err(e) => {
+                        tracing::error!(
+                            credential_id = %cred_id,
+                            "discover-preview: credential lookup failed: {e}",
+                        );
+                        return (
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            axum::Json(serde_json::json!({
+                                "error": "credential_lookup_failed",
+                                "detail": format!("credential lookup failed: {e}"),
+                            })),
+                        )
+                            .into_response();
+                    }
                 }
             }
             None => None,
