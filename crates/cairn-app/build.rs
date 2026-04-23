@@ -133,7 +133,28 @@ fn main() {
     println!("cargo:rerun-if-env-changed=BUILD_DATE");
     println!("cargo:rerun-if-changed=build.rs");
 
-    let git_dir = std::path::Path::new("../../.git");
+    // Anchor the git-dir lookup to `CARGO_MANIFEST_DIR` instead of a hardcoded
+    // `../../.git`, which depended on the crate layout and on Cargo's CWD when
+    // running the build script. Walk upward until we find `.git` — works from
+    // any workspace layout and from crates vendored into a parent repo.
+    let git_dir = std::env::var_os("CARGO_MANIFEST_DIR")
+        .map(std::path::PathBuf::from)
+        .and_then(|mut p| loop {
+            let candidate = p.join(".git");
+            if candidate.exists() {
+                break Some(candidate);
+            }
+            if !p.pop() {
+                break None;
+            }
+        });
+    let Some(git_dir) = git_dir else {
+        // No `.git` on the filesystem — most likely a source-only tarball
+        // build (crates.io publish or vendored) where Cargo strips `.git`.
+        // That's fine; we already have env-var overrides wired below, and the
+        // fallback `git rev-parse` call above returns "unknown" on its own.
+        return;
+    };
     let head_path = git_dir.join("HEAD");
     if head_path.exists() {
         println!("cargo:rerun-if-changed={}", head_path.display());

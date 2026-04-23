@@ -335,7 +335,11 @@ function AboutSection() {
   const { data: info } = useQuery({
     queryKey: ['systemInfo'],
     queryFn:  () => defaultApi.getSystemInfo(),
-    // Version/store/deployment rarely change; no refetch interval.
+    // Version / deployment / store are fixed for a running binary — treat
+    // them as effectively immutable within a session. Prevents needless
+    // refetches on every window focus or tab switch.
+    staleTime: Infinity,
+    refetchOnWindowFocus: false,
   });
 
   function fmtUptime(secs: number): string {
