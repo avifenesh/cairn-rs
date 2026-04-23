@@ -11,7 +11,6 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
-<<<<<<< HEAD
 - **`MemoryPage` now has an in-UI ingest form.** Closes #152. The page used
   to instruct operators to curl `POST /v1/memory/ingest` by hand; it now
   renders a form with source_id / document_id / optional source_type /
@@ -38,7 +37,6 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **`test_http_sources_crud.rs`** integration test covering the full
   roundtrip over `LiveHarness`: create → ingest → list → chunks → update
   → schedule → process-refresh → delete.
-=======
 - **`GET /v1/skills` + `GET /v1/skills/:id` — real skills catalog wiring.**
   Replaces the hard-coded empty stub
   (`list_skills_preserved_handler` in `handlers/memory.rs`) with a
@@ -63,7 +61,6 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   Integration tests at `crates/cairn-app/tests/test_http_skills.rs`
   cover list, tag-filter, detail, 404, disabled-skill handling, and
   empty-state paths. Closes #147.
->>>>>>> origin/main
 - **`RunDetailPage` + `OrchestrationPage` — operator run-mutation actions.**
   Wires the 10 mutation endpoints under `/v1/runs/:id/*` that had no UI
   consumer: **pause**, **resume**, **recover**, **replay**, **claim**,
