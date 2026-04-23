@@ -33,7 +33,12 @@ async fn admin_token_reads_session_under_nondefault_tenant() {
         .send()
         .await
         .expect("session create");
-    assert_eq!(r.status().as_u16(), 201, "seed failed: {:?}", r.text().await);
+    assert_eq!(
+        r.status().as_u16(),
+        201,
+        "seed failed: {:?}",
+        r.text().await
+    );
 
     // Fetch with admin token but NO scope query params on the detail
     // endpoint (the path doesn't take them). Must succeed because admin

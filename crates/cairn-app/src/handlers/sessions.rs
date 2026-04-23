@@ -97,9 +97,18 @@ pub(crate) struct SessionListQuery {
 impl SessionListQuery {
     pub(crate) fn project(&self) -> ProjectKey {
         ProjectKey::new(
-            self.tenant_id.as_deref().filter(|s| !s.is_empty()).unwrap_or(DEFAULT_TENANT_ID),
-            self.workspace_id.as_deref().filter(|s| !s.is_empty()).unwrap_or(DEFAULT_WORKSPACE_ID),
-            self.project_id.as_deref().filter(|s| !s.is_empty()).unwrap_or(DEFAULT_PROJECT_ID),
+            self.tenant_id
+                .as_deref()
+                .filter(|s| !s.is_empty())
+                .unwrap_or(DEFAULT_TENANT_ID),
+            self.workspace_id
+                .as_deref()
+                .filter(|s| !s.is_empty())
+                .unwrap_or(DEFAULT_WORKSPACE_ID),
+            self.project_id
+                .as_deref()
+                .filter(|s| !s.is_empty())
+                .unwrap_or(DEFAULT_PROJECT_ID),
         )
     }
 
@@ -180,8 +189,7 @@ pub(crate) async fn get_session_handler(
         // `tasks.rs`/`runs.rs`/`approvals.rs`). Without this, admin
         // callers get spurious 404s on non-default-tenant sessions.
         Ok(Some(session))
-            if tenant_scope.is_admin
-                || session.project.tenant_id == *tenant_scope.tenant_id() =>
+            if tenant_scope.is_admin || session.project.tenant_id == *tenant_scope.tenant_id() =>
         {
             match RunReadModel::list_by_session(
                 state.runtime.store.as_ref(),
@@ -357,8 +365,7 @@ pub(crate) async fn get_session_cost_handler(
     let session_id = SessionId::new(id);
     match state.runtime.sessions.get(&session_id).await {
         Ok(Some(session))
-            if tenant_scope.is_admin
-                || session.project.tenant_id == *tenant_scope.tenant_id() =>
+            if tenant_scope.is_admin || session.project.tenant_id == *tenant_scope.tenant_id() =>
         {
             match SessionCostReadModel::get_session_cost(state.runtime.store.as_ref(), &session_id)
                 .await
@@ -440,8 +447,7 @@ pub(crate) async fn list_session_events_handler(
     let session_id = SessionId::new(id);
     let session = match state.runtime.sessions.get(&session_id).await {
         Ok(Some(session))
-            if tenant_scope.is_admin
-                || session.project.tenant_id == *tenant_scope.tenant_id() =>
+            if tenant_scope.is_admin || session.project.tenant_id == *tenant_scope.tenant_id() =>
         {
             session
         }

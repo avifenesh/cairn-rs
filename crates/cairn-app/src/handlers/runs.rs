@@ -163,9 +163,18 @@ pub(crate) struct RunListQuery {
 impl RunListQuery {
     pub(crate) fn project(&self) -> ProjectKey {
         ProjectKey::new(
-            self.tenant_id.as_deref().filter(|s| !s.is_empty()).unwrap_or(DEFAULT_TENANT_ID),
-            self.workspace_id.as_deref().filter(|s| !s.is_empty()).unwrap_or(DEFAULT_WORKSPACE_ID),
-            self.project_id.as_deref().filter(|s| !s.is_empty()).unwrap_or(DEFAULT_PROJECT_ID),
+            self.tenant_id
+                .as_deref()
+                .filter(|s| !s.is_empty())
+                .unwrap_or(DEFAULT_TENANT_ID),
+            self.workspace_id
+                .as_deref()
+                .filter(|s| !s.is_empty())
+                .unwrap_or(DEFAULT_WORKSPACE_ID),
+            self.project_id
+                .as_deref()
+                .filter(|s| !s.is_empty())
+                .unwrap_or(DEFAULT_PROJECT_ID),
         )
     }
 
