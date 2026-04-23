@@ -74,8 +74,13 @@ function CreateChannelModal({
     e.preventDefault();
     const errs: { name?: string; capacity?: string } = {};
     if (!name.trim()) errs.name = 'Name is required';
-    const cap = Number.parseInt(capacity, 10);
-    if (!Number.isFinite(cap) || cap <= 0) errs.capacity = 'Must be a positive integer';
+    // Use Number(...) + Number.isInteger so that decimal inputs like "1.9"
+    // or trailing garbage like "10abc" are rejected instead of silently
+    // truncated by parseInt. Also bound above by the backend u32 limit.
+    const cap = Number(capacity);
+    if (!Number.isInteger(cap) || cap <= 0 || cap > 0xffff_ffff) {
+      errs.capacity = 'Must be a positive integer';
+    }
     setFieldErr(errs);
     if (Object.keys(errs).length > 0) return;
     onCreate(name.trim(), cap);
