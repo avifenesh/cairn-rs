@@ -176,8 +176,12 @@ impl EvalRunService {
     ///
     /// Uses the poison-tolerant lock pattern (`unwrap_or_else(into_inner)`)
     /// so a panic on another thread while holding the mutex cannot take down
-    /// the whole eval service. Matches the sibling `EvalBaselineService` /
-    /// `EvalDatasetService` convention.
+    /// the whole eval service. Other methods on this service still use
+    /// `lock().unwrap()` (pre-#223); they are candidates for a future sweep,
+    /// but the non-convergent locking is intentional here — these two
+    /// setters are the only write paths exercised on the hot-restart code
+    /// path (`replay_evals`), so they are the ones where a poisoned-mutex
+    /// cascade is most damaging.
     pub fn set_rubric_id(
         &self,
         eval_run_id: &EvalRunId,
@@ -194,7 +198,10 @@ impl EvalRunService {
 
     /// Link a baseline to an existing eval run (issue #223).
     ///
-    /// See `set_rubric_id` for the poison-tolerant locking rationale.
+    /// See `set_rubric_id` for the poison-tolerant locking rationale and
+    /// scope (this setter + `set_rubric_id` adopt the pattern; the rest of
+    /// this file intentionally still uses `lock().unwrap()` pending a
+    /// future file-wide sweep).
     pub fn set_baseline_id(
         &self,
         eval_run_id: &EvalRunId,
