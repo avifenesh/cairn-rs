@@ -50,7 +50,8 @@ Source of truth: [`tests/compat/http_routes.tsv`](../../tests/compat/http_routes
 | `GET` | `/v1/settings/defaults/all` | Preserve |  |
 | `GET` | `/v1/settings/defaults/resolve/:key` | Preserve |  |
 | `GET` | `/v1/settings/tls` | Preserve | TLS config |
-| `GET` | `/v1/skills` | Preserve | { items, summary, currentlyActive? } |
+| `GET` | `/v1/skills` | Preserve | { items, summary, currently_active, currentlyActive } |
+| `GET` | `/v1/skills/:id` | Preserve | full `Skill` detail (entry_point, required_permissions, status) or 404 |
 | `GET` | `/v1/soul` | Transitional | current singleton asset wrapper |
 | `PUT` | `/v1/soul` | Transitional | body: { content }; { ok, sha } |
 | `GET` | `/v1/soul/history` | Transitional | { items } |

@@ -321,6 +321,12 @@ pub struct AppState {
     /// `Arc<Mutex<_>>` because both the orchestrator (hot path on each
     /// tool call) and the startup replay share ownership.
     pub tool_result_cache: Arc<std::sync::Mutex<cairn_runtime::startup::ToolCallResultCache>>,
+    /// Skills catalog (GAP-012 / issue #147): in-process registry of
+    /// capability bundles. Read by `GET /v1/skills` and `/v1/skills/:id`;
+    /// populated by workers/operators via the skills registration API.
+    /// Starts empty — UI shows an empty-state prompt until a worker
+    /// registers a skill.
+    pub skill_catalog: Arc<tokio::sync::RwLock<cairn_domain::skills::SkillCatalog>>,
     /// Background task that derives lifecycle metrics from the event
     /// log broadcast. Kept on `AppState` so its lifetime tracks the
     /// process; drop/cancel is managed by shutdown paths.
@@ -987,6 +993,9 @@ impl AppState {
             readiness: ReadinessState::new(),
             tool_result_cache: Arc::new(std::sync::Mutex::new(
                 cairn_runtime::startup::ToolCallResultCache::new(),
+            )),
+            skill_catalog: Arc::new(tokio::sync::RwLock::new(
+                cairn_domain::skills::SkillCatalog::new(),
             )),
             #[cfg(any(feature = "metrics-core", feature = "metrics-providers"))]
             metrics_tap: None,

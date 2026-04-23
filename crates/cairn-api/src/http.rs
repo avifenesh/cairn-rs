@@ -298,6 +298,11 @@ pub fn preserved_route_catalog() -> Vec<RouteEntry> {
         },
         RouteEntry {
             method: Get,
+            path: "/v1/skills/:id".into(),
+            classification: Preserve,
+        },
+        RouteEntry {
+            method: Get,
             path: "/v1/soul".into(),
             classification: Transitional,
         },

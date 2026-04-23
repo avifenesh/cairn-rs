@@ -11,6 +11,7 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+<<<<<<< HEAD
 - **`MemoryPage` now has an in-UI ingest form.** Closes #152. The page used
   to instruct operators to curl `POST /v1/memory/ingest` by hand; it now
   renders a form with source_id / document_id / optional source_type /
@@ -37,6 +38,32 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **`test_http_sources_crud.rs`** integration test covering the full
   roundtrip over `LiveHarness`: create → ingest → list → chunks → update
   → schedule → process-refresh → delete.
+=======
+- **`GET /v1/skills` + `GET /v1/skills/:id` — real skills catalog wiring.**
+  Replaces the hard-coded empty stub
+  (`list_skills_preserved_handler` in `handlers/memory.rs`) with a
+  handler that reads a live `cairn_domain::skills::SkillCatalog` held
+  on `AppState`. List returns the UI-expected
+  `{items, summary, currently_active}` shape derived from the real
+  `SkillSummary` records (`skill_id`, `name`, `description`,
+  `version`, `tags`, `enabled`); `?tag=<tag>` filters by tag; detail
+  endpoint returns the full `Skill` struct (with `entry_point`,
+  `required_permissions`, `status`). `SkillsPage` now renders real
+  skill metadata (skill id, version badge, tag pills) instead of
+  dumping opaque `Record<string, unknown>` entries. The catalog
+  starts empty; workers register skills via the domain API. The
+  response body stays shape-compatible with the previous stub:
+  `items`, `summary`, and both `currentlyActive` (camelCase, first)
+  and `currently_active` (snake_case) keys are still emitted from a
+  single shared list, so UI clients keyed on either name continue to
+  work. `currently_active` includes a skill only when it is BOTH
+  lifecycle-`Active` and `enabled` — the domain `disable()` only
+  clears `enabled`, so gating on both avoids listing disabled skills
+  under "Currently active".
+  Integration tests at `crates/cairn-app/tests/test_http_skills.rs`
+  cover list, tag-filter, detail, 404, disabled-skill handling, and
+  empty-state paths. Closes #147.
+>>>>>>> origin/main
 - **`RunDetailPage` + `OrchestrationPage` — operator run-mutation actions.**
   Wires the 10 mutation endpoints under `/v1/runs/:id/*` that had no UI
   consumer: **pause**, **resume**, **recover**, **replay**, **claim**,
@@ -100,8 +127,23 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   (attach → list → get → detach → list-empty roundtrip + malformed-id
   400 contract).
 
+### Removed
+
+- **`list_skills_preserved_handler` stub (part of #147).** The
+  hard-coded empty stub at
+  `crates/cairn-app/src/handlers/memory.rs:1588-1603` that returned
+  `{items: [], summary: {total: 0, enabled: 0, disabled: 0}}` for
+  every `GET /v1/skills` request is deleted; the route is now served
+  by the real handler in `handlers/skills.rs` backed by the domain
+  `SkillCatalog`.
+
 ### Fixed
 
+- **UI: `SessionsPage` per-row run count was O(N*M) per render (#180).**
+  Replaced the per-row `allRuns.filter(...)` scan with a memoized
+  `Map<session_id, count>` computed once from `allRuns`, collapsing
+  per-render work from O(sessions * runs) to O(runs) build + O(1)
+  lookup.
 - **UI: `ApprovalsPage` 24h stats double-counted pending requests (#176).**
   The "Approved (24h)" and "Rejected (24h)" stat cards filtered resolved
   approvals by `created_at`, so approvals requested within the last 24h

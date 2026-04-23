@@ -1000,19 +1000,23 @@ export function createApiClient(config: ApiClientConfig) {
       agent_role: string; approval_policy: string;
     }> => post(`/v1/agent-templates/${encodeURIComponent(templateId)}/instantiate`, withScope(body)),
 
-    listSkills: async (): Promise<import("./types").SkillsResponse> => {
+    listSkills: async (params?: { tag?: string }): Promise<import("./types").SkillsResponse> => {
+      const qs = params?.tag ? `?tag=${encodeURIComponent(params.tag)}` : "";
       const raw = await get<{
         items?: import("./types").SkillRecord[];
         summary?: import("./types").SkillsSummary;
         currentlyActive?: string[];
         currently_active?: string[];
-      }>("/v1/skills");
+      }>(`/v1/skills${qs}`);
       return {
         items: raw.items ?? [],
         summary: raw.summary ?? { total: 0, enabled: 0, disabled: 0 },
         currently_active: raw.currently_active ?? raw.currentlyActive ?? [],
       };
     },
+
+    getSkill: (skillId: string): Promise<import("./types").SkillDetail> =>
+      get(`/v1/skills/${encodeURIComponent(skillId)}`),
 
     getChangelog: (): Promise<import("./types").ChangelogEntry[]> =>
       get('/v1/changelog'),
