@@ -933,8 +933,52 @@ const NUMERIC_KEYS: &[(&str, f64, f64)] = &[
 const MODEL_ID_MAX_LEN: usize = 256;
 const PROMPT_LIKE_MAX_LEN: usize = 4096;
 
+/// Resolve the tenant ids to check for "active connection supports model".
+///
+/// - `Scope::Tenant` → exactly that tenant.
+/// - `Scope::Workspace` → lookup the workspace's owning tenant.
+/// - `Scope::Project` → lookup the project's owning tenant.
+/// - `Scope::System` → every tenant in the store (best-effort,
+///   capped list of 200 to keep the handler bounded).
+async fn resolve_tenants_for_scope(
+    state: &AppState,
+    scope: cairn_domain::Scope,
+    scope_id: &str,
+) -> Vec<TenantId> {
+    use cairn_domain::{Scope, WorkspaceId};
+    use cairn_store::projections::{TenantReadModel, WorkspaceReadModel};
+
+    match scope {
+        Scope::Tenant => vec![TenantId::new(scope_id)],
+        Scope::Workspace => {
+            match WorkspaceReadModel::get(state.runtime.store.as_ref(), &WorkspaceId::new(scope_id))
+                .await
+            {
+                Ok(Some(record)) => vec![record.tenant_id],
+                _ => Vec::new(),
+            }
+        }
+        Scope::Project => {
+            // Project scope_id is just the project_id; the owning
+            // tenant is not trivially addressable without the full
+            // ProjectKey. Fall back to scanning all tenants so
+            // validation doesn't false-reject on project scope.
+            TenantReadModel::list(state.runtime.store.as_ref(), 200, 0)
+                .await
+                .map(|records| records.into_iter().map(|r| r.tenant_id).collect())
+                .unwrap_or_default()
+        }
+        Scope::System => TenantReadModel::list(state.runtime.store.as_ref(), 200, 0)
+            .await
+            .map(|records| records.into_iter().map(|r| r.tenant_id).collect())
+            .unwrap_or_default(),
+    }
+}
+
 async fn validate_setting_value(
     state: &AppState,
+    scope: cairn_domain::Scope,
+    scope_id: &str,
     key: &str,
     value: &serde_json::Value,
 ) -> Result<(), axum::response::Response> {
@@ -992,20 +1036,28 @@ async fn validate_setting_value(
             // Fall back to the broader provider_connections read model:
             // caching is populated lazily, so an un-exercised connection
             // may not appear in the snapshot even though it's configured.
-            // List connections for the default tenant (best-effort — the
-            // runtime treats system-scope tenant as default).
-            let tenant = TenantId::new(DEFAULT_TENANT_ID);
-            let any_supports = state
-                .runtime
-                .provider_connections
-                .list(&tenant, 200, 0)
-                .await
-                .map(|records| {
-                    records
+            // Query every tenant the scope covers — a system-scope
+            // default is valid as long as *some* tenant configured a
+            // connection for this model, and a tenant-scope default
+            // must be valid for that specific tenant.
+            let tenants = resolve_tenants_for_scope(state, scope, scope_id).await;
+            let mut any_supports = false;
+            for tenant in &tenants {
+                if let Ok(records) = state
+                    .runtime
+                    .provider_connections
+                    .list(tenant, 200, 0)
+                    .await
+                {
+                    if records
                         .iter()
                         .any(|r| r.supported_models.iter().any(|m| m == model_id))
-                })
-                .unwrap_or(false);
+                    {
+                        any_supports = true;
+                        break;
+                    }
+                }
+            }
             if !any_supports {
                 return Err(AppApiError::new(
                     StatusCode::UNPROCESSABLE_ENTITY,
@@ -1042,7 +1094,9 @@ pub(crate) async fn set_default_setting_handler(
 
     // Per-key validation (closes #228). Unknown/empty/oversized values
     // now 422 instead of silently persisting.
-    if let Err(resp) = validate_setting_value(state.as_ref(), &key, &body.value).await {
+    if let Err(resp) =
+        validate_setting_value(state.as_ref(), scope, &scope_id, &key, &body.value).await
+    {
         return resp;
     }
 
