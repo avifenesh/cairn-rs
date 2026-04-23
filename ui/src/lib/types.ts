@@ -33,9 +33,11 @@ export interface AgentTemplate {
 // ── Skills (GET /v1/skills) ─────────────────────────────────────────────────
 //
 // Shape mirrors `cairn-api/src/skills_api.rs::SkillSummary` (wire format) and
-// `cairn-app/src/handlers/skills.rs::ListSkillsResponse`. Field names
-// preserve snake_case from the Rust definitions (no serde renames are
-// applied server-side for these structs).
+// `cairn-app/src/handlers/skills.rs::ListSkillsResponse`. The `Skill` /
+// `SkillSummary` structs use default serde (snake_case field names). The
+// enclosing `ListSkillsResponse` additionally emits a legacy
+// `currentlyActive` camelCase alias alongside `currently_active` for stub
+// compatibility — see the handler doc comment.
 
 export type SkillLifecycleStatus = "active" | "proposed" | "rejected";
 

@@ -24,12 +24,17 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   skill metadata (skill id, version badge, tag pills) instead of
   dumping opaque `Record<string, unknown>` entries. The catalog
   starts empty; workers register skills via the domain API. The
-  previous stub's `{items: [], summary: {0,0,0}, currently_active: [],
-  currentlyActive: []}` response is preserved byte-for-byte when no
-  skills are registered — both the snake_case and legacy camelCase
-  `currentlyActive` alias are still emitted.
+  response body stays shape-compatible with the previous stub:
+  `items`, `summary`, and both `currentlyActive` (camelCase, first)
+  and `currently_active` (snake_case) keys are still emitted from a
+  single shared list, so UI clients keyed on either name continue to
+  work. `currently_active` includes a skill only when it is BOTH
+  lifecycle-`Active` and `enabled` — the domain `disable()` only
+  clears `enabled`, so gating on both avoids listing disabled skills
+  under "Currently active".
   Integration tests at `crates/cairn-app/tests/test_http_skills.rs`
-  cover list, tag-filter, detail, 404, and empty-state paths. Closes #147.
+  cover list, tag-filter, detail, 404, disabled-skill handling, and
+  empty-state paths. Closes #147.
 - **`RunDetailPage` + `OrchestrationPage` — operator run-mutation actions.**
   Wires the 10 mutation endpoints under `/v1/runs/:id/*` that had no UI
   consumer: **pause**, **resume**, **recover**, **replay**, **claim**,

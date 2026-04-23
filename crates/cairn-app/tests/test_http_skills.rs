@@ -160,6 +160,50 @@ async fn list_skills_filters_by_tag() {
     assert_eq!(items[0]["skill_id"], "coder");
 }
 
+/// Regression for a reviewer-flagged edge case: the domain
+/// `SkillCatalog::disable()` only clears `enabled` and leaves
+/// `status` as `Active`. The list handler must gate
+/// `currently_active` on BOTH flags so a disabled skill doesn't
+/// keep showing up under the UI's "Currently active" panel.
+#[tokio::test]
+async fn list_skills_excludes_disabled_from_currently_active() {
+    let (app, state) = app_with_token().await;
+    {
+        let mut catalog = state.skill_catalog.write().await;
+        catalog.register(seed_skill("coder", true, &["coding"]));
+        // enabled=true + Active, then disable() — leaves status=Active,
+        // clears enabled. Handler must exclude it.
+        assert!(catalog.disable("coder"));
+    }
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/v1/skills")
+                .header("authorization", format!("Bearer {TOKEN}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+
+    assert_eq!(json["items"].as_array().unwrap().len(), 1);
+    assert_eq!(json["summary"]["enabled"], 0);
+    assert_eq!(json["summary"]["disabled"], 1);
+    assert!(
+        json["currently_active"].as_array().unwrap().is_empty(),
+        "disabled skill must NOT appear under currently_active: {json}"
+    );
+    assert!(
+        json["currentlyActive"].as_array().unwrap().is_empty(),
+        "camelCase alias must mirror snake_case exclusion"
+    );
+}
+
 #[tokio::test]
 async fn get_skill_returns_detail_or_404() {
     let (app, state) = app_with_token().await;

@@ -46,21 +46,25 @@ pub(crate) struct SkillsSummary {
 ///
 /// Shape matches `ui/src/lib/types.ts::SkillsResponse`.
 ///
-/// `currently_active` is also emitted as `currentlyActive` for byte-for-byte
-/// backwards compatibility with the previous stub, which wrote both field
-/// names into the response (the UI reads either). Dropping the camelCase
-/// duplicate would silently break any out-of-tree client that still keys on
-/// it, so we keep both.
+/// The active-skill id list is emitted under BOTH `currentlyActive`
+/// (camelCase) and `currently_active` (snake_case) for backwards
+/// compatibility with the previous stub, which wrote both names into the
+/// response body. Field declaration order here matches the stub's
+/// serialized order (camelCase first) so clients that key by position
+/// rather than name still see the same stream. The two fields always
+/// carry the same list — they're populated from a single Vec.
 #[derive(Clone, Debug, Serialize)]
 pub(crate) struct ListSkillsResponse {
     pub items: Vec<SkillSummary>,
     pub summary: SkillsSummary,
-    /// IDs of skills currently reported as Active by the domain catalog.
-    pub currently_active: Vec<String>,
     /// Legacy camelCase alias for `currently_active`. Serialized verbatim
     /// from the same list so the two fields can never drift.
     #[serde(rename = "currentlyActive")]
     pub currently_active_camel: Vec<String>,
+    /// IDs of skills currently reported as Active AND enabled by the
+    /// domain catalog. Callers should prefer this snake_case form; the
+    /// camelCase alias above is kept for stub-era clients.
+    pub currently_active: Vec<String>,
 }
 
 pub(crate) async fn list_skills_handler(
@@ -92,7 +96,13 @@ pub(crate) async fn list_skills_handler(
         if skill.enabled {
             enabled += 1;
         }
-        if matches!(skill.status, SkillStatus::Active) {
+        // "Currently active" = lifecycle-Active AND `enabled`. The
+        // domain `SkillCatalog::disable()` only clears `enabled`; it
+        // leaves `status` as `Active`, so a skill that was enabled-then-
+        // disabled still reports `SkillStatus::Active`. Gate on both
+        // flags so the UI's "Currently active" panel only lists skills
+        // that are actually runnable right now.
+        if skill.enabled && matches!(skill.status, SkillStatus::Active) {
             currently_active.push(skill.skill_id.clone());
         }
         items.push(SkillSummary::from(*skill));
