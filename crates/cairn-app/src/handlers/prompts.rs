@@ -86,7 +86,7 @@ pub(crate) struct CreatePromptVersionRequest {
     pub(crate) tenant_id: Option<String>,
     pub(crate) workspace_id: Option<String>,
     pub(crate) project_id: Option<String>,
-    /// Optional — server mints `pv_<uuid>` when absent.
+    /// Optional — server mints `pv_<uuid>` when absent or empty.
     #[serde(default)]
     pub(crate) prompt_version_id: Option<String>,
     pub(crate) content_hash: String,
