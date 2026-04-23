@@ -1,0 +1,228 @@
+//! Issue #152 — sources CRUD + memory ingest HTTP surface.
+//!
+//! The UI's SourcesPage and MemoryPage drive these endpoints directly.
+//! A regression in shape, status code, or scope handling would break the
+//! operator workflow: registering a source, ingesting a document into it,
+//! inspecting chunks, scheduling a refresh, and retiring the source.
+
+mod support;
+
+use percent_encoding::{utf8_percent_encode, NON_ALPHANUMERIC};
+use serde_json::{json, Value};
+use support::live_fabric::LiveHarness;
+
+#[tokio::test]
+async fn sources_crud_and_memory_ingest_roundtrip() {
+    let h = LiveHarness::setup().await;
+    let base = &h.base_url;
+    let source_id = "docs/handbook-test";
+    // Full percent-encoding of the path segment — mirrors `encodeURIComponent`
+    // on the UI side, and stays honest against arbitrary operator-supplied
+    // IDs (slashes, spaces, hashes, question marks, etc.).
+    let encoded_source_id = utf8_percent_encode(source_id, NON_ALPHANUMERIC).to_string();
+
+    // 1. Create source.
+    let res = h
+        .client()
+        .post(format!("{base}/v1/sources"))
+        .bearer_auth(&h.admin_token)
+        .json(&json!({
+            "tenant_id":    h.tenant,
+            "workspace_id": h.workspace,
+            "project_id":   h.project,
+            "source_id":    source_id,
+            "name":         "Team Handbook",
+            "description":  "Ingest-CRUD roundtrip",
+        }))
+        .send()
+        .await
+        .expect("create source reaches server");
+    assert_eq!(
+        res.status().as_u16(),
+        201,
+        "create source status, body: {}",
+        res.text().await.unwrap_or_default(),
+    );
+
+    // 2. Ingest a document into the source.
+    let res = h
+        .client()
+        .post(format!("{base}/v1/memory/ingest"))
+        .bearer_auth(&h.admin_token)
+        .json(&json!({
+            "tenant_id":    h.tenant,
+            "workspace_id": h.workspace,
+            "project_id":   h.project,
+            "source_id":    source_id,
+            "document_id":  "onboarding.md",
+            "content":      "Welcome to the team. This is the onboarding guide.",
+        }))
+        .send()
+        .await
+        .expect("ingest reaches server");
+    let ingest_status = res.status().as_u16();
+    let ingest_body = res.text().await.unwrap_or_default();
+    assert!(
+        (200..300).contains(&ingest_status),
+        "ingest status {ingest_status}, body: {ingest_body}",
+    );
+    // The UI's `ingestMemory` is typed against
+    // `{ ok, document_id, source_id, chunk_count }` and uses
+    // `chunk_count` in the success toast — lock that wire contract here
+    // so a future handler refactor can't silently flip it to 204 or rename
+    // fields without tripping CI.
+    let ingest_json: Value = serde_json::from_str(&ingest_body)
+        .unwrap_or_else(|e| panic!("ingest returned non-JSON body: {ingest_body}; error: {e}"));
+    assert_eq!(
+        ingest_json.get("ok").and_then(|v| v.as_bool()),
+        Some(true),
+        "ingest response missing ok=true: {ingest_json}",
+    );
+    assert_eq!(
+        ingest_json.get("document_id").and_then(|v| v.as_str()),
+        Some("onboarding.md"),
+        "ingest response missing expected document_id: {ingest_json}",
+    );
+    assert_eq!(
+        ingest_json.get("source_id").and_then(|v| v.as_str()),
+        Some(source_id),
+        "ingest response missing expected source_id: {ingest_json}",
+    );
+    let chunk_count = ingest_json
+        .get("chunk_count")
+        .and_then(|v| v.as_u64())
+        .unwrap_or_else(|| panic!("ingest response missing numeric chunk_count: {ingest_json}"));
+    assert!(
+        chunk_count >= 1,
+        "ingest response reported no chunks created: {ingest_json}",
+    );
+
+    // 3. List sources — the new source must be present.
+    let res = h
+        .client()
+        .get(format!(
+            "{base}/v1/sources?tenant_id={}&workspace_id={}&project_id={}",
+            h.tenant, h.workspace, h.project,
+        ))
+        .bearer_auth(&h.admin_token)
+        .send()
+        .await
+        .expect("list sources reaches server");
+    assert_eq!(res.status().as_u16(), 200);
+    let body: Value = res.json().await.expect("list json");
+    let items = body.as_array().cloned().unwrap_or_default();
+    assert!(
+        items
+            .iter()
+            .any(|s| s.get("source_id").and_then(|v| v.as_str()) == Some(source_id)),
+        "expected list to contain new source, got {body}",
+    );
+
+    // 4. List chunks — the ingested document produced at least one chunk.
+    let res = h
+        .client()
+        .get(format!(
+            "{base}/v1/sources/{}/chunks?tenant_id={}&workspace_id={}&project_id={}",
+            encoded_source_id, h.tenant, h.workspace, h.project,
+        ))
+        .bearer_auth(&h.admin_token)
+        .send()
+        .await
+        .expect("chunks reaches server");
+    assert_eq!(res.status().as_u16(), 200);
+    let body: Value = res.json().await.expect("chunks json");
+    let chunks = body
+        .get("items")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+    assert!(!chunks.is_empty(), "expected ingested chunks, got {body}");
+
+    // 5. Update source metadata.
+    let res = h
+        .client()
+        .put(format!("{base}/v1/sources/{}", encoded_source_id))
+        .bearer_auth(&h.admin_token)
+        .json(&json!({
+            "tenant_id":    h.tenant,
+            "workspace_id": h.workspace,
+            "project_id":   h.project,
+            "name":         "Updated Handbook",
+            "description":  "edited",
+        }))
+        .send()
+        .await
+        .expect("update reaches server");
+    assert_eq!(res.status().as_u16(), 200);
+    let body: Value = res.json().await.expect("update json");
+    assert_eq!(
+        body.get("name").and_then(|v| v.as_str()),
+        Some("Updated Handbook")
+    );
+
+    // 6. Set refresh schedule.
+    //
+    // Scope travels via *query params* here, not in the JSON body — this
+    // matches the handler signature in
+    // `crates/cairn-app/src/handlers/memory.rs::create_source_refresh_schedule_handler`
+    // which takes `Query<OptionalProjectScopedQuery>` + a scope-free
+    // `CreateRefreshScheduleRequest`. Changing the wire contract is
+    // outside this PR's scope (it would break existing callers); the
+    // UI's `setSourceRefreshSchedule` in `ui/src/lib/api.ts` matches.
+    let res = h
+        .client()
+        .post(format!(
+            "{base}/v1/sources/{}/refresh-schedule?tenant_id={}&workspace_id={}&project_id={}",
+            encoded_source_id, h.tenant, h.workspace, h.project,
+        ))
+        .bearer_auth(&h.admin_token)
+        .json(&json!({ "interval_ms": 3_600_000_u64 }))
+        .send()
+        .await
+        .expect("schedule reaches server");
+    assert_eq!(res.status().as_u16(), 200);
+    let body: Value = res.json().await.expect("schedule json");
+    assert_eq!(
+        body.get("interval_ms").and_then(|v| v.as_u64()),
+        Some(3_600_000)
+    );
+
+    // 7. Process-refresh — global endpoint, may process 0+ schedules.
+    let res = h
+        .client()
+        .post(format!("{base}/v1/sources/process-refresh"))
+        .bearer_auth(&h.admin_token)
+        .json(&json!({}))
+        .send()
+        .await
+        .expect("process-refresh reaches server");
+    assert_eq!(res.status().as_u16(), 200);
+    let body: Value = res.json().await.expect("process-refresh json");
+    assert!(
+        body.get("processed_count").is_some(),
+        "missing processed_count: {body}"
+    );
+
+    // 8. Delete (deactivate) the source.
+    //
+    // The current `delete_source_handler` ignores scope and keys only
+    // on `source_id`, but we still pass scope query-params so the test
+    // stays forward-compatible with a future scoped-delete contract
+    // (and so CI fails loudly if someone drops scope from the UI).
+    let res = h
+        .client()
+        .delete(format!(
+            "{base}/v1/sources/{}?tenant_id={}&workspace_id={}&project_id={}",
+            encoded_source_id, h.tenant, h.workspace, h.project,
+        ))
+        .bearer_auth(&h.admin_token)
+        .send()
+        .await
+        .expect("delete reaches server");
+    assert_eq!(
+        res.status().as_u16(),
+        200,
+        "delete status, body: {}",
+        res.text().await.unwrap_or_default(),
+    );
+}
