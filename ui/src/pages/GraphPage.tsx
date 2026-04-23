@@ -41,6 +41,7 @@ const NODE_TYPES: NodeTypeDef[] = [
   { kind: "task",            label: "Task",           description: "Queued unit of work",               color: "border-violet-500/40 text-violet-400",   bgColor: "bg-violet-950/60 text-violet-300",   group: "runtime"  },
   { kind: "approval",        label: "Approval",       description: "Human-in-the-loop gate",            color: "border-amber-500/40 text-amber-400",     bgColor: "bg-amber-950/60 text-amber-300",     group: "runtime"  },
   { kind: "checkpoint",      label: "Checkpoint",     description: "Resumable execution snapshot",      color: "border-emerald-500/40 text-emerald-400", bgColor: "bg-emerald-950/60 text-emerald-300", group: "runtime"  },
+  { kind: "trigger",         label: "Trigger",        description: "Signal-driven automation trigger",  color: "border-yellow-500/40 text-yellow-400",   bgColor: "bg-yellow-950/60 text-yellow-300",   group: "runtime"  },
   { kind: "mailbox_message", label: "Mailbox Msg",    description: "Agent-to-agent message",            color: "border-sky-500/40 text-sky-400",         bgColor: "bg-sky-950/60 text-sky-300",         group: "runtime"  },
   { kind: "tool_invocation", label: "Tool Call",      description: "External tool invocation",          color: "border-orange-500/40 text-orange-400",   bgColor: "bg-orange-950/60 text-orange-300",   group: "runtime"  },
   { kind: "route_decision",  label: "Route Decision", description: "Provider routing decision",         color: "border-rose-500/40 text-rose-400",       bgColor: "bg-rose-950/60 text-rose-300",       group: "runtime"  },
@@ -61,6 +62,8 @@ const NODE_TYPES: NodeTypeDef[] = [
 
 const EDGE_TYPES: EdgeTypeDef[] = [
   { kind: "triggered",       label: "Triggered",       description: "Session/run triggered a downstream run or task" },
+  { kind: "matched_by",      label: "Matched By",      description: "Signal matched a trigger pattern" },
+  { kind: "fired",           label: "Fired",           description: "Trigger fired a run or task" },
   { kind: "spawned",         label: "Spawned",         description: "Run spawned a sub-run or child task" },
   { kind: "depended_on",     label: "Depended On",     description: "Task depends on another task completing first" },
   { kind: "approved_by",     label: "Approved By",     description: "Run or task was gated by an approval decision" },
@@ -89,7 +92,10 @@ const GROUPS: NodeTypeDef["group"][] = ["runtime", "memory", "prompts", "infra"]
 
 // ── Force simulation types + physics ─────────────────────────────────────────
 
-type SimKind = "session" | "run" | "task";
+// SimKind covers every GraphNodeKind the backend can emit, so the simulation
+// never silently drops nodes. Each kind has a distinct radius/fill/stroke
+// below; new kinds added to the Rust enum must be added to all three maps.
+type SimKind = GraphNodeKind;
 
 interface SimNode {
   id: string;
@@ -107,9 +113,94 @@ interface SimEdge {
   target: string;
 }
 
-const NODE_R: Record<SimKind, number> = { session: 13, run: 9, task: 6 };
-const NODE_FILL: Record<SimKind, string> = { session: "#3b82f6", run: "#6366f1", task: "#8b5cf6" };
-const NODE_STROKE: Record<SimKind, string> = { session: "#1d4ed8", run: "#3730a3", task: "#4c1d95" };
+const DEFAULT_RADIUS = 7;
+const DEFAULT_FILL = "#64748b";
+const DEFAULT_STROKE = "#334155";
+
+const NODE_R: Record<SimKind, number> = {
+  session: 13,
+  run: 10,
+  task: 7,
+  approval: 8,
+  checkpoint: 7,
+  trigger: 7,
+  mailbox_message: 6,
+  tool_invocation: 6,
+  route_decision: 6,
+  provider_call: 6,
+  memory: 7,
+  document: 8,
+  chunk: 5,
+  source: 8,
+  ingest_job: 7,
+  signal: 6,
+  prompt_asset: 8,
+  prompt_version: 7,
+  prompt_release: 8,
+  eval_run: 7,
+  skill: 7,
+  channel_target: 7,
+};
+
+const NODE_FILL: Record<SimKind, string> = {
+  session: "#3b82f6",         // blue
+  run: "#6366f1",             // indigo
+  task: "#8b5cf6",            // violet
+  approval: "#f59e0b",        // amber
+  checkpoint: "#10b981",      // emerald
+  trigger: "#eab308",         // yellow
+  mailbox_message: "#0ea5e9", // sky
+  tool_invocation: "#f97316", // orange
+  route_decision: "#f43f5e",  // rose
+  provider_call: "#ec4899",   // pink
+  memory: "#a855f7",          // purple
+  document: "#14b8a6",        // teal
+  chunk: "#22c55e",           // green
+  source: "#06b6d4",          // cyan
+  ingest_job: "#84cc16",      // lime
+  signal: "#94a3b8",          // slate
+  prompt_asset: "#d946ef",    // fuchsia
+  prompt_version: "#e879f9",  // fuchsia-400
+  prompt_release: "#ef4444",  // red
+  eval_run: "#facc15",        // yellow-400
+  skill: "#818cf8",           // indigo-400
+  channel_target: "#38bdf8",  // sky-400
+};
+
+const NODE_STROKE: Record<SimKind, string> = {
+  session: "#1d4ed8",
+  run: "#3730a3",
+  task: "#4c1d95",
+  approval: "#b45309",
+  checkpoint: "#047857",
+  trigger: "#a16207",
+  mailbox_message: "#0369a1",
+  tool_invocation: "#c2410c",
+  route_decision: "#be123c",
+  provider_call: "#be185d",
+  memory: "#7e22ce",
+  document: "#0f766e",
+  chunk: "#15803d",
+  source: "#0e7490",
+  ingest_job: "#4d7c0f",
+  signal: "#475569",
+  prompt_asset: "#a21caf",
+  prompt_version: "#a21caf",
+  prompt_release: "#b91c1c",
+  eval_run: "#a16207",
+  skill: "#4338ca",
+  channel_target: "#0369a1",
+};
+
+function nodeRadius(kind: SimKind): number {
+  return NODE_R[kind] ?? DEFAULT_RADIUS;
+}
+function nodeFill(kind: SimKind): string {
+  return NODE_FILL[kind] ?? DEFAULT_FILL;
+}
+function nodeStroke(kind: SimKind): string {
+  return NODE_STROKE[kind] ?? DEFAULT_STROKE;
+}
 
 const SVG_W = 800;
 const SVG_H = 520;
@@ -191,53 +282,41 @@ function seededBetween(seed: string, min: number, max: number): number {
   return min + ratio * (max - min);
 }
 
-function toSimKind(kind: GraphNodeKind): SimKind | null {
-  switch (kind) {
-    case "session":
-      return "session";
-    case "run":
-      return "run";
-    case "task":
-      return "task";
-    default:
-      return null;
-  }
-}
-
 function shortNodeId(nodeId: string): string {
   return nodeId.length > 20 ? `${nodeId.slice(0, 8)}…${nodeId.slice(-6)}` : nodeId;
 }
 
-function liveNodeLabel(node: GraphNodeRecord, simKind: SimKind): string {
-  const prefix = simKind === "session" ? "Session" : simKind === "run" ? "Run" : "Task";
-  return `${prefix} ${shortNodeId(node.node_id)}`;
+function kindLabel(kind: GraphNodeKind): string {
+  const def = NODE_TYPES.find((entry) => entry.kind === kind);
+  return def?.label ?? kind;
 }
 
-function buildRuntimeSimulationGraph(
+function liveNodeLabel(node: GraphNodeRecord): string {
+  return `${kindLabel(node.kind)} ${shortNodeId(node.node_id)}`;
+}
+
+function buildSimulationGraph(
   trace: GraphTraceResponse | undefined,
   maxNodes: number,
 ): { nodes: SimNode[]; edges: SimEdge[] } {
   if (!trace) return { nodes: [], edges: [] };
 
-  const runtimeNodes = trace.nodes
-    .map((node) => {
-      const simKind = toSimKind(node.kind);
-      return simKind ? { node, simKind } : null;
-    })
-    .filter((entry): entry is { node: GraphNodeRecord; simKind: SimKind } => entry !== null)
+  // Render every kind the backend emits — no filtering. Newest first,
+  // capped at `maxNodes` to keep the simulation responsive.
+  const runtimeNodes = [...trace.nodes]
     .sort((left, right) => {
-      if (right.node.created_at !== left.node.created_at) {
-        return right.node.created_at - left.node.created_at;
+      if (right.created_at !== left.created_at) {
+        return right.created_at - left.created_at;
       }
-      return left.node.node_id.localeCompare(right.node.node_id);
+      return left.node_id.localeCompare(right.node_id);
     })
     .slice(0, maxNodes);
 
-  const nodeIds = new Set(runtimeNodes.map(({ node }) => node.node_id));
-  const nodes = runtimeNodes.map(({ node, simKind }) => ({
+  const nodeIds = new Set(runtimeNodes.map((node) => node.node_id));
+  const nodes = runtimeNodes.map((node) => ({
     id: node.node_id,
-    kind: simKind,
-    label: liveNodeLabel(node, simKind),
+    kind: node.kind as SimKind,
+    label: liveNodeLabel(node),
     x: seededBetween(`${node.node_id}:x`, 120, 680),
     y: seededBetween(`${node.node_id}:y`, 90, 430),
     vx: 0,
@@ -479,8 +558,8 @@ function ForceGraph({ graph }: { graph: { nodes: SimNode[]; edges: SimEdge[] } }
             if (!source || !target) return null;
             const active =
               hasSelected && connectedSet.has(edge.source) && connectedSet.has(edge.target);
-            const sourceRadius = NODE_R[source.kind];
-            const targetRadius = NODE_R[target.kind];
+            const sourceRadius = nodeRadius(source.kind);
+            const targetRadius = nodeRadius(target.kind);
             const dx = target.x - source.x;
             const dy = target.y - source.y;
             const distance = Math.sqrt(dx * dx + dy * dy) || 1;
@@ -505,7 +584,7 @@ function ForceGraph({ graph }: { graph: { nodes: SimNode[]; edges: SimEdge[] } }
           })}
 
           {snap.map((node) => {
-            const radius = NODE_R[node.kind];
+            const radius = nodeRadius(node.kind);
             const selected = node.id === selectedId;
             const connected = connectedSet.has(node.id);
             const dim = hasSelected && !connected;
@@ -529,8 +608,8 @@ function ForceGraph({ graph }: { graph: { nodes: SimNode[]; edges: SimEdge[] } }
                 )}
                 <circle
                   r={radius}
-                  fill={NODE_FILL[node.kind]}
-                  stroke={selected ? "#a5b4fc" : NODE_STROKE[node.kind]}
+                  fill={nodeFill(node.kind)}
+                  stroke={selected ? "#a5b4fc" : nodeStroke(node.kind)}
                   strokeWidth={selected ? 2 : 1}
                   fillOpacity={dim ? 0.18 : 1}
                   strokeOpacity={dim ? 0.18 : 1}
@@ -552,25 +631,30 @@ function ForceGraph({ graph }: { graph: { nodes: SimNode[]; edges: SimEdge[] } }
         </g>
       </svg>
 
-      <div className="flex items-center gap-5 px-4 py-2 border-t border-gray-200 dark:border-zinc-800 bg-gray-50/40 dark:bg-zinc-900/40 flex-wrap">
-        {(["session", "run", "task"] as SimKind[]).map((kind) => (
-          <div key={kind} className="flex items-center gap-1.5">
-            <svg width={NODE_R[kind] * 2 + 2} height={NODE_R[kind] * 2 + 2}>
-              <circle
-                cx={NODE_R[kind] + 1}
-                cy={NODE_R[kind] + 1}
-                r={NODE_R[kind]}
-                fill={NODE_FILL[kind]}
-                stroke={NODE_STROKE[kind]}
-                strokeWidth={1}
-              />
-            </svg>
-            <span className="text-[11px] text-gray-400 dark:text-zinc-500 capitalize">{kind}</span>
-            {counts[kind] != null && (
-              <span className="text-[10px] text-gray-300 dark:text-zinc-600 font-mono">{counts[kind]}</span>
-            )}
-          </div>
-        ))}
+      <div className="flex items-center gap-4 px-4 py-2 border-t border-gray-200 dark:border-zinc-800 bg-gray-50/40 dark:bg-zinc-900/40 flex-wrap">
+        {(Object.keys(counts) as SimKind[])
+          .sort((a, b) => (counts[b] ?? 0) - (counts[a] ?? 0))
+          .map((kind) => {
+            const r = nodeRadius(kind);
+            return (
+              <div key={kind} className="flex items-center gap-1.5">
+                <svg width={r * 2 + 2} height={r * 2 + 2}>
+                  <circle
+                    cx={r + 1}
+                    cy={r + 1}
+                    r={r}
+                    fill={nodeFill(kind)}
+                    stroke={nodeStroke(kind)}
+                    strokeWidth={1}
+                  />
+                </svg>
+                <span className="text-[11px] text-gray-400 dark:text-zinc-500">{kindLabel(kind)}</span>
+                {counts[kind] != null && (
+                  <span className="text-[10px] text-gray-300 dark:text-zinc-600 font-mono">{counts[kind]}</span>
+                )}
+              </div>
+            );
+          })}
         <span className="ml-auto text-[10px] text-gray-300 dark:text-zinc-600 hidden sm:block">
           scroll to zoom · drag to pan · click a node to highlight its connections
         </span>
@@ -695,9 +779,271 @@ function NodeDetail({
   );
 }
 
+// ── Provenance query panel ────────────────────────────────────────────────────
+
+type QueryKind =
+  | "execution-trace"
+  | "dependency-path"
+  | "retrieval-provenance"
+  | "prompt-provenance"
+  | "multi-hop";
+
+interface QueryDef {
+  kind: QueryKind;
+  label: string;
+  description: string;
+  inputLabel: string;
+  inputPlaceholder: string;
+}
+
+const QUERY_DEFS: QueryDef[] = [
+  {
+    kind: "execution-trace",
+    label: "Execution Trace",
+    description: "Walk the execution subgraph rooted at a run (spawned runs, tasks, tool invocations).",
+    inputLabel: "Run ID",
+    inputPlaceholder: "run-…",
+  },
+  {
+    kind: "dependency-path",
+    label: "Dependency Path",
+    description: "Downstream dependency lineage from a node (tasks, approvals, resume edges).",
+    inputLabel: "Node ID",
+    inputPlaceholder: "task-… / run-…",
+  },
+  {
+    kind: "retrieval-provenance",
+    label: "Retrieval Provenance",
+    description: "Answer → chunk → document → source lineage for a run.",
+    inputLabel: "Run ID",
+    inputPlaceholder: "run-…",
+  },
+  {
+    kind: "prompt-provenance",
+    label: "Prompt Provenance",
+    description: "Prompt-asset → version → release → deployed-run lineage for a prompt release.",
+    inputLabel: "Release ID",
+    inputPlaceholder: "rel-…",
+  },
+  {
+    kind: "multi-hop",
+    label: "Multi-Hop",
+    description: "Generic BFS traversal from a seed node with configurable depth and direction.",
+    inputLabel: "Seed Node ID",
+    inputPlaceholder: "session-… / run-… / doc-…",
+  },
+];
+
+function QueriesPanel() {
+  const [active, setActive] = useState<QueryKind>("execution-trace");
+  const [primary, setPrimary] = useState<string>("");
+  const [maxDepth, setMaxDepth] = useState<string>("5");
+  const [minConfidence, setMinConfidence] = useState<string>("");
+  const [direction, setDirection] = useState<"upstream" | "downstream">("downstream");
+  const [submitted, setSubmitted] = useState<{
+    kind: QueryKind;
+    primary: string;
+    max_depth?: number;
+    min_confidence?: number;
+    direction?: "upstream" | "downstream";
+  } | null>(null);
+
+  const def = QUERY_DEFS.find((entry) => entry.kind === active)!;
+  const showDepth = active === "execution-trace" || active === "dependency-path" || active === "multi-hop";
+  const showMultiHopExtras = active === "multi-hop";
+
+  const result = useQuery<GraphTraceResponse>({
+    queryKey: ["graph-query", submitted],
+    enabled: submitted !== null && submitted.primary.length > 0,
+    queryFn: () => {
+      if (!submitted) throw new Error("no query submitted");
+      switch (submitted.kind) {
+        case "execution-trace":
+          return defaultApi.getGraphExecutionTrace({
+            run_id: submitted.primary,
+            max_depth: submitted.max_depth,
+          });
+        case "dependency-path":
+          return defaultApi.getGraphDependencyPath({
+            node_id: submitted.primary,
+            max_depth: submitted.max_depth,
+          });
+        case "retrieval-provenance":
+          return defaultApi.getGraphRetrievalProvenance({ run_id: submitted.primary });
+        case "prompt-provenance":
+          return defaultApi.getGraphPromptProvenance({ release_id: submitted.primary });
+        case "multi-hop":
+          return defaultApi.getGraphMultiHop({
+            node_id: submitted.primary,
+            max_hops: submitted.max_depth,
+            min_confidence: submitted.min_confidence,
+            direction: submitted.direction,
+          });
+      }
+    },
+    staleTime: 5_000,
+  });
+
+  function handleSubmit(event: React.FormEvent) {
+    event.preventDefault();
+    const trimmed = primary.trim();
+    if (!trimmed) return;
+    const depthNum = Number.parseInt(maxDepth, 10);
+    const confNum = Number.parseFloat(minConfidence);
+    setSubmitted({
+      kind: active,
+      primary: trimmed,
+      max_depth: Number.isFinite(depthNum) && depthNum > 0 ? depthNum : undefined,
+      min_confidence:
+        showMultiHopExtras && Number.isFinite(confNum) && confNum >= 0 && confNum <= 1
+          ? confNum
+          : undefined,
+      direction: showMultiHopExtras ? direction : undefined,
+    });
+  }
+
+  const resultGraph = useMemo(() => buildSimulationGraph(result.data, 200), [result.data]);
+  const resultError =
+    result.error instanceof Error ? result.error.message : "Unable to load query result.";
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center gap-0.5 rounded border border-gray-200 dark:border-zinc-800 bg-gray-50 dark:bg-zinc-900 p-0.5 flex-wrap">
+        {QUERY_DEFS.map((entry) => (
+          <button
+            key={entry.kind}
+            type="button"
+            onClick={() => {
+              setActive(entry.kind);
+              setSubmitted(null);
+            }}
+            className={clsx(
+              "px-2.5 py-1 rounded text-[11px] font-medium transition-colors",
+              active === entry.kind
+                ? "bg-gray-200 dark:bg-zinc-700 text-gray-900 dark:text-zinc-100"
+                : "text-gray-400 dark:text-zinc-500 hover:text-gray-700 dark:hover:text-zinc-300",
+            )}
+          >
+            {entry.label}
+          </button>
+        ))}
+      </div>
+
+      <p className="text-[12px] text-gray-400 dark:text-zinc-600 leading-relaxed">{def.description}</p>
+
+      <form
+        onSubmit={handleSubmit}
+        className="flex flex-wrap items-end gap-3 p-3 rounded-lg border border-gray-200 dark:border-zinc-800 bg-gray-50/60 dark:bg-zinc-900/60"
+      >
+        <label className="flex flex-col gap-1 flex-1 min-w-[240px]">
+          <span className="text-[10px] font-semibold text-gray-400 dark:text-zinc-600 uppercase tracking-wider">
+            {def.inputLabel}
+          </span>
+          <input
+            value={primary}
+            onChange={(event) => setPrimary(event.target.value)}
+            placeholder={def.inputPlaceholder}
+            className="rounded border border-gray-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 text-[12px] text-gray-800 dark:text-zinc-200 placeholder-zinc-600 px-2 py-1.5 font-mono focus:outline-none focus:border-indigo-500 transition-colors"
+          />
+        </label>
+
+        {showDepth && (
+          <label className="flex flex-col gap-1 w-28">
+            <span className="text-[10px] font-semibold text-gray-400 dark:text-zinc-600 uppercase tracking-wider">
+              {active === "multi-hop" ? "Max Hops" : "Max Depth"}
+            </span>
+            <input
+              type="number"
+              min={1}
+              max={20}
+              value={maxDepth}
+              onChange={(event) => setMaxDepth(event.target.value)}
+              className="rounded border border-gray-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 text-[12px] text-gray-800 dark:text-zinc-200 px-2 py-1.5 font-mono focus:outline-none focus:border-indigo-500 transition-colors"
+            />
+          </label>
+        )}
+
+        {showMultiHopExtras && (
+          <>
+            <label className="flex flex-col gap-1 w-32">
+              <span className="text-[10px] font-semibold text-gray-400 dark:text-zinc-600 uppercase tracking-wider">
+                Min Confidence
+              </span>
+              <input
+                type="number"
+                min={0}
+                max={1}
+                step={0.05}
+                value={minConfidence}
+                onChange={(event) => setMinConfidence(event.target.value)}
+                placeholder="0.0–1.0"
+                className="rounded border border-gray-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 text-[12px] text-gray-800 dark:text-zinc-200 px-2 py-1.5 font-mono focus:outline-none focus:border-indigo-500 transition-colors"
+              />
+            </label>
+            <label className="flex flex-col gap-1 w-32">
+              <span className="text-[10px] font-semibold text-gray-400 dark:text-zinc-600 uppercase tracking-wider">
+                Direction
+              </span>
+              <select
+                value={direction}
+                onChange={(event) => setDirection(event.target.value as "upstream" | "downstream")}
+                className="rounded border border-gray-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 text-[12px] text-gray-800 dark:text-zinc-200 px-2 py-1.5 focus:outline-none focus:border-indigo-500 transition-colors"
+              >
+                <option value="downstream">downstream</option>
+                <option value="upstream">upstream</option>
+              </select>
+            </label>
+          </>
+        )}
+
+        <button
+          type="submit"
+          disabled={primary.trim().length === 0}
+          className="px-3 py-1.5 rounded border border-indigo-500/40 bg-indigo-500/10 text-indigo-300 text-[12px] font-medium hover:bg-indigo-500/20 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+        >
+          Run query
+        </button>
+      </form>
+
+      {submitted === null ? (
+        <div className="rounded-lg border border-dashed border-gray-200 dark:border-zinc-800 bg-gray-50/30 dark:bg-zinc-900/30 px-4 py-8 text-center text-[12px] text-gray-400 dark:text-zinc-600">
+          Enter an ID above and click <span className="font-mono text-gray-500 dark:text-zinc-400">Run query</span> to
+          render the {def.label.toLowerCase()} subgraph.
+        </div>
+      ) : result.isLoading ? (
+        <div className="rounded-lg border border-gray-200 dark:border-zinc-800 bg-gray-50/60 dark:bg-zinc-900/60 p-8 flex items-center justify-center gap-3 text-sm text-gray-500 dark:text-zinc-400">
+          <Loader2 size={16} className="animate-spin" />
+          Running {def.label.toLowerCase()}…
+        </div>
+      ) : result.isError ? (
+        <div className="rounded-lg border border-red-800/40 bg-red-500/5 px-4 py-3 flex items-start gap-3">
+          <Info size={14} className="text-red-500 shrink-0 mt-0.5" />
+          <div className="flex-1 min-w-0">
+            <p className="text-[12px] font-medium text-red-400">Query failed</p>
+            <p className="text-[11px] text-red-300/80 mt-0.5">{resultError}</p>
+          </div>
+          <button
+            onClick={() => void result.refetch()}
+            className="shrink-0 px-2 py-1 rounded text-[11px] border border-red-800/40 text-red-300 hover:bg-red-900/30 transition-colors"
+          >
+            Retry
+          </button>
+        </div>
+      ) : resultGraph.nodes.length === 0 ? (
+        <div className="rounded-lg border border-gray-200 dark:border-zinc-800 bg-gray-50/60 dark:bg-zinc-900/60 px-4 py-6 text-center text-[12px] text-gray-400 dark:text-zinc-600">
+          Query returned no nodes. The seed ID may not exist in the current project scope,
+          or the graph has no matching edges yet.
+        </div>
+      ) : (
+        <ForceGraph graph={resultGraph} />
+      )}
+    </div>
+  );
+}
+
 // ── Page ──────────────────────────────────────────────────────────────────────
 
-type View = "simulation" | "schema";
+type View = "simulation" | "queries" | "schema";
 
 export function GraphPage() {
   const [scope] = useScope();
@@ -721,7 +1067,7 @@ export function GraphPage() {
 
   const liveNodes = trace?.nodes ?? [];
   const liveEdges = trace?.edges ?? [];
-  const runtimeGraph = useMemo(() => buildRuntimeSimulationGraph(trace, 100), [trace]);
+  const runtimeGraph = useMemo(() => buildSimulationGraph(trace, 150), [trace]);
   const liveCounts = useMemo(() => {
     return liveNodes.reduce((acc, node) => {
       acc[node.kind] = (acc[node.kind] ?? 0) + 1;
@@ -754,7 +1100,7 @@ export function GraphPage() {
         <span className="text-[10px] text-gray-300 dark:text-zinc-600">Implements RFC 015</span>
 
         <div className="ml-4 flex items-center gap-0.5 rounded border border-gray-200 dark:border-zinc-800 bg-gray-50 dark:bg-zinc-900 p-0.5">
-          {(["simulation", "schema"] as View[]).map((nextView) => (
+          {(["simulation", "queries", "schema"] as View[]).map((nextView) => (
             <button
               key={nextView}
               onClick={() => setView(nextView)}
@@ -790,8 +1136,8 @@ export function GraphPage() {
             {view === "simulation" ? (
               <>
                 <div className="text-[12px] text-gray-400 dark:text-zinc-600 leading-relaxed">
-                  Live session → run → task graph for the current project scope.
-                  {runtimeNodeCount > 0 ? ` Rendering ${runtimeNodeCount} runtime nodes from ${liveNodes.length} total graph nodes.` : " Waiting for runtime activity to populate the trace."}
+                  Live knowledge graph for the current project scope — every emitted node kind is rendered.
+                  {runtimeNodeCount > 0 ? ` Rendering ${runtimeNodeCount} of ${liveNodes.length} graph nodes.` : " Waiting for runtime activity to populate the trace."}
                 </div>
 
                 {isLoading ? (
@@ -825,6 +1171,8 @@ export function GraphPage() {
                   <ForceGraph graph={runtimeGraph} />
                 )}
               </>
+            ) : view === "queries" ? (
+              <QueriesPanel />
             ) : (
               <>
                 <div className="flex items-start gap-8 py-3 px-4 rounded-lg border border-gray-200 dark:border-zinc-800 bg-gray-50/60 dark:bg-zinc-900/60">

@@ -1071,6 +1071,62 @@ export function createApiClient(config: ApiClientConfig) {
       return get(`/v1/graph/trace?${qs}`);
     },
 
+    /** GET /v1/graph/execution-trace/:run_id — execution subgraph rooted at a run. */
+    getGraphExecutionTrace: (params: {
+      run_id: string;
+      max_depth?: number;
+    }): Promise<import("./types").GraphTraceResponse> => {
+      const qs = new URLSearchParams();
+      if (params.max_depth !== undefined) qs.set("max_depth", String(params.max_depth));
+      return get(`/v1/graph/execution-trace/${encodeURIComponent(params.run_id)}?${qs}`);
+    },
+
+    /**
+     * GET /v1/graph/dependency-path/:run_id — downstream dependency path.
+     *
+     * The backend path-param is named `:run_id` but the handler treats it
+     * as a generic `node_id` (it is fed straight into
+     * `GraphQuery::DependencyPath { node_id }`), so any graph node works.
+     * Direction is fixed to `downstream` on the server today; there is no
+     * upstream toggle exposed by this route.
+     */
+    getGraphDependencyPath: (params: {
+      node_id: string;
+      max_depth?: number;
+    }): Promise<import("./types").GraphTraceResponse> => {
+      const qs = new URLSearchParams();
+      if (params.max_depth !== undefined) qs.set("max_depth", String(params.max_depth));
+      return get(`/v1/graph/dependency-path/${encodeURIComponent(params.node_id)}?${qs}`);
+    },
+
+    /** GET /v1/graph/retrieval-provenance/:run_id — answer → chunk → document → source lineage. */
+    getGraphRetrievalProvenance: (params: {
+      run_id: string;
+    }): Promise<import("./types").GraphTraceResponse> => {
+      return get(`/v1/graph/retrieval-provenance/${encodeURIComponent(params.run_id)}`);
+    },
+
+    /** GET /v1/graph/prompt-provenance/:release_id — prompt release lineage. */
+    getGraphPromptProvenance: (params: {
+      release_id: string;
+    }): Promise<import("./types").GraphTraceResponse> => {
+      return get(`/v1/graph/prompt-provenance/${encodeURIComponent(params.release_id)}`);
+    },
+
+    /** GET /v1/graph/multi-hop/:node_id — generic BFS traversal. */
+    getGraphMultiHop: (params: {
+      node_id: string;
+      max_hops?: number;
+      min_confidence?: number;
+      direction?: "upstream" | "downstream";
+    }): Promise<import("./types").GraphTraceResponse> => {
+      const qs = new URLSearchParams();
+      if (params.max_hops !== undefined) qs.set("max_hops", String(params.max_hops));
+      if (params.min_confidence !== undefined) qs.set("min_confidence", String(params.min_confidence));
+      if (params.direction) qs.set("direction", params.direction);
+      return get(`/v1/graph/multi-hop/${encodeURIComponent(params.node_id)}?${qs}`);
+    },
+
     /** GET /v1/sources — list registered signal sources. */
     getSources: (params?: {
       tenant_id?: string;
