@@ -44,6 +44,26 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   correctly; the new test locks in that behavior too so a future
   refactor can't silently regress it the way #234 did.
 
+- **DecisionsPage Cache tab crashed with "Objects are not valid as a
+  React child" (closes #240).** The UI `CacheEntry.outcome` type
+  declared `string`, but `GET /v1/decisions/cache` emits the same
+  nested `{outcome, deny_reason?}` struct as `Decision.outcome`, so
+  `OutcomePill` received an object and React bailed. `scope` was
+  similarly a `ProjectScope` object being rendered directly. The
+  `CacheEntry` type now mirrors the wire shape, the outcome column
+  reads `r.outcome.outcome`, and `scope` is folded to a
+  `tenant/workspace/project` label via `scopeLabel`. Row keys moved
+  from the non-existent `key` field to `decision_id`.
+
+- **AuditLog "Older" pagination permanently disabled (closes #239).**
+  The backend returns `cairn_api::ListResponse<T>` which serializes
+  via `#[serde(rename_all = "camelCase")]`, so the wire envelope is
+  `{items, hasMore}`, but `AuditLogResponse` in `ui/src/lib/types.ts`
+  and the reader in `AuditLogPage.tsx` both read `has_more`. The
+  boolean was always `undefined`, so `Older` was always disabled.
+  Types and the reader now use `hasMore` to match the wire
+  contract.
+
 - **Eval `dataset_id` lost on restart (closes #220).** `POST
   /v1/evals/runs` persisted an `EvalRunStarted` event so runs would
   survive a reboot, but the event only carried prompt-asset /
@@ -240,6 +260,26 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `SkillCatalog`.
 
 ### Fixed
+
+- **Backend: `EvalRunStarted` persists `dataset_id` / `rubric_id` /
+  `baseline_id` (closes #223, supersedes #220).** `POST /v1/evals/runs`
+  accepted the three linkage fields in the request body but dropped
+  them before emitting the `EvalRunStarted` event, so the binding was
+  invisible on `GET /v1/evals/runs/:id` and vanished entirely on
+  event-log replay. The event now carries the three ids (all
+  `Option<String>` with `#[serde(default)]` for backward-compat),
+  `create_eval_run_handler` threads them from the request into the
+  event and the in-memory `EvalRun` record via
+  `set_dataset_id` / `set_rubric_id` / `set_baseline_id`, and
+  `AppState::replay_evals` re-binds them on boot. Covered by
+  `tests/test_http_evals_full.rs::eval_run_full_contract_roundtrip`
+  and a new replay-survives-restart assertion.
+
+- **Backend: `GET /v1/evals/rubrics` + `/v1/evals/baselines` return
+  200 with the list shape the UI consumes (closes #223).** The routes
+  are registered in the preserved catalog and the axum fold; this PR
+  locks the contract with an integration test so they cannot regress
+  to 405 again.
 
 - **Backend: `POST /v1/prompts/releases/:id/request-approval` routed to
   the wrong handler (closes #222).** QA2 Slice 9 surfaced a 422 on every

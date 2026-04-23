@@ -1116,6 +1116,13 @@ pub struct EvalRunStarted {
     /// pre-#220 event log entries.
     #[serde(default)]
     pub dataset_id: Option<String>,
+    /// Rubric id attached at run-create time (issue #223). `#[serde(default)]`
+    /// for backward-compat with pre-#223 event-log entries.
+    #[serde(default)]
+    pub rubric_id: Option<String>,
+    /// Baseline id attached at run-create time (issue #223).
+    #[serde(default)]
+    pub baseline_id: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

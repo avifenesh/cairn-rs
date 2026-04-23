@@ -156,7 +156,7 @@ export function AuditLogPage() {
   });
 
   const entries = data?.items ?? [];
-  const hasMore = Boolean(data?.has_more);
+  const hasMore = Boolean(data?.hasMore);
   const atNewest = cursorStack.length === 0;
 
   // Reset paging when filters that change the result set flip.
