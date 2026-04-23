@@ -1577,36 +1577,52 @@ export function createApiClient(config: ApiClientConfig) {
       return get(`/v1/prompts/assets/${encodeURIComponent(assetId)}/versions${q}`);
     },
 
-    /** POST /v1/prompts/assets/:id/versions — create a new version. */
+    /** POST /v1/prompts/assets/:id/versions — create a new version. Server mints `pv_<uuid>` when `prompt_version_id` is omitted. */
     createPromptVersion: (assetId: string, body: {
-      prompt_version_id: string;
+      prompt_version_id?: string;
       content_hash: string;
       content?: string;
       template_vars?: import("./types").PromptTemplateVar[];
+      tenant_id?: string;
+      workspace_id?: string;
+      project_id?: string;
     }): Promise<import("./types").PromptVersionRecord> =>
-      post(`/v1/prompts/assets/${encodeURIComponent(assetId)}/versions`, body),
+      post(`/v1/prompts/assets/${encodeURIComponent(assetId)}/versions`, withScope(body)),
 
     /** GET /v1/prompts/assets/:id/versions/:vid/diff — diff two versions. */
     getVersionDiff: (assetId: string, versionId: string, compareTo: string): Promise<import("./types").PromptVersionDiff> =>
       get(`/v1/prompts/assets/${encodeURIComponent(assetId)}/versions/${encodeURIComponent(versionId)}/diff?compare_to=${encodeURIComponent(compareTo)}`),
 
-    /** GET /v1/prompts/releases — list all releases. */
-    getPromptReleases: (params?: { limit?: number; offset?: number }): Promise<import("./types").ListResponse<import("./types").PromptReleaseRecord>> => {
+    /** GET /v1/prompts/releases — list releases scoped to the active project. */
+    getPromptReleases: (params?: {
+      limit?: number;
+      offset?: number;
+      tenant_id?: string;
+      workspace_id?: string;
+      project_id?: string;
+    }): Promise<import("./types").ListResponse<import("./types").PromptReleaseRecord>> => {
+      const merged = withScope(params);
       const qs = new URLSearchParams();
-      if (params?.limit  !== undefined) qs.set("limit",  String(params.limit));
-      if (params?.offset !== undefined) qs.set("offset", String(params.offset));
+      if (merged.limit        !== undefined) qs.set("limit",        String(merged.limit));
+      if (merged.offset       !== undefined) qs.set("offset",       String(merged.offset));
+      if (merged.tenant_id    !== undefined) qs.set("tenant_id",    merged.tenant_id);
+      if (merged.workspace_id !== undefined) qs.set("workspace_id", merged.workspace_id);
+      if (merged.project_id   !== undefined) qs.set("project_id",   merged.project_id);
       const q = qs.toString() ? `?${qs}` : "";
       return get(`/v1/prompts/releases${q}`);
     },
 
-    /** POST /v1/prompts/releases — create a release from a version. */
+    /** POST /v1/prompts/releases — create a release from a version. Server mints `rel_<uuid>` when `prompt_release_id` is omitted. */
     createPromptRelease: (body: {
-      prompt_release_id: string;
+      prompt_release_id?: string;
       prompt_asset_id: string;
       prompt_version_id: string;
       release_tag?: string;
+      tenant_id?: string;
+      workspace_id?: string;
+      project_id?: string;
     }): Promise<import("./types").PromptReleaseRecord> =>
-      post("/v1/prompts/releases", body),
+      post("/v1/prompts/releases", withScope(body)),
 
     /** POST /v1/prompts/releases/:id/activate — activate a release. */
     activatePromptRelease: (releaseId: string): Promise<import("./types").PromptReleaseRecord> =>
