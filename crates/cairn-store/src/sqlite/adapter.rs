@@ -78,17 +78,26 @@ impl DbAdapter for SqliteAdapter {
             .await
             .map_err(|e| StoreError::Migration(format!("schema: {e}")))?;
 
-        // Best-effort column adds for pre-existing databases. SQLite lacks
-        // `ADD COLUMN IF NOT EXISTS`, so we swallow the "duplicate column"
-        // error that fires on freshly-created schemas where the column is
-        // already present.
-        for stmt in &["ALTER TABLE workspaces ADD COLUMN archived_at INTEGER"] {
-            if let Err(e) = sqlx::query(stmt).execute(&self.pool).await {
-                let msg = e.to_string();
-                if !msg.contains("duplicate column") {
-                    return Err(StoreError::Migration(format!("{stmt}: {msg}")));
-                }
-            }
+        // Column adds for pre-existing databases. SQLite lacks `ADD COLUMN IF
+        // NOT EXISTS`, so we consult `pragma_table_info` to decide whether the
+        // column is already present before running ALTER — this avoids relying
+        // on brittle substring matches against sqlx error strings that differ
+        // across SQLite and sqlx versions / locales.
+        let archived_at_exists = sqlx::query_scalar::<_, i64>(
+            "SELECT 1 FROM pragma_table_info('workspaces') \
+               WHERE name = 'archived_at' LIMIT 1",
+        )
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|e| StoreError::Migration(format!("pragma workspaces.archived_at: {e}")))?
+        .is_some();
+
+        if !archived_at_exists {
+            let stmt = "ALTER TABLE workspaces ADD COLUMN archived_at INTEGER";
+            sqlx::query(stmt)
+                .execute(&self.pool)
+                .await
+                .map_err(|e| StoreError::Migration(format!("{stmt}: {e}")))?;
         }
 
         Ok(())

@@ -61,11 +61,25 @@ function WorkspaceCard({
   onDelete: () => void;
   deleting: boolean;
 }) {
+  // The card container is NOT a native <button> because it hosts a nested
+  // interactive Delete control; nested buttons are invalid HTML and break
+  // keyboard navigation. We model the activate action with a div + role +
+  // onKeyDown, and the nested Delete as a real <button type="button">.
   return (
-    <button
+    <div
+      role="button"
+      tabIndex={0}
       onClick={onActivate}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          onActivate();
+        }
+      }}
+      aria-label={`Activate workspace ${ws.workspace_id}`}
       className={clsx(
-        'group w-full text-left rounded-xl border p-4 transition-all',
+        'group w-full text-left rounded-xl border p-4 transition-all cursor-pointer',
+        'focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/40',
         isActive
           ? 'border-indigo-500/60 bg-indigo-950/20 ring-1 ring-indigo-500/30'
           : 'border-gray-200 dark:border-zinc-800 bg-gray-50 dark:bg-zinc-900 hover:border-gray-200 dark:border-zinc-700 hover:bg-gray-100/60 dark:hover:bg-zinc-800/60',
@@ -114,30 +128,31 @@ function WorkspaceCard({
             deleting the workspace you're currently viewing would leave the
             operator in an unresolvable scope until they switch. */}
         {!isActive && (
-          <span
-            role="button"
-            tabIndex={0}
+          <button
+            type="button"
+            disabled={deleting}
             aria-label={`Delete workspace ${ws.workspace_id}`}
-            onClick={(e) => { e.stopPropagation(); if (!deleting) onDelete(); }}
+            onClick={(e) => {
+              e.stopPropagation();
+              onDelete();
+            }}
             onKeyDown={(e) => {
-              if (e.key === 'Enter' || e.key === ' ') {
-                e.preventDefault();
-                e.stopPropagation();
-                if (!deleting) onDelete();
-              }
+              // Stop Enter/Space from also bubbling up and triggering the
+              // outer card's activate handler.
+              if (e.key === 'Enter' || e.key === ' ') e.stopPropagation();
             }}
             className={clsx(
-              'inline-flex items-center gap-1 text-[10px] rounded px-1.5 py-0.5 cursor-pointer',
+              'inline-flex items-center gap-1 text-[10px] rounded px-1.5 py-0.5',
               'text-gray-400 dark:text-zinc-500 hover:text-red-400 hover:bg-red-500/10 transition-colors',
               deleting && 'opacity-50 cursor-wait',
             )}
             title="Delete workspace"
           >
             <Trash2 size={10} /> {deleting ? 'Deleting…' : 'Delete'}
-          </span>
+          </button>
         )}
       </div>
-    </button>
+    </div>
   );
 }
 

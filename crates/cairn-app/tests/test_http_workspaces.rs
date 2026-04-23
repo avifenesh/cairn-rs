@@ -27,9 +27,7 @@ async fn workspace_delete_soft_deletes_and_filters_list() {
     for (ws_id, name) in [("ws_keep_218", "keep"), ("ws_gone_218", "gone")] {
         let res = h
             .client()
-            .post(format!(
-                "{base}/v1/admin/tenants/{tenant}/workspaces"
-            ))
+            .post(format!("{base}/v1/admin/tenants/{tenant}/workspaces"))
             .bearer_auth(&h.admin_token)
             .json(&json!({ "workspace_id": ws_id, "name": name }))
             .send()
@@ -138,9 +136,7 @@ async fn workspace_delete_soft_deletes_and_filters_list() {
         .find(|w| w.get("workspace_id").and_then(|s| s.as_str()) == Some("ws_gone_218"))
         .expect("archived workspace surfaced via include_archived");
     assert!(
-        gone.get("archived_at")
-            .and_then(|v| v.as_u64())
-            .is_some(),
+        gone.get("archived_at").and_then(|v| v.as_u64()).is_some(),
         "archived_at must be populated: {gone}",
     );
 
@@ -154,7 +150,11 @@ async fn workspace_delete_soft_deletes_and_filters_list() {
         .send()
         .await
         .expect("idempotent delete");
-    assert_eq!(res.status().as_u16(), 204, "second DELETE must still be 204");
+    assert_eq!(
+        res.status().as_u16(),
+        204,
+        "second DELETE must still be 204"
+    );
 
     // Unknown workspace returns 404.
     let res = h

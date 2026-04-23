@@ -83,19 +83,52 @@ where
         offset: usize,
         include_archived: bool,
     ) -> Result<Vec<WorkspaceRecord>, RuntimeError> {
-        // Fetch an unpaginated-looking window large enough to filter, then
-        // re-paginate. The projection supports only straightforward tenant
-        // windowing, so archived-filtering is applied in the service layer.
-        let raw = self
-            .store
-            .list_by_tenant(tenant_id, usize::MAX, 0)
-            .await?;
-        let filtered: Vec<WorkspaceRecord> = if include_archived {
-            raw
-        } else {
-            raw.into_iter().filter(|w| w.archived_at.is_none()).collect()
-        };
-        Ok(filtered.into_iter().skip(offset).take(limit).collect())
+        if limit == 0 {
+            return Ok(Vec::new());
+        }
+
+        // The `WorkspaceReadModel` trait only supports tenant pagination, not
+        // archived-aware filtering. Rather than loading every workspace for the
+        // tenant up-front, page through the store in bounded batches and
+        // apply the archived filter as we go. This keeps memory usage bounded
+        // on tenants that accumulate many soft-deleted workspaces over time.
+        let batch_size = limit.max(128);
+        let mut store_offset = 0usize;
+        let mut skipped = 0usize;
+        let mut results: Vec<WorkspaceRecord> = Vec::with_capacity(limit);
+
+        loop {
+            let batch = self
+                .store
+                .list_by_tenant(tenant_id, batch_size, store_offset)
+                .await?;
+
+            if batch.is_empty() {
+                break;
+            }
+
+            let batch_len = batch.len();
+            for workspace in batch {
+                if !include_archived && workspace.archived_at.is_some() {
+                    continue;
+                }
+                if skipped < offset {
+                    skipped += 1;
+                    continue;
+                }
+                results.push(workspace);
+                if results.len() == limit {
+                    return Ok(results);
+                }
+            }
+
+            if batch_len < batch_size {
+                break;
+            }
+            store_offset += batch_len;
+        }
+
+        Ok(results)
     }
 
     async fn archive(
@@ -128,11 +161,7 @@ where
             .unwrap_or_default()
             .as_millis() as u64;
 
-        let project = ProjectKey::new(
-            tenant_id.clone(),
-            workspace_id.clone(),
-            "__system__",
-        );
+        let project = ProjectKey::new(tenant_id.clone(), workspace_id.clone(), "__system__");
 
         let event = make_envelope(RuntimeEvent::WorkspaceArchived(WorkspaceArchived {
             project,
