@@ -9,6 +9,7 @@ import { ErrorFallback } from "../components/ErrorFallback";
 import { useToast } from "../components/Toast";
 import { clsx } from "clsx";
 import { sectionLabel } from "../lib/design-system";
+import { ApiError } from "../lib/api";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -16,13 +17,25 @@ const authHeaders = () => ({ Authorization: `Bearer ${localStorage.getItem("cair
 
 /** Fetch wrapper that throws on non-2xx. The raw-`fetch` call sites below
  *  previously ignored HTTP errors entirely — 4xx/5xx returned undefined and
- *  the success toast fired as if the server had honored the request. */
+ *  the success toast fired as if the server had honored the request.
+ *
+ *  Throws `ApiError` (not a generic `Error`) so the global 401 interceptor
+ *  in `main.tsx` recognizes auth-expired failures and routes the operator
+ *  back to the LoginPage. Mirrors the behavior of `apiFetch` in `api.ts`
+ *  so 401 handling stays consistent across the UI. */
 async function assertOk(path: string, init: RequestInit): Promise<Response> {
   const res = await fetch(path, init);
   if (!res.ok) {
-    let body = '';
-    try { body = await res.text(); } catch { /* empty */ }
-    throw new Error(`HTTP ${res.status}${body ? `: ${body}` : ''}`);
+    let code = 'unknown_error';
+    let message = `HTTP ${res.status}`;
+    try {
+      const body = await res.json();
+      code = body?.code ?? code;
+      message = body?.message ?? message;
+    } catch {
+      // Non-JSON body — fall back to the default message above.
+    }
+    throw new ApiError(res.status, code, message);
   }
   return res;
 }
