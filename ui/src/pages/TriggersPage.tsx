@@ -10,10 +10,9 @@ import { useToast } from "../components/Toast";
 import { clsx } from "clsx";
 import { useScope } from "../hooks/useScope";
 import { sectionLabel } from "../lib/design-system";
+import { defaultApi } from "../lib/api";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
-
-const authHeaders = () => ({ Authorization: `Bearer ${localStorage.getItem("cairn_token") || ""}` });
 
 function fmtRelative(ms: number): string {
   const d = Date.now() - ms;
@@ -86,54 +85,39 @@ function StatePill({ state }: { state: string }) {
 export function TriggersPage() {
   const [tab, setTab] = useState<"triggers" | "templates">("triggers");
   const [scope] = useScope();
-  // Backend `trigger_routes.rs` parses `:project` as
-  // "tenant_id/workspace_id/project_id" and silently falls back to the
-  // DEFAULT_* constants when it cannot split on `/`. Sending just
-  // `scope.project_id` therefore leaks triggers across tenants — always
-  // send the full slash path. See FE audit 2026-04-22 (CRITICAL).
-  //
-  // Axum 0.7's `:project` param captures a single path segment, so the
-  // literal `/` characters MUST be percent-encoded (to `%2F`) on the
-  // wire; the server decodes them back to `/` before handing the
-  // segment to `parse_project_scope`. Using plain slashes here would
-  // route to a completely different (non-existent) path and return 404.
-  const projectPath = encodeURIComponent(
-    `${scope.tenant_id}/${scope.workspace_id}/${scope.project_id}`,
-  );
+  // Slash-path scope key for query caching. Route-path encoding +
+  // cross-tenant fallback concerns live in `defaultApi.*Trigger*` —
+  // see PR #132 and issue #154.
+  const projectKey = `${scope.tenant_id}/${scope.workspace_id}/${scope.project_id}`;
   const qc = useQueryClient();
   const toast = useToast();
 
   const triggersQ = useQuery<Trigger[]>({
-    queryKey: ["triggers", projectPath],
-    queryFn: async () => {
-      const res = await fetch(`/v1/projects/${projectPath}/triggers`, { headers: authHeaders() });
-      const data = await res.json();
-      return Array.isArray(data) ? data : (data.items ?? []);
-    },
+    queryKey: ["triggers", projectKey],
+    queryFn: () => defaultApi.listTriggers<Trigger>(scope),
     refetchInterval: 30_000,
   });
 
   const templatesQ = useQuery<RunTemplate[]>({
-    queryKey: ["run-templates", projectPath],
-    queryFn: async () => {
-      const res = await fetch(`/v1/projects/${projectPath}/run-templates`, { headers: authHeaders() });
-      const data = await res.json();
-      return Array.isArray(data) ? data : (data.items ?? []);
-    },
+    queryKey: ["run-templates", projectKey],
+    queryFn: () => defaultApi.listRunTemplates<RunTemplate>(scope),
     refetchInterval: 30_000,
   });
 
   const enableMut = useMutation({
-    mutationFn: (id: string) => fetch(`/v1/projects/${projectPath}/triggers/${id}/enable`, { method: "POST", headers: authHeaders() }),
+    mutationFn: (id: string) => defaultApi.enableTrigger(id, scope),
     onSuccess: () => { toast.success("Trigger enabled."); void qc.invalidateQueries({ queryKey: ["triggers"] }); },
+    onError: (e: Error) => toast.error(e.message),
   });
   const disableMut = useMutation({
-    mutationFn: (id: string) => fetch(`/v1/projects/${projectPath}/triggers/${id}/disable`, { method: "POST", headers: authHeaders() }),
+    mutationFn: (id: string) => defaultApi.disableTrigger(id, scope),
     onSuccess: () => { toast.success("Trigger disabled."); void qc.invalidateQueries({ queryKey: ["triggers"] }); },
+    onError: (e: Error) => toast.error(e.message),
   });
   const deleteMut = useMutation({
-    mutationFn: (id: string) => fetch(`/v1/projects/${projectPath}/triggers/${id}`, { method: "DELETE", headers: authHeaders() }),
+    mutationFn: (id: string) => defaultApi.deleteTrigger(id, scope),
     onSuccess: () => { toast.success("Trigger deleted."); void qc.invalidateQueries({ queryKey: ["triggers"] }); },
+    onError: (e: Error) => toast.error(e.message),
   });
 
   const triggers = triggersQ.data ?? [];
