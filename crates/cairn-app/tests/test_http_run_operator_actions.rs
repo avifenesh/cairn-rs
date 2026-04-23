@@ -382,3 +382,64 @@ async fn intervene_records_intervention() {
         "inject_message action must be recorded: got {actions:?}",
     );
 }
+
+/// Regression for issue #216. A freshly-created run sits in `pending`
+/// state with no lease — it cannot be paused because `ff_suspend_execution`
+/// requires a lease fence (`fence_required`). Before the fix, the FF
+/// rejection collapsed into `FabricError::Internal` → `RuntimeError::Internal`
+/// → HTTP 500, which the TestHarness lifecycle suite correctly flagged as
+/// a server fault.
+///
+/// The contract after the fix: pause on a not-pausable run returns 409
+/// Conflict with code `invalid_state_transition`, not a 500. This lets
+/// clients distinguish a caller-driven state conflict from a genuine
+/// server outage and dispatch cleanly (retry vs escalate).
+#[tokio::test]
+async fn pause_on_pending_run_returns_409_not_500() {
+    let h = LiveHarness::setup().await;
+    let (_session_id, run_id) = create_session_and_run(&h, "pausepending").await;
+
+    let res = h
+        .client()
+        .post(format!("{}/v1/runs/{}/pause", h.base_url, run_id))
+        .bearer_auth(&h.admin_token)
+        .header("X-Cairn-Tenant", TENANT)
+        .header("X-Cairn-Workspace", WORKSPACE)
+        .header("X-Cairn-Project", PROJECT)
+        .json(&json!({ "reason_kind": "operator_pause", "actor": "operator-test" }))
+        .send()
+        .await
+        .expect("POST /v1/runs/:id/pause reaches server");
+    let (status, body_text) = read_once(res).await;
+
+    // The key assertion — must not 500. Was 500 before #216 fix.
+    assert_ne!(
+        status, 500,
+        "pause on pending run must not surface internal server error; body={body_text}",
+    );
+
+    // With the fix, FF's `fence_required` / `execution_not_active` codes
+    // round-trip as `RuntimeError::InvalidTransition` → 409 Conflict with
+    // code `invalid_state_transition`. A successful 200 (claimed-race) is
+    // also acceptable since the pre-fix suite already tolerated it.
+    assert!(
+        status == 409 || status == 200,
+        "expected 409 (invalid state) or 200 (race); got {status}; body={body_text}",
+    );
+
+    if status == 409 {
+        let body = parse_json(&body_text);
+        assert_eq!(
+            body.get("code").and_then(|c| c.as_str()),
+            Some("invalid_state_transition"),
+            "409 body must carry code=invalid_state_transition: {body:?}",
+        );
+        assert!(
+            body.get("message")
+                .and_then(|m| m.as_str())
+                .map(|m| !m.is_empty())
+                .unwrap_or(false),
+            "409 body must carry a non-empty message: {body:?}",
+        );
+    }
+}

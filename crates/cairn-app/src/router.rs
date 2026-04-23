@@ -211,6 +211,7 @@ impl ProviderBindingBootstrapService for AppProviderBootstrap<'_> {
         create_task_handler,
         create_tenant_handler,
         create_workspace_handler,
+        delete_workspace_handler,
         create_project_handler,
         create_provider_connection_handler,
         list_provider_bindings_handler
@@ -414,6 +415,10 @@ impl AppBootstrap {
                     (HttpMethod::Post, "/v1/admin/tenants/:tenant_id/workspaces") => {
                         router.route(&path, post(create_workspace_handler))
                     }
+                    (
+                        HttpMethod::Delete,
+                        "/v1/admin/tenants/:tenant_id/workspaces/:workspace_id",
+                    ) => router.route(&path, delete(delete_workspace_handler)),
                     (HttpMethod::Get, "/v1/admin/tenants/:tenant_id/operator-profiles") => {
                         router.route(&path, get(list_operator_profiles_handler))
                     }
@@ -1205,6 +1210,10 @@ impl AppBootstrap {
             .route(
                 "/v1/admin/tenants/:tenant_id/workspaces",
                 post(create_workspace_handler),
+            )
+            .route(
+                "/v1/admin/tenants/:tenant_id/workspaces/:workspace_id",
+                delete(delete_workspace_handler),
             )
             .route(
                 "/v1/admin/tenants/:tenant_id/operator-profiles",

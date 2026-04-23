@@ -543,8 +543,8 @@ pub(crate) async fn create_eval_run_handler(
     // deterministic event_id (`eval_create_<eval_run_id>`) so the event_log's
     // UNIQUE(event_id) constraint would 500 on any legitimate client retry.
     // Detect the duplicate upfront and return the existing run (200) instead
-    // of letting the store-append surface as an internal_error. (Copilot PR
-    // review on #227.)
+    // of letting the store-append surface as an internal_error.
+    // (Copilot PR review on #227.)
     let candidate_id = EvalRunId::new(body.eval_run_id.clone());
     if let Some(existing) = state.evals.get(&candidate_id) {
         return (StatusCode::OK, Json(existing)).into_response();
@@ -700,14 +700,19 @@ pub(crate) async fn create_eval_run_handler(
                 .created_by
                 .as_deref()
                 .map(cairn_domain::OperatorId::new),
+            // Issue #220 (dataset) + #223 (rubric + baseline): persist bindings
+            // so `replay_evals` can restore them on restart. Before this the
+            // linkage lived only in the in-memory `EvalsService` and was lost
+            // on reboot.
             dataset_id: body.dataset_id.clone(),
             rubric_id: body.rubric_id.clone(),
             baseline_id: body.baseline_id.clone(),
         }),
     );
     // Fail the request if we cannot persist — a 201 that silently loses the
-    // linkage on restart would reintroduce issue #223. Callers already have
-    // retry semantics (creating a run is idempotent by eval_run_id).
+    // linkage on restart would reintroduce issue #223. The handler is
+    // idempotent by eval_run_id (guarded above), so safe retry semantics are
+    // preserved.
     if let Err(e) = state.runtime.store.append(&[ev]).await {
         tracing::error!(
             %eval_run_id,

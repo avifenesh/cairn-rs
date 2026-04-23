@@ -11,6 +11,39 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **Workspace soft-delete via `DELETE /v1/admin/tenants/:t/workspaces/:w`
+  (closes #218).** Before this there was no way to remove a workspace
+  short of wiping the event log — every typo or stale dev workspace
+  piled up on the operator's sidebar forever. The backend now accepts
+  a `DELETE` on the workspace resource, emits a new
+  `WorkspaceArchived` event, and stamps `archived_at` on the
+  projection row. The list endpoint filters archived workspaces by
+  default; passing `?include_archived=true` surfaces them again for
+  audit. The in-memory, SQLite, and Postgres projections all track
+  the new column (SQLite adds it via best-effort `ALTER TABLE` for
+  existing dev databases; Postgres via a new `V020` migration).
+  `WorkspacesPage` gains a per-card **Delete** action (protected by a
+  confirm dialog, hidden on the currently-active workspace) wired to
+  a new `defaultApi.deleteWorkspace` helper; `WorkspaceRecord` picks
+  up an optional `archived_at` field on the UI side.
+
+### Fixed
+
+- **Eval `dataset_id` lost on restart (closes #220).** `POST
+  /v1/evals/runs` persisted an `EvalRunStarted` event so runs would
+  survive a reboot, but the event only carried prompt-asset /
+  version / release / created_by fields — not the dataset binding
+  submitted alongside them. `replay_evals()` rebuilt each run from
+  the event and silently dropped the dataset linkage, so after a
+  reboot `GET /v1/evals/runs/:id` came back with `dataset_id: null`
+  even though the operator had picked one in the form.
+  `EvalRunStarted` now carries an optional `dataset_id` (defaulted
+  via `#[serde(default)]` for backward-compatibility with pre-#220
+  event log entries). The handler populates it from the request
+  body and `replay_evals()` calls `set_dataset_id` on the
+  in-memory eval service when the event carries one, so the
+  binding round-trips through a full sigkill + replay cycle.
+
 - **GraphPage — full node-kind coverage + 5 provenance query tabs
   (closes #151).** The simulation view previously collapsed all 22
   backend `NodeKind` variants down to `session` / `run` / `task` via a
@@ -237,6 +270,30 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `knowledge_pack`), defaulting to `plain_text`. The request field name
   is unchanged so the API contract is untouched.
 
+- **Backend: `POST /v1/runs/:id/pause` returns 409 on invalid state
+  (closes #216).** Pausing a run that was not yet claimable (pending
+  state, no lease) previously crashed into a 500: FF's
+  `ff_suspend_execution` rejects with `fence_required` /
+  `execution_not_active`, which rolled up as `FabricError::Internal`
+  and then `RuntimeError::Internal`. The fabric adapter now classifies
+  the documented suspend-state rejection codes (`fence_required`,
+  `partial_fence_triple`, `execution_not_active`, `lease_revoked`,
+  `stale_lease`, `invalid_lease_for_suspend`, `already_suspended`,
+  `waitpoint_not_token_bound`) as `RuntimeError::InvalidTransition`,
+  and the HTTP error mapper returns 409 Conflict with code
+  `invalid_state_transition` for every `InvalidTransition` variant
+  (was 422). Regression covered end-to-end by
+  `test_http_run_operator_actions::pause_on_pending_run_returns_409_not_500`.
+- **Backend: duplicate credential for the same `(tenant, provider_id)`
+  returns 409 (closes #217).** `POST /v1/admin/tenants/:t/credentials`
+  silently accepted repeated posts with the same `provider_id`, both
+  returning 201 and accumulating two active records in the read model.
+  `CredentialServiceImpl::store` now rejects when an active credential
+  already exists for the pair, surfacing `RuntimeError::Conflict`; the
+  admin handler re-shapes this into a 409 with code
+  `credential_exists` and a message naming the tenant and provider.
+  Revoke-then-create still succeeds, preserving the rotation workflow.
+  Regression covered by `test_http_credentials`.
 - **UI: `PromptsPage` — create initial version alongside asset (#150).**
   `NewPromptForm` previously only posted to `/v1/prompts/assets`, leaving
   authors with an asset they could not release without a curl step. The

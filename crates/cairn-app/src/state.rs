@@ -572,16 +572,45 @@ impl AppState {
                         e.prompt_release_id.clone(),
                         e.created_by.clone(),
                     );
-                    // Re-bind dataset/rubric/baseline links (issue #223) so
-                    // operator-provided artifact bindings survive restart.
-                    if let Some(dataset_id) = e.dataset_id.clone() {
-                        let _ = self.evals.set_dataset_id(&e.eval_run_id, dataset_id);
+                    // Issue #220 (dataset) + #223 (rubric + baseline): restore
+                    // bindings that were previously only held in memory.
+                    // Defaults to None for pre-#220/#223 events
+                    // (serde default on `EvalRunStarted`).
+                    if let Some(dataset_id) = e.dataset_id.as_ref() {
+                        if let Err(err) = self
+                            .evals
+                            .set_dataset_id(&e.eval_run_id, dataset_id.clone())
+                        {
+                            tracing::warn!(
+                                eval_run_id = %e.eval_run_id,
+                                dataset_id = %dataset_id,
+                                "eval replay: set_dataset_id failed: {err}",
+                            );
+                        }
                     }
-                    if let Some(rubric_id) = e.rubric_id.clone() {
-                        let _ = self.evals.set_rubric_id(&e.eval_run_id, rubric_id);
+                    if let Some(rubric_id) = e.rubric_id.as_ref() {
+                        if let Err(err) = self
+                            .evals
+                            .set_rubric_id(&e.eval_run_id, rubric_id.clone())
+                        {
+                            tracing::warn!(
+                                eval_run_id = %e.eval_run_id,
+                                rubric_id = %rubric_id,
+                                "eval replay: set_rubric_id failed: {err}",
+                            );
+                        }
                     }
-                    if let Some(baseline_id) = e.baseline_id.clone() {
-                        let _ = self.evals.set_baseline_id(&e.eval_run_id, baseline_id);
+                    if let Some(baseline_id) = e.baseline_id.as_ref() {
+                        if let Err(err) = self
+                            .evals
+                            .set_baseline_id(&e.eval_run_id, baseline_id.clone())
+                        {
+                            tracing::warn!(
+                                eval_run_id = %e.eval_run_id,
+                                baseline_id = %baseline_id,
+                                "eval replay: set_baseline_id failed: {err}",
+                            );
+                        }
                     }
                     created += 1;
                 }

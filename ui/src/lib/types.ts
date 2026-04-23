@@ -278,6 +278,11 @@ export interface WorkspaceRecord {
   name: string;
   created_at: number; // unix ms
   updated_at: number; // unix ms
+  /**
+   * Unix-ms soft-delete timestamp (issue #218). `null` when the workspace is
+   * active. Populated for workspaces returned with `?include_archived=true`.
+   */
+  archived_at?: number | null;
 }
 
 // ── Sessions ──────────────────────────────────────────────────────────────────
