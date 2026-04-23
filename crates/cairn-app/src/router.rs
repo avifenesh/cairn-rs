@@ -830,11 +830,15 @@ impl AppBootstrap {
                     (HttpMethod::Get, "/v1/skills") => {
                         router.route(&path, get(list_skills_handler))
                     }
-                    // NOTE: /v1/skills/:id is registered in the dynamic-param
-                    // chain below — matchit 0.7 rejects `{id}` (the output of
-                    // `catalog_path_to_axum`) as a literal. Pass the catalog
-                    // entry through the catch-all arm so it still contributes
-                    // to OpenAPI discovery.
+                    // `/v1/skills/:id` is registered in the dynamic-param
+                    // `.route()` chain below — matchit 0.7 rejects the
+                    // `{id}` literal produced by `catalog_path_to_axum`.
+                    // Skip the fold without registering a no-op 501
+                    // shadow; returning `router` unchanged leaves the
+                    // dynamic-chain registration as the authoritative
+                    // binding. The catalog entry still contributes to
+                    // OpenAPI discovery because it's iterated directly.
+                    (HttpMethod::Get, "/v1/skills/:id") => router,
                     (HttpMethod::Get, "/v1/memory/search") => {
                         router.route(&path, get(memory_search_handler))
                     }
