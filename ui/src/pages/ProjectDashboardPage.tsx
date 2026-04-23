@@ -17,7 +17,7 @@ import {
 } from "lucide-react";
 import { clsx } from "clsx";
 import { Card } from "../components/Card";
-import { defaultApi } from "../lib/api";
+import { defaultApi, summariseCostItems } from "../lib/api";
 import { sectionLabel } from "../lib/design-system";
 import { EventLog } from "../components/EventLog";
 import { StatCard } from "../components/StatCard";
@@ -203,11 +203,14 @@ export function ProjectDashboardPage({ projectId }: ProjectDashboardPageProps) {
     refetchInterval: 15_000,
   });
 
-  const { data: costs, isLoading: costsLoading } = useQuery({
+  const { data: costsList, isLoading: costsLoading } = useQuery({
     queryKey: ["proj-costs"],
     queryFn:  () => defaultApi.getCosts(),
     refetchInterval: 60_000,
   });
+  // `/v1/costs` returns `{items, has_more}` — fold into the flat shape the
+  // dashboard stat cards expect (issue #158).
+  const costs = summariseCostItems(costsList?.items ?? []);
 
   const { data: recentEvents } = useQuery({
     queryKey: ["proj-events"],
@@ -348,13 +351,13 @@ export function ProjectDashboardPage({ projectId }: ProjectDashboardPageProps) {
           />
           <StatCard
             label="Total Spend"
-            value={fmtMicros(costs?.total_cost_micros ?? 0)}
+            value={fmtMicros(costs.total_cost_micros)}
             description="server-wide (no project filter)"
             loading={costsLoading}
           />
           <StatCard
             label="Provider Calls"
-            value={(costs?.total_provider_calls ?? 0).toLocaleString()}
+            value={costs.total_provider_calls.toLocaleString()}
             description="server-wide"
             loading={costsLoading}
           />
@@ -531,7 +534,7 @@ export function ProjectDashboardPage({ projectId }: ProjectDashboardPageProps) {
                 { icon: Layers,    label: "Runs",      value: allRuns.length,     sub: `${activeRuns.length} active`      },
                 { icon: ListChecks, label: "Tasks",    value: allTasks.length,    sub: `${activeTasks.length} active`     },
                 { icon: AlertTriangle, label: "Approvals", value: allApprovals.length, sub: "pending" },
-                { icon: Coins,     label: "Spend",     value: fmtMicros(costs?.total_cost_micros ?? 0), sub: "server-wide" },
+                { icon: Coins,     label: "Spend",     value: fmtMicros(costs.total_cost_micros), sub: "server-wide" },
                 { icon: Clock,     label: "Oldest run", value: allRuns.length > 0
                     ? fmtAge(Math.min(...allRuns.map(r => r.created_at)))
                     : "—",

@@ -303,3 +303,94 @@ async fn provider_connection_routes_orchestration_then_503_after_delete() {
         "mock must not be hit after connection delete",
     );
 }
+
+/// Regression for issue #156: when a tenant has an active connection but the
+/// caller asks for a model the connection doesn't serve, chat/stream must
+/// return 422 with an actionable error — not the old 503 "no provider
+/// configured" that pointed the operator at the wrong env vars.
+#[tokio::test]
+async fn chat_stream_returns_422_when_model_not_supported_by_any_connection() {
+    let h = LiveHarness::setup().await;
+    let (mock_url, _hits) = spawn_openrouter_mock().await;
+
+    let suffix = h.project.clone();
+    let tenant = "default_tenant".to_owned();
+    let connection_id = format!("conn422_{suffix}");
+
+    // Register a credential + connection whose supported_models is empty —
+    // exactly the shape ProvidersPage produces if the operator skips the
+    // models step.
+    let r = h
+        .client()
+        .post(format!(
+            "{}/v1/admin/tenants/{}/credentials",
+            h.base_url, tenant,
+        ))
+        .bearer_auth(&h.admin_token)
+        .json(&json!({
+            "provider_id": "openrouter",
+            "plaintext_value": format!("sk-test-422-{suffix}"),
+        }))
+        .send()
+        .await
+        .expect("credential reaches server");
+    assert_eq!(r.status().as_u16(), 201);
+    let credential_id = r
+        .json::<Value>()
+        .await
+        .unwrap()
+        .get("id")
+        .and_then(|v| v.as_str())
+        .unwrap()
+        .to_owned();
+
+    let r = h
+        .client()
+        .post(format!("{}/v1/providers/connections", h.base_url))
+        .bearer_auth(&h.admin_token)
+        .json(&json!({
+            "tenant_id": tenant,
+            "provider_connection_id": connection_id,
+            "provider_family": "openrouter",
+            "adapter_type": "openrouter",
+            "supported_models": [],
+            "credential_id": credential_id,
+            "endpoint_url": mock_url,
+        }))
+        .send()
+        .await
+        .expect("connection reaches server");
+    assert_eq!(r.status().as_u16(), 201);
+
+    // Chat stream with a model no connection serves.
+    let r = h
+        .client()
+        .post(format!("{}/v1/chat/stream", h.base_url))
+        .bearer_auth(&h.admin_token)
+        .json(&json!({
+            "model": "openrouter/definitely-not-registered",
+            "prompt": "hello",
+        }))
+        .send()
+        .await
+        .expect("chat/stream reaches server");
+
+    let status = r.status().as_u16();
+    let body = r.text().await.unwrap_or_default();
+    assert_eq!(
+        status, 422,
+        "expected 422 when no active connection supports the model, got {status}: {body}",
+    );
+    assert!(
+        body.contains("No registered connection"),
+        "422 body must explain the root cause, got: {body}",
+    );
+    assert!(
+        body.contains("discover-models") || body.contains("supported_models"),
+        "422 body must point at the fix, got: {body}",
+    );
+    assert!(
+        body.contains("active_connections"),
+        "422 body must enumerate active connections, got: {body}",
+    );
+}

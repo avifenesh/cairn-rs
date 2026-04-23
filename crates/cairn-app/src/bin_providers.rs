@@ -16,6 +16,39 @@ use axum::Json;
 #[allow(unused_imports)]
 use cairn_runtime::{OllamaEmbeddingProvider, OllamaModel};
 
+/// Optional `?tenant_id=&workspace_id=&project_id=` scope on provider
+/// playground routes (generate / embed / chat-stream).
+///
+/// Pre-#157, these handlers hardcoded `TenantId::new("default_tenant")`,
+/// which silently served the wrong tenant's providers to any operator
+/// not running on the default scope. Now the caller can pin the tenant
+/// explicitly; absence still falls back to `default_tenant` for local
+/// single-tenant dev workflows.
+#[derive(Clone, Debug, Default, serde::Deserialize)]
+pub(crate) struct PlaygroundScopeQuery {
+    pub tenant_id: Option<String>,
+    #[allow(dead_code)]
+    pub workspace_id: Option<String>,
+    #[allow(dead_code)]
+    pub project_id: Option<String>,
+}
+
+impl PlaygroundScopeQuery {
+    pub(crate) fn tenant(&self) -> cairn_domain::TenantId {
+        // Mirrors `cairn_app::state::DEFAULT_TENANT_ID` (same literal);
+        // duplicated because this file lives in the binary crate which
+        // cannot reach the lib-crate `pub(crate)` constant directly.
+        const DEFAULT_TENANT_ID: &str = "default_tenant";
+        cairn_domain::TenantId::new(
+            self.tenant_id
+                .as_deref()
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .unwrap_or(DEFAULT_TENANT_ID),
+        )
+    }
+}
+
 // ── Ollama handler ────────────────────────────────────────────────────────────
 
 /// `GET /v1/providers/ollama/models` — list models available in the local Ollama registry.
@@ -736,6 +769,7 @@ pub(crate) struct OllamaGenerateRequest {
 
 pub(crate) async fn ollama_generate_handler(
     State(state): State<AppState>,
+    Query(scope): Query<PlaygroundScopeQuery>,
     Json(body): Json<OllamaGenerateRequest>,
 ) -> impl IntoResponse {
     if let Err(msg) = validate::check_all(&[
@@ -751,11 +785,12 @@ pub(crate) async fn ollama_generate_handler(
     let default_model = state.runtime.runtime_config.default_generate_model().await;
     let model_id = body.model.as_deref().unwrap_or(&default_model).to_owned();
 
+    let tenant_id = scope.tenant();
     let provider: Arc<dyn cairn_domain::providers::GenerationProvider> = match state
         .runtime
         .provider_registry
         .resolve_generation_for_model(
-            &cairn_domain::TenantId::new("default_tenant"),
+            &tenant_id,
             &model_id,
             cairn_runtime::ProviderResolutionPurpose::Generate,
         )
@@ -909,6 +944,7 @@ pub(crate) struct OllamaEmbedRequest {
 
 pub(crate) async fn ollama_embed_handler(
     State(state): State<AppState>,
+    Query(scope): Query<PlaygroundScopeQuery>,
     Json(body): Json<OllamaEmbedRequest>,
 ) -> impl IntoResponse {
     if body.texts.is_empty() {
@@ -937,10 +973,11 @@ pub(crate) async fn ollama_embed_handler(
         })
         .to_owned();
 
+    let tenant_id = scope.tenant();
     let embedder: Arc<dyn cairn_domain::providers::EmbeddingProvider> = match state
         .runtime
         .provider_registry
-        .resolve_embedding_for_model(&cairn_domain::TenantId::new("default_tenant"), &model_id)
+        .resolve_embedding_for_model(&tenant_id, &model_id)
         .await
     {
         Ok(Some(embedder)) => embedder,
@@ -1141,11 +1178,12 @@ pub(crate) fn stream_chat_provider_as_sse(
 
 pub(crate) async fn chat_stream_handler(
     State(state): State<AppState>,
+    Query(scope): Query<PlaygroundScopeQuery>,
     Json(body): Json<OllamaGenerateRequest>,
 ) -> impl IntoResponse {
     let default_stream = state.runtime.runtime_config.default_stream_model().await;
     let model_id = body.model.as_deref().unwrap_or(&default_stream).to_owned();
-    let tenant_id = cairn_domain::TenantId::new("default_tenant");
+    let tenant_id = scope.tenant();
     let messages: Vec<serde_json::Value> = body
         .messages
         .unwrap_or_else(|| vec![serde_json::json!({"role": "user", "content": body.prompt})]);
@@ -1266,6 +1304,45 @@ pub(crate) async fn chat_stream_handler(
             ),
             or_.api_key.as_str().to_owned(),
         )
+    } else if has_active_connections {
+        // Tenant has active connections, but none served the requested
+        // model and no env-var static fallback exists either. Return a
+        // precise 422 so the operator knows to widen `supported_models`
+        // or re-run discover-models — not the misleading "no provider
+        // configured" 503 (issue #156).
+        let summaries = state
+            .runtime
+            .provider_registry
+            .active_connection_summaries(&tenant_id)
+            .await
+            .unwrap_or_default();
+        let conn_list: Vec<serde_json::Value> = summaries
+            .iter()
+            .map(|(id, models)| {
+                serde_json::json!({
+                    "connection_id": id,
+                    "supported_models": models,
+                })
+            })
+            .collect();
+        return (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            axum::Json(serde_json::json!({
+                "error": format!(
+                    "No registered connection for tenant '{}' supports model '{}'. \
+                     Register with POST /v1/providers/connections with supported_models \
+                     including '{}', or call POST /v1/providers/connections/<id>/discover-models \
+                     to refresh.",
+                    tenant_id.as_str(),
+                    model_id,
+                    model_id,
+                ),
+                "tenant_id": tenant_id.as_str(),
+                "requested_model": model_id,
+                "active_connections": conn_list,
+            })),
+        )
+            .into_response();
     } else {
         return (
                 StatusCode::SERVICE_UNAVAILABLE,

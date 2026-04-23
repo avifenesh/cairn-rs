@@ -1128,28 +1128,60 @@ function ModelPicker({ local, setLocal }: { local: string; setLocal: (v: string)
     retry: false,
   });
 
-  // Collect all known model IDs from registry entries
+  const { data: connData } = useQuery({
+    queryKey: ["provider-connections"],
+    queryFn: () => defaultApi.listProviderConnections(),
+    staleTime: 30_000,
+  });
+
+  // Issue #158: ModelPicker used to list every registry catalog model,
+  // including ones with `available: false` and models no registered
+  // connection serves. Operators would pick a model the runtime can't
+  // resolve and hit the misleading 503 loop (#156). Two-gate filter:
+  //   1. registry entry must be `available: true` (provider reachable)
+  //   2. AND at least one active connection's `supported_models` lists it
+  // If the tenant has no connections at all, we keep the registry list
+  // with a disclaimer so fresh installs can still see what's available.
+  const registeredModels: Set<string> = new Set(
+    (connData?.items ?? []).flatMap((c) => c.supported_models ?? []),
+  );
+  const hasAnyConnection = (connData?.items ?? []).length > 0;
+
   const models: string[] = (registry ?? [])
+    .filter((entry) => entry.available)
     .flatMap((entry) => entry.models?.map((m) => m.id) ?? [])
+    .filter((id) => !hasAnyConnection || registeredModels.has(id))
     .filter((m, i, arr) => arr.indexOf(m) === i)
     .sort();
 
   return (
-    <div className="flex items-center gap-2">
-      <select
-        value={local}
-        onChange={e => setLocal(e.target.value)}
-        className="flex-1 rounded border border-gray-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-2.5 py-1.5 text-[12px] font-mono text-gray-800 dark:text-zinc-200 focus:outline-none focus:ring-1 focus:ring-indigo-500"
-      >
-        <option value="">— select a model —</option>
-        {models.map(m => <option key={m} value={m}>{m}</option>)}
-      </select>
-      <input
-        value={local}
-        onChange={e => setLocal(e.target.value)}
-        placeholder="or type a model ID"
-        className="w-48 rounded border border-gray-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-2.5 py-1.5 text-[12px] font-mono text-gray-800 dark:text-zinc-200 focus:outline-none focus:ring-1 focus:ring-indigo-500"
-      />
+    <div className="space-y-1">
+      <div className="flex items-center gap-2">
+        <select
+          value={local}
+          onChange={e => setLocal(e.target.value)}
+          className="flex-1 rounded border border-gray-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-2.5 py-1.5 text-[12px] font-mono text-gray-800 dark:text-zinc-200 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+        >
+          <option value="">— select a model —</option>
+          {models.map(m => <option key={m} value={m}>{m}</option>)}
+        </select>
+        <input
+          value={local}
+          onChange={e => setLocal(e.target.value)}
+          placeholder="or type a model ID"
+          className="w-48 rounded border border-gray-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-2.5 py-1.5 text-[12px] font-mono text-gray-800 dark:text-zinc-200 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+        />
+      </div>
+      {!hasAnyConnection && (
+        <p className="text-[10px] text-amber-600 dark:text-amber-400">
+          No provider connections registered yet — register one on the Providers page to use any of these models.
+        </p>
+      )}
+      {hasAnyConnection && models.length === 0 && (
+        <p className="text-[10px] text-amber-600 dark:text-amber-400">
+          Registered connections have no supported models yet — run discover-models on a connection or add model IDs manually.
+        </p>
+      )}
     </div>
   );
 }

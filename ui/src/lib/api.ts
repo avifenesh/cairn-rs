@@ -281,6 +281,28 @@ function parsePrometheusMetrics(text: string): {
   };
 }
 
+/** Reduce a list of `SessionCostRecord` into the aggregate stat-card shape.
+ *
+ *  Pre-fix (issue #158) the CostsPage assumed `/v1/costs` returned a flat
+ *  `CostSummary`; it actually returns `{items, has_more}`. This helper does
+ *  the fold client-side so every stat card is accurate regardless of how
+ *  many sessions are present. */
+export function summariseCostItems(
+  items: readonly import("./types").SessionCostRecord[],
+): CostSummary {
+  let total_cost_micros = 0;
+  let total_tokens_in   = 0;
+  let total_tokens_out  = 0;
+  let total_provider_calls = 0;
+  for (const it of items) {
+    total_cost_micros    += it.total_cost_micros ?? 0;
+    total_tokens_in      += it.total_tokens_in   ?? it.token_in  ?? 0;
+    total_tokens_out     += it.total_tokens_out  ?? it.token_out ?? 0;
+    total_provider_calls += it.provider_calls    ?? 0;
+  }
+  return { total_cost_micros, total_tokens_in, total_tokens_out, total_provider_calls };
+}
+
 // ── API client factory ────────────────────────────────────────────────────────
 
 export function createApiClient(config: ApiClientConfig) {
@@ -595,8 +617,10 @@ export function createApiClient(config: ApiClientConfig) {
 
     // ── Costs ─────────────────────────────────────────────────────────────────
 
-    /** GET /v1/costs — aggregate token and cost totals. */
-    getCosts: (): Promise<CostSummary> => get("/v1/costs"),
+    /** GET /v1/costs — list of per-session cost records for the active tenant.
+     *  Returns `{ items, has_more }`. Callers typically pass this through
+     *  `summariseCostItems` to get a `CostSummary` for stat-card rendering. */
+    getCosts: (): Promise<import("./types").CostListResponse> => get("/v1/costs"),
 
     // ── API metrics ──────────────────────────────────────────────────────────
 
@@ -713,6 +737,31 @@ export function createApiClient(config: ApiClientConfig) {
     /** GET /v1/providers/connections/:id/test — probe the provider and return reachability + latency. */
     testConnection: (id: string): Promise<{ ok: boolean; latency_ms: number; provider: string; status: number; detail: string }> =>
       get(`/v1/providers/connections/${encodeURIComponent(id)}/test`),
+
+    /** GET /v1/providers/connections/:id/discover-models — query the upstream provider for its model catalog.
+     *
+     *  Response shape: `{ provider, endpoint, models: DiscoveredModel[] }`.
+     *  Callers that only want the model IDs can pass through `discoverModelIds`. */
+    discoverModels: (id: string): Promise<{
+      provider: string;
+      endpoint: string;
+      models: Array<{
+        model_id: string;
+        name: string;
+        parameter_size?: string;
+        quantization?: string;
+        capabilities: string[];
+        context_window_tokens?: number;
+      }>;
+    }> => get(`/v1/providers/connections/${encodeURIComponent(id)}/discover-models`),
+
+    /** Convenience wrapper: return only the model IDs from `discoverModels`. */
+    discoverModelIds: async (id: string): Promise<string[]> => {
+      const r = await get<{ models: Array<{ model_id: string }> }>(
+        `/v1/providers/connections/${encodeURIComponent(id)}/discover-models`,
+      );
+      return r.models.map((m) => m.model_id);
+    },
 
     // ── Default settings ─────────────────────────────────────────────────────
 
