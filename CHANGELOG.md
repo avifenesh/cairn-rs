@@ -127,6 +127,15 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   most one `rSessions`/`rRuns`/`rTasks`. Payload ids read both
   snake_case and camelCase to match the pattern in `RunDetailPage`.
   Operator actions wired in PR P are untouched.
+- **UI: `TriggersPage` swallowed backend failures on raw `fetch` calls (#154).**
+  Replaced the 5 raw `fetch` calls (list triggers, list run-templates,
+  enable/disable/delete trigger) with new `defaultApi.listTriggers` /
+  `listRunTemplates` / `enableTrigger` / `disableTrigger` /
+  `deleteTrigger` methods that route through `apiFetch` and throw on
+  non-2xx. Added `onError` toasts to all three mutations so operators
+  see the real backend reason instead of a lying "Trigger enabled."
+  toast after a 4xx/5xx. DecisionsPage was already fixed in PR #131;
+  this closes the TriggersPage half.
 
 - **UI: `SessionsPage` per-row run count was O(N*M) per render (#180).**
   Replaced the per-row `allRuns.filter(...)` scan with a memoized
