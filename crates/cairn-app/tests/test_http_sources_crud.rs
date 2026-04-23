@@ -66,6 +66,36 @@ async fn sources_crud_and_memory_ingest_roundtrip() {
         (200..300).contains(&ingest_status),
         "ingest status {ingest_status}, body: {ingest_body}",
     );
+    // The UI's `ingestMemory` is typed against
+    // `{ ok, document_id, source_id, chunk_count }` and uses
+    // `chunk_count` in the success toast — lock that wire contract here
+    // so a future handler refactor can't silently flip it to 204 or rename
+    // fields without tripping CI.
+    let ingest_json: Value = serde_json::from_str(&ingest_body)
+        .unwrap_or_else(|e| panic!("ingest returned non-JSON body: {ingest_body}; error: {e}"));
+    assert_eq!(
+        ingest_json.get("ok").and_then(|v| v.as_bool()),
+        Some(true),
+        "ingest response missing ok=true: {ingest_json}",
+    );
+    assert_eq!(
+        ingest_json.get("document_id").and_then(|v| v.as_str()),
+        Some("onboarding.md"),
+        "ingest response missing expected document_id: {ingest_json}",
+    );
+    assert_eq!(
+        ingest_json.get("source_id").and_then(|v| v.as_str()),
+        Some(source_id),
+        "ingest response missing expected source_id: {ingest_json}",
+    );
+    let chunk_count = ingest_json
+        .get("chunk_count")
+        .and_then(|v| v.as_u64())
+        .unwrap_or_else(|| panic!("ingest response missing numeric chunk_count: {ingest_json}"));
+    assert!(
+        chunk_count >= 1,
+        "ingest response reported no chunks created: {ingest_json}",
+    );
 
     // 3. List sources — the new source must be present.
     let res = h

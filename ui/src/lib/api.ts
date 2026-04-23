@@ -1008,8 +1008,18 @@ export function createApiClient(config: ApiClientConfig) {
     },
 
     /** DELETE /v1/sources/:id — deactivate a source. */
-    deleteSource: (sourceId: string): Promise<{ ok: boolean }> =>
-      del(`/v1/sources/${encodeURIComponent(sourceId)}`),
+    deleteSource: (sourceId: string, params?: {
+      tenant_id?: string;
+      workspace_id?: string;
+      project_id?: string;
+    }): Promise<{ ok: boolean }> => {
+      const merged = withScope(params);
+      const qs = new URLSearchParams();
+      qs.set("tenant_id",    merged.tenant_id    ?? DEFAULT_SCOPE.tenant_id);
+      qs.set("workspace_id", merged.workspace_id ?? DEFAULT_SCOPE.workspace_id);
+      qs.set("project_id",   merged.project_id   ?? DEFAULT_SCOPE.project_id);
+      return del(`/v1/sources/${encodeURIComponent(sourceId)}?${qs}`);
+    },
 
     /** GET /v1/sources/:id/chunks — paginated chunk list for a source. */
     getSourceChunks: (sourceId: string, params?: {
@@ -1044,11 +1054,10 @@ export function createApiClient(config: ApiClientConfig) {
     }): Promise<import("./types").RefreshScheduleResponse> => {
       const merged = withScope(body);
       const qs = new URLSearchParams();
-      if (merged.tenant_id)    qs.set("tenant_id",    merged.tenant_id);
-      if (merged.workspace_id) qs.set("workspace_id", merged.workspace_id);
-      if (merged.project_id)   qs.set("project_id",   merged.project_id);
-      const query = qs.toString() ? `?${qs}` : "";
-      return post(`/v1/sources/${encodeURIComponent(sourceId)}/refresh-schedule${query}`, {
+      qs.set("tenant_id",    merged.tenant_id    ?? DEFAULT_SCOPE.tenant_id);
+      qs.set("workspace_id", merged.workspace_id ?? DEFAULT_SCOPE.workspace_id);
+      qs.set("project_id",   merged.project_id   ?? DEFAULT_SCOPE.project_id);
+      return post(`/v1/sources/${encodeURIComponent(sourceId)}/refresh-schedule?${qs}`, {
         interval_ms:  body.interval_ms,
         ...(body.refresh_url !== undefined ? { refresh_url: body.refresh_url } : {}),
       });

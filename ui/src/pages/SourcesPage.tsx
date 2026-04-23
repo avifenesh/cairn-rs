@@ -8,6 +8,7 @@ import { clsx } from 'clsx';
 import { StatCard } from '../components/StatCard';
 import { defaultApi } from '../lib/api';
 import { useToast } from '../components/Toast';
+import { useScope } from '../hooks/useScope';
 import { useFocusTrap } from '../hooks/useFocusTrap';
 import { ds } from '../lib/design-system';
 import type {
@@ -538,6 +539,7 @@ function SourceRow({ source, even, expanded, onToggle, onEdit, onDelete, onChunk
 export function SourcesPage() {
   const toast = useToast();
   const qc    = useQueryClient();
+  const [scope] = useScope();
   const [expanded, setExpanded] = useState<string | null>(null);
   const [creating,       setCreating]       = useState(false);
   const [editing,        setEditing]        = useState<string | null>(null);
@@ -545,8 +547,10 @@ export function SourcesPage() {
   const [chunksFor,      setChunksFor]      = useState<string | null>(null);
   const [scheduleFor,    setScheduleFor]    = useState<string | null>(null);
 
+  // Scope travels in the queryKey so changing tenant/workspace/project does
+  // not serve stale sources from a different scope's cache.
   const { data: sources, isLoading, isError, error, refetch, isFetching } = useQuery<SourceRecord[]>({
-    queryKey: ['sources'],
+    queryKey: ['sources', scope.tenant_id, scope.workspace_id, scope.project_id],
     queryFn:  () => defaultApi.getSources(),
     refetchInterval: 60_000,
   });
