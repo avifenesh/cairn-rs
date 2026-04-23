@@ -19,6 +19,7 @@ use std::sync::Arc;
 use cairn_domain::{AuditLogEntryRecorded, AuditOutcome, RuntimeEvent, TenantId};
 use cairn_runtime::services::AuditServiceImpl;
 use cairn_runtime::AuditService;
+use cairn_store::projections::AuditLogReadModel;
 use cairn_store::{EventLog, InMemoryStore};
 
 fn tenant() -> TenantId {
@@ -364,4 +365,98 @@ async fn audit_events_preserve_insertion_order() {
     for (i, ev) in events.iter().enumerate() {
         assert_eq!(ev.resource_id, format!("run_{i}"));
     }
+}
+
+// ── Pagination: since_ms + before_ms windowing (issue #163) ──────────────────
+
+#[tokio::test]
+async fn list_by_tenant_honors_since_and_before_bounds() {
+    // Issue #163: the admin logs/audit UI needs time-range filtering +
+    // cursor pagination. This test exercises the `AuditLogReadModel`
+    // `since_ms` / `before_ms` / `limit` params that back both.
+    let (store, audit) = setup();
+
+    // Record 6 entries — their real timestamps are "now" and monotonic,
+    // so after recording we can derive synthetic bucket boundaries by
+    // pulling the actual `occurred_at_ms` of each entry.
+    let mut recorded_ts = Vec::new();
+    for i in 0u32..6 {
+        let entry = audit
+            .record(
+                tenant(),
+                "op_sys".to_owned(),
+                format!("act_{i}"),
+                "run".to_owned(),
+                format!("run_{i}"),
+                AuditOutcome::Success,
+                serde_json::json!({}),
+            )
+            .await
+            .unwrap();
+        recorded_ts.push(entry.occurred_at_ms);
+        // Small delay to ensure millis tick for at least some entries.
+        tokio::time::sleep(std::time::Duration::from_millis(2)).await;
+    }
+
+    let all = store
+        .list_by_tenant(&tenant(), None, None, 100)
+        .await
+        .unwrap();
+    assert_eq!(all.len(), 6);
+
+    // ── limit cap ────────────────────────────────────────────────────────
+    let first_3 = store
+        .list_by_tenant(&tenant(), None, None, 3)
+        .await
+        .unwrap();
+    assert_eq!(first_3.len(), 3, "limit must cap the response");
+
+    // ── since_ms (inclusive lower bound) ─────────────────────────────────
+    let third_ts = recorded_ts[2];
+    let from_third = store
+        .list_by_tenant(&tenant(), Some(third_ts), None, 100)
+        .await
+        .unwrap();
+    assert!(
+        from_third.iter().all(|e| e.occurred_at_ms >= third_ts),
+        "since_ms must be an inclusive lower bound"
+    );
+
+    // ── before_ms (exclusive upper bound) ────────────────────────────────
+    let fifth_ts = recorded_ts[4];
+    let up_to_fifth = store
+        .list_by_tenant(&tenant(), None, Some(fifth_ts), 100)
+        .await
+        .unwrap();
+    assert!(
+        up_to_fifth.iter().all(|e| e.occurred_at_ms < fifth_ts),
+        "before_ms must be an exclusive upper bound"
+    );
+
+    // ── since + before window ────────────────────────────────────────────
+    // Use a strict window that guarantees at least one timestamp is excluded
+    // on each side, regardless of identical-millis collisions.
+    let window_lo = recorded_ts[1];
+    let window_hi = recorded_ts[5];
+    let windowed = store
+        .list_by_tenant(&tenant(), Some(window_lo), Some(window_hi), 100)
+        .await
+        .unwrap();
+    assert!(
+        windowed
+            .iter()
+            .all(|e| e.occurred_at_ms >= window_lo && e.occurred_at_ms < window_hi),
+        "combined since_ms + before_ms must clamp both sides",
+    );
+    assert!(
+        windowed.len() < all.len(),
+        "window must exclude at least one entry"
+    );
+
+    // ── cross-tenant isolation ───────────────────────────────────────────
+    let other = store
+        .list_by_tenant(&TenantId::new("tenant_other"), None, None, 100)
+        .await
+        .unwrap();
+    assert!(other.is_empty(), "unrelated tenant must not see entries");
 }

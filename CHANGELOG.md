@@ -11,6 +11,19 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **LogsPage + AuditLogPage — time-range filter, page-size control, and
+  cursor pagination (closes #163).** Both pages previously hardcoded a
+  single fetch (500 / 200 entries) with no way to scroll into older
+  history. The admin request-log handler now accepts `since_ms`; the
+  audit-log handler now accepts `before_ms` (exclusive upper bound) in
+  addition to the existing `since_ms`/`limit`, with the limit clamped to
+  `[1, 1000]`. The UI gains last-15m / 1h / 24h / 7d / all time-range
+  dropdowns, a 50/100/250/500 page-size picker, and — for the audit log
+  — prev / next / jump-to-newest pagination driven by a `before_ms`
+  cursor stack. The request-log response now also returns `buffered` +
+  `has_more` so the footer can show "showing N of M" and surface a
+  hint when the page was truncated.
+
 - **`GET /v1/skills` + `GET /v1/skills/:id` — real skills catalog wiring.**
   Replaces the hard-coded empty stub
   (`list_skills_preserved_handler` in `handlers/memory.rs`) with a
@@ -110,6 +123,31 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **UI: `DashboardPage` — real widgets, no placeholders (#179).** Three
+  bugs fixed in one pass: (A) the Runs / Tasks tabs rendered empty or
+  dummy content — now render compact, live tables driven by
+  `defaultApi.getRuns({ limit: 50 })` / `defaultApi.getAllTasks({
+  limit: 50 })` filtered to active states, sorted newest-first, capped
+  at 8 rows, auto-refreshing every 5 s, mirroring the row pattern from
+  the existing `ActiveRunsWidget`. (B) `ProviderStatusWidget` hardcoded
+  three rows (`Store / Events / Memory`) against `/v1/health/detailed`;
+  it now iterates the real `components` array from `/v1/status`,
+  normalizes status tokens (`ok`/`healthy`/`degraded`/`unhealthy`/
+  `unconfigured`) and pretty-prints snake_case names. New components
+  added server-side appear automatically with no UI change. (C) the
+  `CostWidget` trend was dead code — the previous-snapshot query was
+  `enabled: false` so the arrow never rendered. Replaced with a
+  `useRef`-tracked prior total updated after each successful fetch;
+  widget now shows an up / down / flat arrow plus a signed percent
+  delta (`+12.3%` / `-4.1%` / `0.0%`) vs. the previous 30 s snapshot.
+  The `displayedPrev` baseline only advances when `dataUpdatedAt`
+  changes, so ordinary re-renders don't collapse the delta to flat.
+  Also fixed the event-sparkline bucketing bug: `useHourlyEventCounts`
+  now prefers numeric `stored_at` (backend truth) and falls back to
+  ISO `timestamp` — previously it only read `timestamp`, dropping
+  every `RecentEvent` that arrived with only the numeric field.
+  Hash navigation from the Run / Task rows is now URL-encoded, to
+  match the rest of the UI's routing pattern.
 - **UI: `TestHarnessPage` "Run All Scenarios" no-op'd scenario cards (#143).**
   The page-level Run All handler ran its own private copy of each
   scenario's steps against the server and then bumped a `runAllKey`

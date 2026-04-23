@@ -175,12 +175,26 @@ function LogRow({ entry, even }: { entry: RequestLogEntry; even: boolean }) {
 
 // ── Page ──────────────────────────────────────────────────────────────────────
 
+type TimeRange = '15m' | '1h' | '24h' | '7d' | 'all';
+
+const TIME_RANGE_MS: Record<Exclude<TimeRange, 'all'>, number> = {
+  '15m': 15 * 60 * 1000,
+  '1h':       60 * 60 * 1000,
+  '24h':  24 * 60 * 60 * 1000,
+  '7d':    7 * 24 * 60 * 60 * 1000,
+};
+
+const PAGE_SIZES = [50, 100, 250, 500] as const;
+type PageSize = typeof PAGE_SIZES[number];
+
 export function LogsPage() {
   const [search,     setSearch]     = useState('');
   const [paused,     setPaused]     = useState(false);
   const [activeLevels, setActiveLevels] = useState<Set<Level>>(
     new Set(['info', 'warn', 'error'] satisfies Level[]),
   );
+  const [pageSize,  setPageSize]  = useState<PageSize>(100);
+  const [timeRange, setTimeRange] = useState<TimeRange>('24h');
   const listRef  = useRef<HTMLDivElement>(null);
   const atBottom = useRef(true);
 
@@ -189,9 +203,19 @@ export function LogsPage() {
     .filter(l => activeLevels.has(l))
     .join(',');
 
+  // Compute since_ms from the selected time range. "all" disables the filter.
+  // We floor to 10s buckets so the query key stays stable across refetches.
+  const sinceMs = timeRange === 'all'
+    ? undefined
+    : Math.floor((Date.now() - TIME_RANGE_MS[timeRange]) / 10_000) * 10_000;
+
   const { data, isLoading, isError, error, isFetching } = useQuery({
-    queryKey: ['request-logs', levelParam],
-    queryFn:  () => defaultApi.getRequestLogs({ limit: 500, level: levelParam || undefined }),
+    queryKey: ['request-logs', levelParam, pageSize, timeRange],
+    queryFn:  () => defaultApi.getRequestLogs({
+      limit:    pageSize,
+      level:    levelParam || undefined,
+      since_ms: sinceMs,
+    }),
     refetchInterval: paused ? false : 2_000,
     staleTime: 0,
   });
@@ -273,6 +297,34 @@ export function LogsPage() {
             onClick={() => toggleLevel(level)}
           />
         ))}
+
+        {/* Time-range filter */}
+        <select
+          value={timeRange}
+          onChange={e => setTimeRange(e.target.value as TimeRange)}
+          aria-label="Time range"
+          className="h-6 ml-2 bg-gray-50 dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 rounded
+                     px-1.5 text-[11px] text-gray-600 dark:text-zinc-400 focus:outline-none focus:border-indigo-500"
+        >
+          <option value="15m">Last 15m</option>
+          <option value="1h">Last hour</option>
+          <option value="24h">Last 24h</option>
+          <option value="7d">Last 7d</option>
+          <option value="all">All time</option>
+        </select>
+
+        {/* Page-size dropdown */}
+        <select
+          value={pageSize}
+          onChange={e => setPageSize(Number(e.target.value) as PageSize)}
+          aria-label="Page size"
+          className="h-6 bg-gray-50 dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 rounded
+                     px-1.5 text-[11px] text-gray-600 dark:text-zinc-400 focus:outline-none focus:border-indigo-500"
+        >
+          {PAGE_SIZES.map(n => (
+            <option key={n} value={n}>{n}/page</option>
+          ))}
+        </select>
 
         {/* Search */}
         <div className="relative ml-2">
@@ -383,8 +435,15 @@ export function LogsPage() {
           )} />
           {paused ? 'Paused' : 'Live (2s)'}
         </span>
-        <span className="text-[10px] text-gray-300 dark:text-zinc-600 ml-auto">
-          Ring buffer: last 2,000 requests
+        <span className="text-[10px] text-gray-300 dark:text-zinc-600 ml-auto tabular-nums">
+          {data?.buffered !== undefined
+            ? `Showing ${entries.length} of ${data.buffered} buffered`
+            : 'Ring buffer: last 2,000 requests'}
+          {data?.has_more && (
+            <span className="ml-2 text-amber-500">
+              • more available — widen range or raise page size
+            </span>
+          )}
         </span>
       </div>
     </div>

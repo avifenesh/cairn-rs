@@ -48,9 +48,18 @@ pub(crate) fn audit_actor_id(principal: &AuthPrincipal) -> String {
 
 #[derive(Clone, Debug, serde::Deserialize)]
 pub(crate) struct AuditLogQuery {
+    /// Inclusive lower bound on `occurred_at_ms`.
     pub since_ms: Option<u64>,
+    /// Exclusive upper bound on `occurred_at_ms` — used for
+    /// "older than X" cursor pagination from the UI.
+    pub before_ms: Option<u64>,
+    /// Max entries to return (capped at [`MAX_AUDIT_LIMIT`],
+    /// default [`DEFAULT_AUDIT_LIMIT`]).
     pub limit: Option<usize>,
 }
+
+pub(crate) const DEFAULT_AUDIT_LIMIT: usize = 100;
+pub(crate) const MAX_AUDIT_LIMIT: usize = 1000;
 
 #[derive(Clone, Debug, serde::Deserialize)]
 pub(crate) struct CreateOperatorProfileRequest {
@@ -177,11 +186,16 @@ pub(crate) struct RequestLogsQuery {
     #[serde(default = "default_logs_limit")]
     limit: usize,
     level: Option<String>,
+    /// Lower bound on `start_time_unix_ns` (millis × 1_000_000). Entries older
+    /// than this are excluded — used by the UI "last hour / last 24h" filter.
+    since_ms: Option<u64>,
 }
 
 fn default_logs_limit() -> usize {
     200
 }
+
+const MAX_REQUEST_LOGS_LIMIT: usize = 500;
 
 #[derive(Clone, Debug, serde::Deserialize)]
 pub(crate) struct SetNotificationPreferencesRequest {
@@ -522,7 +536,13 @@ pub(crate) async fn list_audit_log_handler(
     tenant_scope: TenantScope,
     Query(query): Query<AuditLogQuery>,
 ) -> impl IntoResponse {
-    let limit = query.limit.unwrap_or(50);
+    let limit = query
+        .limit
+        .unwrap_or(DEFAULT_AUDIT_LIMIT)
+        .clamp(1, MAX_AUDIT_LIMIT);
+    // Fetch one extra so we can accurately report `has_more` without needing
+    // a separate count query.
+    let fetch_limit = limit.saturating_add(1);
     // Admin users see all audit entries (scan all known tenants).
     // Non-admin users only see their own tenant's entries.
     if tenant_scope.is_admin {
@@ -537,7 +557,8 @@ pub(crate) async fn list_audit_log_handler(
                 state.runtime.store.as_ref(),
                 &tenant.tenant_id,
                 query.since_ms,
-                limit,
+                query.before_ms,
+                fetch_limit,
             )
             .await
             {
@@ -545,10 +566,10 @@ pub(crate) async fn list_audit_log_handler(
                 Err(err) => return runtime_error_response(err.into()),
             }
         }
-        // Sort by occurred_at_ms descending (most recent first) and cap at limit.
+        // Sort by occurred_at_ms descending (most recent first).
         all_items.sort_by_key(|r| std::cmp::Reverse(r.occurred_at_ms));
+        let has_more = all_items.len() > limit;
         all_items.truncate(limit);
-        let has_more = all_items.len() >= limit;
         (
             StatusCode::OK,
             Json(ListResponse {
@@ -562,18 +583,16 @@ pub(crate) async fn list_audit_log_handler(
             state.runtime.store.as_ref(),
             tenant_scope.tenant_id(),
             query.since_ms,
-            limit,
+            query.before_ms,
+            fetch_limit,
         )
         .await
         {
-            Ok(items) => (
-                StatusCode::OK,
-                Json(ListResponse {
-                    has_more: items.len() >= limit,
-                    items,
-                }),
-            )
-                .into_response(),
+            Ok(mut items) => {
+                let has_more = items.len() > limit;
+                items.truncate(limit);
+                (StatusCode::OK, Json(ListResponse { has_more, items })).into_response()
+            }
             Err(err) => runtime_error_response(err.into()),
         }
     }
@@ -619,7 +638,7 @@ pub(crate) async fn list_request_logs_handler(
     Query(q): Query<RequestLogsQuery>,
 ) -> impl IntoResponse {
     // T6a-H3: request logs span every tenant — admin-only.
-    let limit = q.limit.min(500);
+    let limit = q.limit.clamp(1, MAX_REQUEST_LOGS_LIMIT);
     let level_filter: Vec<&'static str> = q
         .level
         .as_deref()
@@ -634,28 +653,41 @@ pub(crate) async fn list_request_logs_handler(
                 .collect()
         })
         .unwrap_or_default();
+    // UI sends millis since epoch; buffer stores nanos.
+    let since_ns = q.since_ms.map(|ms| ms.saturating_mul(1_000_000));
 
-    let entries: Vec<RequestLogEntry> = match state.request_log.read() {
-        Ok(log) => log
-            .tail(limit, &level_filter)
-            .into_iter()
-            .cloned()
-            .collect(),
-        Err(poisoned) => poisoned
-            .into_inner()
-            .tail(limit, &level_filter)
-            .into_iter()
-            .cloned()
-            .collect(),
+    let (entries, buffered): (Vec<RequestLogEntry>, usize) = match state.request_log.read() {
+        Ok(log) => (
+            log.tail(limit, &level_filter, since_ns)
+                .into_iter()
+                .cloned()
+                .collect(),
+            log.len(),
+        ),
+        Err(poisoned) => {
+            let log = poisoned.into_inner();
+            (
+                log.tail(limit, &level_filter, since_ns)
+                    .into_iter()
+                    .cloned()
+                    .collect(),
+                log.len(),
+            )
+        }
     };
 
     let total = entries.len();
+    // `has_more` is best-effort: we returned fewer than the ring buffer
+    // holds AND hit the page limit exactly — older entries may exist.
+    let has_more = total == limit && buffered > limit;
     (
         StatusCode::OK,
         Json(serde_json::json!({
-            "entries": entries,
-            "total":   total,
-            "limit":   limit,
+            "entries":  entries,
+            "total":    total,
+            "limit":    limit,
+            "buffered": buffered,
+            "has_more": has_more,
         })),
     )
 }
