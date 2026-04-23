@@ -349,12 +349,25 @@ export function IntegrationsPage() {
   //   2. last successful mutation result (bridges the window between
   //      mutation success and the `github-queue` query refetching)
   //   3. authoritative server value
-  // On error, mutation data clears and the select reverts to the server
-  // value, so the operator sees the real state.
+  // Once the server catches up (maxConcurrent === the last applied value),
+  // we `reset()` the mutation so the server value becomes authoritative
+  // again — otherwise another operator updating concurrency wouldn't
+  // show through because mutation.data persists until reset.
+  const lastApplied = concurrencyMut.data?.max_concurrent;
+  useEffect(() => {
+    if (
+      lastApplied != null &&
+      maxConcurrent === lastApplied &&
+      !concurrencyMut.isPending
+    ) {
+      concurrencyMut.reset();
+    }
+  }, [maxConcurrent, lastApplied, concurrencyMut]);
+
   const concurrencySelected =
     concurrencyMut.isPending && concurrencyMut.variables != null
       ? concurrencyMut.variables
-      : concurrencyMut.data?.max_concurrent ?? maxConcurrent;
+      : lastApplied ?? maxConcurrent;
 
   const handleScan = useCallback((repo: string, labels?: string, limit?: number) => {
     scanMut.mutate({ repo, labels, limit });

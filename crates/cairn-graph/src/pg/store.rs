@@ -374,6 +374,8 @@ fn node_kind_str(kind: NodeKind) -> &'static str {
         NodeKind::ChannelTarget => "channel_target",
         NodeKind::Signal => "signal",
         NodeKind::IngestJob => "ingest_job",
+        NodeKind::RouteDecision => "route_decision",
+        NodeKind::ProviderCall => "provider_call",
     }
 }
 
@@ -399,6 +401,8 @@ fn parse_node_kind(s: &str) -> Option<NodeKind> {
         "channel_target" => Some(NodeKind::ChannelTarget),
         "signal" => Some(NodeKind::Signal),
         "ingest_job" => Some(NodeKind::IngestJob),
+        "route_decision" => Some(NodeKind::RouteDecision),
+        "provider_call" => Some(NodeKind::ProviderCall),
         _ => None,
     }
 }
@@ -423,6 +427,7 @@ fn edge_kind_str(kind: EdgeKind) -> &'static str {
         EdgeKind::RoutedTo => "routed_to",
         EdgeKind::UsedPrompt => "used_prompt",
         EdgeKind::UsedTool => "used_tool",
+        EdgeKind::CalledProvider => "called_provider",
     }
 }
 
@@ -446,6 +451,7 @@ fn parse_edge_kind(s: &str) -> Option<EdgeKind> {
         "routed_to" => Some(EdgeKind::RoutedTo),
         "used_prompt" => Some(EdgeKind::UsedPrompt),
         "used_tool" => Some(EdgeKind::UsedTool),
+        "called_provider" => Some(EdgeKind::CalledProvider),
         _ => None,
     }
 }
