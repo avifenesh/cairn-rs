@@ -33,6 +33,23 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   and `GraphEdgeKind` picked up `matched_by` and `fired` so the
   TypeScript types match the Rust enum 1:1.
 
+- **ChannelsPage — real `/v1/channels` CRUD UI (closes #139).** The
+  `/v1/channels` runtime-channel API (create/list/send/consume/messages
+  on `cairn-runtime::ChannelService`) had no operator UI. A new
+  `ChannelsPage` now wires it up: project-scoped list with name /
+  channel_id / capacity / created columns, a "New Channel" modal
+  (name + capacity), a per-row "Send" modal (sender_id + body), and a
+  per-row "Messages" drawer that polls `/v1/channels/:id/messages`.
+  `api.ts` gains `listChannels`, `createChannel`, `sendToChannel`,
+  `getChannelMessages`, `consumeChannelMessage`; `types.ts` gains
+  `Channel`, `ChannelMessage`, `CreateChannelRequest`,
+  `SendChannelMessageRequest`, `SendChannelMessageResponse` mirroring
+  the `cairn_domain::{ChannelRecord, ChannelMessage}` Rust types. New
+  integration test
+  `crates/cairn-app/tests/test_http_channels.rs::channel_create_send_list_roundtrip`
+  pins the create → send → list contract end-to-end against a live
+  `cairn-app` subprocess.
+
 - **LogsPage + AuditLogPage — time-range filter, page-size control, and
   cursor pagination (closes #163).** Both pages previously hardcoded a
   single fetch (500 / 200 entries) with no way to scroll into older
@@ -132,6 +149,18 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `crates/cairn-app/tests/test_http_project_repos.rs`
   (attach → list → get → detach → list-empty roundtrip + malformed-id
   400 contract).
+
+### Changed
+
+- **ChannelsPage → NotificationsPage rename (closes #139).** The
+  legacy `ChannelsPage.tsx` was misnamed — it managed per-operator
+  notification preferences at `/v1/admin/operators/:id/notifications`,
+  not the `/v1/channels` CRUD surface. The file is renamed to
+  `NotificationsPage.tsx`, the nav item splits into two entries under
+  Infrastructure ("Channels" for runtime channels, "Notifications" for
+  notification preferences), and the `NavPage` union in `Sidebar.tsx`
+  / `Layout.tsx` gains a `notifications` key. Existing
+  `/v1/admin/operators/:id/notifications` behaviour is unchanged.
 
 ### Removed
 

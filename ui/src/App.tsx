@@ -38,6 +38,7 @@ const DecisionsPage      = lazy(() => import('./pages/DecisionsPage').then(m => 
 const SourcesPage        = lazy(() => import('./pages/SourcesPage').then(m => ({ default: m.SourcesPage })));
 const CredentialsPage    = lazy(() => import('./pages/CredentialsPage').then(m => ({ default: m.CredentialsPage })));
 const ChannelsPage       = lazy(() => import('./pages/ChannelsPage').then(m => ({ default: m.ChannelsPage })));
+const NotificationsPage  = lazy(() => import('./pages/NotificationsPage').then(m => ({ default: m.NotificationsPage })));
 const IntegrationsPage   = lazy(() => import('./pages/IntegrationsPage').then(m => ({ default: m.IntegrationsPage })));
 const ProjectReposPage   = lazy(() => import('./pages/ProjectReposPage').then(m => ({ default: m.ProjectReposPage })));
 const LogsPage           = lazy(() => import('./pages/LogsPage').then(m => ({ default: m.LogsPage })));
@@ -146,6 +147,7 @@ function renderRoute(route: Route): React.ReactNode {
       case 'sources':     return <SourcesPage />;
       case 'credentials': return <CredentialsPage />;
       case 'channels':      return <ChannelsPage />;
+      case 'notifications': return <NotificationsPage />;
       case 'integrations': return <IntegrationsPage />;
       case 'project-repos': return <ProjectReposPage />;
       case 'logs':        return <LogsPage />;

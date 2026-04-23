@@ -1427,6 +1427,73 @@ export function createApiClient(config: ApiClientConfig) {
     ): Promise<import("./types").CredentialSummary> =>
       del(`/v1/admin/tenants/${encodeURIComponent(tenantId)}/credentials/${encodeURIComponent(credentialId)}`),
 
+    // ── Runtime message channels (/v1/channels) ──────────────────────────────
+
+    /** GET /v1/channels — list runtime channels in the current project. */
+    listChannels: (params?: {
+      tenant_id?: string;
+      workspace_id?: string;
+      project_id?: string;
+      limit?: number;
+      offset?: number;
+    }): Promise<import("./types").ListResponse<import("./types").Channel>> => {
+      const merged = withScope(params);
+      const qs = new URLSearchParams();
+      qs.set("tenant_id",    merged.tenant_id    ?? DEFAULT_SCOPE.tenant_id);
+      qs.set("workspace_id", merged.workspace_id ?? DEFAULT_SCOPE.workspace_id);
+      qs.set("project_id",   merged.project_id   ?? DEFAULT_SCOPE.project_id);
+      if (params?.limit !== undefined)  qs.set("limit",  String(params.limit));
+      if (params?.offset !== undefined) qs.set("offset", String(params.offset));
+      return get(`/v1/channels?${qs}`);
+    },
+
+    /** POST /v1/channels — create a new runtime channel. */
+    createChannel: (
+      name: string,
+      capacity: number,
+      scope?: import("./scope").ProjectScope,
+    ): Promise<import("./types").Channel> => {
+      const s = scope ?? config.scope ?? DEFAULT_SCOPE;
+      return post("/v1/channels", {
+        tenant_id:    s.tenant_id,
+        workspace_id: s.workspace_id,
+        project_id:   s.project_id,
+        name,
+        capacity,
+      });
+    },
+
+    /** POST /v1/channels/:id/send — publish a message to a channel. */
+    sendToChannel: (
+      channelId: string,
+      senderId: string,
+      body: string,
+    ): Promise<import("./types").SendChannelMessageResponse> =>
+      post(`/v1/channels/${encodeURIComponent(channelId)}/send`, {
+        sender_id: senderId,
+        body,
+      }),
+
+    /** GET /v1/channels/:id/messages — list messages on a channel. */
+    getChannelMessages: (
+      channelId: string,
+      limit?: number,
+    ): Promise<import("./types").ChannelMessage[]> => {
+      const qs = new URLSearchParams();
+      if (limit !== undefined) qs.set("limit", String(limit));
+      const suffix = qs.toString().length > 0 ? `?${qs}` : "";
+      return get(`/v1/channels/${encodeURIComponent(channelId)}/messages${suffix}`);
+    },
+
+    /** POST /v1/channels/:id/consume — consume next message for consumer_id. */
+    consumeChannelMessage: (
+      channelId: string,
+      consumerId: string,
+    ): Promise<import("./types").ChannelMessage | null> =>
+      post(`/v1/channels/${encodeURIComponent(channelId)}/consume`, {
+        consumer_id: consumerId,
+      }),
+
     // ── Notification channels (RFC 007/014) ──────────────────────────────────
 
     /** GET /v1/admin/operators/:operatorId/notifications — fetch preferences for one operator. */
