@@ -2,16 +2,29 @@ import { useState, type FormEvent, useId } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   RefreshCw, ServerCrash, Loader2, Plus, Trash2, ChevronDown, ChevronRight,
-  HardDrive, Zap, XCircle, Pencil,
+  HardDrive, Zap, XCircle, Pencil, Search,
   Globe, Server, Check, X, Settings, Tag,
 } from "lucide-react";
 import { clsx } from "clsx";
 import { StatCard } from "../components/StatCard";
-import { defaultApi } from "../lib/api";
+import { Badge } from "../components/Badge";
+import { Drawer } from "../components/Drawer";
+import { defaultApi, ApiError } from "../lib/api";
 import { useToast } from "../components/Toast";
 import { sectionLabel } from "../lib/design-system";
 import { useScope } from "../hooks/useScope";
 import type { ProviderConnectionRecord, ProviderHealthEntry } from "../lib/types";
+
+// ── Test-connection result ────────────────────────────────────────────────────
+
+interface TestConnectionResult {
+  connection_id: string;
+  ok: boolean;
+  latency_ms: number;
+  status: number;
+  provider: string;
+  detail: string;
+}
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -404,12 +417,14 @@ function ConnectionRow({
   even,
   onDelete,
   onUpdated,
+  onTestResult,
 }: {
   record: ProviderConnectionRecord;
   health?: ProviderHealthEntry;
   even: boolean;
   onDelete: (id: string) => void;
   onUpdated: () => void;
+  onTestResult: (r: TestConnectionResult) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
   const [editing, setEditing] = useState(false);
@@ -450,14 +465,25 @@ function ConnectionRow({
 
   const testConn = useMutation({
     mutationFn: () => defaultApi.testConnection(record.provider_connection_id),
-    onSuccess: (r) => {
-      if (r.ok) {
-        toast.success(`${record.provider_connection_id} — reachable (${r.latency_ms}ms)`);
-      } else {
-        toast.error(`${record.provider_connection_id} — ${r.detail} (HTTP ${r.status})`);
-      }
+    onMutate: () => {
+      // Fire a transient "testing…" toast so the operator sees immediate
+      // feedback; the full structured result lands in the right-hand
+      // drawer a moment later.
+      toast.info(`Testing ${record.provider_connection_id}…`);
     },
-    onError: () => toast.error(`Failed to test ${record.provider_connection_id}`),
+    onSuccess: (r) => {
+      onTestResult({ connection_id: record.provider_connection_id, ...r });
+    },
+    onError: (e) => {
+      onTestResult({
+        connection_id: record.provider_connection_id,
+        ok: false,
+        latency_ms: 0,
+        status: 0,
+        provider: record.provider_family,
+        detail: e instanceof Error ? e.message : "connection test failed",
+      });
+    },
   });
 
   const discoverConn = useMutation({
@@ -723,15 +749,59 @@ function AddProviderModal({ onClose, onCreated }: AddProviderModalProps) {
 
   const removeModel = (m: string) => setModels(prev => prev.filter(x => x !== m));
 
+  // Discover-preview mutation — probes the provider for its model catalog
+  // BEFORE registration so the operator can see what they'll get instead
+  // of hoping auto-discovery fires on create. Populates `models` on success.
+  const previewDiscover = useMutation({
+    mutationFn: async () => {
+      const adapter_type = adapter.trim().toLowerCase() === "ollama" ? "ollama" : "openai_compat";
+      const r = await defaultApi.discoverModelsPreview({
+        adapter_type,
+        endpoint_url: baseUrl.trim() || undefined,
+        api_key:      apiKey.trim() || undefined,
+      });
+      return r.models.map(m => m.model_id);
+    },
+    onSuccess: (ids) => {
+      if (ids.length === 0) {
+        toast.warning("Provider returned no models — add IDs manually.");
+        return;
+      }
+      // Merge with any manually-entered IDs so the operator doesn't lose work.
+      setModels(prev => {
+        const merged = [...prev];
+        for (const id of ids) if (!merged.includes(id)) merged.push(id);
+        return merged;
+      });
+      setModelInput(ids.join(", "));
+      toast.success(`Discovered ${ids.length} model${ids.length === 1 ? "" : "s"}.`);
+    },
+    onError: (e) =>
+      toast.error(`Discover preview failed: ${e instanceof Error ? e.message : "error"}`),
+  });
+
   const createMutation = useMutation({
     mutationFn: async () => {
       let credentialId: string | undefined;
       if (apiKey.trim()) {
-        const stored = await defaultApi.storeCredential(scope.tenant_id, {
-          provider_id: connectionId.trim(),
-          plaintext_value: apiKey,
-        });
-        credentialId = stored.id;
+        try {
+          const stored = await defaultApi.storeCredential(scope.tenant_id, {
+            provider_id: connectionId.trim(),
+            plaintext_value: apiKey,
+          });
+          credentialId = stored.id;
+        } catch (e) {
+          // If the credential already exists for this (tenant, provider_id),
+          // the user is retrying after a partial failure — continue without
+          // storing so the connection itself can still be registered.
+          // #251: surface the failure as a warning rather than silently
+          // dropping it so the user can decide whether to change the ID.
+          if (e instanceof ApiError && e.status === 409) {
+            toast.warning(`Credential for "${connectionId}" already exists — re-using.`);
+          } else {
+            throw e;
+          }
+        }
       }
 
       const created = await defaultApi.createProviderConnection({
@@ -779,7 +849,16 @@ function AddProviderModal({ onClose, onCreated }: AddProviderModalProps) {
       onCreated();
       onClose();
     },
-    onError: (e) => toast.error(`Failed: ${e instanceof Error ? e.message : "error"}`),
+    onError: (e) => {
+      // Defensive: surface every non-2xx with a visible red toast so the
+      // modal never fails silently (the #251 bug was a submission that
+      // appeared to do nothing because the onError path only surfaced a
+      // generic string and the button stayed enabled).
+      const msg = e instanceof ApiError
+        ? `${e.status} ${e.message}`
+        : e instanceof Error ? e.message : "Unknown error";
+      toast.error(`Failed to register "${connectionId}": ${msg}`);
+    },
   });
 
   const steps = ["Type", "Connection", "Models"];
@@ -944,12 +1023,17 @@ function AddProviderModal({ onClose, onCreated }: AddProviderModalProps) {
 
           {/* ── Step 2: Model discovery / manual entry ── */}
           {step === 2 && (
-            <div className="space-y-4">
+            <form
+              id={`${formId}-models-form`}
+              onSubmit={(e: FormEvent) => { e.preventDefault(); createMutation.mutate(); }}
+              className="space-y-4"
+            >
               <div>
                 <p className="text-[12px] text-gray-700 dark:text-zinc-300 font-medium">Add models</p>
                 <p className="text-[11px] text-gray-400 dark:text-zinc-500 mt-1 leading-relaxed">
-                  Enter the model IDs served through this connection, or leave this blank
-                  — we will call the provider&apos;s <code className="text-gray-500 dark:text-zinc-400 font-mono text-[10px]">/models</code> endpoint right after registration and fill it in automatically.
+                  Enter the model IDs served through this connection, or click
+                  <strong className="text-gray-700 dark:text-zinc-300"> Discover </strong>
+                  to probe the provider&apos;s <code className="text-gray-500 dark:text-zinc-400 font-mono text-[10px]">/models</code> endpoint right now.
                 </p>
               </div>
 
@@ -979,12 +1063,29 @@ function AddProviderModal({ onClose, onCreated }: AddProviderModalProps) {
                 </button>
               </div>
 
-              {/* Discovery notice */}
-              <div className="flex items-center gap-2 px-3 py-2 rounded-md bg-gray-50/60 dark:bg-zinc-900/60 border border-gray-200/60 dark:border-zinc-800/60 border-dashed">
-                <Zap size={12} className="text-emerald-400 shrink-0" />
-                <span className="text-[11px] text-gray-500 dark:text-zinc-400">
-                  Auto-discovery runs on registration when this list is empty — calls{" "}
-                  <code className="text-gray-400 dark:text-zinc-500 font-mono text-[10px]">GET /v1/providers/connections/:id/discover-models</code>.
+              {/* Discover-preview button — probes the provider WITHOUT
+                  registering a connection yet, so the operator can cancel
+                  the wizard without leaving a stale connection record. */}
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  data-testid="discover-preview-btn"
+                  onClick={() => previewDiscover.mutate()}
+                  disabled={previewDiscover.isPending || (!baseUrl.trim() && kind !== "ollama")}
+                  className="flex items-center gap-1.5 px-3 h-8 rounded-md bg-emerald-600/90 hover:bg-emerald-500 disabled:opacity-40 text-white text-[11px] font-medium transition-colors"
+                  title={
+                    !baseUrl.trim() && kind !== "ollama"
+                      ? "Set a base URL on the previous step first"
+                      : "Probe the provider for its model catalog right now"
+                  }
+                >
+                  {previewDiscover.isPending
+                    ? <Loader2 size={11} className="animate-spin" />
+                    : <Search size={11} />}
+                  {previewDiscover.isPending ? "Discovering…" : "Discover models"}
+                </button>
+                <span className="text-[11px] text-gray-400 dark:text-zinc-500">
+                  Fills the list by calling <code className="font-mono text-[10px]">POST /v1/providers/connections/discover-preview</code>.
                 </span>
               </div>
 
@@ -1016,7 +1117,7 @@ function AddProviderModal({ onClose, onCreated }: AddProviderModalProps) {
                   You can register models later from the connection row.
                 </p>
               )}
-            </div>
+            </form>
           )}
         </div>
 
@@ -1040,7 +1141,9 @@ function AddProviderModal({ onClose, onCreated }: AddProviderModalProps) {
             </button>
           ) : (
             <button
-              onClick={() => createMutation.mutate()}
+              type="submit"
+              form={`${formId}-models-form`}
+              data-testid="register-provider-btn"
               disabled={createMutation.isPending}
               className="flex items-center gap-1.5 px-4 py-1.5 rounded-md bg-indigo-600 hover:bg-indigo-500 disabled:bg-gray-100 dark:bg-zinc-800 disabled:text-gray-400 dark:text-zinc-600 text-white text-[12px] font-medium transition-colors"
             >
@@ -1059,7 +1162,13 @@ function AddProviderModal({ onClose, onCreated }: AddProviderModalProps) {
 
 // ── Connections section ───────────────────────────────────────────────────────
 
-function ConnectionsSection({ onAdd }: { onAdd: () => void }) {
+function ConnectionsSection({
+  onAdd,
+  onTestResult,
+}: {
+  onAdd: () => void;
+  onTestResult: (r: TestConnectionResult) => void;
+}) {
   const toast = useToast();
   const qc = useQueryClient();
 
@@ -1184,6 +1293,7 @@ function ConnectionsSection({ onAdd }: { onAdd: () => void }) {
                   even={i % 2 === 0}
                   onDelete={handleDelete}
                   onUpdated={refetch}
+                  onTestResult={onTestResult}
                 />
               ))}
             </tbody>
@@ -1213,6 +1323,7 @@ function ConnectionsSection({ onAdd }: { onAdd: () => void }) {
 export function ProvidersPage() {
   const qc = useQueryClient();
   const [showAddModal, setShowAddModal] = useState(false);
+  const [testResult, setTestResult] = useState<TestConnectionResult | null>(null);
 
   const handleCreated = () => {
     void qc.invalidateQueries({ queryKey: ["provider-connections"] });
@@ -1231,7 +1342,7 @@ export function ProvidersPage() {
       </div>
 
       {/* User-created connections with Add Provider button */}
-      <ConnectionsSection onAdd={() => setShowAddModal(true)} />
+      <ConnectionsSection onAdd={() => setShowAddModal(true)} onTestResult={setTestResult} />
 
       {/* Add Provider slide-over */}
       {showAddModal && (
@@ -1240,7 +1351,69 @@ export function ProvidersPage() {
           onCreated={handleCreated}
         />
       )}
+
+      {/* Test-connection result drawer */}
+      <TestConnectionDrawer
+        result={testResult}
+        onClose={() => setTestResult(null)}
+      />
     </div>
+  );
+}
+
+// ── Test-connection result drawer ─────────────────────────────────────────────
+
+function TestConnectionDrawer({
+  result,
+  onClose,
+}: {
+  result: TestConnectionResult | null;
+  onClose: () => void;
+}) {
+  return (
+    <Drawer
+      open={!!result}
+      onClose={onClose}
+      title={result ? `Test: ${result.connection_id}` : "Test connection"}
+      width="w-96"
+    >
+      {result && (
+        <div className="p-5 space-y-4" data-testid="test-connection-drawer">
+          <div className="flex items-center gap-2">
+            {result.ok ? (
+              <Badge variant="success" dot compact>Reachable</Badge>
+            ) : (
+              <Badge variant="danger" dot compact>Failed</Badge>
+            )}
+            <span className="text-[11px] font-mono text-gray-400 dark:text-zinc-500">
+              HTTP {result.status || "—"}
+            </span>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <p className="text-[10px] uppercase tracking-wide text-gray-400 dark:text-zinc-500">Latency</p>
+              <p className="text-[13px] font-mono text-gray-800 dark:text-zinc-200">
+                {result.latency_ms > 0 ? `${result.latency_ms} ms` : "—"}
+              </p>
+            </div>
+            <div>
+              <p className="text-[10px] uppercase tracking-wide text-gray-400 dark:text-zinc-500">Provider</p>
+              <p className="text-[13px] font-mono text-gray-800 dark:text-zinc-200">
+                {result.provider || "—"}
+              </p>
+            </div>
+          </div>
+
+          <div>
+            <p className="text-[10px] uppercase tracking-wide text-gray-400 dark:text-zinc-500 mb-1">Detail</p>
+            <pre className="text-[11px] font-mono whitespace-pre-wrap break-words text-gray-700 dark:text-zinc-300 bg-gray-50 dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 rounded p-2 max-h-64 overflow-auto">
+              {result.detail || (result.ok ? "(no detail)" : "Connection failed.")}
+            </pre>
+          </div>
+        </div>
+      )}
+    </Drawer>
   );
 }
 
