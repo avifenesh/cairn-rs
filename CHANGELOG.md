@@ -11,32 +11,6 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
-- **`MemoryPage` now has an in-UI ingest form.** Closes #152. The page used
-  to instruct operators to curl `POST /v1/memory/ingest` by hand; it now
-  renders a form with source_id / document_id / optional source_type /
-  content fields, wired via TanStack Query mutation against
-  `defaultApi.ingestMemory`. Scope is inferred from `useScope()`. Errors
-  surface via `useToast().error(message)`; on success the `memory-search`
-  and `sources` queries are invalidated so the search results and source
-  panel refresh without a full page reload.
-- **`SourcesPage` gained full CRUD + schedule + chunk inspection.** New
-  toolbar buttons for "New Source" and "Process Due" (all-schedule
-  sweep), plus per-row Edit, Delete, View Chunks, and Refresh Schedule
-  actions. Each action is a focused modal following the existing design
-  system (`ds.modal.*`, `useFocusTrap`, `useToast`). Mutations invalidate
-  `['sources']`, `['source', id]`, `['source', id, 'chunks']`, and
-  `['source', id, 'schedule']` as appropriate.
-- **`defaultApi.ingestMemory` / `createSource` / `getSource` /
-  `updateSource` / `deleteSource` / `getSourceChunks` /
-  `getSourceRefreshSchedule` / `setSourceRefreshSchedule` /
-  `processSourceRefresh`** on the TypeScript API client, with matching
-  `CreateSourceRequest`, `UpdateSourceRequest`, `MemoryIngestRequest`,
-  `SourceDetailResponse`, `SourceChunkView`, `CreateRefreshScheduleRequest`,
-  `RefreshScheduleResponse`, and `ProcessRefreshResponse` types
-  mirroring the Rust handler shapes exactly.
-- **`test_http_sources_crud.rs`** integration test covering the full
-  roundtrip over `LiveHarness`: create → ingest → list → chunks → update
-  → schedule → process-refresh → delete.
 - **`GET /v1/skills` + `GET /v1/skills/:id` — real skills catalog wiring.**
   Replaces the hard-coded empty stub
   (`list_skills_preserved_handler` in `handlers/memory.rs`) with a
@@ -136,6 +110,7 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+<<<<<<< HEAD
 - **UI: `AgentTemplatesPage` navigated after a 500 ms `setTimeout` (#161).**
   After `instantiateAgentTemplate` succeeded the page slept 500 ms before
   routing to the new run, hoping the backend had finished creating it —
@@ -175,6 +150,33 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   most one `rSessions`/`rRuns`/`rTasks`. Payload ids read both
   snake_case and camelCase to match the pattern in `RunDetailPage`.
   Operator actions wired in PR P are untouched.
+=======
+- **UI: `PlaygroundPage` model picker excluded Anthropic-native providers (#160).** The registry-derived model list filtered out providers whose `api_format` was `anthropic`, silently hiding every Anthropic-native connection even though the backend `chat/stream` handler routes through the native adapter. Removed the adapter-kind filter so all available registered providers contribute their models to the picker. Closes #160.
+- **UI: `DecisionsPage` row-level Invalidate button was invisible (#153).**
+  The per-row "Invalidate" button in the cache tab used Tailwind's
+  `opacity-0 group-hover:opacity-100` reveal pattern, but the shared
+  `DataTable` `<tr>` did not declare the `group` class, so the
+  `group-hover:` variant never activated and the button stayed
+  permanently hidden. Added an opt-in `rowClassName` prop to
+  `DataTable` (keeps the shared component free of implicit Tailwind
+  scopes) and pass `rowClassName="group"` from `DecisionsPage` for
+  the cache tab so hover-revealed row actions become visible on
+  hover. Closes #153.
+- **UI: `CredentialsPage` Add-Credential modal missing toast on store error + stale `default` placeholder (#162).**
+  The `storeCredential` mutation only declared `onSuccess`, so any
+  failure (invalid provider, encryption key lookup miss, transport
+  error) was only shown via the modal's inline `mutErr` text and did
+  not surface through the shared toast — inconsistent with the rest
+  of the app (ApprovalsPage, DecisionsPage) where operator-initiated
+  mutations always raise a toast on failure. Added an `onError`
+  handler that surfaces the error message via `useToast()`, matching
+  the `ApprovalsPage` pattern. Also replaced a stale
+  `placeholder="default"` string literal on the Tenant input with
+  `DEFAULT_SCOPE.tenant_id` from `ui/src/lib/scope.ts` so the
+  placeholder stays in sync with the canonical default tenant id
+  (`default_tenant`) — the PR #132 cleanup missed this one field.
+  Closes #162.
+>>>>>>> origin/main
 - **UI: `RunDetailPage` plan-mode detection used a loose substring match (#178).**
   The `isPlanMode` check in `ui/src/pages/RunDetailPage.tsx` used a loose
   substring match (`runModeType.includes("plan")`), so runs with names or
