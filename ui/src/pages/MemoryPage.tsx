@@ -4,7 +4,7 @@ import { Search, Loader2, X, RefreshCw, Database, Upload } from 'lucide-react';
 import { HelpTooltip } from '../components/HelpTooltip';
 import { FeatureEmptyState } from '../components/FeatureEmptyState';
 import { clsx } from 'clsx';
-import { defaultApi } from '../lib/api';
+import { defaultApi, ApiError } from '../lib/api';
 import { useScope } from '../hooks/useScope';
 import { useToast } from '../components/Toast';
 import type { MemoryChunkResult, SourceRecord } from '../lib/types';
@@ -13,6 +13,24 @@ import type { MemoryChunkResult, SourceRecord } from '../lib/types';
 
 function truncate(s: string, n: number) {
   return s.length > n ? `${s.slice(0, n)}…` : s;
+}
+
+/**
+ * Detect the "no embedding provider configured" condition from a structured
+ * ApiError. The backend returns 503 with `code: provider_unavailable` in
+ * that case; everything else (auth, network, validation) renders a generic
+ * error card instead.
+ */
+function isProviderUnavailable(err: unknown): boolean {
+  if (err instanceof ApiError) {
+    return err.status === 503 || err.code === 'provider_unavailable';
+  }
+  return false;
+}
+
+function errorMessage(err: unknown): string {
+  if (err instanceof Error) return err.message;
+  return String(err ?? 'Unknown error');
 }
 
 function fmtScore(n: number) {
@@ -243,7 +261,7 @@ export function MemoryPage() {
 
   // Scope-keyed — same pattern as SourcesPage — so changing scope does not
   // bleed sources from a previous tenant/workspace/project into the panel.
-  const { data: sources, isError: isSourcesError, refetch: refetchSources } = useQuery({
+  const { data: sources, isError: isSourcesError, error: sourcesError, refetch: refetchSources } = useQuery({
     queryKey: ['sources', scope.tenant_id, scope.workspace_id, scope.project_id],
     // Pass scope explicitly so the request body is guaranteed to match the
     // queryKey even if the API client's implicit scope (localStorage) has
@@ -339,32 +357,26 @@ export function MemoryPage() {
               <Loader2 size={12} className="animate-spin" /> Searching…
             </div>
           ) : isSearchError ? (
-            // Distinguish "no embedding provider configured" (the common
-            // first-run case — backend returns 503 / provider_unavailable)
-            // from generic errors (network, 4xx, 5xx). Showing the provider
-            // hint on every failure masked real bugs — now we only show it
-            // when the error genuinely points at missing provider config.
-            (() => {
-              const errMsg = searchError instanceof Error ? searchError.message : String(searchError ?? '');
-              const isProviderUnavailable =
-                /provider/i.test(errMsg) && /(unavailable|not configured|missing|no embedding|embedding)/i.test(errMsg);
-              return isProviderUnavailable ? (
-                <FeatureEmptyState
-                  icon={<Database size={20} className="text-gray-400 dark:text-zinc-500" />}
-                  title="No embedding provider configured"
-                  description="Memory search requires an embedding provider to generate vector representations. Add one on the Providers page, then ingest documents with the form above."
-                  actionLabel="Go to Providers"
-                  actionHref="#providers"
-                />
-              ) : (
-                <div className="px-4 py-6 text-center">
-                  <p className="text-[12px] font-medium text-red-400">Search failed</p>
-                  <p className="mt-1 text-[11px] text-gray-400 dark:text-zinc-500 font-mono break-words">
-                    {errMsg || 'Unknown error'}
-                  </p>
-                </div>
-              );
-            })()
+            // Distinguish "no embedding provider configured" (backend 503 /
+            // code=provider_unavailable) from generic errors (network, 4xx,
+            // other 5xx). Detection is based on the structured ApiError
+            // (status/code), not regex-matching human-readable text.
+            isProviderUnavailable(searchError) ? (
+              <FeatureEmptyState
+                icon={<Database size={20} className="text-gray-400 dark:text-zinc-500" />}
+                title="No embedding provider configured"
+                description="Memory search requires an embedding provider to generate vector representations. Add one on the Providers page, then ingest documents with the form above."
+                actionLabel="Go to Providers"
+                actionHref="#providers"
+              />
+            ) : (
+              <div className="px-4 py-6 text-center">
+                <p className="text-[12px] font-medium text-red-400">Search failed</p>
+                <p className="mt-1 text-[11px] text-gray-400 dark:text-zinc-500 font-mono break-words">
+                  {errorMessage(searchError)}
+                </p>
+              </div>
+            )
           ) : results.length === 0 ? (
             <div className="px-4 py-8 text-center text-xs text-gray-400 dark:text-zinc-600">
               No results for "{submitted}"
@@ -408,13 +420,16 @@ export function MemoryPage() {
         </div>
 
         {isSourcesError ? (
-          <FeatureEmptyState
-            icon={<Database size={20} className="text-gray-400 dark:text-zinc-500" />}
-            title="No embedding provider configured"
-            description="Add one on the Providers page, then ingest documents with the form above."
-            actionLabel="Go to Providers"
-            actionHref="#providers"
-          />
+          // /v1/sources errors are unrelated to embedding providers —
+          // show the real error message so operators can debug auth /
+          // network / validation failures instead of being sent to the
+          // Providers page on unrelated issues.
+          <div className="px-4 py-8 text-center">
+            <p className="text-[12px] font-medium text-red-400">Failed to load sources</p>
+            <p className="mt-1 text-[11px] text-gray-400 dark:text-zinc-500 font-mono break-words">
+              {errorMessage(sourcesError)}
+            </p>
+          </div>
         ) : !sources || sources.length === 0 ? (
           <div className="px-4 py-8 text-center text-xs text-gray-400 dark:text-zinc-600">
             No sources registered — use the ingest form above to add documents
