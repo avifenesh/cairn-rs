@@ -31,14 +31,29 @@ export interface AgentTemplate {
 }
 
 // ── Skills (GET /v1/skills) ─────────────────────────────────────────────────
+//
+// Shape mirrors `cairn-api/src/skills_api.rs::SkillSummary` (wire format) and
+// `cairn-app/src/handlers/skills.rs::ListSkillsResponse`. The `Skill` /
+// `SkillSummary` structs use default serde (snake_case field names). The
+// enclosing `ListSkillsResponse` additionally emits a legacy
+// `currentlyActive` camelCase alias alongside `currently_active` for stub
+// compatibility — see the handler doc comment.
+
+export type SkillLifecycleStatus = "active" | "proposed" | "rejected";
 
 export interface SkillRecord {
-  id?: string;
-  name?: string;
-  description?: string;
-  enabled?: boolean;
-  source?: string;
-  [key: string]: unknown;
+  skill_id: string;
+  name: string;
+  description: string;
+  version: string;
+  tags: string[];
+  enabled: boolean;
+}
+
+export interface SkillDetail extends SkillRecord {
+  entry_point: string;
+  required_permissions: string[];
+  status: SkillLifecycleStatus;
 }
 
 export interface SkillsSummary {

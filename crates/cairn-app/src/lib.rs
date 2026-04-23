@@ -127,6 +127,8 @@ pub(crate) use handlers::sessions::*;
 #[allow(unused_imports)]
 pub(crate) use handlers::signals::*;
 #[allow(unused_imports)]
+pub(crate) use handlers::skills::*;
+#[allow(unused_imports)]
 pub(crate) use handlers::sqeq::*;
 #[allow(unused_imports)]
 pub(crate) use handlers::sse::*;
