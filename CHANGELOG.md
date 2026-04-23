@@ -123,6 +123,18 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- **Soak tests (`test_soak_5min`, `test_soak_30min`, `test_soak_1hr`)
+  now assert post-warmup fd steady-state variance rather than a
+  baseline→end %-growth bound.** A baseline→end % bound at small
+  baselines (~16 fds post-Phase-D + harness-tools) conflates one-time
+  startup fd cost with leak growth and fires spuriously. The new bound
+  skips the warmup window (60 s for 5min, 150 s for 30min/1hr) and
+  asserts `max(fd) - min(fd) <= 5` across steady-state samples —
+  exactly what "no leak" semantically means. Motivated by the
+  2026-04-22 30min run: 181 successful orchestrations, RSS stable,
+  fd oscillated 19–22 post-warmup (delta=3) but the +6 absolute fixed
+  startup cost tripped the old 30 % relative bound. Full sample trace
+  remains in the panic message for diagnostics.
 - **FlowFabric 0.3.2 → 0.3.4 lockfile refresh.** Workspace pins remain
   at the `"0.3"` caret (unchanged), only `Cargo.lock` moves. Picks up
   upstream hotfix for `FlowFabricWorker::connect_with` null
