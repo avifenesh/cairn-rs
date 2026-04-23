@@ -885,6 +885,11 @@ pub(crate) async fn intervene_run_handler(
         }
         Err(err) => return runtime_error_response(err),
     };
+    // Tenant to stamp on intervention events / notifications: the run's
+    // real tenant, not the request principal's. Admin can cross tenants
+    // past the guard above, so using the principal's tenant here would
+    // mislabel events and misroute SSE/notifications.
+    let event_tenant_id = run.project.tenant_id.clone();
 
     let before = current_event_head(&state).await;
     match body.action {
@@ -894,7 +899,7 @@ pub(crate) async fn intervene_run_handler(
                     if let Err(err) = append_run_intervention_event(
                         &state,
                         &run_id,
-                        &run.project.tenant_id,
+                        &event_tenant_id,
                         "force_complete",
                         &body.reason,
                     )
@@ -932,7 +937,7 @@ pub(crate) async fn intervene_run_handler(
                 operator_event_envelope(RuntimeEvent::OperatorIntervention(
                     cairn_domain::OperatorIntervention {
                         run_id: Some(run_id.clone()),
-                        tenant_id: run.project.tenant_id.clone(),
+                        tenant_id: event_tenant_id.clone(),
                         action: "force_fail".to_owned(),
                         reason: body.reason,
                         intervened_at_ms: now_ms(),
@@ -946,7 +951,7 @@ pub(crate) async fn intervene_run_handler(
                         .runtime
                         .notifications
                         .notify_if_applicable(
-                            &run.project.tenant_id,
+                            &event_tenant_id,
                             "run.failed",
                             serde_json::json!({ "run_id": run_id.as_str() }),
                         )
@@ -996,7 +1001,7 @@ pub(crate) async fn intervene_run_handler(
                 operator_event_envelope(RuntimeEvent::OperatorIntervention(
                     cairn_domain::OperatorIntervention {
                         run_id: Some(run_id.clone()),
-                        tenant_id: run.project.tenant_id.clone(),
+                        tenant_id: event_tenant_id.clone(),
                         action: "force_restart".to_owned(),
                         reason: body.reason,
                         intervened_at_ms: now_ms(),
@@ -1067,7 +1072,7 @@ pub(crate) async fn intervene_run_handler(
                     if let Err(err) = append_run_intervention_event(
                         &state,
                         &run_id,
-                        &run.project.tenant_id,
+                        &event_tenant_id,
                         "inject_message",
                         &body.reason,
                     )

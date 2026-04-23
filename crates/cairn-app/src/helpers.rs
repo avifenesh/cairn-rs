@@ -1551,10 +1551,18 @@ pub(crate) fn event_message(event: &RuntimeEvent) -> String {
             format!("Plan proposed for run {}", p.plan_run_id)
         }
         RuntimeEvent::PlanApproved(p) => {
-            format!("Plan {} approved by {}", p.plan_run_id, p.approved_by)
+            format!(
+                "Plan {} approved by {}",
+                p.plan_run_id,
+                sanitize_for_event_message(p.approved_by.as_str())
+            )
         }
         RuntimeEvent::PlanRejected(p) => {
-            format!("Plan {} rejected: {}", p.plan_run_id, p.reason)
+            format!(
+                "Plan {} rejected: {}",
+                p.plan_run_id,
+                sanitize_for_event_message(&p.reason)
+            )
         }
         RuntimeEvent::PlanRevisionRequested(p) => {
             format!(
@@ -1562,6 +1570,25 @@ pub(crate) fn event_message(event: &RuntimeEvent) -> String {
                 p.original_plan_run_id, p.new_plan_run_id
             )
         }
+    }
+}
+
+/// Sanitize a user / operator-provided string before embedding it into a
+/// one-line SSE / audit-facing `event_message`. CR/LF are replaced with
+/// spaces to prevent log-line injection, and the result is truncated to
+/// keep SSE frames bounded. We do not need HTML-escape here — downstream
+/// consumers (UI, CLI) treat the message as plain text.
+fn sanitize_for_event_message(s: &str) -> String {
+    const MAX_LEN: usize = 200;
+    let cleaned: String = s
+        .chars()
+        .map(|c| if c == '\n' || c == '\r' { ' ' } else { c })
+        .collect();
+    if cleaned.chars().count() <= MAX_LEN {
+        cleaned
+    } else {
+        let truncated: String = cleaned.chars().take(MAX_LEN).collect();
+        format!("{truncated}…")
     }
 }
 
@@ -1684,5 +1711,74 @@ pub(crate) fn runtime_event_to_activity_entry(
             description: format!("Signal {} received from {}", e.signal_id, e.source),
         }),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use cairn_domain::{PlanApproved, PlanRejected, RunId, SessionId};
+
+    fn project_key() -> cairn_domain::tenancy::ProjectKey {
+        cairn_domain::tenancy::ProjectKey {
+            tenant_id: cairn_domain::TenantId::new("t"),
+            workspace_id: cairn_domain::WorkspaceId::new("w"),
+            project_id: cairn_domain::ProjectId::new("p"),
+        }
+    }
+
+    #[test]
+    fn sanitize_strips_crlf_and_truncates() {
+        let s = "hello\r\nworld\nattacker";
+        assert_eq!(sanitize_for_event_message(s), "hello  world attacker");
+
+        let long: String = "a".repeat(300);
+        let out = sanitize_for_event_message(&long);
+        // 200 chars + "…"
+        assert_eq!(out.chars().count(), 201);
+        assert!(out.ends_with('…'));
+    }
+
+    #[test]
+    fn plan_events_render_concrete_messages() {
+        let approved = RuntimeEvent::PlanApproved(PlanApproved {
+            project: project_key(),
+            plan_run_id: RunId::new("run_plan_1"),
+            approved_by: cairn_domain::OperatorId::new("alice"),
+            reviewer_comments: None,
+            approved_at: 0,
+        });
+        assert_eq!(event_message(&approved), "Plan run_plan_1 approved by alice");
+
+        let rejected = RuntimeEvent::PlanRejected(PlanRejected {
+            project: project_key(),
+            plan_run_id: RunId::new("run_plan_2"),
+            rejected_by: cairn_domain::OperatorId::new("bob"),
+            reason: "out of scope".to_owned(),
+            rejected_at: 0,
+        });
+        assert_eq!(
+            event_message(&rejected),
+            "Plan run_plan_2 rejected: out of scope"
+        );
+
+        // Injection attempt: CR/LF in reason is neutralized.
+        let injected = RuntimeEvent::PlanRejected(PlanRejected {
+            project: project_key(),
+            plan_run_id: RunId::new("run_plan_3"),
+            rejected_by: cairn_domain::OperatorId::new("bob"),
+            reason: "bad\nFAKE_LOG_LINE".to_owned(),
+            rejected_at: 0,
+        });
+        assert!(!event_message(&injected).contains('\n'));
+
+        // Sentinel: none of these fall through to "unknown".
+        for ev in [&approved, &rejected, &injected] {
+            assert_ne!(event_message(ev), "unknown");
+        }
+
+        // Silence unused-imports warning for SessionId import (reserved for
+        // future plan-session tests).
+        let _ = SessionId::new("sess");
     }
 }

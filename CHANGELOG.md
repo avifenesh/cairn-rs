@@ -149,8 +149,9 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `POST /v1/runs/:id/intervene`.** Both handlers compared the run's
   `project.tenant_id` to the principal's tenant without an admin
   short-circuit, so the `admin` service account (hard-bound to
-  `TenantId("default")`) returned `404 run_not_found` for any run in
-  another tenant — inconsistent with `replay_to_checkpoint` and other
+  `TenantId("default")`) returned a `404` with error code `"not_found"`
+  and message `"run not found"` for any run in another tenant —
+  inconsistent with `replay_to_checkpoint` and other
   sibling handlers that already honor `tenant_scope.is_admin`. Surfaced
   while wiring the run-detail operator pages (PR P / PR O'). Both
   handlers now read `tenant_scope.is_admin || run.project.tenant_id ==
