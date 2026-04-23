@@ -26,7 +26,7 @@ use crate::extractors::{HasProjectScope, ProjectJson, ProjectScope, TenantScope}
 use crate::state::AppState;
 use crate::{
     event_message, event_type_name, runtime_event_to_activity_entry, ActivityEntry, EventSummary,
-    EventsPage, EventsPageQuery,
+    EventsPage, EventsPageQuery, DEFAULT_PROJECT_ID, DEFAULT_TENANT_ID, DEFAULT_WORKSPACE_ID,
 };
 #[allow(unused_imports)]
 use crate::{SessionListResponseDoc, SessionRecordDoc};
@@ -76,11 +76,19 @@ impl HasProjectScope for CreateSessionRequest {
     }
 }
 
-#[derive(Clone, Debug, serde::Deserialize)]
+#[derive(Clone, Debug, Default, serde::Deserialize)]
 pub(crate) struct SessionListQuery {
-    pub(crate) tenant_id: String,
-    pub(crate) workspace_id: String,
-    pub(crate) project_id: String,
+    // Scope fields are optional at the HTTP boundary: bare calls
+    // (e.g. first-load UI without localStorage scope) fall back to
+    // the default tenant/workspace/project rather than 422-ing on
+    // missing query params. Non-default scopes still flow through
+    // `validate_project_scope` for tenant-mismatch rejection.
+    #[serde(default)]
+    pub(crate) tenant_id: Option<String>,
+    #[serde(default)]
+    pub(crate) workspace_id: Option<String>,
+    #[serde(default)]
+    pub(crate) project_id: Option<String>,
     pub(crate) status: Option<String>,
     pub(crate) limit: Option<usize>,
     pub(crate) offset: Option<usize>,
@@ -89,9 +97,9 @@ pub(crate) struct SessionListQuery {
 impl SessionListQuery {
     pub(crate) fn project(&self) -> ProjectKey {
         ProjectKey::new(
-            self.tenant_id.as_str(),
-            self.workspace_id.as_str(),
-            self.project_id.as_str(),
+            self.tenant_id.as_deref().filter(|s| !s.is_empty()).unwrap_or(DEFAULT_TENANT_ID),
+            self.workspace_id.as_deref().filter(|s| !s.is_empty()).unwrap_or(DEFAULT_WORKSPACE_ID),
+            self.project_id.as_deref().filter(|s| !s.is_empty()).unwrap_or(DEFAULT_PROJECT_ID),
         )
     }
 
@@ -167,7 +175,14 @@ pub(crate) async fn get_session_handler(
     Path(id): Path<String>,
 ) -> impl IntoResponse {
     match state.runtime.sessions.get(&SessionId::new(id)).await {
-        Ok(Some(session)) if session.project.tenant_id == *tenant_scope.tenant_id() => {
+        // Admin tokens bypass the per-tenant scope check so they can
+        // view sessions across any tenant (mirrors the pattern in
+        // `tasks.rs`/`runs.rs`/`approvals.rs`). Without this, admin
+        // callers get spurious 404s on non-default-tenant sessions.
+        Ok(Some(session))
+            if tenant_scope.is_admin
+                || session.project.tenant_id == *tenant_scope.tenant_id() =>
+        {
             match RunReadModel::list_by_session(
                 state.runtime.store.as_ref(),
                 &session.session_id,
@@ -200,7 +215,8 @@ pub(crate) async fn get_session_activity_handler(
     let session_id = SessionId::new(id.clone());
 
     match state.runtime.sessions.get(&session_id).await {
-        Ok(Some(s)) if s.project.tenant_id == *tenant_scope.tenant_id() => {}
+        Ok(Some(s))
+            if tenant_scope.is_admin || s.project.tenant_id == *tenant_scope.tenant_id() => {}
         Ok(Some(_)) | Ok(None) => {
             return AppApiError::new(StatusCode::NOT_FOUND, "not_found", "session not found")
                 .into_response();
@@ -298,7 +314,8 @@ pub(crate) async fn get_session_active_runs_handler(
     let session_id = SessionId::new(id.clone());
 
     match state.runtime.sessions.get(&session_id).await {
-        Ok(Some(s)) if s.project.tenant_id == *tenant_scope.tenant_id() => {}
+        Ok(Some(s))
+            if tenant_scope.is_admin || s.project.tenant_id == *tenant_scope.tenant_id() => {}
         Ok(Some(_)) | Ok(None) => {
             return AppApiError::new(StatusCode::NOT_FOUND, "not_found", "session not found")
                 .into_response();
@@ -339,7 +356,10 @@ pub(crate) async fn get_session_cost_handler(
 ) -> impl IntoResponse {
     let session_id = SessionId::new(id);
     match state.runtime.sessions.get(&session_id).await {
-        Ok(Some(session)) if session.project.tenant_id == *tenant_scope.tenant_id() => {
+        Ok(Some(session))
+            if tenant_scope.is_admin
+                || session.project.tenant_id == *tenant_scope.tenant_id() =>
+        {
             match SessionCostReadModel::get_session_cost(state.runtime.store.as_ref(), &session_id)
                 .await
             {
@@ -387,9 +407,11 @@ pub(crate) async fn get_session_llm_traces_handler(
 ) -> impl IntoResponse {
     let session_id = SessionId::new(id);
 
-    // Verify the session exists and belongs to the requesting tenant.
+    // Verify the session exists and belongs to the requesting tenant
+    // (admin tokens bypass the scope check).
     match state.runtime.sessions.get(&session_id).await {
-        Ok(Some(s)) if s.project.tenant_id == *tenant_scope.tenant_id() => {}
+        Ok(Some(s))
+            if tenant_scope.is_admin || s.project.tenant_id == *tenant_scope.tenant_id() => {}
         Ok(Some(_)) | Ok(None) => {
             return AppApiError::new(StatusCode::NOT_FOUND, "not_found", "session not found")
                 .into_response();
@@ -417,7 +439,12 @@ pub(crate) async fn list_session_events_handler(
 ) -> impl IntoResponse {
     let session_id = SessionId::new(id);
     let session = match state.runtime.sessions.get(&session_id).await {
-        Ok(Some(session)) if session.project.tenant_id == *tenant_scope.tenant_id() => session,
+        Ok(Some(session))
+            if tenant_scope.is_admin
+                || session.project.tenant_id == *tenant_scope.tenant_id() =>
+        {
+            session
+        }
         Ok(Some(_)) | Ok(None) => {
             return AppApiError::new(StatusCode::NOT_FOUND, "not_found", "session not found")
                 .into_response();

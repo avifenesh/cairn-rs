@@ -43,7 +43,8 @@ use crate::state::AppState;
 use crate::{
     append_run_intervention_event, current_event_head, event_message, event_type_name,
     persist_run_mode_default, publish_runtime_frames_since, resolve_run_mode_default,
-    resolve_run_string_default, PaginationQuery, RunRecordView,
+    resolve_run_string_default, PaginationQuery, RunRecordView, DEFAULT_PROJECT_ID,
+    DEFAULT_TENANT_ID, DEFAULT_WORKSPACE_ID,
 };
 #[allow(unused_imports)]
 use crate::{RunListResponseDoc, RunRecordDoc};
@@ -141,11 +142,18 @@ pub(crate) struct EventsPage {
     pub(crate) has_more: bool,
 }
 
-#[derive(Clone, Debug, serde::Deserialize, ToSchema)]
+#[derive(Clone, Debug, Default, serde::Deserialize, ToSchema)]
 pub(crate) struct RunListQuery {
-    pub(crate) tenant_id: String,
-    pub(crate) workspace_id: String,
-    pub(crate) project_id: String,
+    // Scope fields are optional at the HTTP boundary: bare calls
+    // (e.g. first-load UI without localStorage scope) fall back to
+    // the default tenant/workspace/project rather than 422-ing on
+    // missing query params.
+    #[serde(default)]
+    pub(crate) tenant_id: Option<String>,
+    #[serde(default)]
+    pub(crate) workspace_id: Option<String>,
+    #[serde(default)]
+    pub(crate) project_id: Option<String>,
     pub(crate) session_id: Option<String>,
     pub(crate) status: Option<String>,
     pub(crate) limit: Option<usize>,
@@ -155,9 +163,9 @@ pub(crate) struct RunListQuery {
 impl RunListQuery {
     pub(crate) fn project(&self) -> ProjectKey {
         ProjectKey::new(
-            self.tenant_id.as_str(),
-            self.workspace_id.as_str(),
-            self.project_id.as_str(),
+            self.tenant_id.as_deref().filter(|s| !s.is_empty()).unwrap_or(DEFAULT_TENANT_ID),
+            self.workspace_id.as_deref().filter(|s| !s.is_empty()).unwrap_or(DEFAULT_WORKSPACE_ID),
+            self.project_id.as_deref().filter(|s| !s.is_empty()).unwrap_or(DEFAULT_PROJECT_ID),
         )
     }
 
