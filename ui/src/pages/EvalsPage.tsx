@@ -462,8 +462,9 @@ export function EvalsPage() {
               <div className="fixed inset-0 z-30" onClick={() => setShowNewForm(false)} />
               <div className="absolute right-0 top-full mt-1 z-40 w-80 bg-white dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 rounded-lg shadow-xl p-3 space-y-3 max-h-[80vh] overflow-y-auto">
                 <p className="text-[11px] text-gray-500 dark:text-zinc-400 leading-snug">
-                  Eval runs are bound to a dataset + optional rubric and baseline.
-                  Linked artifacts are validated at create time.
+                  Linked artifacts (dataset, rubric, baseline) are all optional,
+                  but when supplied they are validated to exist at create time —
+                  dangling references are rejected.
                 </p>
 
                 <label className="block">

@@ -582,9 +582,26 @@ pub(crate) async fn create_eval_run_handler(
     );
     // Link the dataset picked in the form to the freshly-minted run so the
     // operator can see (and downstream services can honour) the binding.
+    // We already validated dataset existence above and just minted the run,
+    // so a failure here is an internal inconsistency: surface it as 500
+    // rather than silently drop the link (which would violate the
+    // round-trip contract asserted by test_http_evals_full.rs).
     if let Some(dataset_id) = body.dataset_id.as_deref() {
-        if let Ok(updated) = state.evals.set_dataset(&eval_run_id, dataset_id.to_owned()) {
-            run = updated;
+        match state.evals.set_dataset(&eval_run_id, dataset_id.to_owned()) {
+            Ok(updated) => run = updated,
+            Err(err) => {
+                tracing::error!(
+                    %eval_run_id,
+                    dataset_id = %dataset_id,
+                    "failed to attach dataset to freshly-created eval run: {err}"
+                );
+                return AppApiError::new(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "internal_error",
+                    format!("failed to attach dataset to eval run: {err}"),
+                )
+                .into_response();
+            }
         }
     }
 
