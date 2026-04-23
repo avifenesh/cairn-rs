@@ -8,17 +8,21 @@
  */
 
 import { useState, useEffect, useCallback, useMemo } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { ErrorFallback } from "../components/ErrorFallback";
 import {
   ChevronRight, ChevronDown, RefreshCw, Loader2,
-  Radio, Layers, Play, ListChecks, Cpu,
-  CheckCircle2, Clock,
+  Radio, Layers, Play, Pause, ListChecks, Cpu,
+  CheckCircle2, Clock, Sparkles, Stethoscope, MessageSquare,
 } from "lucide-react";
 import { clsx } from "clsx";
+import { Drawer } from "../components/Drawer";
+import { useToast } from "../components/Toast";
 import { defaultApi } from "../lib/api";
 import { useEventStream } from "../hooks/useEventStream";
-import type { SessionRecord, RunRecord, TaskRecord } from "../lib/types";
+import type {
+  SessionRecord, RunRecord, TaskRecord, InterventionAction, InterveneRequest,
+} from "../lib/types";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -171,6 +175,154 @@ function TaskRow({ task, fresh }: { task: TaskRecord; fresh: boolean }) {
   );
 }
 
+// ── Run quick actions (issues #166/#173) ──────────────────────────────────────
+
+const RUNNING_STATES = new Set(["pending", "running", "waiting_approval", "waiting_dependency"]);
+const TERMINAL_STATES = new Set(["completed", "failed", "canceled"]);
+
+function SimpleInterveneDrawer({
+  runId, open, onClose, onSuccess,
+}: {
+  runId: string;
+  open: boolean;
+  onClose: () => void;
+  onSuccess: () => void;
+}) {
+  const [action, setAction] = useState<InterventionAction>("force_restart");
+  const [reason, setReason] = useState("");
+  const toast = useToast();
+  useEffect(() => { if (open) { setReason(""); setAction("force_restart"); } }, [open]);
+
+  const mut = useMutation({
+    mutationFn: () => {
+      const body: InterveneRequest = { action, reason };
+      return defaultApi.interveneRun(runId, body);
+    },
+    onSuccess: () => {
+      toast.success(`Intervention "${action}" recorded.`);
+      onSuccess();
+      onClose();
+    },
+    onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Intervene failed."),
+  });
+
+  return (
+    <Drawer open={open} onClose={onClose} title={`Intervene on ${runId.slice(0, 20)}…`} width="w-[26rem]">
+      <div className="space-y-3">
+        <label className="block">
+          <span className="text-[11px] text-gray-500 dark:text-zinc-400 uppercase tracking-wider">Action</span>
+          <select
+            value={action}
+            onChange={e => setAction(e.target.value as InterventionAction)}
+            className="mt-1 w-full bg-gray-50 dark:bg-zinc-950 border border-gray-300 dark:border-zinc-700 rounded-md px-2 py-1.5 text-[12px] text-gray-700 dark:text-zinc-300"
+          >
+            <option value="force_complete">Force complete</option>
+            <option value="force_fail">Force fail</option>
+            <option value="force_restart">Force restart</option>
+          </select>
+        </label>
+        <label className="block">
+          <span className="text-[11px] text-gray-500 dark:text-zinc-400 uppercase tracking-wider">Reason</span>
+          <textarea
+            value={reason}
+            onChange={e => setReason(e.target.value)}
+            placeholder="Why is this intervention needed?"
+            className="mt-1 w-full h-20 bg-gray-50 dark:bg-zinc-950 border border-gray-300 dark:border-zinc-700 rounded-md px-3 py-2 text-[12px] text-gray-700 dark:text-zinc-300 resize-none focus:outline-none focus:border-indigo-500"
+          />
+        </label>
+        <div className="flex items-center gap-2 pt-2">
+          <button
+            onClick={() => mut.mutate()}
+            disabled={mut.isPending || !reason.trim()}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded bg-indigo-600 text-white text-[12px] font-medium hover:bg-indigo-500 disabled:opacity-50"
+          >
+            {mut.isPending ? <Loader2 size={11} className="animate-spin" /> : <MessageSquare size={11} />}
+            Submit
+          </button>
+          <button onClick={onClose} className="px-3 py-1.5 rounded bg-gray-100 dark:bg-zinc-800 text-gray-500 dark:text-zinc-400 text-[12px] hover:bg-gray-200 dark:hover:bg-zinc-700">
+            Cancel
+          </button>
+        </div>
+      </div>
+    </Drawer>
+  );
+}
+
+function RunQuickActions({ run }: { run: RunRecord }) {
+  const queryClient = useQueryClient();
+  const toast = useToast();
+  const [interveneOpen, setInterveneOpen] = useState(false);
+  const [diagDrawer, setDiagDrawer] = useState<{ open: boolean; data?: unknown }>({ open: false });
+
+  const invalidate = () => {
+    void queryClient.invalidateQueries({ queryKey: ["orch-runs"] });
+    void queryClient.invalidateQueries({ queryKey: ["orch-tasks"] });
+  };
+
+  const pauseMut = useMutation({
+    mutationFn: () => defaultApi.pauseRun(run.run_id, { reason_kind: "operator_pause", actor: "operator" }),
+    onSuccess: () => { toast.success("Run paused."); invalidate(); },
+    onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Pause failed."),
+  });
+  const resumeMut = useMutation({
+    mutationFn: () => defaultApi.resumeRun(run.run_id, { trigger: "operator_resume", target: "running" }),
+    onSuccess: () => { toast.success("Run resumed."); invalidate(); },
+    onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Resume failed."),
+  });
+  const orchestrateMut = useMutation({
+    mutationFn: () => defaultApi.orchestrateRun(run.run_id, {}),
+    onSuccess: () => { toast.success("Orchestration step triggered."); invalidate(); },
+    onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Orchestrate failed."),
+  });
+  const diagnoseMut = useMutation({
+    mutationFn: () => defaultApi.diagnoseRun(run.run_id),
+    onSuccess: (data) => setDiagDrawer({ open: true, data }),
+    onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Diagnose failed."),
+  });
+
+  const canPause  = RUNNING_STATES.has(run.state) && run.state !== "paused";
+  const canResume = run.state === "paused";
+  const isTerminal = TERMINAL_STATES.has(run.state);
+
+  const iconBtn = (
+    onClick: () => void,
+    disabled: boolean,
+    pending: boolean,
+    icon: React.ReactNode,
+    title: string,
+  ) => (
+    <button
+      onClick={(e) => { e.stopPropagation(); if (!disabled && !pending) onClick(); }}
+      disabled={disabled || pending}
+      title={title}
+      className="flex h-5 w-5 items-center justify-center rounded text-gray-500 dark:text-zinc-400 hover:text-gray-800 dark:hover:text-zinc-100 hover:bg-gray-100 dark:hover:bg-zinc-800 disabled:opacity-30 disabled:hover:bg-transparent disabled:cursor-not-allowed"
+    >
+      {pending ? <Loader2 size={11} className="animate-spin" /> : icon}
+    </button>
+  );
+
+  return (
+    <div className="flex items-center gap-0.5 shrink-0" onClick={(e) => e.stopPropagation()}>
+      {iconBtn(() => pauseMut.mutate(),       !canPause,      pauseMut.isPending,       <Pause size={11} />,        canPause ? "Pause run" : "Run is not pausable")}
+      {iconBtn(() => resumeMut.mutate(),      !canResume,     resumeMut.isPending,      <Play size={11} />,         canResume ? "Resume run" : "Run is not paused")}
+      {iconBtn(() => orchestrateMut.mutate(), isTerminal,     orchestrateMut.isPending, <Sparkles size={11} />,     "Orchestrate next step")}
+      {iconBtn(() => diagnoseMut.mutate(),    false,          diagnoseMut.isPending,    <Stethoscope size={11} />,  "Diagnose run")}
+      {iconBtn(() => setInterveneOpen(true),  isTerminal,     false,                    <MessageSquare size={11} />,"Intervene")}
+      <SimpleInterveneDrawer
+        runId={run.run_id}
+        open={interveneOpen}
+        onClose={() => setInterveneOpen(false)}
+        onSuccess={invalidate}
+      />
+      <Drawer open={diagDrawer.open} onClose={() => setDiagDrawer({ open: false })} title={`Diagnosis — ${run.run_id.slice(0, 20)}…`} width="w-[28rem]">
+        <pre className="text-[11px] font-mono text-gray-700 dark:text-zinc-300 bg-gray-50 dark:bg-zinc-950/50 rounded-md p-3 overflow-auto whitespace-pre-wrap break-all">
+          {diagDrawer.data === undefined ? "—" : JSON.stringify(diagDrawer.data, null, 2)}
+        </pre>
+      </Drawer>
+    </div>
+  );
+}
+
 // ── Run row ───────────────────────────────────────────────────────────────────
 
 function RunRow({
@@ -229,6 +381,9 @@ function RunRow({
           <span>{fmtDur(run.created_at, endMs)}</span>
           <span>{fmtAge(run.created_at)}</span>
         </div>
+
+        {/* Operator quick actions (issues #166/#173) */}
+        <RunQuickActions run={run} />
       </div>
 
       {/* Task list */}
