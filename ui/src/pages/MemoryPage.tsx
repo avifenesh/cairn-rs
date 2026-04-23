@@ -238,10 +238,14 @@ function IngestForm() {
       </div>
 
       <div className="flex items-center gap-2">
-        <label className="text-[11px] text-gray-500 dark:text-zinc-400 shrink-0 w-24">
+        <label
+          htmlFor="memory-ingest-source-type"
+          className="text-[11px] text-gray-500 dark:text-zinc-400 shrink-0 w-24"
+        >
           Source type
         </label>
         <select
+          id="memory-ingest-source-type"
           value={sourceType}
           onChange={e => {
             const next = e.target.value;
