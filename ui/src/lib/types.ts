@@ -31,14 +31,27 @@ export interface AgentTemplate {
 }
 
 // ── Skills (GET /v1/skills) ─────────────────────────────────────────────────
+//
+// Shape mirrors `cairn-api/src/skills_api.rs::SkillSummary` (wire format) and
+// `cairn-app/src/handlers/skills.rs::ListSkillsResponse`. Field names
+// preserve snake_case from the Rust definitions (no serde renames are
+// applied server-side for these structs).
+
+export type SkillLifecycleStatus = "active" | "proposed" | "rejected";
 
 export interface SkillRecord {
-  id?: string;
-  name?: string;
-  description?: string;
-  enabled?: boolean;
-  source?: string;
-  [key: string]: unknown;
+  skill_id: string;
+  name: string;
+  description: string;
+  version: string;
+  tags: string[];
+  enabled: boolean;
+}
+
+export interface SkillDetail extends SkillRecord {
+  entry_point: string;
+  required_permissions: string[];
+  status: SkillLifecycleStatus;
 }
 
 export interface SkillsSummary {

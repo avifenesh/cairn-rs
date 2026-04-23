@@ -11,6 +11,23 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **`GET /v1/skills` + `GET /v1/skills/:id` — real skills catalog wiring.**
+  Replaces the hard-coded empty stub
+  (`list_skills_preserved_handler` in `handlers/memory.rs`) with a
+  handler that reads a live `cairn_domain::skills::SkillCatalog` held
+  on `AppState`. List returns the UI-expected
+  `{items, summary, currently_active}` shape derived from the real
+  `SkillSummary` records (`skill_id`, `name`, `description`,
+  `version`, `tags`, `enabled`); `?tag=<tag>` filters by tag; detail
+  endpoint returns the full `Skill` struct (with `entry_point`,
+  `required_permissions`, `status`). `SkillsPage` now renders real
+  skill metadata (skill id, version badge, tag pills) instead of
+  dumping opaque `Record<string, unknown>` entries. The catalog
+  starts empty; workers register skills via the domain API. The
+  previous stub's `{items: [], summary: {0,0,0}}` response is
+  preserved byte-for-byte when no skills are registered.
+  Integration tests at `crates/cairn-app/tests/test_http_skills.rs`
+  cover list, tag-filter, detail, 404, and empty-state paths. Closes #147.
 - **`RunDetailPage` + `OrchestrationPage` — operator run-mutation actions.**
   Wires the 10 mutation endpoints under `/v1/runs/:id/*` that had no UI
   consumer: **pause**, **resume**, **recover**, **replay**, **claim**,
@@ -73,6 +90,16 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `crates/cairn-app/tests/test_http_project_repos.rs`
   (attach → list → get → detach → list-empty roundtrip + malformed-id
   400 contract).
+
+### Removed
+
+- **`list_skills_preserved_handler` stub (part of #147).** The
+  hard-coded empty stub at
+  `crates/cairn-app/src/handlers/memory.rs:1588-1603` that returned
+  `{items: [], summary: {total: 0, enabled: 0, disabled: 0}}` for
+  every `GET /v1/skills` request is deleted; the route is now served
+  by the real handler in `handlers/skills.rs` backed by the domain
+  `SkillCatalog`.
 
 ### Fixed
 

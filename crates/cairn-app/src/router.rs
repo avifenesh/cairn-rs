@@ -828,8 +828,13 @@ impl AppBootstrap {
                         router.route(&path, get(graph_trace_preserved_handler))
                     }
                     (HttpMethod::Get, "/v1/skills") => {
-                        router.route(&path, get(list_skills_preserved_handler))
+                        router.route(&path, get(list_skills_handler))
                     }
+                    // NOTE: /v1/skills/:id is registered in the dynamic-param
+                    // chain below — matchit 0.7 rejects `{id}` (the output of
+                    // `catalog_path_to_axum`) as a literal. Pass the catalog
+                    // entry through the catch-all arm so it still contributes
+                    // to OpenAPI discovery.
                     (HttpMethod::Get, "/v1/memory/search") => {
                         router.route(&path, get(memory_search_handler))
                     }
@@ -1310,6 +1315,8 @@ impl AppBootstrap {
                 "/v1/telemetry/usage",
                 get(telemetry_routes::get_usage_telemetry_handler),
             )
+            // ── Skills ────────────────────────────────────────────────────────────────
+            .route("/v1/skills/:id", get(get_skill_handler))
             // ── Runs ──────────────────────────────────────────────────────────────────
             .route("/v1/runs/:id", get(get_run_handler))
             .route("/v1/runs/:id/cost-alert", post(set_run_cost_alert_handler))

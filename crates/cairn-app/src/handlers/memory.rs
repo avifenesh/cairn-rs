@@ -1585,19 +1585,3 @@ pub(crate) async fn graph_trace_preserved_handler(
     (StatusCode::OK, Json(response)).into_response()
 }
 
-pub(crate) async fn list_skills_preserved_handler() -> impl IntoResponse {
-    (
-        StatusCode::OK,
-        Json(serde_json::json!({
-            "items": [],
-            "summary": {
-                "total": 0,
-                "enabled": 0,
-                "disabled": 0,
-            },
-            "currentlyActive": [],
-            "currently_active": [],
-        })),
-    )
-        .into_response()
-}
