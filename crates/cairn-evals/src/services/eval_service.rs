@@ -173,12 +173,17 @@ impl EvalRunService {
     }
 
     /// Link a rubric to an existing eval run (issue #223).
+    ///
+    /// Uses the poison-tolerant lock pattern (`unwrap_or_else(into_inner)`)
+    /// so a panic on another thread while holding the mutex cannot take down
+    /// the whole eval service. Matches the sibling `EvalBaselineService` /
+    /// `EvalDatasetService` convention.
     pub fn set_rubric_id(
         &self,
         eval_run_id: &EvalRunId,
         rubric_id: String,
     ) -> Result<(), EvalError> {
-        let mut state = self.state.lock().unwrap();
+        let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         let run = state
             .runs
             .get_mut(eval_run_id.as_str())
@@ -188,12 +193,14 @@ impl EvalRunService {
     }
 
     /// Link a baseline to an existing eval run (issue #223).
+    ///
+    /// See `set_rubric_id` for the poison-tolerant locking rationale.
     pub fn set_baseline_id(
         &self,
         eval_run_id: &EvalRunId,
         baseline_id: String,
     ) -> Result<(), EvalError> {
-        let mut state = self.state.lock().unwrap();
+        let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         let run = state
             .runs
             .get_mut(eval_run_id.as_str())
