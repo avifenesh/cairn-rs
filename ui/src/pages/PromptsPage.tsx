@@ -12,7 +12,27 @@ import { sectionLabel } from "../lib/design-system";
 import { useToast } from "../components/Toast";
 import type {
   PromptAssetRecord, PromptVersionRecord, PromptReleaseRecord, PromptVersionDiff,
+  PromptKind, PromptReleaseState,
 } from "../lib/types";
+
+/** Human-readable label for a `PromptKind`. */
+const KIND_LABEL: Record<PromptKind, string> = {
+  system:        "system",
+  user_template: "user template",
+  tool_prompt:   "tool prompt",
+  critic:        "critic",
+  router:        "router",
+};
+
+/** Human-readable label for a `PromptReleaseState`. */
+const RELEASE_LABEL: Record<PromptReleaseState, string> = {
+  draft:    "draft",
+  proposed: "proposed",
+  approved: "approved",
+  active:   "active",
+  rejected: "rejected",
+  archived: "archived",
+};
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -33,43 +53,43 @@ function makeReleaseId(assetId: string): string {
 
 // ── Kind badge ────────────────────────────────────────────────────────────────
 
-const KIND_STYLE: Record<string, string> = {
-  system:    "bg-blue-950/60 text-blue-300 border-blue-800/40",
-  user:      "bg-indigo-950/60 text-indigo-300 border-indigo-800/40",
-  assistant: "bg-teal-950/60 text-teal-300 border-teal-800/40",
-  tool:      "bg-amber-950/60 text-amber-300 border-amber-800/40",
+const KIND_STYLE: Record<PromptKind, string> = {
+  system:        "bg-blue-950/60 text-blue-300 border-blue-800/40",
+  user_template: "bg-indigo-950/60 text-indigo-300 border-indigo-800/40",
+  tool_prompt:   "bg-amber-950/60 text-amber-300 border-amber-800/40",
+  critic:        "bg-teal-950/60 text-teal-300 border-teal-800/40",
+  router:        "bg-purple-950/60 text-purple-300 border-purple-800/40",
 };
 
-function KindBadge({ kind }: { kind: string }) {
+function KindBadge({ kind }: { kind: PromptKind }) {
   return (
     <span className={clsx(
       "text-[10px] font-mono font-medium rounded px-1.5 py-0.5 border",
       KIND_STYLE[kind] ?? "bg-gray-100/60 dark:bg-zinc-800/60 text-gray-500 dark:text-zinc-400 border-gray-200 dark:border-zinc-700",
     )}>
-      {kind}
+      {KIND_LABEL[kind] ?? kind}
     </span>
   );
 }
 
 // ── Release state badge ───────────────────────────────────────────────────────
 
-const RELEASE_STYLE: Record<string, string> = {
-  draft:              "bg-gray-100/60 dark:bg-zinc-800/60 text-gray-500 dark:text-zinc-400 border-gray-200 dark:border-zinc-700",
-  pending_approval:   "bg-amber-950/60 text-amber-300 border-amber-800/40",
-  approved:           "bg-blue-950/60 text-blue-300 border-blue-800/40",
-  released:           "bg-emerald-950/60 text-emerald-300 border-emerald-800/40",
-  rolling_out:        "bg-indigo-950/60 text-indigo-300 border-indigo-800/40",
-  archived:           "bg-gray-100/40 dark:bg-zinc-800/40 text-gray-400 dark:text-zinc-600 border-gray-200 dark:border-zinc-800",
-  rolled_back:        "bg-red-950/60 text-red-300 border-red-800/40",
+const RELEASE_STYLE: Record<PromptReleaseState, string> = {
+  draft:    "bg-gray-100/60 dark:bg-zinc-800/60 text-gray-500 dark:text-zinc-400 border-gray-200 dark:border-zinc-700",
+  proposed: "bg-amber-950/60 text-amber-300 border-amber-800/40",
+  approved: "bg-blue-950/60 text-blue-300 border-blue-800/40",
+  active:   "bg-emerald-950/60 text-emerald-300 border-emerald-800/40",
+  rejected: "bg-red-950/60 text-red-300 border-red-800/40",
+  archived: "bg-gray-100/40 dark:bg-zinc-800/40 text-gray-400 dark:text-zinc-600 border-gray-200 dark:border-zinc-800",
 };
 
-function ReleaseBadge({ state }: { state: string }) {
+function ReleaseBadge({ state }: { state: PromptReleaseState }) {
   return (
     <span className={clsx(
       "text-[10px] font-medium rounded px-1.5 py-0.5 border whitespace-nowrap",
       RELEASE_STYLE[state] ?? RELEASE_STYLE.draft,
     )}>
-      {state.replace(/_/g, " ")}
+      {RELEASE_LABEL[state] ?? state}
     </span>
   );
 }
@@ -261,6 +281,24 @@ function ReleaseControls({ release }: { release: PromptReleaseRecord }) {
     onError:   () => toast.error("Failed to request approval."),
   });
 
+  const approve = useMutation({
+    mutationFn: () => defaultApi.transitionPromptRelease(release.prompt_release_id, "approved"),
+    onSuccess: () => { toast.success("Release approved."); invalidate(); },
+    onError:   () => toast.error("Failed to approve release."),
+  });
+
+  const reject = useMutation({
+    mutationFn: () => defaultApi.transitionPromptRelease(release.prompt_release_id, "rejected"),
+    onSuccess: () => { toast.success("Release rejected."); invalidate(); },
+    onError:   () => toast.error("Failed to reject release."),
+  });
+
+  const archive = useMutation({
+    mutationFn: () => defaultApi.transitionPromptRelease(release.prompt_release_id, "archived"),
+    onSuccess: () => { toast.success("Release archived."); invalidate(); },
+    onError:   () => toast.error("Failed to archive release."),
+  });
+
   return (
     <div className="flex items-center gap-2 flex-wrap">
       <ReleaseBadge state={release.state} />
@@ -277,7 +315,8 @@ function ReleaseControls({ release }: { release: PromptReleaseRecord }) {
         </span>
       )}
 
-      {/* State-driven action buttons */}
+      {/* State-driven action buttons. Transitions mirror
+          `PromptReleaseState::can_transition_to` in cairn-evals. */}
       {release.state === "draft" && (
         <button
           onClick={() => reqApproval.mutate()}
@@ -289,6 +328,31 @@ function ReleaseControls({ release }: { release: PromptReleaseRecord }) {
           {reqApproval.isPending ? <Loader2 size={9} className="animate-spin" /> : null}
           Request Approval
         </button>
+      )}
+
+      {release.state === "proposed" && (
+        <>
+          <button
+            onClick={() => approve.mutate()}
+            disabled={approve.isPending}
+            className="flex items-center gap-1 rounded px-2 py-0.5 text-[10px] font-medium
+                       bg-blue-900/40 text-blue-300 border border-blue-800/40
+                       hover:bg-blue-900/70 transition-colors disabled:opacity-40"
+          >
+            {approve.isPending ? <Loader2 size={9} className="animate-spin" /> : <Check size={9} />}
+            Approve
+          </button>
+          <button
+            onClick={() => reject.mutate()}
+            disabled={reject.isPending}
+            className="flex items-center gap-1 rounded px-2 py-0.5 text-[10px] font-medium
+                       bg-red-900/40 text-red-300 border border-red-800/40
+                       hover:bg-red-900/70 transition-colors disabled:opacity-40"
+          >
+            {reject.isPending ? <Loader2 size={9} className="animate-spin" /> : <X size={9} />}
+            Reject
+          </button>
+        </>
       )}
 
       {release.state === "approved" && (
@@ -306,7 +370,7 @@ function ReleaseControls({ release }: { release: PromptReleaseRecord }) {
         </button>
       )}
 
-      {(release.state === "released" || release.state === "rolling_out") && (
+      {release.state === "active" && (
         <div className="flex items-center gap-2">
           <input
             type="range" min={0} max={100} step={5}
@@ -328,6 +392,23 @@ function ReleaseControls({ release }: { release: PromptReleaseRecord }) {
             Apply
           </button>
         </div>
+      )}
+
+      {(release.state === "draft"
+        || release.state === "proposed"
+        || release.state === "approved"
+        || release.state === "active"
+        || release.state === "rejected") && (
+        <button
+          onClick={() => archive.mutate()}
+          disabled={archive.isPending}
+          className="flex items-center gap-1 rounded px-2 py-0.5 text-[10px] font-medium
+                     bg-zinc-800/60 text-zinc-400 border border-zinc-700/40
+                     hover:bg-zinc-800 transition-colors disabled:opacity-40"
+        >
+          {archive.isPending ? <Loader2 size={9} className="animate-spin" /> : <Package size={9} />}
+          Archive
+        </button>
       )}
     </div>
   );
@@ -478,7 +559,7 @@ function NewPromptForm({ onClose }: { onClose: () => void }) {
   const toast = useToast();
   const [id,   setId]   = useState("");
   const [name, setName] = useState("");
-  const [kind, setKind] = useState("system");
+  const [kind, setKind] = useState<PromptKind>("system");
 
   // Close on Escape
   useEffect(() => {
@@ -529,12 +610,12 @@ function NewPromptForm({ onClose }: { onClose: () => void }) {
         <div>
           <label className="text-[10px] text-gray-400 dark:text-zinc-500 block mb-1">Kind</label>
           <select
-            value={kind} onChange={(e) => setKind(e.target.value)}
+            value={kind} onChange={(e) => setKind(e.target.value as PromptKind)}
             className="w-full rounded border border-gray-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 text-[12px] text-gray-700 dark:text-zinc-300
                        px-2 py-1.5 focus:outline-none focus:border-indigo-500 transition-colors"
           >
-            {["system", "user", "assistant", "tool"].map((k) => (
-              <option key={k} value={k}>{k}</option>
+            {(Object.keys(KIND_LABEL) as PromptKind[]).map((k) => (
+              <option key={k} value={k}>{KIND_LABEL[k]}</option>
             ))}
           </select>
         </div>
@@ -563,7 +644,7 @@ function NewPromptForm({ onClose }: { onClose: () => void }) {
 
 export function PromptsPage() {
   const [showNew, setShowNew] = useState(false);
-  const [filter, setFilter]  = useState<"all" | "released" | "draft">("all");
+  const [filter, setFilter]  = useState<"all" | "active" | "draft">("all");
 
   const { data: assetsData, isLoading: assetsLoading, isError, error, refetch, isFetching } = useQuery({
     queryKey: ["prompt-assets"],
@@ -582,7 +663,7 @@ export function PromptsPage() {
   const releases = releasesData?.items ?? [];
 
   // Derive latest release state per asset for filtering
-  const latestState = (assetId: string): string | null => {
+  const latestState = (assetId: string): PromptReleaseState | null => {
     const rels = releases
       .filter((r) => r.prompt_asset_id === assetId)
       .sort((a, b) => b.created_at - a.created_at);
@@ -590,9 +671,9 @@ export function PromptsPage() {
   };
 
   const filtered = assets.filter((a) => {
-    if (filter === "all")      return true;
-    if (filter === "released") return latestState(a.prompt_asset_id) === "released" || latestState(a.prompt_asset_id) === "rolling_out";
-    if (filter === "draft")    return !latestState(a.prompt_asset_id) || latestState(a.prompt_asset_id) === "draft";
+    if (filter === "all")    return true;
+    if (filter === "active") return latestState(a.prompt_asset_id) === "active";
+    if (filter === "draft")  return !latestState(a.prompt_asset_id) || latestState(a.prompt_asset_id) === "draft";
     return true;
   });
 
@@ -625,7 +706,7 @@ export function PromptsPage() {
 
         {/* Filter tabs */}
         <div className="flex items-center gap-0 ml-4">
-          {(["all", "released", "draft"] as const).map((f) => (
+          {(["all", "active", "draft"] as const).map((f) => (
             <button
               key={f}
               onClick={() => setFilter(f)}

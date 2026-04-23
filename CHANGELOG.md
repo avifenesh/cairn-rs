@@ -49,22 +49,16 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
-- **UI: `RunDetailPage` rendered `$0.000000` for every run with no
-  provider calls (#168).** `GET /v1/runs/:id/cost` returns `200` with a
-  zero-valued `RunCostRecord` when no cost data has been recorded, so
-  the page's `cost ? … : "—"` check always fell into the truthy branch
-  and displayed a misleading exact-zero dollar amount. The Cost stat
-  card now renders "—" when both `provider_calls` and
-  `total_cost_micros` are zero, and only shows the formatted amount
-  (with the "N provider call(s)" description) once real cost data
-  exists.
-- **UI: canceling a run on `RunDetailPage` did not refresh the page
-  header until the next poll tick (#167).** `cancelRunMut.onSuccess`
-  invalidated `["runs"]` and `["run-events", runId]` but not
-  `["run-detail", runId]`, so the `StateBadge` kept showing "running"
-  for up to 10 seconds after the cancel succeeded. The mutation now
-  also invalidates `["run-detail", runId]`, matching the pattern
-  established in #131 for plan approve / reject / revise.
+- **UI: `PromptsPage` enum values now match the Rust domain (#150).** The
+  kind dropdown and release-state badges used values (`user`, `assistant`,
+  `pending_approval`, `released`, `rolling_out`, `rolled_back`) that the
+  backend's `PromptKind` / `PromptReleaseState` enums do not recognize, so
+  action buttons fired transition requests the server rejected. Kinds are
+  now `system`, `user_template`, `tool_prompt`, `critic`, `router` and
+  release states are `draft`, `proposed`, `approved`, `active`, `rejected`,
+  `archived`, all exported as typed literal unions in `ui/src/lib/types.ts`
+  and mirrored by state-driven buttons that only fire transitions allowed
+  by `PromptReleaseState::can_transition_to` in `cairn-evals`.
 - **UI: `SessionDetailPage` silently dropped runs past the first 500 (#170).**
   The page fetched `GET /v1/runs?limit=500` and filtered by
   `session_id` client-side, so on projects with more than 500 total
