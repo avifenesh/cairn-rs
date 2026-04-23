@@ -33,6 +33,25 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   and `GraphEdgeKind` picked up `matched_by` and `fired` so the
   TypeScript types match the Rust enum 1:1.
 
+- **EvalsPage — real eval-run contract with dataset / rubric / baseline /
+  prompt-release pickers (closes #138).** The "New Eval Run" popover used
+  to collect only `evaluator_type` and `subject_kind`; the backend accepted
+  the submission and returned a 201 with a run id, but the run was a
+  no-op stub — no dataset, no rubric, no scorecard. `POST /v1/evals/runs`
+  now additionally accepts (and validates against tenant state) optional
+  `dataset_id`, `rubric_id`, and `baseline_id`. Dangling ids return 404
+  instead of being silently ignored. New list endpoints
+  `GET /v1/evals/rubrics` and `GET /v1/evals/baselines` (wrapping the
+  existing `EvalRubricService::list` / `EvalBaselineService::list` — both
+  tenant-scoped via `?tenant_id=`) back the pickers. The form now fetches
+  datasets, rubrics, baselines, and — when `subject_kind=prompt_release`
+  — prompt releases, letting the operator wire a real subject to a real
+  eval configuration. A "Results" link on every row navigates to
+  `#eval-results/:run_id`, which reuses `EvalComparisonPage` in
+  single-run mode and hydrates metrics from `/v1/evals/compare`. Locked
+  by integration test
+  `cairn-app/tests/test_http_evals_full.rs::eval_run_full_contract_roundtrip`.
+
 - **ChannelsPage — real `/v1/channels` CRUD UI (closes #139).** The
   `/v1/channels` runtime-channel API (create/list/send/consume/messages
   on `cairn-runtime::ChannelService`) had no operator UI. A new

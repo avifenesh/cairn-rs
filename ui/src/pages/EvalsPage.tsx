@@ -20,6 +20,7 @@ import { useToast } from "../components/Toast";
 import { MiniChart } from "../components/MiniChart";
 import { BarChart } from "../components/BarChart";
 import { defaultApi } from "../lib/api";
+import { useScope } from "../hooks/useScope";
 import type { EvalRunRecord, EvalRunStatus } from "../lib/types";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -301,7 +302,9 @@ function CompareBanner({
 // ── Main page ─────────────────────────────────────────────────────────────────
 
 const EVALUATOR_TYPES = ["accuracy", "relevance", "coherence", "safety", "custom"] as const;
-const SUBJECT_KINDS   = ["prompt_release", "agent_template", "run_output", "custom"] as const;
+// NOTE: these must match `cairn_domain::EvalSubjectKind` (snake_case).
+// Adding a value here without a corresponding domain variant will 400.
+const SUBJECT_KINDS   = ["prompt_release", "provider_route", "retrieval_policy", "skill", "guardrail_policy"] as const;
 
 export function EvalsPage() {
   const [statusFilter, setStatusFilter] = useState<EvalRunStatus | "all">("all");
@@ -309,27 +312,72 @@ export function EvalsPage() {
   const [showNewForm, setShowNewForm]   = useState(false);
   const [newEvalType, setNewEvalType]   = useState<string>(EVALUATOR_TYPES[0]);
   const [newSubject, setNewSubject]     = useState<string>(SUBJECT_KINDS[0]);
+  const [newDatasetId, setNewDatasetId]   = useState<string>("");
+  const [newRubricId, setNewRubricId]     = useState<string>("");
+  const [newBaselineId, setNewBaselineId] = useState<string>("");
+  const [newReleaseId, setNewReleaseId]   = useState<string>("");
   const qc = useQueryClient();
   const toast = useToast();
+  // Scope goes into every cache key so that switching tenant/workspace/project
+  // does not serve the previous scope's data from cache.
+  const [scope] = useScope();
+  const scopeKey = [scope.tenant_id, scope.workspace_id, scope.project_id];
 
   const { data, isLoading, isError, error, refetch, isFetching } = useQuery({
-    queryKey: ["evals"],
+    queryKey: ["evals", "runs", ...scopeKey],
     queryFn:  () => defaultApi.getEvalRuns(200),
     refetchInterval: 20_000,
+  });
+
+  // Artifact pickers — fetched lazily when the form is opened.
+  // tenant_id is the server-side scope for these list endpoints, so only that
+  // piece of the scope needs to be in the cache key; include it all for safety.
+  const datasetsQ  = useQuery({
+    queryKey: ["evals", "datasets", ...scopeKey],
+    queryFn:  () => defaultApi.listEvalDatasets(),
+    enabled:  showNewForm,
+    staleTime: 60_000,
+  });
+  const rubricsQ   = useQuery({
+    queryKey: ["evals", "rubrics", ...scopeKey],
+    queryFn:  () => defaultApi.listEvalRubrics(),
+    enabled:  showNewForm,
+    staleTime: 60_000,
+  });
+  const baselinesQ = useQuery({
+    queryKey: ["evals", "baselines", ...scopeKey],
+    queryFn:  () => defaultApi.listEvalBaselines(),
+    enabled:  showNewForm,
+    staleTime: 60_000,
+  });
+  const releasesQ  = useQuery({
+    queryKey: ["evals", "prompt-releases", ...scopeKey],
+    queryFn:  () => defaultApi.getPromptReleases({ limit: 200 }),
+    enabled:  showNewForm && newSubject === "prompt_release",
+    staleTime: 60_000,
   });
 
   const createEval = useMutation({
     mutationFn: () => {
       const id = `eval_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
       return defaultApi.createEvalRun({
-        eval_run_id: id,
-        subject_kind: newSubject,
-        evaluator_type: newEvalType,
+        eval_run_id:       id,
+        subject_kind:      newSubject,
+        evaluator_type:    newEvalType,
+        dataset_id:        newDatasetId  || undefined,
+        rubric_id:         newRubricId   || undefined,
+        baseline_id:       newBaselineId || undefined,
+        prompt_release_id: newSubject === "prompt_release" && newReleaseId ? newReleaseId : undefined,
       });
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["evals"] });
       setShowNewForm(false);
+      setNewDatasetId("");
+      setNewRubricId("");
+      setNewBaselineId("");
+      setNewReleaseId("");
+      toast.success("Eval run created");
     },
     onError: (e: unknown) =>
       toast.error(`Failed to create eval run: ${e instanceof Error ? e.message : String(e)}`),
@@ -419,7 +467,13 @@ export function EvalsPage() {
           {showNewForm && (
             <>
               <div className="fixed inset-0 z-30" onClick={() => setShowNewForm(false)} />
-              <div className="absolute right-0 top-full mt-1 z-40 w-64 bg-white dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 rounded-lg shadow-xl p-3 space-y-3">
+              <div className="absolute right-0 top-full mt-1 z-40 w-80 bg-white dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 rounded-lg shadow-xl p-3 space-y-3 max-h-[80vh] overflow-y-auto">
+                <p className="text-[11px] text-gray-500 dark:text-zinc-400 leading-snug">
+                  Linked artifacts (dataset, rubric, baseline) are all optional,
+                  but when supplied they are validated to exist at create time —
+                  dangling references are rejected.
+                </p>
+
                 <label className="block">
                   <span className="text-[10px] text-gray-400 dark:text-zinc-500 uppercase tracking-wide">Evaluator Type</span>
                   <select
@@ -430,6 +484,7 @@ export function EvalsPage() {
                     {EVALUATOR_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
                   </select>
                 </label>
+
                 <label className="block">
                   <span className="text-[10px] text-gray-400 dark:text-zinc-500 uppercase tracking-wide">Subject Kind</span>
                   <select
@@ -440,6 +495,85 @@ export function EvalsPage() {
                     {SUBJECT_KINDS.map(s => <option key={s} value={s}>{s}</option>)}
                   </select>
                 </label>
+
+                {/* Subject-specific pickers ─ only for prompt_release today */}
+                {newSubject === "prompt_release" && (
+                  <label className="block">
+                    <span className="text-[10px] text-gray-400 dark:text-zinc-500 uppercase tracking-wide">
+                      Prompt Release
+                      {releasesQ.isLoading && <span className="ml-1 normal-case text-gray-400">loading…</span>}
+                    </span>
+                    <select
+                      value={newReleaseId}
+                      onChange={e => setNewReleaseId(e.target.value)}
+                      className="mt-1 w-full rounded border border-gray-200 dark:border-zinc-700 bg-gray-50 dark:bg-zinc-950 text-gray-700 dark:text-zinc-300 text-[12px] px-2 py-1.5 focus:outline-none focus:border-indigo-500"
+                    >
+                      <option value="">— none —</option>
+                      {(releasesQ.data?.items ?? []).map(r => (
+                        <option key={r.prompt_release_id} value={r.prompt_release_id}>
+                          {r.prompt_release_id}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                )}
+
+                <label className="block">
+                  <span className="text-[10px] text-gray-400 dark:text-zinc-500 uppercase tracking-wide">
+                    Dataset
+                    {datasetsQ.isLoading && <span className="ml-1 normal-case text-gray-400">loading…</span>}
+                  </span>
+                  <select
+                    value={newDatasetId}
+                    onChange={e => setNewDatasetId(e.target.value)}
+                    className="mt-1 w-full rounded border border-gray-200 dark:border-zinc-700 bg-gray-50 dark:bg-zinc-950 text-gray-700 dark:text-zinc-300 text-[12px] px-2 py-1.5 focus:outline-none focus:border-indigo-500"
+                  >
+                    <option value="">— none —</option>
+                    {(datasetsQ.data ?? []).map(d => (
+                      <option key={d.dataset_id} value={d.dataset_id}>{d.name} ({d.dataset_id.slice(0, 8)}…)</option>
+                    ))}
+                  </select>
+                  {(datasetsQ.data ?? []).length === 0 && !datasetsQ.isLoading && (
+                    <span className="mt-1 block text-[10px] text-gray-400 dark:text-zinc-600">
+                      No datasets for this tenant. Create one via POST /v1/evals/datasets.
+                    </span>
+                  )}
+                </label>
+
+                <label className="block">
+                  <span className="text-[10px] text-gray-400 dark:text-zinc-500 uppercase tracking-wide">
+                    Rubric (optional)
+                    {rubricsQ.isLoading && <span className="ml-1 normal-case text-gray-400">loading…</span>}
+                  </span>
+                  <select
+                    value={newRubricId}
+                    onChange={e => setNewRubricId(e.target.value)}
+                    className="mt-1 w-full rounded border border-gray-200 dark:border-zinc-700 bg-gray-50 dark:bg-zinc-950 text-gray-700 dark:text-zinc-300 text-[12px] px-2 py-1.5 focus:outline-none focus:border-indigo-500"
+                  >
+                    <option value="">— none —</option>
+                    {(rubricsQ.data ?? []).map(r => (
+                      <option key={r.rubric_id} value={r.rubric_id}>{r.name} ({r.rubric_id.slice(0, 8)}…)</option>
+                    ))}
+                  </select>
+                </label>
+
+                <label className="block">
+                  <span className="text-[10px] text-gray-400 dark:text-zinc-500 uppercase tracking-wide">
+                    Baseline (optional)
+                    {baselinesQ.isLoading && <span className="ml-1 normal-case text-gray-400">loading…</span>}
+                  </span>
+                  <select
+                    value={newBaselineId}
+                    onChange={e => setNewBaselineId(e.target.value)}
+                    className="mt-1 w-full rounded border border-gray-200 dark:border-zinc-700 bg-gray-50 dark:bg-zinc-950 text-gray-700 dark:text-zinc-300 text-[12px] px-2 py-1.5 focus:outline-none focus:border-indigo-500"
+                  >
+                    <option value="">— none —</option>
+                    {(baselinesQ.data ?? []).map(b => (
+                      <option key={b.baseline_id} value={b.baseline_id}>{b.name} ({b.baseline_id.slice(0, 8)}…)</option>
+                    ))}
+                  </select>
+                </label>
+
                 <button
                   onClick={() => createEval.mutate()}
                   disabled={createEval.isPending}
@@ -524,6 +658,7 @@ export function EvalsPage() {
                   { label: "Status",     cls: "text-left"  },
                   { label: "Duration",   cls: "text-right" },
                   { label: "Created",    cls: "text-right" },
+                  { label: "",           cls: "text-right" },
                 ].map(({ label, cls }) => (
                   <th key={label} className={clsx(
                     "px-4 py-2 text-[11px] font-medium text-gray-400 dark:text-zinc-500 uppercase tracking-wider whitespace-nowrap",
@@ -592,6 +727,15 @@ export function EvalsPage() {
                     </td>
                     <td className="px-4 py-0 text-[11px] text-gray-400 dark:text-zinc-600 whitespace-nowrap text-right font-mono">
                       {fmtTime(run.started_at)}
+                    </td>
+                    <td className="px-4 py-0 text-right whitespace-nowrap">
+                      <a
+                        href={`#eval-results/${encodeURIComponent(run.eval_run_id)}`}
+                        className="text-[11px] text-indigo-400 hover:text-indigo-300 transition-colors"
+                        title="View results for this eval run"
+                      >
+                        Results
+                      </a>
                     </td>
                   </tr>
                 );

@@ -83,6 +83,7 @@ GET	/v1/evals/assets/:asset_id/export	preserve	-	-
 GET	/v1/evals/assets/:asset_id/report	preserve	-	-
 GET	/v1/evals/assets/:asset_id/trend	preserve	-	-
 GET	/v1/evals/assets/:asset_id/winner	preserve	-	-
+GET	/v1/evals/baselines	preserve	query: tenant_id?	{ items, has_more }
 GET	/v1/evals/baselines/:id	preserve	-	-
 GET	/v1/evals/compare	preserve	-	-
 GET	/v1/evals/dashboard	preserve	-	-
@@ -94,6 +95,7 @@ GET	/v1/evals/matrices/permissions	preserve	-	{ rows }
 GET	/v1/evals/matrices/prompt-comparison	preserve	-	{ rows }
 GET	/v1/evals/matrices/provider-routing	preserve	-	-
 GET	/v1/evals/matrices/skill-health	preserve	-	{ rows }
+GET	/v1/evals/rubrics	preserve	query: tenant_id?	{ items, has_more }
 GET	/v1/evals/rubrics/:id	preserve	-	-
 GET	/v1/evals/runs	preserve	query: limit?	{ items }
 GET	/v1/evals/runs/:id	preserve	-	-

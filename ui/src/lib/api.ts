@@ -970,7 +970,11 @@ export function createApiClient(config: ApiClientConfig) {
       return { items, has_more: raw.has_more ?? raw.hasMore ?? false };
     },
 
-    /** POST /v1/evals/runs — create a new eval run. */
+    /** POST /v1/evals/runs — create a new eval run.
+     *  Real eval contract: dataset_id / rubric_id / baseline_id are validated
+     *  against tenant state at create time (404 if dangling). prompt_release_id
+     *  ties the run to the subject under test when subject_kind is
+     *  `prompt_release`. */
     createEvalRun: (body: {
       eval_run_id: string;
       subject_kind: string;
@@ -978,7 +982,45 @@ export function createApiClient(config: ApiClientConfig) {
       tenant_id?: string;
       workspace_id?: string;
       project_id?: string;
+      dataset_id?: string;
+      rubric_id?: string;
+      baseline_id?: string;
+      prompt_release_id?: string;
+      prompt_asset_id?: string;
+      prompt_version_id?: string;
+      created_by?: string;
     }): Promise<import("./types").EvalRunRecord> => post("/v1/evals/runs", withScope(body)),
+
+    /** GET /v1/evals/datasets — list datasets scoped to the active tenant. */
+    listEvalDatasets: async (): Promise<import("./types").EvalDatasetRecord[]> => {
+      const merged = withScope();
+      const qs = new URLSearchParams();
+      if (merged.tenant_id) qs.set("tenant_id", merged.tenant_id);
+      return getList<import("./types").EvalDatasetRecord>(`/v1/evals/datasets${qs.toString() ? `?${qs}` : ""}`);
+    },
+
+    /** GET /v1/evals/rubrics — list rubrics scoped to the active tenant. */
+    listEvalRubrics: async (): Promise<import("./types").EvalRubricRecord[]> => {
+      const merged = withScope();
+      const qs = new URLSearchParams();
+      if (merged.tenant_id) qs.set("tenant_id", merged.tenant_id);
+      return getList<import("./types").EvalRubricRecord>(`/v1/evals/rubrics${qs.toString() ? `?${qs}` : ""}`);
+    },
+
+    /** GET /v1/evals/baselines — list baselines scoped to the active tenant. */
+    listEvalBaselines: async (): Promise<import("./types").EvalBaselineRecord[]> => {
+      const merged = withScope();
+      const qs = new URLSearchParams();
+      if (merged.tenant_id) qs.set("tenant_id", merged.tenant_id);
+      return getList<import("./types").EvalBaselineRecord>(`/v1/evals/baselines${qs.toString() ? `?${qs}` : ""}`);
+    },
+
+    /** GET /v1/evals/compare?run_ids=a,b — side-by-side metric comparison. */
+    getEvalComparison: (runIds: string[]): Promise<import("./types").EvalCompareResponse> => {
+      const qs = new URLSearchParams();
+      qs.set("run_ids", runIds.join(","));
+      return get(`/v1/evals/compare?${qs}`);
+    },
 
     // ── Audit Log ────────────────────────────────────────────────────────────
 

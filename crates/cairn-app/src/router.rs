@@ -698,11 +698,17 @@ impl AppBootstrap {
                     (HttpMethod::Post, "/v1/evals/datasets/:id/entries") => {
                         router.route(&path, post(add_eval_dataset_entry_handler))
                     }
+                    (HttpMethod::Get, "/v1/evals/baselines") => {
+                        router.route(&path, get(list_eval_baselines_handler))
+                    }
                     (HttpMethod::Post, "/v1/evals/baselines") => {
                         router.route(&path, post(create_eval_baseline_handler))
                     }
                     (HttpMethod::Get, "/v1/evals/baselines/:id") => {
                         router.route(&path, get(get_eval_baseline_handler))
+                    }
+                    (HttpMethod::Get, "/v1/evals/rubrics") => {
+                        router.route(&path, get(list_eval_rubrics_handler))
                     }
                     (HttpMethod::Post, "/v1/evals/rubrics") => {
                         router.route(&path, post(create_eval_rubric_handler))

@@ -104,6 +104,18 @@ function renderRoute(route: Route): React.ReactNode {
       </Guarded>
     );
   }
+  if (route.kind === 'eval-results') {
+    // Single-run view — reuse the comparison page in single-run mode by
+    // passing the same id for both sides; the page detects this and
+    // renders a results view instead of a diff.
+    return (
+      <Guarded name="Eval Results">
+        <Suspense fallback={<PageLoader />}>
+          <EvalComparisonPage leftId={route.runId} rightId={route.runId} />
+        </Suspense>
+      </Guarded>
+    );
+  }
   if (route.kind === 'project-dashboard') {
     return (
       <Guarded name="Project Dashboard">

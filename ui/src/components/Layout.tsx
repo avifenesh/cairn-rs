@@ -23,6 +23,7 @@ export type Route =
   | { kind: 'run-detail'; runId: string }
   | { kind: 'session-detail'; sessionId: string }
   | { kind: 'eval-compare'; leftId: string; rightId: string }
+  | { kind: 'eval-results'; runId: string }
   | { kind: 'project-dashboard'; projectId: string }
   | { kind: 'not-found'; hash: string };
 
@@ -42,6 +43,19 @@ export function parseRoute(hash: string): Route {
     if (parts.length >= 2) {
       return { kind: 'eval-compare', leftId: parts[0], rightId: parts[1] };
     }
+  }
+  if (h.startsWith('eval-results/') && h.length > 'eval-results/'.length) {
+    // The link in EvalsPage encodes via encodeURIComponent; decode here so
+    // runIds containing reserved characters (/, ?, #, etc.) round-trip.
+    // Guard against malformed percent-escapes (URIError).
+    const raw = h.slice('eval-results/'.length);
+    let runId: string;
+    try {
+      runId = decodeURIComponent(raw);
+    } catch {
+      return { kind: 'not-found', hash: h };
+    }
+    return { kind: 'eval-results', runId };
   }
   // Empty hash → dashboard; known page → page; anything else → 404
   if (h === '') return { kind: 'page', page: 'dashboard' };
@@ -167,6 +181,7 @@ function activePage(route: Route): NavPage {
   if (route.kind === 'run-detail')        return 'runs';
   if (route.kind === 'session-detail')    return 'sessions';
   if (route.kind === 'eval-compare')      return 'evals';
+  if (route.kind === 'eval-results')      return 'evals';
   if (route.kind === 'project-dashboard') return 'dashboard';
   if (route.kind === 'not-found')         return 'dashboard';
   return route.page;
