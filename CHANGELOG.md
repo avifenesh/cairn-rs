@@ -37,6 +37,33 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **`test_http_sources_crud.rs`** integration test covering the full
   roundtrip over `LiveHarness`: create → ingest → list → chunks → update
   → schedule → process-refresh → delete.
+- **`RunDetailPage` + `OrchestrationPage` — operator run-mutation actions.**
+  Wires the 10 mutation endpoints under `/v1/runs/:id/*` that had no UI
+  consumer: **pause**, **resume**, **recover**, **replay**, **claim**,
+  **spawn subagent**, **children list**, **orchestrate**, **diagnose**,
+  and **intervene** (plus `GET /v1/runs/:id/interventions` history).
+  `RunDetailPage` gains an Operator Actions toolbar (pause/resume
+  state-aware, orchestrate/diagnose drawer, intervene & spawn modals,
+  recover/claim gated behind `window.confirm`), a Children Runs
+  subtable that navigates to each child on click, and an Interventions
+  history drawer. `OrchestrationPage` gains per-row quick-action icons
+  (pause/resume/orchestrate/diagnose/intervene) that disable themselves
+  based on run state and invalidate the live orchestration tree on
+  success. Closes #166 and #173.
+- **`defaultApi` — new run-scoped methods**: `recoverRun`, `replayRun`,
+  `claimRun`, `spawnSubagentRun`, `listChildRuns`, `orchestrateRun`,
+  `diagnoseRun`, `interveneRun`, `listRunInterventions`, plus widened
+  `pauseRun` / `resumeRun` signatures that accept the full
+  `PauseRunRequest` / `ResumeRunRequest` bodies (reason kind, actor,
+  trigger, target). Matching TypeScript types in `lib/types.ts`
+  (`PauseReasonKind`, `ResumeTrigger`, `RunResumeTarget`,
+  `SpawnSubagentRequest`, `InterventionAction`, `InterveneRequest`,
+  `InterventionRecord`, …) mirror the Rust DTOs in
+  `crates/cairn-app/src/handlers/runs.rs`.
+- **`test_http_run_operator_actions.rs`** integration test covering
+  pause/resume endpoint wiring, `spawn → list_children` roundtrip, and
+  `intervene → list_interventions` against the live HTTP server via
+  `LiveHarness`.
 - **`WorkersPage` now reads the real worker registry.** The page used to
   synthesise "workers" by grouping `GET /v1/tasks` rows by `lease_owner`,
   which reported zero workers whenever no task was currently leased —
