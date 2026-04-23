@@ -123,6 +123,18 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **UI: `PromptsPage` — create initial version alongside asset (#150).**
+  `NewPromptForm` previously only posted to `/v1/prompts/assets`, leaving
+  authors with an asset they could not release without a curl step. The
+  form now accepts an optional "Initial version" textarea; on submit, the
+  UI sequentially creates the asset and, when the body is non-empty,
+  posts the first `PromptVersion` with a SHA-256 `content_hash` computed
+  in the browser. Backend `POST /v1/prompts/assets/:id/versions` and
+  `POST /v1/prompts/releases` now accept the request with
+  `prompt_version_id`/`prompt_release_id` omitted and mint `pv_<uuid>`
+  and `rel_<uuid>` respectively, so the UI no longer fabricates IDs
+  client-side. Asset-only creation (blank textarea) still works.
+  Closes #150.
 - **UI: `TestHarnessPage` "Run All Scenarios" no-op'd scenario cards (#143).**
   The page-level Run All handler ran its own private copy of each
   scenario's steps against the server and then bumped a `runAllKey`

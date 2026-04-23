@@ -1454,9 +1454,9 @@ export function createApiClient(config: ApiClientConfig) {
       return get(`/v1/prompts/assets/${encodeURIComponent(assetId)}/versions${q}`);
     },
 
-    /** POST /v1/prompts/assets/:id/versions — create a new version. */
+    /** POST /v1/prompts/assets/:id/versions — create a new version. Server mints `pv_<uuid>` when `prompt_version_id` is omitted. */
     createPromptVersion: (assetId: string, body: {
-      prompt_version_id: string;
+      prompt_version_id?: string;
       content_hash: string;
       content?: string;
       template_vars?: import("./types").PromptTemplateVar[];
@@ -1476,9 +1476,9 @@ export function createApiClient(config: ApiClientConfig) {
       return get(`/v1/prompts/releases${q}`);
     },
 
-    /** POST /v1/prompts/releases — create a release from a version. */
+    /** POST /v1/prompts/releases — create a release from a version. Server mints `rel_<uuid>` when `prompt_release_id` is omitted. */
     createPromptRelease: (body: {
-      prompt_release_id: string;
+      prompt_release_id?: string;
       prompt_asset_id: string;
       prompt_version_id: string;
       release_tag?: string;

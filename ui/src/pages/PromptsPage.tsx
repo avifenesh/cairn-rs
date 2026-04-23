@@ -54,8 +54,13 @@ const shortId = (id: string) =>
 
 const shortHash = (h: string) => h.slice(0, 8);
 
-function makeReleaseId(assetId: string): string {
-  return `rel-${assetId.slice(0, 8)}-${Date.now().toString(36)}`;
+/** SHA-256 hex digest via SubtleCrypto — matches backend `content_hash` format. */
+async function sha256Hex(text: string): Promise<string> {
+  const bytes = new TextEncoder().encode(text);
+  const digest = await crypto.subtle.digest("SHA-256", bytes);
+  return Array.from(new Uint8Array(digest))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
 }
 
 // ── Kind badge ────────────────────────────────────────────────────────────────
@@ -506,7 +511,6 @@ function AssetItem({
   const createRelease = useMutation({
     mutationFn: (versionId: string) =>
       defaultApi.createPromptRelease({
-        prompt_release_id: makeReleaseId(asset.prompt_asset_id),
         prompt_asset_id:   asset.prompt_asset_id,
         prompt_version_id: versionId,
       }),
@@ -620,6 +624,7 @@ function NewPromptForm({ onClose }: { onClose: () => void }) {
   const [id,   setId]   = useState("");
   const [name, setName] = useState("");
   const [kind, setKind] = useState<PromptKind>("system");
+  const [initialBody, setInitialBody] = useState("");
 
   // Close on Escape
   useEffect(() => {
@@ -628,14 +633,49 @@ function NewPromptForm({ onClose }: { onClose: () => void }) {
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
 
+  // Single mutation: create asset, then (if body non-empty) create initial version.
+  // Sequential: version depends on the returned asset_id, and a failure mid-flow
+  // must not block asset discovery — we toast a partial-success message.
   const create = useMutation({
-    mutationFn: () => defaultApi.createPromptAsset({ prompt_asset_id: id.trim(), name: name.trim(), kind }),
-    onSuccess: () => {
-      toast.success("Prompt asset created.");
+    mutationFn: async () => {
+      const asset = await defaultApi.createPromptAsset({
+        prompt_asset_id: id.trim(),
+        name: name.trim(),
+        kind,
+      });
+      const body = initialBody.trim();
+      if (body.length === 0) return { asset, version: null as null };
+      try {
+        const content_hash = await sha256Hex(body);
+        const version = await defaultApi.createPromptVersion(asset.prompt_asset_id, {
+          content: body,
+          content_hash,
+        });
+        return { asset, version };
+      } catch (err) {
+        // Asset is created; bubble a partial-success so the operator knows.
+        throw Object.assign(new Error("version_failed"), { assetCreated: true, cause: err });
+      }
+    },
+    onSuccess: (result) => {
+      if (result.version) {
+        toast.success(`Prompt asset “${result.asset.prompt_asset_id}” created with initial version.`);
+      } else {
+        toast.success(`Prompt asset “${result.asset.prompt_asset_id}” created.`);
+      }
       void qc.invalidateQueries({ queryKey: ["prompt-assets"] });
+      void qc.invalidateQueries({ queryKey: ["prompt-versions", result.asset.prompt_asset_id] });
       onClose();
     },
-    onError: () => toast.error("Failed to create prompt asset."),
+    onError: (err: unknown) => {
+      if (err && typeof err === "object" && "assetCreated" in err) {
+        toast.error("Asset created, but initial version failed. Add a version from the asset view.");
+        void qc.invalidateQueries({ queryKey: ["prompt-assets"] });
+        onClose();
+      } else {
+        toast.error("Failed to create prompt asset.");
+      }
+    },
   });
 
   const valid = id.trim().length > 0 && name.trim().length > 0;
@@ -683,6 +723,19 @@ function NewPromptForm({ onClose }: { onClose: () => void }) {
             ))}
           </select>
         </div>
+      </div>
+      <div>
+        <label className="text-[10px] text-gray-400 dark:text-zinc-500 block mb-1">
+          Initial version <span className="text-gray-300 dark:text-zinc-600">(optional — leave blank to author later)</span>
+        </label>
+        <textarea
+          value={initialBody}
+          onChange={(e) => setInitialBody(e.target.value)}
+          placeholder="You are a helpful assistant…"
+          rows={5}
+          className="w-full rounded border border-gray-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 text-[12px] text-gray-800 dark:text-zinc-200
+                     font-mono px-2 py-1.5 focus:outline-none focus:border-indigo-500 transition-colors resize-y"
+        />
       </div>
       <div className="flex items-center gap-2 justify-end">
         <button onClick={onClose}
