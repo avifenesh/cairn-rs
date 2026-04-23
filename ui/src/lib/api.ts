@@ -84,7 +84,13 @@ async function apiFetch<T>(
     try {
       const err = await response.json();
       code = err.code ?? code;
-      message = err.message ?? message;
+      // Cairn handlers use two body shapes for errors:
+      //   1. `{ code, message }`    — used by most handlers.
+      //   2. `{ error: string }`    — used by repo_routes, credentials, and
+      //      a handful of older handlers that predate the unified envelope.
+      // Prefer `message` when present, fall back to `error` so UI toasts
+      // surface the real backend reason instead of a generic `HTTP 400`.
+      message = err.message ?? err.error ?? message;
     } catch {
       // ignore JSON parse failure — use defaults above
     }

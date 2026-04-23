@@ -31,11 +31,10 @@ function parseRepoId(repoId: string): { owner: string; repo: string } | null {
 }
 
 function errorMessage(e: unknown, fallback: string): string {
-  if (e instanceof ApiError) {
-    // repo_store / validation errors come back as `{error: string}` — ApiError.message
-    // already carries the decoded body when the backend emits JSON.
-    return e.message || fallback;
-  }
+  // `apiFetch` normalizes both `{code, message}` and `{error: string}` body
+  // shapes into `ApiError.message`, so the decoded backend reason is
+  // available here regardless of which envelope `repo_routes.rs` emits.
+  if (e instanceof ApiError) return e.message || fallback;
   if (e instanceof Error) return e.message || fallback;
   return fallback;
 }
@@ -298,8 +297,12 @@ export function ProjectReposPage() {
             render: r => {
               const parts = parseRepoId(r.repo_id);
               if (!parts) return null;
+              // `DataTable` doesn't put a `group` class on the row, so
+              // `group-hover:opacity-100` would hide this button forever.
+              // Keep it always visible — this is a destructive action the
+              // operator always needs to be able to reach.
               return (
-                <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                <div className="flex items-center gap-1">
                   <button
                     onClick={() => {
                       if (window.confirm(`Detach ${r.repo_id} from this project?`)) {
@@ -316,7 +319,10 @@ export function ProjectReposPage() {
             },
           },
         ]}
-        filterFn={(r, q) => r.repo_id.includes(q)}
+        // `DataTable` lowercases the query before calling this predicate,
+        // so compare in lowercase too — otherwise mixed-case repo ids
+        // (e.g. `Microsoft/TypeScript`) would never match.
+        filterFn={(r, q) => r.repo_id.toLowerCase().includes(q)}
         csvRow={r => [r.repo_id, r.clone_status, r.added_at ?? "", r.last_used_at ?? ""]}
         csvHeaders={["Repo", "Clone", "Added", "Last Used"]}
         filename="project-repos"
