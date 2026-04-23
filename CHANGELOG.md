@@ -110,7 +110,24 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
-<<<<<<< HEAD
+- **UI: `TestHarnessPage` "Run All Scenarios" no-op'd scenario cards (#143).**
+  The page-level Run All handler ran its own private copy of each
+  scenario's steps against the server and then bumped a `runAllKey`
+  to remount cards. Cards themselves never executed — step rows
+  stayed idle ("0/N steps") while the summary banner reported
+  green. Rewired Run All so each `ScenarioCard` accepts a per-card
+  `runNonce` prop; the parent increments nonces sequentially and
+  awaits an `onComplete` callback from the card's real
+  `runScenario` before moving to the next. Step rows now reflect
+  live per-step progress during Run All, and the summary reflects
+  what the cards actually saw. Closes #143.
+- **UI: `TestHarnessPage` "Event log" step was a sham (#143).**
+  The `event_log` step called `getRunEvents("__nonexistent__")`
+  with a blanket `.catch(() => [])` and reported pass regardless
+  of server state — it asserted nothing. Replaced with a real
+  `GET /v1/events/recent?limit=5` probe via `getRecentEvents` that
+  asserts the response is an array and each returned record has a
+  non-empty `event_type`. Description updated to match.
 - **UI: `AgentTemplatesPage` navigated after a 500 ms `setTimeout` (#161).**
   After `instantiateAgentTemplate` succeeded the page slept 500 ms before
   routing to the new run, hoping the backend had finished creating it —
@@ -150,7 +167,6 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   most one `rSessions`/`rRuns`/`rTasks`. Payload ids read both
   snake_case and camelCase to match the pattern in `RunDetailPage`.
   Operator actions wired in PR P are untouched.
-=======
 - **UI: `PlaygroundPage` model picker excluded Anthropic-native providers (#160).** The registry-derived model list filtered out providers whose `api_format` was `anthropic`, silently hiding every Anthropic-native connection even though the backend `chat/stream` handler routes through the native adapter. Removed the adapter-kind filter so all available registered providers contribute their models to the picker. Closes #160.
 - **UI: `DecisionsPage` row-level Invalidate button was invisible (#153).**
   The per-row "Invalidate" button in the cache tab used Tailwind's
@@ -176,7 +192,6 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   placeholder stays in sync with the canonical default tenant id
   (`default_tenant`) — the PR #132 cleanup missed this one field.
   Closes #162.
->>>>>>> origin/main
 - **UI: `RunDetailPage` plan-mode detection used a loose substring match (#178).**
   The `isPlanMode` check in `ui/src/pages/RunDetailPage.tsx` used a loose
   substring match (`runModeType.includes("plan")`), so runs with names or
