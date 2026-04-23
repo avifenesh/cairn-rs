@@ -661,13 +661,20 @@ export interface CreateSourceRequest {
   description?: string;
 }
 
-/** PUT /v1/sources/:id — update source request body. */
+/** PUT /v1/sources/:id — update source request body.
+ *
+ * Backend (`crates/cairn-app/src/handlers/memory.rs::UpdateSourceRequest`)
+ * uses `Option<String>`, so the wire accepts either an explicit string, an
+ * explicit `null` (to clear the field), or omission. `defaultApi.updateSource`
+ * always serialises `null` when the caller passes `undefined`, so the TS
+ * type must allow `string | null`.
+ */
 export interface UpdateSourceRequest {
   tenant_id: string;
   workspace_id: string;
   project_id: string;
-  name?: string;
-  description?: string;
+  name?: string | null;
+  description?: string | null;
 }
 
 /** POST /v1/memory/ingest — response body. */

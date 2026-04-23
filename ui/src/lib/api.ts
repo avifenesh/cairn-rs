@@ -1182,9 +1182,18 @@ export function createApiClient(config: ApiClientConfig) {
     },
 
     /** GET /v1/sources/:id/refresh-schedule — current schedule, if any. */
-    getSourceRefreshSchedule: (sourceId: string):
-      Promise<import("./types").RefreshScheduleResponse> =>
-      get(`/v1/sources/${encodeURIComponent(sourceId)}/refresh-schedule`),
+    getSourceRefreshSchedule: (sourceId: string, params?: {
+      tenant_id?: string;
+      workspace_id?: string;
+      project_id?: string;
+    }): Promise<import("./types").RefreshScheduleResponse> => {
+      const merged = withScope(params);
+      const qs = new URLSearchParams();
+      qs.set("tenant_id",    merged.tenant_id    ?? DEFAULT_SCOPE.tenant_id);
+      qs.set("workspace_id", merged.workspace_id ?? DEFAULT_SCOPE.workspace_id);
+      qs.set("project_id",   merged.project_id   ?? DEFAULT_SCOPE.project_id);
+      return get(`/v1/sources/${encodeURIComponent(sourceId)}/refresh-schedule?${qs}`);
+    },
 
     /** POST /v1/sources/:id/refresh-schedule — create or update schedule. */
     setSourceRefreshSchedule: (sourceId: string, body: {

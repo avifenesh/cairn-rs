@@ -17,9 +17,12 @@ function truncate(s: string, n: number) {
 
 /**
  * Detect the "no embedding provider configured" condition from a structured
- * ApiError. The backend returns 503 with `code: provider_unavailable` in
- * that case; everything else (auth, network, validation) renders a generic
- * error card instead.
+ * ApiError. The current `memory_search_handler` returns 400 `bad_request`
+ * with no dedicated error code for missing provider config, so in practice
+ * this branch only fires if/when the backend is extended to emit 503 with
+ * `code: 'provider_unavailable'`. Until then every search error falls into
+ * the generic "Search failed" branch, which surfaces the real message
+ * instead of the misleading provider hint.
  */
 function isProviderUnavailable(err: unknown): boolean {
   if (err instanceof ApiError) {
@@ -263,9 +266,11 @@ export function MemoryPage() {
   // bleed sources from a previous tenant/workspace/project into the panel.
   const { data: sources, isError: isSourcesError, error: sourcesError, refetch: refetchSources } = useQuery({
     queryKey: ['sources', scope.tenant_id, scope.workspace_id, scope.project_id],
-    // Pass scope explicitly so the request body is guaranteed to match the
-    // queryKey even if the API client's implicit scope (localStorage) has
-    // drifted from the hook state.
+    // Pass scope explicitly so the outgoing query params are guaranteed to
+    // match the queryKey even if the API client's implicit scope
+    // (localStorage) has drifted from the hook state. getSources is GET, so
+    // scope travels as `?tenant_id=…&workspace_id=…&project_id=…` on the
+    // wire, not in a request body.
     queryFn: () => defaultApi.getSources({
       tenant_id:    scope.tenant_id,
       workspace_id: scope.workspace_id,
