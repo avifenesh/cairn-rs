@@ -1093,11 +1093,13 @@ pub(crate) async fn store_credential_handler(
     if let Some(denied) = require_feature(&state.config, CREDENTIAL_MANAGEMENT) {
         return denied;
     }
+    let tenant = TenantId::new(tenant_id);
+    let provider_id = body.provider_id.clone();
     match state
         .runtime
         .credentials
         .store(
-            TenantId::new(tenant_id),
+            tenant.clone(),
             body.provider_id,
             body.plaintext_value,
             body.key_id,
@@ -1105,6 +1107,23 @@ pub(crate) async fn store_credential_handler(
         .await
     {
         Ok(record) => (StatusCode::CREATED, Json(credential_summary(record))).into_response(),
+        // Closes #217: duplicate `(tenant_id, provider_id)` is a
+        // typed conflict from the credential service. Re-shape the
+        // generic `Conflict` 409 into the `credential_exists` code so
+        // clients can dispatch on it without string-sniffing the
+        // message.
+        Err(cairn_runtime::RuntimeError::Conflict {
+            entity: "credential",
+            ..
+        }) => AppApiError::new(
+            StatusCode::CONFLICT,
+            "credential_exists",
+            format!(
+                "credential for provider '{provider_id}' already exists for tenant '{}'",
+                tenant.as_str()
+            ),
+        )
+        .into_response(),
         Err(err) => runtime_error_response(err),
     }
 }

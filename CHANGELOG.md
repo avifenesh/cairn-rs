@@ -217,6 +217,30 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `knowledge_pack`), defaulting to `plain_text`. The request field name
   is unchanged so the API contract is untouched.
 
+- **Backend: `POST /v1/runs/:id/pause` returns 409 on invalid state
+  (closes #216).** Pausing a run that was not yet claimable (pending
+  state, no lease) previously crashed into a 500: FF's
+  `ff_suspend_execution` rejects with `fence_required` /
+  `execution_not_active`, which rolled up as `FabricError::Internal`
+  and then `RuntimeError::Internal`. The fabric adapter now classifies
+  the documented suspend-state rejection codes (`fence_required`,
+  `partial_fence_triple`, `execution_not_active`, `lease_revoked`,
+  `stale_lease`, `invalid_lease_for_suspend`, `already_suspended`,
+  `waitpoint_not_token_bound`) as `RuntimeError::InvalidTransition`,
+  and the HTTP error mapper returns 409 Conflict with code
+  `invalid_state_transition` for every `InvalidTransition` variant
+  (was 422). Regression covered end-to-end by
+  `test_http_run_operator_actions::pause_on_pending_run_returns_409_not_500`.
+- **Backend: duplicate credential for the same `(tenant, provider_id)`
+  returns 409 (closes #217).** `POST /v1/admin/tenants/:t/credentials`
+  silently accepted repeated posts with the same `provider_id`, both
+  returning 201 and accumulating two active records in the read model.
+  `CredentialServiceImpl::store` now rejects when an active credential
+  already exists for the pair, surfacing `RuntimeError::Conflict`; the
+  admin handler re-shapes this into a 409 with code
+  `credential_exists` and a message naming the tenant and provider.
+  Revoke-then-create still succeeds, preserving the rotation workflow.
+  Regression covered by `test_http_credentials`.
 - **UI: `PromptsPage` — create initial version alongside asset (#150).**
   `NewPromptForm` previously only posted to `/v1/prompts/assets`, leaving
   authors with an asset they could not release without a curl step. The
