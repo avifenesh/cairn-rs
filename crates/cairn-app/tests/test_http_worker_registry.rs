@@ -13,14 +13,17 @@ mod support;
 use serde_json::{json, Value};
 use support::live_fabric::LiveHarness;
 
-/// Percent-encode a path segment so worker ids containing `/`, `#`,
-/// spaces, etc. route to the intended handler. Mirrors the UI client's
-/// `encodeURIComponent(id)` behaviour.
+/// Percent-encode every byte outside the RFC 3986 "unreserved" set
+/// (`A-Z a-z 0-9 - _ . ~`) so a worker id containing reserved or
+/// special characters (e.g. `/`, `#`, spaces, unicode) still routes to
+/// the intended handler. This is a stricter superset of
+/// `encodeURIComponent` — the JS built-in leaves `!`, `*`, `'`, `(`,
+/// `)` unescaped, but on the axum path-segment matcher an over-escaped
+/// byte round-trips correctly, so tightening here is always safe.
 fn encode_path(segment: &str) -> String {
     let mut out = String::with_capacity(segment.len());
     for &b in segment.as_bytes() {
         match b {
-            // RFC 3986 unreserved characters — safe in a path segment.
             b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
                 out.push(b as char);
             }
@@ -28,6 +31,16 @@ fn encode_path(segment: &str) -> String {
         }
     }
     out
+}
+
+#[test]
+fn encode_path_escapes_reserved_bytes_and_preserves_unreserved() {
+    // Unreserved stays as-is.
+    assert_eq!(encode_path("worker_abc-123.v2~x"), "worker_abc-123.v2~x");
+    // Reserved path bytes must be percent-encoded.
+    assert_eq!(encode_path("a/b#c d"), "a%2Fb%23c%20d");
+    // Multi-byte UTF-8 is encoded byte-by-byte.
+    assert_eq!(encode_path("π"), "%CF%80");
 }
 
 #[tokio::test]
