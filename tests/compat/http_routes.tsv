@@ -208,6 +208,7 @@ GET	/v1/settings/tls	preserve	-	TLS config
 GET	/v1/signals	preserve	-	-
 GET	/v1/signals/subscriptions	preserve	-	-
 GET	/v1/skills	preserve	-	{ items, summary, currentlyActive? }
+GET	/v1/skills/:id	preserve	-	-
 GET	/v1/soul	transitional	-	current singleton asset wrapper
 GET	/v1/soul/history	transitional	-	{ items }
 GET	/v1/soul/patches	transitional	-	{ items }
