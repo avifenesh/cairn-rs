@@ -76,6 +76,22 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **UI: `RunsPage` detail side-panel was dead code (#169).** A
+  `DetailPanel` component was rendered against a `selected`/`setSelected`
+  state pair that nothing ever set — clicking a row already navigates to
+  `#run/<id>`, so the panel was guaranteed never to appear. The unused
+  component, state, and all orphaned imports (`X`, `ChevronRight`,
+  `FieldRow`, `SectionLabel`, `sectionLabel`, `card` preset) have been
+  removed (~60 LOC).
+- **UI: `RunsPage` batch create now issues one HTTP call (#174).** The
+  `BatchCreateModal` fan-out of N sequential `POST /v1/runs` requests
+  has been replaced by a single `POST /v1/runs/batch` round-trip via
+  `defaultApi.batchCreateRuns`. On partial failure the toast now
+  surfaces the first per-item error message from the backend's
+  `{results: [{ok, error}…]}` body instead of a generic "failed" line.
+  Plan-mode parity is preserved by extending the backend
+  `CreateRunBody` with an optional `mode` field so batch callers can
+  opt into `RunMode::plan` the same way single-run create already does.
 - **UI: `RunDetailPage` rendered `$0.000000` for every run with no
   provider calls (#168).** `GET /v1/runs/:id/cost` returns `200` with a
   zero-valued `RunCostRecord` when no cost data has been recorded, so
