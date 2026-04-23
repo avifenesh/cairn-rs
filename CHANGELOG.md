@@ -11,6 +11,32 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **`MemoryPage` now has an in-UI ingest form.** Closes #152. The page used
+  to instruct operators to curl `POST /v1/memory/ingest` by hand; it now
+  renders a form with source_id / document_id / optional source_type /
+  content fields, wired via TanStack Query mutation against
+  `defaultApi.ingestMemory`. Scope is inferred from `useScope()`. Errors
+  surface via `useToast().error(message)`; on success the `memory-search`
+  and `sources` queries are invalidated so the search results and source
+  panel refresh without a full page reload.
+- **`SourcesPage` gained full CRUD + schedule + chunk inspection.** New
+  toolbar buttons for "New Source" and "Process Due" (all-schedule
+  sweep), plus per-row Edit, Delete, View Chunks, and Refresh Schedule
+  actions. Each action is a focused modal following the existing design
+  system (`ds.modal.*`, `useFocusTrap`, `useToast`). Mutations invalidate
+  `['sources']`, `['source', id]`, `['source', id, 'chunks']`, and
+  `['source', id, 'schedule']` as appropriate.
+- **`defaultApi.ingestMemory` / `createSource` / `getSource` /
+  `updateSource` / `deleteSource` / `getSourceChunks` /
+  `getSourceRefreshSchedule` / `setSourceRefreshSchedule` /
+  `processSourceRefresh`** on the TypeScript API client, with matching
+  `CreateSourceRequest`, `UpdateSourceRequest`, `MemoryIngestRequest`,
+  `SourceDetailResponse`, `SourceChunkView`, `CreateRefreshScheduleRequest`,
+  `RefreshScheduleResponse`, and `ProcessRefreshResponse` types
+  mirroring the Rust handler shapes exactly.
+- **`test_http_sources_crud.rs`** integration test covering the full
+  roundtrip over `LiveHarness`: create → ingest → list → chunks → update
+  → schedule → process-refresh → delete.
 - **`WorkersPage` now reads the real worker registry.** The page used to
   synthesise "workers" by grouping `GET /v1/tasks` rows by `lease_owner`,
   which reported zero workers whenever no task was currently leased —

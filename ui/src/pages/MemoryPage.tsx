@@ -1,11 +1,12 @@
 import { useState, useRef, type FormEvent } from 'react';
-import { useQuery } from '@tanstack/react-query';
-import { Search, Loader2, X, RefreshCw, Database } from 'lucide-react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { Search, Loader2, X, RefreshCw, Database, Upload } from 'lucide-react';
 import { HelpTooltip } from '../components/HelpTooltip';
 import { FeatureEmptyState } from '../components/FeatureEmptyState';
 import { clsx } from 'clsx';
 import { defaultApi } from '../lib/api';
 import { useScope } from '../hooks/useScope';
+import { useToast } from '../components/Toast';
 import type { MemoryChunkResult, SourceRecord } from '../lib/types';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -107,6 +108,107 @@ function SourceRow({ source, even }: { source: SourceRecord; even: boolean }) {
   );
 }
 
+// ── Ingest form ───────────────────────────────────────────────────────────────
+
+function IngestForm({ onIngested }: { onIngested: () => void }) {
+  const toast = useToast();
+  const qc    = useQueryClient();
+  const [scope] = useScope();
+
+  const [sourceId,   setSourceId]   = useState('');
+  const [documentId, setDocumentId] = useState('');
+  const [content,    setContent]    = useState('');
+  const [sourceType, setSourceType] = useState('');
+
+  const { mutate, isPending } = useMutation({
+    mutationFn: () => defaultApi.ingestMemory({
+      source_id:    sourceId.trim(),
+      document_id:  documentId.trim(),
+      content,
+      ...(sourceType.trim() ? { source_type: sourceType.trim() } : {}),
+    }),
+    onSuccess: () => {
+      toast.success(`Ingested document ${documentId} into source ${sourceId}.`);
+      setDocumentId('');
+      setContent('');
+      qc.invalidateQueries({ queryKey: ['memory-search'] });
+      qc.invalidateQueries({ queryKey: ['sources'] });
+      onIngested();
+    },
+    onError: (e: unknown) => {
+      toast.error(e instanceof Error ? e.message : 'Ingest failed.');
+    },
+  });
+
+  function submit(e: FormEvent) {
+    e.preventDefault();
+    if (!sourceId.trim() || !documentId.trim() || !content.trim()) return;
+    mutate();
+  }
+
+  return (
+    <form
+      onSubmit={submit}
+      className="bg-gray-50 dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 rounded-lg p-4 space-y-3"
+    >
+      <div className="flex items-center gap-2">
+        <Upload size={13} className="text-indigo-500" />
+        <p className="text-[11px] font-medium text-gray-500 dark:text-zinc-400 uppercase tracking-wider">
+          Ingest Document
+        </p>
+        <HelpTooltip
+          text={`Ingests a single document into the knowledge store under the current scope (${scope.tenant_id}/${scope.workspace_id}/${scope.project_id}). Source is created on first ingest.`}
+          placement="right"
+        />
+      </div>
+
+      <div className="grid grid-cols-2 gap-2">
+        <input
+          value={sourceId}
+          onChange={e => setSourceId(e.target.value)}
+          placeholder="source_id (e.g. docs/handbook)"
+          className="rounded-md bg-white dark:bg-zinc-950 border border-gray-200 dark:border-zinc-800 px-3 h-8 text-xs font-mono text-gray-800 dark:text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
+          required
+        />
+        <input
+          value={documentId}
+          onChange={e => setDocumentId(e.target.value)}
+          placeholder="document_id (e.g. onboarding.md)"
+          className="rounded-md bg-white dark:bg-zinc-950 border border-gray-200 dark:border-zinc-800 px-3 h-8 text-xs font-mono text-gray-800 dark:text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
+          required
+        />
+      </div>
+
+      <input
+        value={sourceType}
+        onChange={e => setSourceType(e.target.value)}
+        placeholder="source_type (optional: web, file, api, …)"
+        className="w-full rounded-md bg-white dark:bg-zinc-950 border border-gray-200 dark:border-zinc-800 px-3 h-8 text-xs text-gray-800 dark:text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
+      />
+
+      <textarea
+        value={content}
+        onChange={e => setContent(e.target.value)}
+        placeholder="Document content to ingest…"
+        rows={4}
+        className="w-full rounded-md bg-white dark:bg-zinc-950 border border-gray-200 dark:border-zinc-800 px-3 py-2 text-xs text-gray-800 dark:text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 resize-y"
+        required
+      />
+
+      <div className="flex justify-end">
+        <button
+          type="submit"
+          disabled={isPending || !sourceId.trim() || !documentId.trim() || !content.trim()}
+          className="h-8 px-3 rounded-md bg-indigo-600 hover:bg-indigo-500 disabled:bg-gray-200 dark:disabled:bg-zinc-800 disabled:text-gray-400 dark:disabled:text-zinc-600 text-white text-xs font-medium flex items-center gap-1.5 transition-colors"
+        >
+          {isPending ? <Loader2 size={12} className="animate-spin" /> : <Upload size={12} />}
+          Ingest
+        </button>
+      </div>
+    </form>
+  );
+}
+
 // ── Main page ─────────────────────────────────────────────────────────────────
 
 export function MemoryPage() {
@@ -186,6 +288,9 @@ export function MemoryPage() {
         />
       </form>
 
+      {/* ── Ingest form ─────────────────────────────────────────────────── */}
+      <IngestForm onIngested={() => refetchSources()} />
+
       {/* ── Search results ──────────────────────────────────────────────── */}
       {submitted && (
         <div className="bg-gray-50 dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 rounded-lg overflow-hidden">
@@ -217,7 +322,7 @@ export function MemoryPage() {
             <FeatureEmptyState
               icon={<Database size={20} className="text-gray-400 dark:text-zinc-500" />}
               title="No embedding provider configured"
-              description="Memory search requires an embedding provider to generate vector representations. Add one on the Providers page, then ingest documents via POST /v1/memory/ingest."
+              description="Memory search requires an embedding provider to generate vector representations. Add one on the Providers page, then ingest documents with the form above."
               actionLabel="Go to Providers"
               actionHref="#providers"
             />
@@ -267,13 +372,13 @@ export function MemoryPage() {
           <FeatureEmptyState
             icon={<Database size={20} className="text-gray-400 dark:text-zinc-500" />}
             title="No embedding provider configured"
-            description="Add one on the Providers page, then ingest documents via POST /v1/memory/ingest."
+            description="Add one on the Providers page, then ingest documents with the form above."
             actionLabel="Go to Providers"
             actionHref="#providers"
           />
         ) : !sources || sources.length === 0 ? (
           <div className="px-4 py-8 text-center text-xs text-gray-400 dark:text-zinc-600">
-            No sources registered — POST to /v1/memory/ingest to add documents
+            No sources registered — use the ingest form above to add documents
           </div>
         ) : (
           <div>
