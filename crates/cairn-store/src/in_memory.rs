@@ -4991,11 +4991,17 @@ impl InMemoryStore {
     }
 
     /// List tasks with optional filters.
+    ///
+    /// The `query` project key is always applied so the list cannot leak
+    /// tasks across tenants. Issue #234: previously the filter args were
+    /// silently ignored and every task in the store was returned
+    /// regardless of scope. `run_id` and `state_filter` narrow the
+    /// result further when present.
     pub async fn list_tasks_filtered(
         &self,
-        _query: &cairn_domain::tenancy::ProjectKey,
-        _run_id: Option<&cairn_domain::RunId>,
-        _state_filter: Option<cairn_domain::TaskState>,
+        query: &cairn_domain::tenancy::ProjectKey,
+        run_id: Option<&cairn_domain::RunId>,
+        state_filter: Option<cairn_domain::TaskState>,
         limit: usize,
         offset: usize,
     ) -> Result<Vec<crate::projections::TaskRecord>, crate::StoreError> {
@@ -5003,6 +5009,9 @@ impl InMemoryStore {
         Ok(state
             .tasks
             .values()
+            .filter(|t| t.project == *query)
+            .filter(|t| run_id.is_none_or(|r| t.parent_run_id.as_ref() == Some(r)))
+            .filter(|t| state_filter.is_none_or(|st| t.state == st))
             .skip(offset)
             .take(limit)
             .cloned()
