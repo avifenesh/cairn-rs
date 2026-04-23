@@ -96,6 +96,12 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `MemoryPage`'s search-result React key from the bare `chunk_id` to
   `${chunk_id}-${rank}` so duplicate chunks across pages no longer
   trigger React's duplicate-key warning.
+- **ApprovalsPage rows now navigate to the linked run on click
+  (closes #231).** Clicking (or pressing Enter/Space on) an approval
+  row whose `run_id` is populated now routes to `#run/:id`; rows
+  without a run id remain non-interactive, and the Approve/Reject and
+  copy-id buttons keep stopping propagation so they don't trigger
+  navigation.
 
 - **`GET /v1/tasks` + `GET /v1/runs` now honor the
   `tenant_id`/`workspace_id`/`project_id` query filters (closes
