@@ -416,6 +416,18 @@ export function createApiClient(config: ApiClientConfig) {
       return getList(`/v1/runs${query}`);
     },
 
+    /** GET /v1/sessions/:id/runs — list runs for one session (server-side filter). */
+    getSessionRuns: (
+      sessionId: string,
+      params?: { limit?: number; offset?: number },
+    ): Promise<RunRecord[]> => {
+      const qs = new URLSearchParams();
+      if (params?.limit  !== undefined) qs.set("limit",  String(params.limit));
+      if (params?.offset !== undefined) qs.set("offset", String(params.offset));
+      const query = qs.toString() ? `?${qs}` : "";
+      return getList(`/v1/sessions/${encodeURIComponent(sessionId)}/runs${query}`);
+    },
+
     /** GET /v1/runs/:id — fetch a single run by ID. */
     getRun: async (runId: string): Promise<RunRecord> => {
       const raw = await get<RunRecord | { run: RunRecord; tasks?: import("./types").TaskRecord[] }>(
@@ -795,7 +807,7 @@ export function createApiClient(config: ApiClientConfig) {
 
     /** GET /v1/sessions/:id/llm-traces — traces for one session. */
     getSessionTraces: (sessionId: string, limit = 200): Promise<import("./types").TracesResponse> =>
-      get(`/v1/sessions/${sessionId}/llm-traces?limit=${limit}`),
+      get(`/v1/sessions/${encodeURIComponent(sessionId)}/llm-traces?limit=${limit}`),
 
     // ── Evals ────────────────────────────────────────────────────────────────
 

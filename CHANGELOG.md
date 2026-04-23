@@ -49,6 +49,23 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **UI: `SessionDetailPage` silently dropped runs past the first 500 (#170).**
+  The page fetched `GET /v1/runs?limit=500` and filtered by
+  `session_id` client-side, so on projects with more than 500 total
+  runs older session runs were cut out before the filter ran and
+  simply disappeared from the detail view. The page now calls
+  `GET /v1/sessions/:id/runs` (which filters server-side at the
+  projection layer) via a new `defaultApi.getSessionRuns` helper, and
+  paginates through all runs with named caps
+  (`SESSION_RUNS_PAGE_SIZE` = 500, `SESSION_RUNS_MAX_PAGES` = 40). If
+  the 20k-run hard cap is reached the page surfaces an explicit
+  truncation banner directing operators to session export. The page
+  also reads `isError`/`error` from the runs query, renders a dedicated
+  "Session not found" red card on 404 and a generic error card for
+  other failures, and short-circuits retries on 404. Integration
+  coverage in `crates/cairn-app/tests/test_http_session_detail.rs`
+  asserts that a session's runs are returned in full and that
+  sibling-session runs under the same project scope do not leak.
 - **UI: `WorkspacesPage` polish — surface create failures + drop dead stat
   tiles.** The `createWorkspace` mutation only had an `onSuccess` handler,
   so any failed POST (duplicate ID, 422 validation, 5xx) was silently

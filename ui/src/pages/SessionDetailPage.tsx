@@ -7,9 +7,9 @@ import { StatCard } from "../components/StatCard";
 import { StateBadge } from "../components/StateBadge";
 import { CopyButton } from "../components/CopyButton";
 import { useToast } from "../components/Toast";
-import { defaultApi } from "../lib/api";
+import { ApiError, defaultApi } from "../lib/api";
 import { table as tablePreset } from "../lib/design-system";
-import type { SessionState } from "../lib/types";
+import type { RunRecord, SessionState } from "../lib/types";
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -90,6 +90,16 @@ const TH = ({ ch, right, hide }: { ch: React.ReactNode; right?: boolean; hide?: 
   )}>{ch}</th>
 );
 
+// ── Pagination limits ─────────────────────────────────────────────────────────
+
+/** How many runs to request per `GET /v1/sessions/:id/runs` page. */
+const SESSION_RUNS_PAGE_SIZE = 500;
+/** Hard cap on pages — protects against an unbounded loop if the backend
+ *  ever stops honouring the page-size contract. Sessions with more runs
+ *  than `SESSION_RUNS_PAGE_SIZE * SESSION_RUNS_MAX_PAGES` are surfaced
+ *  via an explicit truncation banner, not silently dropped. */
+const SESSION_RUNS_MAX_PAGES = 40;
+
 // ── Page ──────────────────────────────────────────────────────────────────────
 
 interface SessionDetailPageProps {
@@ -108,13 +118,52 @@ export function SessionDetailPage({ sessionId, onBack }: SessionDetailPageProps)
   });
   const session = sessions?.find(s => s.session_id === sessionId);
 
-  // All runs — filter client-side for this session.
-  const { data: allRuns, isLoading: runsLoading } = useQuery({
-    queryKey: ["runs"],
-    queryFn: () => defaultApi.getRuns({ limit: 500 }),
+  // Runs for this session — server-side filter via /v1/sessions/:id/runs,
+  // paginated up to SESSION_RUNS_PAGE_SIZE * SESSION_RUNS_MAX_PAGES.
+  // Fixes #170, where a global `getRuns({limit:500})` + client-side filter
+  // dropped older runs in projects past 500 total runs. If the hard cap is
+  // hit we surface a banner (see below) rather than silently truncating.
+  const {
+    data: sessionRunsResult,
+    isLoading: runsLoading,
+    isError: runsIsError,
+    error: runsError,
+  } = useQuery({
+    queryKey: ["session-runs", sessionId],
+    queryFn: async (): Promise<{ runs: RunRecord[]; truncated: boolean }> => {
+      const all: RunRecord[] = [];
+      let offset = 0;
+      let truncated = false;
+      for (let page = 0; page < SESSION_RUNS_MAX_PAGES; page++) {
+        const chunk = await defaultApi.getSessionRuns(sessionId, {
+          limit: SESSION_RUNS_PAGE_SIZE,
+          offset,
+        });
+        all.push(...chunk);
+        if (chunk.length < SESSION_RUNS_PAGE_SIZE) break;
+        offset += chunk.length;
+        if (page === SESSION_RUNS_MAX_PAGES - 1) {
+          // Final allowed page came back full — it's either an exact
+          // multiple of the cap (no more rows) or we hit the client
+          // limit. Probe with `limit:1` at the next offset to
+          // distinguish, so the "older runs exist" banner only fires
+          // when more data actually lives on the server.
+          const probe = await defaultApi.getSessionRuns(sessionId, { limit: 1, offset });
+          truncated = probe.length > 0;
+        }
+      }
+      return { runs: all, truncated };
+    },
     staleTime: 30_000,
+    // 404 means "session does not exist" — retrying won't change the
+    // answer and wastes a round-trip per retry, so short-circuit it.
+    // Other transient errors still get TanStack's default retry policy.
+    retry: (failureCount, err) =>
+      !(err instanceof ApiError && err.status === 404) && failureCount < 3,
   });
-  const runs = (allRuns ?? []).filter(r => r.session_id === sessionId);
+  const runs = sessionRunsResult?.runs ?? [];
+  const runsTruncated = sessionRunsResult?.truncated ?? false;
+  const runsNotFound = runsIsError && runsError instanceof ApiError && runsError.status === 404;
   const activeRuns = runs.filter(r => r.state === "running" || r.state === "pending").length;
 
   // LLM traces for this session.
@@ -214,9 +263,38 @@ export function SessionDetailPage({ sessionId, onBack }: SessionDetailPageProps)
 
         {/* Runs table */}
         <Section title="Runs">
+          {runsTruncated && (
+            <div className="flex items-start gap-2 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 mb-3 text-[12px] text-amber-500 dark:text-amber-400">
+              <AlertTriangle size={13} className="mt-0.5 shrink-0" />
+              <span>
+                Showing the first {SESSION_RUNS_PAGE_SIZE * SESSION_RUNS_MAX_PAGES} runs of this session.
+                Older runs exist but are not loaded; use the session export to retrieve them in full.
+              </span>
+            </div>
+          )}
           {runsLoading ? (
             <div className="flex items-center gap-2 text-gray-400 dark:text-zinc-600 text-[13px] py-4">
               <Loader2 size={14} className="animate-spin" /> Loading runs…
+            </div>
+          ) : runsNotFound ? (
+            <div className="flex items-start gap-2 rounded-md border border-red-500/30 bg-red-500/10 px-3 py-3 text-[13px] text-red-400">
+              <AlertTriangle size={14} className="mt-0.5 shrink-0" />
+              <div>
+                <p className="font-medium">Session not found</p>
+                <p className="text-[12px] mt-0.5">
+                  No session with id <span className="font-mono">{sessionId}</span> exists in this scope.
+                </p>
+              </div>
+            </div>
+          ) : runsIsError ? (
+            <div className="flex items-start gap-2 rounded-md border border-red-500/30 bg-red-500/10 px-3 py-3 text-[13px] text-red-400">
+              <AlertTriangle size={14} className="mt-0.5 shrink-0" />
+              <div>
+                <p className="font-medium">Couldn't load runs for this session.</p>
+                <p className="text-[12px] mt-0.5">
+                  {runsError instanceof Error ? runsError.message : String(runsError)}
+                </p>
+              </div>
             </div>
           ) : runs.length === 0 ? (
             <p className="text-[13px] text-gray-400 dark:text-zinc-600 italic py-4">No runs in this session.</p>
