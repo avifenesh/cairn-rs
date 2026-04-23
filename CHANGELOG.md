@@ -102,6 +102,17 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **UI: `MetricsPage` percentiles were always zero (#159).** The API
+  client's `getMetrics` fetched `/v1/metrics` (JSON counters-only,
+  no histogram buckets), so `p50_latency_ms` / `p95_latency_ms` /
+  `p99_latency_ms` were never populated. It now fetches
+  `/v1/metrics/prometheus`, and `parsePrometheusMetrics` was extended
+  (not rewritten) with branches for the four metric names the Rust
+  handler actually emits — `cairn_http_latency_ms{quantile="0.50|0.95|0.99|avg"}`
+  direct gauges, `cairn_http_requests_by_path_total`,
+  `cairn_http_error_rate`, and `cairn_http_errors_by_status` — with the
+  existing histogram-bucket path kept as a defensive fallback for
+  non-cairn Prometheus feeds. Follow-up to #131's dual-name parser fix.
 - **UI: `RunsPage` detail side-panel was dead code (#169).** A
   `DetailPanel` component was rendered against a `selected`/`setSelected`
   state pair that nothing ever set — clicking a row already navigates to
