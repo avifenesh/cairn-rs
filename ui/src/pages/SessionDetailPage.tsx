@@ -7,7 +7,7 @@ import { StatCard } from "../components/StatCard";
 import { StateBadge } from "../components/StateBadge";
 import { CopyButton } from "../components/CopyButton";
 import { useToast } from "../components/Toast";
-import { defaultApi } from "../lib/api";
+import { ApiError, defaultApi } from "../lib/api";
 import { table as tablePreset } from "../lib/design-system";
 import type { RunRecord, SessionState } from "../lib/types";
 
@@ -123,7 +123,12 @@ export function SessionDetailPage({ sessionId, onBack }: SessionDetailPageProps)
   // Fixes #170, where a global `getRuns({limit:500})` + client-side filter
   // dropped older runs in projects past 500 total runs. If the hard cap is
   // hit we surface a banner (see below) rather than silently truncating.
-  const { data: sessionRunsResult, isLoading: runsLoading } = useQuery({
+  const {
+    data: sessionRunsResult,
+    isLoading: runsLoading,
+    isError: runsIsError,
+    error: runsError,
+  } = useQuery({
     queryKey: ["session-runs", sessionId],
     queryFn: async (): Promise<{ runs: RunRecord[]; truncated: boolean }> => {
       const all: RunRecord[] = [];
@@ -143,9 +148,15 @@ export function SessionDetailPage({ sessionId, onBack }: SessionDetailPageProps)
       return { runs: all, truncated };
     },
     staleTime: 30_000,
+    // 404 means "session does not exist" — retrying won't change the
+    // answer and wastes a round-trip per retry, so short-circuit it.
+    // Other transient errors still get TanStack's default retry policy.
+    retry: (failureCount, err) =>
+      !(err instanceof ApiError && err.status === 404) && failureCount < 3,
   });
   const runs = sessionRunsResult?.runs ?? [];
   const runsTruncated = sessionRunsResult?.truncated ?? false;
+  const runsNotFound = runsIsError && runsError instanceof ApiError && runsError.status === 404;
   const activeRuns = runs.filter(r => r.state === "running" || r.state === "pending").length;
 
   // LLM traces for this session.
@@ -257,6 +268,26 @@ export function SessionDetailPage({ sessionId, onBack }: SessionDetailPageProps)
           {runsLoading ? (
             <div className="flex items-center gap-2 text-gray-400 dark:text-zinc-600 text-[13px] py-4">
               <Loader2 size={14} className="animate-spin" /> Loading runs…
+            </div>
+          ) : runsNotFound ? (
+            <div className="flex items-start gap-2 rounded-md border border-red-500/30 bg-red-500/10 px-3 py-3 text-[13px] text-red-400">
+              <AlertTriangle size={14} className="mt-0.5 shrink-0" />
+              <div>
+                <p className="font-medium">Session not found</p>
+                <p className="text-[12px] mt-0.5">
+                  No session with id <span className="font-mono">{sessionId}</span> exists in this scope.
+                </p>
+              </div>
+            </div>
+          ) : runsIsError ? (
+            <div className="flex items-start gap-2 rounded-md border border-red-500/30 bg-red-500/10 px-3 py-3 text-[13px] text-red-400">
+              <AlertTriangle size={14} className="mt-0.5 shrink-0" />
+              <div>
+                <p className="font-medium">Couldn't load runs for this session.</p>
+                <p className="text-[12px] mt-0.5">
+                  {runsError instanceof Error ? runsError.message : String(runsError)}
+                </p>
+              </div>
             </div>
           ) : runs.length === 0 ? (
             <p className="text-[13px] text-gray-400 dark:text-zinc-600 italic py-4">No runs in this session.</p>
