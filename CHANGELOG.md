@@ -153,6 +153,14 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `useRef`-tracked prior total updated after each successful fetch;
   widget now shows an up / down / flat arrow plus a signed percent
   delta (`+12.3%` / `-4.1%` / `0.0%`) vs. the previous 30 s snapshot.
+  The `displayedPrev` baseline only advances when `dataUpdatedAt`
+  changes, so ordinary re-renders don't collapse the delta to flat.
+  Also fixed the event-sparkline bucketing bug: `useHourlyEventCounts`
+  now prefers numeric `stored_at` (backend truth) and falls back to
+  ISO `timestamp` — previously it only read `timestamp`, dropping
+  every `RecentEvent` that arrived with only the numeric field.
+  Hash navigation from the Run / Task rows is now URL-encoded, to
+  match the rest of the UI's routing pattern.
 - **UI: `OrchestrationPage` re-processed the oldest buffered SSE event
   on each SSE update and leaked `setTimeout` callbacks on unmount
   (#177).** The stream effect depended on the whole `streamEvents`

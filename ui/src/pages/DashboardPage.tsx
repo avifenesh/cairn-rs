@@ -90,7 +90,7 @@ function Skeleton({ className }: { className?: string }) {
 
 function ActiveRunRow({ run }: { run: RunRecord }) {
   const handleClick = useCallback(() => {
-    window.location.hash = `run/${run.run_id}`;
+    window.location.hash = `run/${encodeURIComponent(run.run_id)}`;
   }, [run.run_id]);
 
   return (
@@ -201,7 +201,7 @@ function taskStateColors(state: string): string {
 
 function ActiveTaskRow({ task }: { task: TaskRecord }) {
   const handleClick = useCallback(() => {
-    if (task.parent_run_id) window.location.hash = `run/${task.parent_run_id}`;
+    if (task.parent_run_id) window.location.hash = `run/${encodeURIComponent(task.parent_run_id)}`;
   }, [task.parent_run_id]);
 
   return (
@@ -362,18 +362,26 @@ function CostWidget() {
 
   const costs = rawCosts ? aggregateCosts(rawCosts) : undefined;
 
-  // Track the previous snapshot across refreshes to compute a real delta.
-  // We stash the prior total in a ref and update it *after* rendering, so
-  // each fetched snapshot is compared against the one before it.
-  const prevTotalRef = useRef<number | null>(null);
-  const prevTotal    = prevTotalRef.current;
+  // Track the *previous* fetched snapshot across refreshes so we can compute a
+  // real delta. We only advance the ref when `dataUpdatedAt` changes (i.e. a
+  // genuinely new server response arrived). Without that guard, every
+  // unrelated re-render would stamp the current total into the ref, collapse
+  // `prev` to the current value, and permanently pin the delta at 0.0%.
+  const prevTotalRef     = useRef<number | null>(null);
+  const lastUpdatedRef   = useRef<number>(0);
+  const [displayedPrev, setDisplayedPrev] = useState<number | null>(null);
 
   useEffect(() => {
-    if (costs) prevTotalRef.current = costs.total_cost_micros;
+    if (!costs || dataUpdatedAt === lastUpdatedRef.current) return;
+    // A new snapshot arrived: freeze the prior total as the comparison base,
+    // then shift the ref forward to this snapshot for the next tick.
+    setDisplayedPrev(prevTotalRef.current);
+    prevTotalRef.current   = costs.total_cost_micros;
+    lastUpdatedRef.current = dataUpdatedAt;
   }, [dataUpdatedAt, costs]);
 
-  const deltaPct = (costs && prevTotal !== null && prevTotal > 0)
-    ? ((costs.total_cost_micros - prevTotal) / prevTotal) * 100
+  const deltaPct = (costs && displayedPrev !== null && displayedPrev > 0)
+    ? ((costs.total_cost_micros - displayedPrev) / displayedPrev) * 100
     : null;
   const trend: "up" | "down" | "flat" | null = deltaPct === null
     ? null
@@ -732,12 +740,19 @@ function useHourlyEventCounts(): number[] {
 
   const hours = 12;
   const now   = Date.now();
+  // RecentEvent carries EITHER `stored_at` (numeric unix ms — backend truth)
+  // OR `timestamp` (legacy ISO string). Prefer the numeric form so we don't
+  // accidentally Date-parse a field that isn't there.
   const buckets = Array.from({ length: hours }, (_, i) => {
     const bucketStart = now - (hours - i) * 3_600_000;
     const bucketEnd   = bucketStart + 3_600_000;
     return (data ?? []).filter((e) => {
-      const ts = typeof e === "object" && e !== null && "timestamp" in e
-        ? new Date((e as { timestamp: string }).timestamp).getTime()
+      if (!e || typeof e !== "object") return false;
+      const rec = e as { stored_at?: number; timestamp?: string };
+      const ts = typeof rec.stored_at === "number"
+        ? rec.stored_at
+        : typeof rec.timestamp === "string"
+        ? new Date(rec.timestamp).getTime()
         : 0;
       return ts >= bucketStart && ts < bucketEnd;
     }).length;
