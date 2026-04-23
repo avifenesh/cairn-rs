@@ -18,6 +18,9 @@ pub struct WorkspaceRecord {
     pub name: String,
     pub created_at: u64,
     pub updated_at: u64,
+    /// Unix-ms timestamp of soft-delete, or `None` when the workspace is active.
+    #[serde(default)]
+    pub archived_at: Option<u64>,
 }
 
 /// Project entity record scoped to a workspace within a tenant.

@@ -427,6 +427,19 @@ impl PgSyncProjection {
                 .map_err(|err| StoreError::Internal(err.to_string()))?;
             }
 
+            RuntimeEvent::WorkspaceArchived(e) => {
+                sqlx::query(
+                    "UPDATE workspaces
+                        SET archived_at = $1, updated_at = $1
+                      WHERE workspace_id = $2",
+                )
+                .bind(e.archived_at as i64)
+                .bind(e.workspace_id.as_str())
+                .execute(&mut **tx)
+                .await
+                .map_err(|err| StoreError::Internal(err.to_string()))?;
+            }
+
             RuntimeEvent::ProjectCreated(e) => {
                 sqlx::query(
                     "INSERT INTO projects (project_id, workspace_id, tenant_id, name, created_at, updated_at)

@@ -373,6 +373,7 @@ impl<P: GraphProjection> EventProjector<P> {
             | RuntimeEvent::PromptRolloutStarted(_)
             | RuntimeEvent::TenantCreated(_)
             | RuntimeEvent::WorkspaceCreated(_)
+            | RuntimeEvent::WorkspaceArchived(_)
             | RuntimeEvent::ProjectCreated(_)
             | RuntimeEvent::RouteDecisionMade(_)
             | RuntimeEvent::ProviderCallCompleted(_)
@@ -694,6 +695,7 @@ mod tests {
                 prompt_version_id: None,
                 prompt_release_id: None,
                 created_by: None,
+                dataset_id: None,
             })),
             make_stored(RuntimeEvent::EvalRunCompleted(EvalRunCompleted {
                 project: ProjectKey::new("t", "w", "p"),
@@ -736,6 +738,7 @@ mod tests {
                 prompt_version_id: None,
                 prompt_release_id: None,
                 created_by: None,
+                dataset_id: None,
             })),
             make_stored(RuntimeEvent::EvalRunCompleted(EvalRunCompleted {
                 project: ProjectKey::new("t", "w", "p"),

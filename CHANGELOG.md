@@ -11,6 +11,39 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **Workspace soft-delete via `DELETE /v1/admin/tenants/:t/workspaces/:w`
+  (closes #218).** Before this there was no way to remove a workspace
+  short of wiping the event log — every typo or stale dev workspace
+  piled up on the operator's sidebar forever. The backend now accepts
+  a `DELETE` on the workspace resource, emits a new
+  `WorkspaceArchived` event, and stamps `archived_at` on the
+  projection row. The list endpoint filters archived workspaces by
+  default; passing `?include_archived=true` surfaces them again for
+  audit. The in-memory, SQLite, and Postgres projections all track
+  the new column (SQLite adds it via best-effort `ALTER TABLE` for
+  existing dev databases; Postgres via a new `V020` migration).
+  `WorkspacesPage` gains a per-card **Delete** action (protected by a
+  confirm dialog, hidden on the currently-active workspace) wired to
+  a new `defaultApi.deleteWorkspace` helper; `WorkspaceRecord` picks
+  up an optional `archived_at` field on the UI side.
+
+### Fixed
+
+- **Eval `dataset_id` lost on restart (closes #220).** `POST
+  /v1/evals/runs` persisted an `EvalRunStarted` event so runs would
+  survive a reboot, but the event only carried prompt-asset /
+  version / release / created_by fields — not the dataset binding
+  submitted alongside them. `replay_evals()` rebuilt each run from
+  the event and silently dropped the dataset linkage, so after a
+  reboot `GET /v1/evals/runs/:id` came back with `dataset_id: null`
+  even though the operator had picked one in the form.
+  `EvalRunStarted` now carries an optional `dataset_id` (defaulted
+  via `#[serde(default)]` for backward-compatibility with pre-#220
+  event log entries). The handler populates it from the request
+  body and `replay_evals()` calls `set_dataset_id` on the
+  in-memory eval service when the event carries one, so the
+  binding round-trips through a full sigkill + replay cycle.
+
 - **GraphPage — full node-kind coverage + 5 provenance query tabs
   (closes #151).** The simulation view previously collapsed all 22
   backend `NodeKind` variants down to `session` / `run` / `task` via a

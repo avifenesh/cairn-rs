@@ -249,6 +249,9 @@ fn assert_all_variants_covered(event: &RuntimeEvent) {
         RuntimeEvent::WorkspaceCreated(_) => {
             assert!(eref.is_none());
         }
+        RuntimeEvent::WorkspaceArchived(_) => {
+            assert!(eref.is_none());
+        }
         RuntimeEvent::ProjectCreated(_) => {
             assert!(eref.is_none());
         }
@@ -839,6 +842,7 @@ fn all_variants() -> Vec<RuntimeEvent> {
             prompt_version_id: None,
             prompt_release_id: None,
             created_by: None,
+            dataset_id: None,
         }),
         RuntimeEvent::EvalRunCompleted(EvalRunCompleted {
             project: p(),
@@ -929,6 +933,12 @@ fn all_variants() -> Vec<RuntimeEvent> {
             tenant_id: tid(),
             name: "W".to_owned(),
             created_at: ts,
+        }),
+        RuntimeEvent::WorkspaceArchived(cairn_domain::WorkspaceArchived {
+            project: p(),
+            workspace_id: WorkspaceId::new("w_exh"),
+            tenant_id: tid(),
+            archived_at: ts,
         }),
         RuntimeEvent::ProjectCreated(ProjectCreated {
             project: p(),
@@ -1652,14 +1662,14 @@ fn all_variants() -> Vec<RuntimeEvent> {
 #[test]
 fn all_runtime_event_variants_covered_count() {
     let variants = all_variants();
-    // 135 variants in the RuntimeEvent enum (130 baseline + RFC 020 Track 3:
+    // 136 variants in the RuntimeEvent enum (130 baseline + RFC 020 Track 3:
     // ToolInvocationCacheHit, ToolRecoveryPaused + RFC 020 decision-cache
     // survival pair from PR #85: DecisionRecorded, DecisionCacheWarmup +
-    // RFC 020 Track 4: RecoverySummaryEmitted).
+    // RFC 020 Track 4: RecoverySummaryEmitted + issue #218: WorkspaceArchived).
     assert_eq!(
         variants.len(),
-        135,
-        "all_variants() must construct exactly 135 RuntimeEvent instances"
+        136,
+        "all_variants() must construct exactly 136 RuntimeEvent instances"
     );
 }
 

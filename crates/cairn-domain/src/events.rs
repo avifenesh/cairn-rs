@@ -135,6 +135,7 @@ pub enum RuntimeEvent {
     PromptRolloutStarted(PromptRolloutStarted),
     TenantCreated(TenantCreated),
     WorkspaceCreated(WorkspaceCreated),
+    WorkspaceArchived(WorkspaceArchived),
     ProjectCreated(ProjectCreated),
     RouteDecisionMade(RouteDecisionMade),
     ProviderCallCompleted(ProviderCallCompleted),
@@ -294,6 +295,7 @@ impl RuntimeEvent {
             RuntimeEvent::PromptRolloutStarted(event) => &event.project,
             RuntimeEvent::TenantCreated(event) => &event.project,
             RuntimeEvent::WorkspaceCreated(event) => &event.project,
+            RuntimeEvent::WorkspaceArchived(event) => &event.project,
             RuntimeEvent::ProjectCreated(event) => &event.project,
             RuntimeEvent::RouteDecisionMade(event) => &event.project,
             RuntimeEvent::ProviderCallCompleted(event) => &event.project,
@@ -544,6 +546,7 @@ impl RuntimeEvent {
             }),
             RuntimeEvent::TenantCreated(_) => None,
             RuntimeEvent::WorkspaceCreated(_) => None,
+            RuntimeEvent::WorkspaceArchived(_) => None,
             RuntimeEvent::ProjectCreated(_) => None,
             RuntimeEvent::RouteDecisionMade(_) => None,
             RuntimeEvent::ProviderCallCompleted(_) => None,
@@ -1104,6 +1107,15 @@ pub struct EvalRunStarted {
     pub prompt_release_id: Option<PromptReleaseId>,
     #[serde(default)]
     pub created_by: Option<OperatorId>,
+    /// Dataset binding captured at run-create time.
+    ///
+    /// Persisted on `EvalRunStarted` so `replay_evals` can restore the
+    /// dataset linkage after a restart — the in-memory eval service
+    /// previously lost this binding because only the run-create path
+    /// wrote to it. Defaulted to `None` for backward compatibility with
+    /// pre-#220 event log entries.
+    #[serde(default)]
+    pub dataset_id: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -1319,6 +1331,16 @@ pub struct WorkspaceCreated {
     pub tenant_id: TenantId,
     pub name: String,
     pub created_at: u64,
+}
+
+/// Emitted when a workspace is soft-deleted (archived). The workspace record
+/// is preserved for audit/history; list endpoints filter it out by default.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorkspaceArchived {
+    pub project: ProjectKey,
+    pub workspace_id: WorkspaceId,
+    pub tenant_id: TenantId,
+    pub archived_at: u64,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

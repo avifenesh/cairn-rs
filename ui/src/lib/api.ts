@@ -526,6 +526,18 @@ export function createApiClient(config: ApiClientConfig) {
     ): Promise<import("./types").WorkspaceRecord> =>
       post(`/v1/admin/tenants/${encodeURIComponent(tenantId)}/workspaces`, body),
 
+    /**
+     * DELETE /v1/admin/tenants/:tenant_id/workspaces/:workspace_id — soft-delete
+     * a workspace (issue #218). The record is preserved on the backend with
+     * `archived_at` set so audit trails remain intact; by default the workspace
+     * drops out of `getWorkspaces`. Pass `include_archived: true` on a GET to
+     * surface archived workspaces again.
+     */
+    deleteWorkspace: (tenantId: string, workspaceId: string): Promise<void> =>
+      del<void>(
+        `/v1/admin/tenants/${encodeURIComponent(tenantId)}/workspaces/${encodeURIComponent(workspaceId)}`,
+      ),
+
     /** GET /v1/runs/:id/events — event timeline for a run. */
     getRunEvents: async (runId: string, limit = 100): Promise<import("./types").RunEventSummary[]> => {
       let raw: unknown;

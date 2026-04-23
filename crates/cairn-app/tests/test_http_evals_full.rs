@@ -237,3 +237,104 @@ async fn eval_run_full_contract_roundtrip() {
         "compare.rows[] present: {compare}",
     );
 }
+
+/// Issue #220 — dataset_id must survive a process restart via the event log.
+///
+/// Before this fix, `POST /v1/evals/runs` stored the dataset binding only in
+/// the in-memory `EvalsService`. `replay_evals` reconstructed runs from
+/// `EvalRunStarted` events, which did not carry `dataset_id`, so the
+/// dataset/run linkage silently disappeared on reboot.
+///
+/// Contract: the dataset_id is persisted on `EvalRunStarted` (serde-default
+/// for backward compatibility with pre-#220 event logs) and restored on
+/// replay. After a sigkill+restart, `GET /v1/evals/runs/:id` must still echo
+/// the dataset_id that was submitted at create time.
+#[tokio::test]
+async fn eval_dataset_id_survives_restart() {
+    let mut h = LiveHarness::setup_with_sqlite().await;
+    let tenant = h.tenant.clone();
+    let workspace = h.workspace.clone();
+    let project = h.project.clone();
+
+    // Create a dataset so the run has a real binding to attach.
+    let base = h.base_url.clone();
+    let res = h
+        .client()
+        .post(format!("{base}/v1/evals/datasets"))
+        .bearer_auth(&h.admin_token)
+        .json(&json!({
+            "tenant_id":    tenant,
+            "name":         "issue-220 dataset",
+            "subject_kind": "prompt_release",
+        }))
+        .send()
+        .await
+        .expect("create dataset reaches server");
+    assert_eq!(res.status().as_u16(), 201, "create dataset");
+    let dataset: Value = res.json().await.expect("dataset json");
+    let dataset_id = dataset
+        .get("dataset_id")
+        .and_then(|v| v.as_str())
+        .expect("dataset_id")
+        .to_owned();
+
+    // Create an eval run bound to the dataset.
+    let eval_run_id = "eval_issue220_persist";
+    let res = h
+        .client()
+        .post(format!("{base}/v1/evals/runs"))
+        .bearer_auth(&h.admin_token)
+        .json(&json!({
+            "tenant_id":      tenant,
+            "workspace_id":   workspace,
+            "project_id":     project,
+            "eval_run_id":    eval_run_id,
+            "subject_kind":   "prompt_release",
+            "evaluator_type": "accuracy",
+            "dataset_id":     dataset_id,
+        }))
+        .send()
+        .await
+        .expect("create run reaches server");
+    assert_eq!(res.status().as_u16(), 201, "create run");
+
+    // Sanity: pre-restart echoes dataset_id.
+    let got: Value = h
+        .client()
+        .get(format!("{base}/v1/evals/runs/{eval_run_id}"))
+        .bearer_auth(&h.admin_token)
+        .send()
+        .await
+        .expect("pre-restart get run")
+        .json()
+        .await
+        .expect("pre-restart get run json");
+    assert_eq!(
+        got.get("dataset_id").and_then(|v| v.as_str()),
+        Some(dataset_id.as_str()),
+        "pre-restart: dataset_id must be attached: {got}",
+    );
+
+    // Sigkill the subprocess and bring up a fresh one against the same
+    // event log. replay_evals() must restore the dataset binding.
+    h.sigkill_and_restart()
+        .await
+        .expect("sigkill+restart succeeds");
+    let base = h.base_url.clone();
+
+    let got: Value = h
+        .client()
+        .get(format!("{base}/v1/evals/runs/{eval_run_id}"))
+        .bearer_auth(&h.admin_token)
+        .send()
+        .await
+        .expect("post-restart get run")
+        .json()
+        .await
+        .expect("post-restart get run json");
+    assert_eq!(
+        got.get("dataset_id").and_then(|v| v.as_str()),
+        Some(dataset_id.as_str()),
+        "post-restart: dataset_id must survive replay, got: {got}",
+    );
+}

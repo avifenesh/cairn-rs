@@ -9,7 +9,7 @@
 import { useState, useMemo } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
-  Layers, Plus, Check, RefreshCw, ArrowRight, Clock,
+  Layers, Plus, Check, RefreshCw, ArrowRight, Clock, Trash2,
 } from 'lucide-react';
 import { clsx } from 'clsx';
 import { defaultApi } from '../lib/api';
@@ -52,10 +52,14 @@ function WorkspaceCard({
   ws,
   isActive,
   onActivate,
+  onDelete,
+  deleting,
 }: {
   ws: WorkspaceInfo;
   isActive: boolean;
   onActivate: () => void;
+  onDelete: () => void;
+  deleting: boolean;
 }) {
   return (
     <button
@@ -99,11 +103,39 @@ function WorkspaceCard({
       </div>
 
       {/* Footer */}
-      <div className="flex items-center gap-1.5 mt-4 pt-2.5 border-t border-gray-200/50 dark:border-zinc-800/50">
-        <Clock size={10} className="text-gray-300 dark:text-zinc-600 shrink-0" />
-        <span className="text-[10px] text-gray-400 dark:text-zinc-600">
-          {fmtRelative(ws.latest_at)}
-        </span>
+      <div className="flex items-center justify-between gap-1.5 mt-4 pt-2.5 border-t border-gray-200/50 dark:border-zinc-800/50">
+        <div className="flex items-center gap-1.5">
+          <Clock size={10} className="text-gray-300 dark:text-zinc-600 shrink-0" />
+          <span className="text-[10px] text-gray-400 dark:text-zinc-600">
+            {fmtRelative(ws.latest_at)}
+          </span>
+        </div>
+        {/* Delete action (issue #218). Skipped on the active workspace —
+            deleting the workspace you're currently viewing would leave the
+            operator in an unresolvable scope until they switch. */}
+        {!isActive && (
+          <span
+            role="button"
+            tabIndex={0}
+            aria-label={`Delete workspace ${ws.workspace_id}`}
+            onClick={(e) => { e.stopPropagation(); if (!deleting) onDelete(); }}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                e.stopPropagation();
+                if (!deleting) onDelete();
+              }
+            }}
+            className={clsx(
+              'inline-flex items-center gap-1 text-[10px] rounded px-1.5 py-0.5 cursor-pointer',
+              'text-gray-400 dark:text-zinc-500 hover:text-red-400 hover:bg-red-500/10 transition-colors',
+              deleting && 'opacity-50 cursor-wait',
+            )}
+            title="Delete workspace"
+          >
+            <Trash2 size={10} /> {deleting ? 'Deleting…' : 'Delete'}
+          </span>
+        )}
       </div>
     </button>
   );
@@ -226,6 +258,21 @@ export function WorkspacesPage() {
       ),
   });
 
+  // Issue #218 — soft-delete mutation. Backend returns 204 and marks the
+  // workspace `archived_at`; default list endpoint filters it out.
+  const deleteWorkspace = useMutation({
+    mutationFn: (workspaceId: string) =>
+      defaultApi.deleteWorkspace(scope.tenant_id, workspaceId),
+    onSuccess: async (_, workspaceId) => {
+      await qc.invalidateQueries({ queryKey: ['workspaces', scope.tenant_id] });
+      toast.success(`Workspace ${workspaceId} deleted.`);
+    },
+    onError: (e: unknown) =>
+      toast.error(
+        e instanceof Error && e.message ? e.message : 'Failed to delete workspace.',
+      ),
+  });
+
   const isLoading  = wsLoading;
   const isFetching = wsFetching;
 
@@ -270,6 +317,20 @@ export function WorkspacesPage() {
         ws.tenant_id.toLowerCase().includes(filter.toLowerCase()),
       )
     : workspaces;
+
+  function handleDelete(ws: WorkspaceInfo) {
+    // Lightweight confirmation — enough friction to prevent an accidental
+    // click, without a full modal. Pattern mirrors the Remove Integration
+    // action on IntegrationsPage.
+    const ok = window.confirm(
+      `Delete workspace "${ws.workspace_id}"?\n\n` +
+        `The backend keeps the record (soft-delete) and filters it from ` +
+        `list views. You can re-expose archived workspaces via the API's ` +
+        `?include_archived=true query parameter.`,
+    );
+    if (!ok) return;
+    deleteWorkspace.mutate(ws.workspace_id);
+  }
 
   function activate(ws: WorkspaceInfo) {
     setScope({
@@ -417,6 +478,11 @@ export function WorkspacesPage() {
                 ws={ws}
                 isActive={ws.workspace_id === scope.workspace_id && ws.tenant_id === scope.tenant_id}
                 onActivate={() => activate(ws)}
+                onDelete={() => handleDelete(ws)}
+                deleting={
+                  deleteWorkspace.isPending &&
+                  deleteWorkspace.variables === ws.workspace_id
+                }
               />
             ))}
           </div>

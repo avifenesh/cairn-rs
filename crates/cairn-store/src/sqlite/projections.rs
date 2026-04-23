@@ -480,6 +480,19 @@ impl SqliteSyncProjection {
                 .await
                 .map_err(|err| StoreError::Internal(err.to_string()))?;
             }
+            RuntimeEvent::WorkspaceArchived(e) => {
+                sqlx::query(
+                    "UPDATE workspaces
+                        SET archived_at = ?, updated_at = ?
+                      WHERE workspace_id = ?",
+                )
+                .bind(e.archived_at as i64)
+                .bind(e.archived_at as i64)
+                .bind(e.workspace_id.as_str())
+                .execute(&mut **tx)
+                .await
+                .map_err(|err| StoreError::Internal(err.to_string()))?;
+            }
             RuntimeEvent::ProjectCreated(e) => {
                 sqlx::query(
                     "INSERT INTO projects (project_id, workspace_id, tenant_id, name, created_at, updated_at)

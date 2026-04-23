@@ -1520,8 +1520,15 @@ impl InMemoryStore {
                         name: e.name.clone(),
                         created_at: e.created_at,
                         updated_at: e.created_at,
+                        archived_at: None,
                     },
                 );
+            }
+            RuntimeEvent::WorkspaceArchived(e) => {
+                if let Some(ws) = state.workspaces.get_mut(e.workspace_id.as_str()) {
+                    ws.archived_at = Some(e.archived_at);
+                    ws.updated_at = e.archived_at;
+                }
             }
             RuntimeEvent::ProjectCreated(e) => {
                 state.projects.insert(
