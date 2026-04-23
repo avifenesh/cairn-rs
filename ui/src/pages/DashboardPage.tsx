@@ -138,10 +138,11 @@ function ActiveRunRow({ run }: { run: RunRecord }) {
 }
 
 function ActiveRunsWidget() {
-  const { data: runs, isLoading } = useQuery({
+  const { data: runs, isLoading, isError } = useQuery({
     queryKey: ["runs-active"],
     queryFn:  () => defaultApi.getRuns({ limit: 50 }),
     refetchInterval: 5_000,
+    retry: false,
     select: (rows) => rows.filter(r => ACTIVE_STATES.has(r.state))
                           .sort((a, b) => b.created_at - a.created_at)
                           .slice(0, 8),
@@ -169,6 +170,11 @@ function ActiveRunsWidget() {
               <Skeleton className="h-4 w-16" />
             </div>
           ))}
+        </div>
+      ) : isError ? (
+        <div className="flex-1 flex flex-col items-center justify-center py-6 gap-2">
+          <AlertTriangle size={18} className="text-amber-500" />
+          <p className="text-[12px] text-amber-500">Failed to load runs</p>
         </div>
       ) : !runs || runs.length === 0 ? (
         <div className="flex-1 flex flex-col items-center justify-center py-6 gap-2">
@@ -244,7 +250,7 @@ function ActiveTaskRow({ task }: { task: TaskRecord }) {
 }
 
 function ActiveTasksWidget() {
-  const { data: tasks, isLoading } = useQuery({
+  const { data: tasks, isLoading, isError } = useQuery({
     queryKey: ["tasks-active-dashboard"],
     queryFn:  () => defaultApi.getAllTasks({ limit: 50 }),
     refetchInterval: 5_000,
@@ -276,6 +282,11 @@ function ActiveTasksWidget() {
               <Skeleton className="h-4 w-16" />
             </div>
           ))}
+        </div>
+      ) : isError ? (
+        <div className="flex-1 flex flex-col items-center justify-center py-6 gap-2">
+          <AlertTriangle size={18} className="text-amber-500" />
+          <p className="text-[12px] text-amber-500">Failed to load tasks</p>
         </div>
       ) : !tasks || tasks.length === 0 ? (
         <div className="flex-1 flex flex-col items-center justify-center py-6 gap-2">
@@ -360,19 +371,24 @@ function CostWidget() {
     refetchInterval: 30_000,
   });
 
-  const costs = rawCosts ? aggregateCosts(rawCosts) : undefined;
+  // Memoise so the object identity is stable across unrelated re-renders;
+  // otherwise the effect below would re-run on every render instead of only
+  // when a new fetch arrives.
+  const costs = useMemo(() => rawCosts ? aggregateCosts(rawCosts) : undefined, [rawCosts]);
 
   // Track the *previous* fetched snapshot across refreshes so we can compute a
-  // real delta. We only advance the ref when `dataUpdatedAt` changes (i.e. a
-  // genuinely new server response arrived). Without that guard, every
-  // unrelated re-render would stamp the current total into the ref, collapse
-  // `prev` to the current value, and permanently pin the delta at 0.0%.
-  const prevTotalRef     = useRef<number | null>(null);
-  const lastUpdatedRef   = useRef<number>(0);
+  // real delta. We only advance the stored total when `dataUpdatedAt` changes
+  // (i.e. a genuinely new server response arrived). Without that guard, every
+  // unrelated re-render (tab switches, parent updates) would stamp the current
+  // total into the ref, collapse `prev` to the current value, and permanently
+  // pin the delta at 0.0 % flat.
+  const prevTotalRef   = useRef<number | null>(null);
+  const lastUpdatedRef = useRef<number>(0);
   const [displayedPrev, setDisplayedPrev] = useState<number | null>(null);
 
   useEffect(() => {
-    if (!costs || dataUpdatedAt === lastUpdatedRef.current) return;
+    if (!costs) return;
+    if (dataUpdatedAt === lastUpdatedRef.current) return;
     // A new snapshot arrived: freeze the prior total as the comparison base,
     // then shift the ref forward to this snapshot for the next tick.
     setDisplayedPrev(prevTotalRef.current);
