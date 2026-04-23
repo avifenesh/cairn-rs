@@ -132,4 +132,39 @@ async fn prompt_asset_version_and_release_with_server_minted_ids() {
         release_id.starts_with("rel_"),
         "server should mint rel_<uuid> when omitted; got {release_id}"
     );
+
+    // 5. Request approval with the active scope in the body — the handler
+    //    reads scope from the release, but the UI posts tenant/workspace/
+    //    project triple via `withScope(…)` to match the rest of the client
+    //    (regression guard for issue #222 bug C: posting `{}` used to land
+    //    a 422 via a strict deserializer path).
+    let res = h
+        .client()
+        .post(format!(
+            "{}/v1/prompts/releases/{}/request-approval",
+            h.base_url, release_id
+        ))
+        .bearer_auth(&h.admin_token)
+        .json(&json!({
+            "tenant_id":    h.tenant,
+            "workspace_id": h.workspace,
+            "project_id":   h.project,
+        }))
+        .send()
+        .await
+        .expect("request approval");
+    let status = res.status();
+    let txt = res.text().await.unwrap_or_default();
+    assert!(
+        status.is_success(),
+        "request approval returned {status}: {txt}"
+    );
+    let approval_body: serde_json::Value =
+        serde_json::from_str(&txt).expect("approval json");
+    assert!(
+        approval_body["approval_id"]
+            .as_str()
+            .is_some_and(|s| s.starts_with("apr_rel_")),
+        "approval_id missing or wrong prefix: {approval_body}"
+    );
 }
