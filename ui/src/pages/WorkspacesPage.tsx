@@ -293,7 +293,8 @@ export function WorkspacesPage() {
     // present) instead of leaving the UI out-of-sync with the server.
     onSettled: () =>
       qc.invalidateQueries({
-        predicate: (q) => q.queryKey[0] === 'workspaces',
+        predicate: (q) =>
+          Array.isArray(q.queryKey) && q.queryKey[0] === 'workspaces',
       }),
   });
 

@@ -92,10 +92,16 @@ where
         // tenant up-front, page through the store in bounded batches and
         // apply the archived filter as we go. This keeps memory usage bounded
         // on tenants that accumulate many soft-deleted workspaces over time.
-        let batch_size = limit.max(128);
+        //
+        // The batch is capped at `BATCH_CAP` so callers that pass
+        // `limit = usize::MAX` (e.g. the tenant-overview handler asking for
+        // "all workspaces") do not trigger a `Vec::with_capacity(usize::MAX)`
+        // allocation or an unbounded query.
+        const BATCH_CAP: usize = 512;
+        let batch_size = limit.clamp(128, BATCH_CAP);
         let mut store_offset = 0usize;
         let mut skipped = 0usize;
-        let mut results: Vec<WorkspaceRecord> = Vec::with_capacity(limit);
+        let mut results: Vec<WorkspaceRecord> = Vec::with_capacity(limit.min(BATCH_CAP));
 
         loop {
             let batch = self
