@@ -136,6 +136,23 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **UI: `DashboardPage` — real widgets, no placeholders (#179).** Three
+  bugs fixed in one pass: (A) the Runs / Tasks tabs rendered empty or
+  dummy content — now render compact, live tables driven by
+  `defaultApi.getRuns({ limit: 50 })` / `defaultApi.getAllTasks({
+  limit: 50 })` filtered to active states, sorted newest-first, capped
+  at 8 rows, auto-refreshing every 5 s, mirroring the row pattern from
+  the existing `ActiveRunsWidget`. (B) `ProviderStatusWidget` hardcoded
+  three rows (`Store / Events / Memory`) against `/v1/health/detailed`;
+  it now iterates the real `components` array from `/v1/status`,
+  normalizes status tokens (`ok`/`healthy`/`degraded`/`unhealthy`/
+  `unconfigured`) and pretty-prints snake_case names. New components
+  added server-side appear automatically with no UI change. (C) the
+  `CostWidget` trend was dead code — the previous-snapshot query was
+  `enabled: false` so the arrow never rendered. Replaced with a
+  `useRef`-tracked prior total updated after each successful fetch;
+  widget now shows an up / down / flat arrow plus a signed percent
+  delta (`+12.3%` / `-4.1%` / `0.0%`) vs. the previous 30 s snapshot.
 - **UI: `OrchestrationPage` re-processed the oldest buffered SSE event
   on each SSE update and leaked `setTimeout` callbacks on unmount
   (#177).** The stream effect depended on the whole `streamEvents`
