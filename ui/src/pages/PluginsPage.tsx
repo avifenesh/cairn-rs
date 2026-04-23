@@ -7,6 +7,7 @@ import {
 } from 'lucide-react';
 import { ErrorFallback } from '../components/ErrorFallback';
 import { StatCard } from '../components/StatCard';
+import { useToast } from '../components/Toast';
 import { defaultApi } from '../lib/api';
 import { sectionLabel } from '../lib/design-system';
 import { useFocusTrap } from '../hooks/useFocusTrap';
@@ -411,17 +412,26 @@ function CredentialWizardModal({
 
 function CatalogCard({ entry }: { entry: CatalogEntry }) {
   const queryClient = useQueryClient();
+  const toast = useToast();
   const [showCreds, setShowCreds] = useState(false);
   const [enableProject, setEnableProject] = useState('');
+
+  // Toast on error for all four catalog actions. Previously these mutations
+  // swallowed failures entirely — the operator got no feedback when an
+  // install/verify/enable/disable request 4xx-ed.
+  const toastErr = (verb: string) => (e: unknown) =>
+    toast.error(`Failed to ${verb}: ${e instanceof Error ? e.message : String(e)}`);
 
   const installMut = useMutation({
     mutationFn: () => defaultApi.installPlugin(entry.id),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['catalog'] }),
+    onError: toastErr('install plugin'),
   });
 
   const verifyMut = useMutation({
     mutationFn: () => defaultApi.verifyPlugin(entry.id),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['catalog'] }),
+    onError: toastErr('verify plugin'),
   });
 
   const enableMut = useMutation({
@@ -430,11 +440,13 @@ function CatalogCard({ entry }: { entry: CatalogEntry }) {
       setEnableProject('');
       queryClient.invalidateQueries({ queryKey: ['catalog'] });
     },
+    onError: toastErr('enable plugin'),
   });
 
   const disableMut = useMutation({
     mutationFn: (project: string) => defaultApi.disablePluginForProject(project, entry.id),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['catalog'] }),
+    onError: toastErr('disable plugin'),
   });
 
   const isInstalled = entry.state === 'installed' || entry.state === 'Installed';

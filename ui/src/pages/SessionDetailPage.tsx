@@ -6,6 +6,7 @@ import { clsx } from "clsx";
 import { StatCard } from "../components/StatCard";
 import { StateBadge } from "../components/StateBadge";
 import { CopyButton } from "../components/CopyButton";
+import { useToast } from "../components/Toast";
 import { defaultApi } from "../lib/api";
 import { table as tablePreset } from "../lib/design-system";
 import type { SessionState } from "../lib/types";
@@ -97,6 +98,8 @@ interface SessionDetailPageProps {
 }
 
 export function SessionDetailPage({ sessionId, onBack }: SessionDetailPageProps) {
+  const toast = useToast();
+
   // Fetch session metadata from the list.
   const { data: sessions } = useQuery({
     queryKey: ["sessions"],
@@ -159,15 +162,17 @@ export function SessionDetailPage({ sessionId, onBack }: SessionDetailPageProps)
               {session && <SessionPill state={session.state} />}
               <button
                 onClick={() => {
-                  void defaultApi.exportSession(sessionId).then(data => {
-                    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-                    const url  = URL.createObjectURL(blob);
-                    const a    = document.createElement('a');
-                    a.href     = url;
-                    a.download = `session-${sessionId}.json`;
-                    a.click();
-                    URL.revokeObjectURL(url);
-                  });
+                  void defaultApi.exportSession(sessionId)
+                    .then(data => {
+                      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+                      const url  = URL.createObjectURL(blob);
+                      const a    = document.createElement('a');
+                      a.href     = url;
+                      a.download = `session-${sessionId}.json`;
+                      a.click();
+                      URL.revokeObjectURL(url);
+                    })
+                    .catch(e => toast.error(`Export failed: ${e instanceof Error ? e.message : String(e)}`));
                 }}
                 title="Export session as JSON"
                 className="flex items-center gap-1.5 rounded px-2.5 py-1.5 text-[12px] font-medium

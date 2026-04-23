@@ -179,7 +179,7 @@ const DOMAINS: DomainGroup[] = [
   {
     id: "events", label: "Events", dot: "bg-sky-500",
     endpoints: [
-      { id: "events-stream", method: "GET", path: "/v1/events/stream",  description: "SSE stream of all runtime events. Supports Last-Event-ID replay.", sse: true, responseDesc: "SSE: event: <type>\\ndata: <json>\\nid: <seq>" },
+      { id: "events-stream", method: "GET", path: "/v1/stream",         description: "SSE stream of all runtime events. Supports Last-Event-ID replay.", sse: true, responseDesc: "SSE: event: <type>\\ndata: <json>\\nid: <seq>" },
       { id: "events-recent", method: "GET", path: "/v1/events/recent",  description: "Fetch the most recent N runtime events.", queryParams: [{ name: "limit", type: "number", description: "Max events (default 50)", example: "50" }], responseDesc: "Array of RecentEvent" },
       { id: "notifications",  method: "GET", path: "/v1/notifications", description: "Recent operator notifications (approvals, run failures, etc.).", queryParams: [{ name: "limit", type: "number", description: "Max notifications (default 50)", example: "50" }], responseDesc: '{ notifications: [...], unread_count: number }' },
     ],
