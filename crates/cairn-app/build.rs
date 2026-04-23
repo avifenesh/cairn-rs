@@ -83,6 +83,20 @@ fn iso8601_utc_now() -> String {
 }
 
 fn main() {
+    // Capture rustc version so `/v1/system/info.rust_version` reports the
+    // toolchain (e.g. `rustc 1.95.0 (abc123 2026-04-10)`) instead of the crate
+    // version. Falls back to "unknown" if `rustc` isn't on PATH (rare inside a
+    // cargo build, but defensive).
+    let rust_version = Command::new(std::env::var("RUSTC").unwrap_or_else(|_| "rustc".to_owned()))
+        .arg("--version")
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .and_then(|o| String::from_utf8(o.stdout).ok())
+        .map(|s| s.trim().to_owned())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "unknown".to_owned());
+
     let git_commit = std::env::var("GIT_COMMIT")
         .ok()
         .filter(|s| !s.trim().is_empty())
@@ -105,11 +119,21 @@ fn main() {
 
     println!("cargo:rustc-env=GIT_COMMIT={git_commit}");
     println!("cargo:rustc-env=BUILD_DATE={build_date}");
+    println!("cargo:rustc-env=RUSTC_VERSION={rust_version}");
 
-    // Re-run when env overrides change. We intentionally do NOT watch HEAD —
-    // rebuilding on every commit would thrash incremental builds; CI injects
-    // `GIT_COMMIT`/`BUILD_DATE` explicitly for release artifacts.
+    // Re-run when env overrides change OR when HEAD moves, so that
+    // `GIT_COMMIT`/`BUILD_DATE` don't go stale across incremental rebuilds on
+    // a developer machine. We only watch `.git/HEAD` and the packed-refs file
+    // (both rewritten by `git commit` / `git checkout`), which is cheap —
+    // not every file in the repo. CI builds inject the env vars explicitly
+    // so these file-watches are a no-op there.
     println!("cargo:rerun-if-env-changed=GIT_COMMIT");
     println!("cargo:rerun-if-env-changed=BUILD_DATE");
     println!("cargo:rerun-if-changed=build.rs");
+    if std::path::Path::new("../../.git/HEAD").exists() {
+        println!("cargo:rerun-if-changed=../../.git/HEAD");
+    }
+    if std::path::Path::new("../../.git/packed-refs").exists() {
+        println!("cargo:rerun-if-changed=../../.git/packed-refs");
+    }
 }

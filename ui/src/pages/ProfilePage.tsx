@@ -332,6 +332,11 @@ function AboutSection() {
     queryFn:  () => defaultApi.getStatus(),
     refetchInterval: 30_000,
   });
+  const { data: info } = useQuery({
+    queryKey: ['systemInfo'],
+    queryFn:  () => defaultApi.getSystemInfo(),
+    // Version/store/deployment rarely change; no refetch interval.
+  });
 
   function fmtUptime(secs: number): string {
     if (secs < 60)    return `${secs}s`;
@@ -345,11 +350,13 @@ function AboutSection() {
     <SectionCard title="About" icon={Server}>
       <div className="space-y-0">
         {[
-          { label: 'Version',        value: 'v0.1.0 (cairn-rs)' },
+          { label: 'Version',        value: info?.version ? `v${info.version} (cairn-rs)` : '—' },
           { label: 'API endpoint',   value: import.meta.env.VITE_API_URL || 'localhost:3000' },
+          { label: 'Deployment',     value: info?.environment?.deployment_mode ?? '—' },
           { label: 'Runtime',        value: status ? (status.status === 'ok' ? 'Healthy' : 'Degraded') : '—',
             ok: status?.status === 'ok' },
-          { label: 'Store',          value: status ? ((status.components?.find(c => c.name === 'event_store')?.status === 'ok') ? 'Healthy' : 'Degraded') : '—',
+          { label: 'Store',          value: info?.features?.store_type ?? '—' },
+          { label: 'Store health',   value: status ? ((status.components?.find(c => c.name === 'event_store')?.status === 'ok') ? 'Healthy' : 'Degraded') : '—',
             ok: status?.components?.find(c => c.name === 'event_store')?.status === 'ok' },
           { label: 'Uptime',         value: status ? fmtUptime(status.uptime_secs) : '—' },
         ].map(({ label, value, ok }) => (

@@ -620,7 +620,7 @@ function EndpointRow({ ep }: { ep: Endpoint }) {
             setExpanded(v => !v);
           }
         }}
-        className="w-full flex items-center gap-3 px-4 py-3 text-left group cursor-pointer">
+        className="w-full flex items-center gap-3 px-4 py-3 text-left group cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 focus-visible:ring-offset-1 focus-visible:ring-offset-transparent rounded-lg">
         <MethodBadge method={ep.method} />
         <code className="flex-1 text-[13px] font-mono text-gray-800 dark:text-zinc-200 truncate">{ep.path}</code>
         {ep.sse && <span className="text-[10px] font-medium text-sky-400 bg-sky-950/60 border border-sky-800/40 rounded px-1.5 py-0.5 shrink-0">SSE</span>}

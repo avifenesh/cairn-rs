@@ -127,8 +127,12 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   - `ProfilePage` drops the hardcoded "Release Notes" block that
     contradicted live `/v1/system/info` (claimed "Postgres default store"
     and "13 LLM providers" regardless of the actual deployment). The
-    `About` section already surfaces the real store type and provider
-    count; no stand-in copy added.
+    `About` section now pulls `version`, `deployment_mode`, and
+    `store_type` from `/v1/system/info` so the surfaced values match the
+    running binary instead of stale hardcoded strings.
+  - `/v1/system/info.rust_version` now reports `rustc --version` captured
+    at build time, not the crate version — the field name never matched
+    its value.
 
 - **UI: `TriggersPage` swallowed backend failures on raw `fetch` calls (#154).**
   Replaced the 5 raw `fetch` calls (list triggers, list run-templates,
