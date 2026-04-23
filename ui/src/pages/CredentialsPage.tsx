@@ -28,6 +28,7 @@ import { Badge } from '../components/Badge';
 import { FormField, fieldInputMono } from '../components/FormField';
 import { StatCard } from '../components/StatCard';
 import { ds } from '../lib/design-system';
+import { useToast } from '../components/Toast';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -158,6 +159,7 @@ function AddCredentialModal({
   onCreated: () => void;
 }) {
   const formId = useId();
+  const toast = useToast();
 
   const [form, setForm] = useState<AddCredentialFormState>({
     tenant_id:       initialTenantId,
@@ -176,6 +178,7 @@ function AddCredentialModal({
       onCreated();
       onClose();
     },
+    onError: (e: unknown) => toast.error(e instanceof Error ? e.message : 'Failed to store credential.'),
   });
 
   function set<K extends keyof AddCredentialFormState>(key: K, value: AddCredentialFormState[K]) {
@@ -246,7 +249,7 @@ function AddCredentialModal({
               type="text"
               value={form.tenant_id}
               onChange={e => set('tenant_id', e.target.value)}
-              placeholder="default"
+              placeholder={DEFAULT_SCOPE.tenant_id}
               className={clsx(
                 fieldInputMono,
                 fieldErr.tenant_id && 'border-red-500/60 focus:border-red-500',
