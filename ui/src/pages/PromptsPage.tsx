@@ -58,9 +58,17 @@ const shortHash = (h: string) => h.slice(0, 8);
 /**
  * Scope key for TanStack Query cache keys.
  *
- * Prompt data is project-scoped on the backend; without this, switching scope
- * from the scope switcher leaves the previous project's assets/versions/releases
- * cached under the same key, surfacing stale (or cross-project) data.
+ * The three prompt endpoints actually scope differently on the backend —
+ * `/v1/prompts/assets` lists by workspace (tenant + workspace),
+ * `/v1/prompts/releases` lists by project (tenant + workspace + project), and
+ * `/v1/prompts/assets/:id/versions` is asset-scoped (the asset itself carries
+ * the workspace). Rather than maintain three sub-keys per endpoint, we key
+ * all three caches on the full `tenant:workspace:project` triple. Over-keying
+ * by `project_id` on the workspace-scoped endpoints is safe: all calls
+ * originating from a given active scope share the same triple, so cache hits
+ * still work within that scope, and switching scope correctly invalidates
+ * every prompt cache — even the over-keyed workspace-level ones — preventing
+ * cross-project bleed-through.
  */
 function scopeKey(scope: { tenant_id: string; workspace_id: string; project_id: string }): string {
   return `${scope.tenant_id}:${scope.workspace_id}:${scope.project_id}`;
@@ -289,8 +297,13 @@ function ReleaseControls({ release }: { release: PromptReleaseRecord }) {
   const toast = useToast();
   const [rollout, setRollout] = useState(release.rollout_percent ?? 0);
 
+  // Match any scope suffix — e.g. `["prompt-releases", "tenant:ws:proj"]`.
+  // Using a predicate instead of a bare key so the control keeps working
+  // if the caller (PromptsPage) switches to a per-tenant key shape later.
   const invalidate = () => {
-    void qc.invalidateQueries({ queryKey: ["prompt-releases"] });
+    void qc.invalidateQueries({
+      predicate: (q) => Array.isArray(q.queryKey) && q.queryKey[0] === "prompt-releases",
+    });
   };
 
   const activate = useMutation({
