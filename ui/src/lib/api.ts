@@ -757,7 +757,7 @@ export function createApiClient(config: ApiClientConfig) {
 
     /** GET /v1/sessions/:id/llm-traces — traces for one session. */
     getSessionTraces: (sessionId: string, limit = 200): Promise<import("./types").TracesResponse> =>
-      get(`/v1/sessions/${sessionId}/llm-traces?limit=${limit}`),
+      get(`/v1/sessions/${encodeURIComponent(sessionId)}/llm-traces?limit=${limit}`),
 
     // ── Evals ────────────────────────────────────────────────────────────────
 

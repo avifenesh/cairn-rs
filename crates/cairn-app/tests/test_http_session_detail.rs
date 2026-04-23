@@ -1,11 +1,13 @@
-//! Regression for #170: SessionDetailPage silently dropped runs when a
-//! project had >500 total runs because the UI pulled `/v1/runs?limit=500`
-//! and filtered client-side. The fix routes the page through
-//! `GET /v1/sessions/:id/runs`, which filters server-side.
+//! Regression coverage for #170: SessionDetailPage now loads runs via
+//! `GET /v1/sessions/:id/runs`, which applies session filtering
+//! server-side instead of relying on a client-side `session_id` filter
+//! applied on top of a globally capped `/v1/runs?limit=500` response
+//! (the original path silently dropped runs once a project passed 500
+//! total runs).
 //!
-//! This test verifies that the endpoint returns *every* run created in a
-//! session and does not mix in runs from a sibling session under the same
-//! project scope.
+//! This test verifies that the endpoint returns *every* run created in
+//! the requested session and does not mix in runs from a sibling
+//! session under the same project scope.
 
 mod support;
 
@@ -106,12 +108,26 @@ async fn list_session_runs_returns_all_runs_unfiltered() {
     }
 
     // GET /v1/sessions/:id/runs — all 5 target runs, zero sibling runs.
+    // Build the URL via `reqwest::Url::path_segments_mut` so the
+    // `session_id` is percent-encoded; validation in cairn-app only
+    // rejects control chars, so `/` and other reserved chars are
+    // legal session ids and must not break routing.
+    let mut url = reqwest::Url::parse(&format!("{}/", h.base_url))
+        .expect("base_url parses as URL");
+    {
+        let mut segments = url
+            .path_segments_mut()
+            .expect("base_url supports path segments");
+        segments.push("v1");
+        segments.push("sessions");
+        segments.push(&session_id);
+        segments.push("runs");
+    }
+    url.query_pairs_mut().append_pair("limit", "500");
+
     let res = h
         .client()
-        .get(format!(
-            "{}/v1/sessions/{}/runs?limit=500",
-            h.base_url, session_id,
-        ))
+        .get(url)
         .bearer_auth(&h.admin_token)
         .send()
         .await

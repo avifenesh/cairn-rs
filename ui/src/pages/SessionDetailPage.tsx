@@ -9,7 +9,7 @@ import { CopyButton } from "../components/CopyButton";
 import { useToast } from "../components/Toast";
 import { defaultApi } from "../lib/api";
 import { table as tablePreset } from "../lib/design-system";
-import type { SessionState } from "../lib/types";
+import type { RunRecord, SessionState } from "../lib/types";
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -108,12 +108,26 @@ export function SessionDetailPage({ sessionId, onBack }: SessionDetailPageProps)
   });
   const session = sessions?.find(s => s.session_id === sessionId);
 
-  // Runs for this session — server-side filter via /v1/sessions/:id/runs.
-  // Avoids the pre-#170 bug where a global getRuns({limit:500}) silently
-  // dropped older runs once a project passed 500 total runs.
+  // Runs for this session — server-side filter via /v1/sessions/:id/runs,
+  // paginated so no run is silently truncated. Fixes #170, where a global
+  // `getRuns({limit:500})` + client-side filter dropped older runs in
+  // projects past 500 total runs.
   const { data: sessionRuns, isLoading: runsLoading } = useQuery({
     queryKey: ["session-runs", sessionId],
-    queryFn: () => defaultApi.getSessionRuns(sessionId, { limit: 500 }),
+    queryFn: async () => {
+      const pageSize = 500;
+      const all: RunRecord[] = [];
+      let offset = 0;
+      // Cap at 20k runs (40 pages) to avoid unbounded loops if the
+      // backend ever stops honouring the page-size contract.
+      for (let page = 0; page < 40; page++) {
+        const chunk = await defaultApi.getSessionRuns(sessionId, { limit: pageSize, offset });
+        all.push(...chunk);
+        if (chunk.length < pageSize) break;
+        offset += chunk.length;
+      }
+      return all;
+    },
     staleTime: 30_000,
   });
   const runs = sessionRuns ?? [];
