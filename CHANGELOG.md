@@ -120,7 +120,8 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   it scheduled had no cleanup (timeouts accumulated for the life of
   the tab). Fixed by iterating `streamEvents` in reverse so events
   are processed exactly once in causal order (dedupe via a
-  `useRef<Set>` of server-assigned event ids, capped at 256 with
+  `useRef<Set>` of server-assigned event ids, capped at
+  `STREAM_BUFFER_MAX * 5` (currently 250) with
   oldest-insertion-order eviction), tracking pending highlight
   timeouts in a `useRef<Map>` that clears them on supersede +
   unmount, and coalescing refetches so an event burst triggers at
