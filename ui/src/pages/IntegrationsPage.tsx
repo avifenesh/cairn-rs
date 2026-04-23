@@ -343,14 +343,18 @@ export function IntegrationsPage() {
     onError: toastErr("Failed to update concurrency"),
   });
 
-  // While the mutation is in-flight, `maxConcurrent` still reflects the stale
-  // server value (the `github-queue` query has not refetched yet), so show the
-  // user's pending selection on the controlled <select> instead of snapping
-  // back. On error, `variables` clears and the select reverts to the
-  // authoritative server value.
-  const concurrencySelected = concurrencyMut.isPending && concurrencyMut.variables != null
-    ? concurrencyMut.variables
-    : maxConcurrent;
+  // Show the user's most recent choice on the controlled <select> without
+  // letting it flicker back to a stale server value. Precedence:
+  //   1. in-flight mutation variables (while isPending)
+  //   2. last successful mutation result (bridges the window between
+  //      mutation success and the `github-queue` query refetching)
+  //   3. authoritative server value
+  // On error, mutation data clears and the select reverts to the server
+  // value, so the operator sees the real state.
+  const concurrencySelected =
+    concurrencyMut.isPending && concurrencyMut.variables != null
+      ? concurrencyMut.variables
+      : concurrencyMut.data?.max_concurrent ?? maxConcurrent;
 
   const handleScan = useCallback((repo: string, labels?: string, limit?: number) => {
     scanMut.mutate({ repo, labels, limit });
