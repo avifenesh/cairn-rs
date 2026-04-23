@@ -49,6 +49,15 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **`TasksPage`: removed duplicate unstyled Refresh button.** A merge-conflict
+  artifact left two Refresh buttons in the toolbar — one unstyled, one
+  properly styled. The unstyled duplicate has been removed; the styled
+  Refresh button (with auto-refresh interval selector) remains. Closes #172.
+- **`TasksPage`: batch cancel now invalidates `run-tasks`.** The
+  `cancelSelected` mutation invalidated `['tasks']` on success but not
+  `['run-tasks', runId]`, so `RunDetailPage` showed stale task state
+  after a batch cancel. Now mirrors the `claim` / `release` mutation
+  pattern and invalidates both query keys. Closes #171.
 - **UI: global 401 interceptor.** When an operator's token is rotated
   (via `POST /v1/admin/rotate-token`) or expires mid-session, the app
   used to turn into a wall of red error badges on every page because
