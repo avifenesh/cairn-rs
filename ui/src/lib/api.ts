@@ -1261,7 +1261,10 @@ export function createApiClient(config: ApiClientConfig) {
       post(`/v1/prompts/releases/${encodeURIComponent(releaseId)}/rollback`, { target_release_id: targetReleaseId }),
 
     /** POST /v1/prompts/releases/:id/transition — generic state transition. */
-    transitionPromptRelease: (releaseId: string, toState: string): Promise<import("./types").PromptReleaseRecord> =>
+    transitionPromptRelease: (
+      releaseId: string,
+      toState: import("./types").PromptReleaseState,
+    ): Promise<import("./types").PromptReleaseRecord> =>
       post(`/v1/prompts/releases/${encodeURIComponent(releaseId)}/transition`, { to_state: toState }),
 
     // ── Request logs ─────────────────────────────────────────────────────────
