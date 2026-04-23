@@ -127,7 +127,9 @@ async fn plugin_catalog_install_enable_disable_roundtrip() {
     //    POST (enable) and DELETE (disable).
     let res = h
         .client()
-        .post(format!("{base}/v1/projects/{p}/plugins/{plugin_id}/disable"))
+        .post(format!(
+            "{base}/v1/projects/{p}/plugins/{plugin_id}/disable"
+        ))
         .bearer_auth(&h.admin_token)
         .send()
         .await
