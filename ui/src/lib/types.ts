@@ -898,3 +898,54 @@ export interface ChangelogEntry {
   date:    string;
   changes: string[];
 }
+
+// ── Workers / Fleet (GAP-005) ─────────────────────────────────────────────────
+
+/** Live health snapshot for a registered external worker. */
+export interface WorkerHealth {
+  /** Epoch-ms of the last received heartbeat (0 if no heartbeat yet). */
+  last_heartbeat_ms: number;
+  /** True when the worker sent a heartbeat within the configured TTL window. */
+  is_alive: boolean;
+  /** Number of tasks currently leased to this worker. */
+  active_task_count: number;
+}
+
+/**
+ * Registered external worker as returned by `GET /v1/workers` and
+ * `GET /v1/workers/:id`. Mirrors `ExternalWorkerRecord` in cairn-domain.
+ */
+export interface WorkerRecord {
+  worker_id:     string;
+  tenant_id:     string;
+  display_name:  string;
+  /** "active" | "suspended" | "offline" */
+  status:        string;
+  registered_at: number;
+  updated_at:    number;
+  health:        WorkerHealth;
+  current_task_id?: string | null;
+}
+
+/** Per-worker snapshot inside a fleet report. Mirrors `WorkerState` in cairn-runtime. */
+export interface FleetWorkerState {
+  worker_id:    string;
+  display_name: string;
+  /** "active" | "suspended" | "offline" */
+  status:       string;
+  health:       WorkerHealth;
+  current_task_id?: string | null;
+}
+
+/**
+ * Fleet aggregate as returned by `GET /v1/fleet`. Mirrors `FleetReport`
+ * in cairn-runtime.
+ */
+export interface FleetReport {
+  workers: FleetWorkerState[];
+  total:   number;
+  /** Workers whose status is "active". */
+  active:  number;
+  /** Workers that reported a heartbeat recently. */
+  healthy: number;
+}
