@@ -153,10 +153,7 @@ async fn worker_registry_lifecycle_surfaces_through_list_get_and_fleet() {
     // 5. Reactivate.
     let res = h
         .client()
-        .post(format!(
-            "{}/v1/workers/{}/reactivate",
-            h.base_url, enc,
-        ))
+        .post(format!("{}/v1/workers/{}/reactivate", h.base_url, enc,))
         .bearer_auth(&h.admin_token)
         .send()
         .await
