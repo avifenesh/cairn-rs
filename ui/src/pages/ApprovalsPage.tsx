@@ -63,6 +63,14 @@ function RowActions({ approval }: { approval: ApprovalRecord }) {
     onSuccess: (_, decision) => {
       toast.success(decision === "approved" ? "Approval granted." : "Approval denied.");
       void qc.invalidateQueries({ queryKey: ["approvals"] });
+      // Resolving an approval can change the owning run's state + event
+      // stream (and therefore the runs list). Invalidate run-scoped caches
+      // so navigating back to the run views doesn't show stale data.
+      void qc.invalidateQueries({ queryKey: ["runs"] });
+      if (approval.run_id) {
+        void qc.invalidateQueries({ queryKey: ["run-detail", approval.run_id] });
+        void qc.invalidateQueries({ queryKey: ["run-events", approval.run_id] });
+      }
     },
     onError: () => toast.error("Failed to resolve — try again."),
   });
@@ -213,10 +221,13 @@ export function ApprovalsPage() {
     tab === "pending"  ? pending  :
     tab === "resolved" ? resolved : all;
 
-  // 24-hour window stats (created_at within last 24h and resolved).
+  // 24-hour window stats (resolved within the last 24h).
+  // Key on updated_at — for resolved approvals this is the resolution timestamp.
+  // Using created_at here double-counted pending requests and missed approvals
+  // that were requested earlier but resolved recently (issue #176).
   const since24h   = Date.now() - 86_400_000;
-  const approved24 = resolved.filter(a => a.decision === "approved" && a.created_at >= since24h).length;
-  const rejected24 = resolved.filter(a => a.decision === "rejected" && a.created_at >= since24h).length;
+  const approved24 = resolved.filter(a => a.decision === "approved" && a.updated_at >= since24h).length;
+  const rejected24 = resolved.filter(a => a.decision === "rejected" && a.updated_at >= since24h).length;
 
   if (isError) return <ErrorFallback error={error} resource="approvals" onRetry={() => void refetch()} />;
 
