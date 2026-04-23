@@ -200,9 +200,13 @@ function PageInterveneDrawer({
   const [messageBody, setMessageBody] = useState("");
   const toast = useToast();
   const open = runId !== null;
+  // Reset form state whenever the selected run changes (or the drawer
+  // opens). Depending on `runId` — not just `open` — guarantees that
+  // switching between runs while the drawer is open clears stale input
+  // before the operator can submit it against the new run.
   useEffect(() => {
     if (open) { setReason(""); setMessageBody(""); setAction("force_restart"); }
-  }, [open]);
+  }, [open, runId]);
 
   const mut = useMutation({
     mutationFn: () => {

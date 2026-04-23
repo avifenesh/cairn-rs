@@ -19,15 +19,35 @@ mod support;
 use serde_json::{json, Value};
 use support::live_fabric::LiveHarness;
 
-// Run mutation handlers that don't bypass tenant scope for admin tokens
-// (`spawn_subagent_run_handler`, `intervene_run_handler`) require the
-// token's implicit scope to match the run's `project.tenant_id`. Bind all
-// tests to the default admin scope — same pattern used by
-// `test_http_provider_lifecycle.rs`.
-// The admin service account is registered with tenant id `"default"` in
-// `main.rs`. Spawn and intervene handlers compare the run's
-// `project.tenant_id` to this principal's tenant without an admin bypass,
-// so tests must create runs under the same tenant.
+// Tenant-scope choice (deliberate):
+//
+// `LiveHarness::setup()` assigns a per-harness uuid-unique
+// tenant/workspace/project triple (`h.tenant` / `h.workspace` /
+// `h.project`) and cross-test isolation for everything that goes through
+// the `load_run_visible_to_tenant` helper (GETs, cancel, pause, resume,
+// approve, reject, revise, cost-alert…) is based on that.
+//
+// **However**, `spawn_subagent_run_handler` and `intervene_run_handler`
+// do NOT use `load_run_visible_to_tenant` — they compare the run's
+// `project.tenant_id` to the request principal's tenant directly, with
+// no admin bypass. The admin service account registered in `main.rs` is
+// hard-bound to `TenantId("default")`, so with a uuid-unique
+// `h.tenant`, spawn and intervene reliably return `404 run_not_found`
+// even though the GET endpoint finds the run. Binding the test scope to
+// `"default"` is the only way to exercise those two endpoints
+// end-to-end without patching the handlers.
+//
+// Per-test isolation is preserved via the uuid suffix embedded in the
+// `run_id` / `session_id` (see `create_session_and_run` below), which
+// lives in the run-id space rather than the tenant-id space, so two
+// parallel tests never collide on the run id even while sharing
+// `TENANT`. `h.scope_headers()` would not help here — the tenant
+// attached to the request via the `X-Cairn-*` headers is overridden by
+// the principal's implicit tenant inside `auth_middleware`.
+//
+// When spawn/intervene gain an admin bypass (tracked as part of the
+// handler-consistency follow-up), this block should be ripped out and
+// replaced with `h.tenant` / `h.workspace` / `h.project`.
 const TENANT: &str = "default";
 const WORKSPACE: &str = "default_workspace";
 const PROJECT: &str = "default_project";
