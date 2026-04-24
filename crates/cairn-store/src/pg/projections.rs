@@ -403,7 +403,7 @@ impl PgSyncProjection {
             // new pending row; Amended/Approved/Rejected update it.
             RuntimeEvent::ToolCallProposed(e) => {
                 let match_policy_json = serde_json::to_value(&e.match_policy)
-                    .map_err(|err| StoreError::Internal(err.to_string()))?;
+                    .map_err(|err| StoreError::Serialization(err.to_string()))?;
                 let display_summary_opt: Option<&str> = if e.display_summary.is_empty() {
                     None
                 } else {
@@ -461,7 +461,7 @@ impl PgSyncProjection {
             }
             RuntimeEvent::ToolCallApproved(e) => {
                 let scope_json = serde_json::to_value(&e.scope)
-                    .map_err(|err| StoreError::Internal(err.to_string()))?;
+                    .map_err(|err| StoreError::Serialization(err.to_string()))?;
                 sqlx::query(
                     "UPDATE tool_call_approvals
                      SET state = 'approved',

@@ -367,6 +367,86 @@ async fn amend_on_unknown_call_id_is_noop() {
 }
 
 #[tokio::test]
+async fn replayed_proposed_does_not_reset_approved_record() {
+    // Addresses PR-268 review: a replayed ToolCallProposed must be
+    // idempotent and must NOT wipe an already-approved record — the
+    // SQL backends enforce this via `ON CONFLICT DO NOTHING`, and the
+    // in-memory projection now mirrors that with `entry().or_insert`.
+    let store = InMemoryStore::new();
+    store
+        .append(&[
+            proposed("tc_replay", "sess_1", "run_1", 1_000),
+            approved(
+                "tc_replay",
+                "sess_1",
+                "op_1",
+                1_500,
+                Some(serde_json::json!({ "path": "/final.md" })),
+            ),
+        ])
+        .await
+        .unwrap();
+
+    // Replay the original Proposed. Expectation: record unchanged.
+    store
+        .append(&[proposed("tc_replay", "sess_1", "run_1", 1_000)])
+        .await
+        .unwrap();
+
+    let rec = store
+        .get(&ToolCallId::new("tc_replay"))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(rec.state, ToolCallApprovalState::Approved);
+    assert_eq!(
+        rec.approved_tool_args,
+        Some(serde_json::json!({ "path": "/final.md" }))
+    );
+}
+
+#[tokio::test]
+async fn approval_with_none_clears_stale_override_on_replay() {
+    // Addresses PR-268 review: an Approved event with
+    // `approved_tool_args: None` must clear any previously-set
+    // override — mirrors the SQL behaviour of binding NULL.
+    let store = InMemoryStore::new();
+    store
+        .append(&[
+            proposed("tc_clear", "sess_1", "run_1", 1_000),
+            approved(
+                "tc_clear",
+                "sess_1",
+                "op_1",
+                1_500,
+                Some(serde_json::json!({ "path": "/override.md" })),
+            ),
+        ])
+        .await
+        .unwrap();
+
+    // Now a second Approved with None arrives (e.g. from a later
+    // "approve current args" decision). It must clear the override.
+    store
+        .append(&[approved("tc_clear", "sess_1", "op_2", 1_800, None)])
+        .await
+        .unwrap();
+
+    let rec = store
+        .get(&ToolCallId::new("tc_clear"))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(rec.state, ToolCallApprovalState::Approved);
+    assert!(
+        rec.approved_tool_args.is_none(),
+        "Approved-with-None must clear the stale override"
+    );
+    assert_eq!(rec.operator_id.as_ref().unwrap().as_str(), "op_2");
+    assert_eq!(rec.approved_at_ms, Some(1_800));
+}
+
+#[tokio::test]
 async fn empty_display_summary_stored_as_none() {
     let store = InMemoryStore::new();
     let mut envelope = proposed("tc_empty", "sess_1", "run_1", 1_000);

@@ -769,9 +769,9 @@ impl SqliteSyncProjection {
             // TEXT because SQLite has no native JSONB.
             RuntimeEvent::ToolCallProposed(e) => {
                 let tool_args_text = serde_json::to_string(&e.tool_args)
-                    .map_err(|err| StoreError::Internal(err.to_string()))?;
+                    .map_err(|err| StoreError::Serialization(err.to_string()))?;
                 let match_policy_text = serde_json::to_string(&e.match_policy)
-                    .map_err(|err| StoreError::Internal(err.to_string()))?;
+                    .map_err(|err| StoreError::Serialization(err.to_string()))?;
                 let display_summary_opt: Option<&str> = if e.display_summary.is_empty() {
                     None
                 } else {
@@ -813,7 +813,7 @@ impl SqliteSyncProjection {
             }
             RuntimeEvent::ToolCallAmended(e) => {
                 let new_args_text = serde_json::to_string(&e.new_tool_args)
-                    .map_err(|err| StoreError::Internal(err.to_string()))?;
+                    .map_err(|err| StoreError::Serialization(err.to_string()))?;
                 sqlx::query(
                     "UPDATE tool_call_approvals
                      SET amended_tool_args = ?,
@@ -832,13 +832,13 @@ impl SqliteSyncProjection {
             }
             RuntimeEvent::ToolCallApproved(e) => {
                 let scope_text = serde_json::to_string(&e.scope)
-                    .map_err(|err| StoreError::Internal(err.to_string()))?;
+                    .map_err(|err| StoreError::Serialization(err.to_string()))?;
                 let approved_args_text: Option<String> = e
                     .approved_tool_args
                     .as_ref()
                     .map(serde_json::to_string)
                     .transpose()
-                    .map_err(|err| StoreError::Internal(err.to_string()))?;
+                    .map_err(|err| StoreError::Serialization(err.to_string()))?;
                 sqlx::query(
                     "UPDATE tool_call_approvals
                      SET state = 'approved',

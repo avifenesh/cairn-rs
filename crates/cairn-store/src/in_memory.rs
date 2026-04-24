@@ -1311,9 +1311,13 @@ impl InMemoryStore {
             // PR BP-2: project tool-call approval events into the
             // `tool_call_approvals` map.
             RuntimeEvent::ToolCallProposed(e) => {
-                state.tool_call_approvals.insert(
-                    e.call_id.as_str().to_owned(),
-                    ToolCallApprovalRecord {
+                // Idempotent: mirror the SQL backends' `ON CONFLICT DO
+                // NOTHING` so a replayed ToolCallProposed does NOT reset
+                // an already-amended/approved/rejected record.
+                state
+                    .tool_call_approvals
+                    .entry(e.call_id.as_str().to_owned())
+                    .or_insert_with(|| ToolCallApprovalRecord {
                         call_id: e.call_id.clone(),
                         session_id: e.session_id.clone(),
                         run_id: e.run_id.clone(),
@@ -1339,8 +1343,7 @@ impl InMemoryStore {
                         version: 1,
                         created_at: now,
                         updated_at: now,
-                    },
-                );
+                    });
             }
             RuntimeEvent::ToolCallAmended(e) => {
                 if let Some(rec) = state.tool_call_approvals.get_mut(e.call_id.as_str()) {
@@ -1355,9 +1358,12 @@ impl InMemoryStore {
                     rec.state = ToolCallApprovalState::Approved;
                     rec.operator_id = Some(e.operator_id.clone());
                     rec.scope = Some(e.scope.clone());
-                    if let Some(args) = &e.approved_tool_args {
-                        rec.approved_tool_args = Some(args.clone());
-                    }
+                    // Mirror SQL behaviour (binding NULL clears the
+                    // override): assign unconditionally so a replayed
+                    // Approved-with-None cannot leave stale override
+                    // args. Preserves the "Approved-with-None must NOT
+                    // populate approved_tool_args" invariant.
+                    rec.approved_tool_args = e.approved_tool_args.clone();
                     rec.approved_at_ms = Some(e.approved_at_ms);
                     rec.version += 1;
                     rec.updated_at = now;

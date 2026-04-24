@@ -1033,12 +1033,12 @@ struct ToolCallApprovalRow {
 impl ToolCallApprovalRow {
     fn into_record(self) -> Result<ToolCallApprovalRecord, StoreError> {
         let match_policy: ApprovalMatchPolicy = serde_json::from_value(self.match_policy)
-            .map_err(|e| StoreError::Internal(format!("match_policy decode: {e}")))?;
+            .map_err(|e| StoreError::Serialization(format!("match_policy decode: {e}")))?;
         let scope: Option<ApprovalScope> = self
             .scope
             .map(serde_json::from_value)
             .transpose()
-            .map_err(|e| StoreError::Internal(format!("scope decode: {e}")))?;
+            .map_err(|e| StoreError::Serialization(format!("scope decode: {e}")))?;
         Ok(ToolCallApprovalRecord {
             call_id: ToolCallId::new(self.call_id),
             session_id: SessionId::new(self.session_id),

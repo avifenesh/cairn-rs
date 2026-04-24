@@ -1114,14 +1114,14 @@ struct SqliteToolCallApprovalRow {
 impl SqliteToolCallApprovalRow {
     fn into_record(self) -> Result<ToolCallApprovalRecord, StoreError> {
         let original: serde_json::Value = serde_json::from_str(&self.original_tool_args)
-            .map_err(|e| StoreError::Internal(format!("original_tool_args decode: {e}")))?;
+            .map_err(|e| StoreError::Serialization(format!("original_tool_args decode: {e}")))?;
         let amended = self
             .amended_tool_args
             .as_deref()
             .map(serde_json::from_str)
             .transpose()
             .map_err(|e: serde_json::Error| {
-                StoreError::Internal(format!("amended_tool_args decode: {e}"))
+                StoreError::Serialization(format!("amended_tool_args decode: {e}"))
             })?;
         let approved = self
             .approved_tool_args
@@ -1129,16 +1129,18 @@ impl SqliteToolCallApprovalRow {
             .map(serde_json::from_str)
             .transpose()
             .map_err(|e: serde_json::Error| {
-                StoreError::Internal(format!("approved_tool_args decode: {e}"))
+                StoreError::Serialization(format!("approved_tool_args decode: {e}"))
             })?;
         let match_policy: ApprovalMatchPolicy = serde_json::from_str(&self.match_policy)
-            .map_err(|e| StoreError::Internal(format!("match_policy decode: {e}")))?;
+            .map_err(|e| StoreError::Serialization(format!("match_policy decode: {e}")))?;
         let scope: Option<ApprovalScope> = self
             .scope
             .as_deref()
             .map(serde_json::from_str)
             .transpose()
-            .map_err(|e: serde_json::Error| StoreError::Internal(format!("scope decode: {e}")))?;
+            .map_err(|e: serde_json::Error| {
+                StoreError::Serialization(format!("scope decode: {e}"))
+            })?;
         Ok(ToolCallApprovalRecord {
             call_id: ToolCallId::new(self.call_id),
             session_id: SessionId::new(self.session_id),
