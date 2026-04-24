@@ -39,7 +39,7 @@
 
 pub mod skill_tool;
 
-pub use skill_tool::HarnessSkill;
+pub use skill_tool::{evict_session, HarnessSkill};
 
 /// Internal helpers exposed only under the `test-utils` cargo feature.
 ///

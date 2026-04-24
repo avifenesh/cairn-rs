@@ -23,7 +23,7 @@ use std::fs;
 
 use cairn_domain::ProjectKey;
 use cairn_harness_tools::HarnessBuiltin;
-use cairn_skills::{__clear_activated_sets_for_tests, HarnessSkill};
+use cairn_skills::{__clear_activated_sets_for_tests, evict_session, HarnessSkill};
 use cairn_tools::builtins::{ToolContext, ToolError, ToolHandler};
 use harness_core::ToolErrorCode;
 use serde_json::json;
@@ -72,15 +72,19 @@ async fn activation_succeeds_and_returns_body() {
 
     assert_eq!(res.output["kind"], "ok");
     assert_eq!(res.output["name"], "run-analysis");
+    // The formatted `output` wraps the body in `<skill>…</skill>` and is
+    // what the LLM consumes. It must include the authored prose.
     assert!(
-        res.output["body"]
+        res.output["output"]
             .as_str()
             .unwrap_or("")
             .contains("flag anomalies"),
-        "body should include the SKILL.md prose; got {:?}",
-        res.output["body"]
+        "output should include the SKILL.md prose; got {:?}",
+        res.output["output"]
     );
-    assert!(res.output["bytes"].as_u64().unwrap_or(0) > 0);
+    // `dir` and `resources` round out the response for structured callers.
+    assert!(res.output["dir"].is_string());
+    assert!(res.output["resources"].is_array());
 }
 
 #[tokio::test]
@@ -173,6 +177,37 @@ async fn unknown_skill_returns_not_found_with_suggestions() {
     assert!(
         !siblings.is_empty(),
         "fuzzy-suggester should return at least one neighbour"
+    );
+}
+
+#[tokio::test]
+async fn evict_session_drops_dedupe_state() {
+    __clear_activated_sets_for_tests();
+    let dir = TempDir::new().unwrap();
+    plant_skill(&dir, "evictable", "Test.", "Body.");
+
+    let tool = HarnessBuiltin::<HarnessSkill>::new();
+    let ctx = ctx_for(&dir, "sess-evict");
+    let project = project();
+
+    // Activate once — ok.
+    let first = tool
+        .execute_with_context(&project, json!({ "name": "evictable" }), &ctx)
+        .await
+        .expect("first activation");
+    assert_eq!(first.output["kind"], "ok");
+
+    // Evict the session's cached ActivatedSet.
+    evict_session(&project, Some("sess-evict"), ctx.run_id.as_deref());
+
+    // Next call must see a fresh activation, not already_loaded.
+    let second = tool
+        .execute_with_context(&project, json!({ "name": "evictable" }), &ctx)
+        .await
+        .expect("post-evict activation");
+    assert_eq!(
+        second.output["kind"], "ok",
+        "evict_session should drop the dedupe set so the skill re-activates"
     );
 }
 

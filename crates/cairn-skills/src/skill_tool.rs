@@ -43,26 +43,58 @@ use serde_json::{json, Value};
 
 use cairn_harness_tools::default_sensitive_patterns;
 
+/// Maximum number of distinct (tenant, workspace, project, session, run)
+/// keys retained in `ACTIVATED_SETS`. When the cache exceeds this, the
+/// least-recently-inserted half is evicted in one pass.
+///
+/// 1024 fits several hundred concurrent multi-run sessions at typical
+/// cairn-app workloads while keeping worst-case memory bounded (each
+/// entry holds a small `HashSet<String>` behind an `Arc<Mutex<_>>`).
+/// Operators with higher session churn should call `evict_session`
+/// from the run-finalize path (follow-up: wire that hook explicitly).
+const MAX_CACHED_SESSIONS: usize = 1024;
+
 /// Process-wide cache of per-session activated sets.
 ///
-/// Growth is bounded by live sessions; eviction on session finalize is a
-/// follow-up (tracked alongside the write-ledger eviction TODO in
-/// `cairn-harness-tools::tools::write`).
+/// Keyed by `(tenant, workspace, project, session_id, run_id)` so two
+/// runs within the same session get independent sets and a skill
+/// activated in run A does not silence re-injection in run B. Bounded
+/// by `MAX_CACHED_SESSIONS` with half-eviction on overflow.
 static ACTIVATED_SETS: Lazy<Mutex<HashMap<String, ActivatedSet>>> =
     Lazy::new(|| Mutex::new(HashMap::new()));
 
+/// Build the cache key. When both `session_id` and `run_id` are absent
+/// (e.g. `ToolContext::default()` in unit tests), returns a per-call
+/// unique key so session-less invocations cannot share dedupe state by
+/// accident. Production code paths always supply at least one field.
 fn session_key(ctx: &ToolContext, project: &ProjectKey) -> String {
-    format!(
-        "{}/{}/{}/{}/{}",
-        project.tenant_id,
-        project.workspace_id,
-        project.project_id,
-        ctx.session_id.as_deref().unwrap_or(""),
-        ctx.run_id.as_deref().unwrap_or(""),
-    )
+    match (ctx.session_id.as_deref(), ctx.run_id.as_deref()) {
+        (None, None) => {
+            // Per-call unique key; callers that want shared dedupe must
+            // supply session_id or run_id.
+            use std::sync::atomic::{AtomicU64, Ordering};
+            static NONCE: AtomicU64 = AtomicU64::new(0);
+            let n = NONCE.fetch_add(1, Ordering::Relaxed);
+            format!(
+                "{}/{}/{}/__anon__/{}",
+                project.tenant_id, project.workspace_id, project.project_id, n,
+            )
+        }
+        (s, r) => format!(
+            "{}/{}/{}/{}/{}",
+            project.tenant_id,
+            project.workspace_id,
+            project.project_id,
+            s.unwrap_or(""),
+            r.unwrap_or(""),
+        ),
+    }
 }
 
-/// Lookup or create the `ActivatedSet` for this (project, session) tuple.
+/// Lookup or create the `ActivatedSet` for this (project, session, run)
+/// tuple. On cache overflow, evicts half the entries (oldest insertion
+/// order is not tracked; we rely on HashMap's iteration order which is
+/// randomised per run — fine for a pressure-relief valve, not an LRU).
 ///
 /// On mutex poisoning (a prior panic while the lock was held) we recover
 /// the inner map instead of propagating — tool calls should not fail
@@ -70,7 +102,38 @@ fn session_key(ctx: &ToolContext, project: &ProjectKey) -> String {
 fn activated_set_for(ctx: &ToolContext, project: &ProjectKey) -> ActivatedSet {
     let key = session_key(ctx, project);
     let mut guard = ACTIVATED_SETS.lock().unwrap_or_else(|e| e.into_inner());
+    if guard.len() >= MAX_CACHED_SESSIONS && !guard.contains_key(&key) {
+        // Pressure relief: drop half the keys. Cheaper than tracking an
+        // LRU linked list and acceptable for a cache that only affects
+        // dedupe (worst case: a skill re-injects its body once).
+        let victims: Vec<String> = guard
+            .keys()
+            .take(MAX_CACHED_SESSIONS / 2)
+            .cloned()
+            .collect();
+        for v in victims {
+            guard.remove(&v);
+        }
+    }
     guard.entry(key).or_default().clone()
+}
+
+/// Drop the cached `ActivatedSet` for a (project, session, run) tuple.
+///
+/// Call this from the orchestrator's run-finalize path so long-running
+/// cairn-app processes do not accumulate per-run state indefinitely.
+/// Safe to call with either field missing; on a cache miss it is a no-op.
+pub fn evict_session(project: &ProjectKey, session_id: Option<&str>, run_id: Option<&str>) {
+    let key = format!(
+        "{}/{}/{}/{}/{}",
+        project.tenant_id,
+        project.workspace_id,
+        project.project_id,
+        session_id.unwrap_or(""),
+        run_id.unwrap_or(""),
+    );
+    let mut guard = ACTIVATED_SETS.lock().unwrap_or_else(|e| e.into_inner());
+    guard.remove(&key);
 }
 
 /// Test-only: clear the cache between test cases so dedupe state does not
@@ -155,9 +218,11 @@ impl HarnessTool for HarnessSkill {
     }
 
     fn execution_class() -> ExecutionClass {
-        // Skill activation reads a file and injects prose. No sandboxed
-        // process needed, no network, no side effects beyond the
-        // conversation it is about to shape.
+        // `SupervisedProcess` is the non-sandboxed, non-sensitive default —
+        // the domain enum exposes only `SupervisedProcess | SandboxedProcess
+        // | Sensitive`. Skill activation reads a SKILL.md from an authored
+        // workspace root and injects prose; no subprocess, no network, no
+        // operator approval required before dispatch.
         ExecutionClass::SupervisedProcess
     }
 
@@ -227,16 +292,23 @@ impl HarnessTool for HarnessSkill {
         _project: &ProjectKey,
     ) -> Result<ToolResult, ToolError> {
         match result {
-            SkillResult::Ok(ok) => Ok(ToolResult::ok(json!({
-                "kind": "ok",
-                "output": ok.output,
-                "name": ok.name,
-                "dir": ok.dir,
-                "body": ok.body,
-                "frontmatter": ok.frontmatter,
-                "resources": ok.resources,
-                "bytes": ok.bytes,
-            }))),
+            SkillResult::Ok(ok) => {
+                // `output` is the harness-formatted rendering that wraps
+                // the skill body in `<skill>…</skill>` tags — it is what
+                // the LLM reads. We do NOT echo `body` / `frontmatter` /
+                // `bytes` separately; duplicating that content wastes
+                // tokens on every activation. `name` lets callers pattern-
+                // match on which skill activated, `resources` tells the
+                // model what supporting files exist, `dir` lets it resolve
+                // resource paths via a follow-up read tool call.
+                Ok(ToolResult::ok(json!({
+                    "kind": "ok",
+                    "name": ok.name,
+                    "dir": ok.dir,
+                    "output": ok.output,
+                    "resources": ok.resources,
+                })))
+            }
             SkillResult::AlreadyLoaded(al) => Ok(ToolResult::ok(json!({
                 "kind": "already_loaded",
                 "output": al.output,
