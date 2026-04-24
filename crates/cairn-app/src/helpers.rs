@@ -1132,13 +1132,22 @@ pub(crate) fn event_message(event: &RuntimeEvent) -> String {
             )
         }
         RuntimeEvent::ToolCallApproved(event) => {
-            format!("Tool call {} approved by {}", event.call_id, event.operator_id)
+            format!(
+                "Tool call {} approved by {}",
+                event.call_id, event.operator_id
+            )
         }
         RuntimeEvent::ToolCallRejected(event) => {
-            format!("Tool call {} rejected by {}", event.call_id, event.operator_id)
+            format!(
+                "Tool call {} rejected by {}",
+                event.call_id, event.operator_id
+            )
         }
         RuntimeEvent::ToolCallAmended(event) => {
-            format!("Tool call {} amended by {}", event.call_id, event.operator_id)
+            format!(
+                "Tool call {} amended by {}",
+                event.call_id, event.operator_id
+            )
         }
         RuntimeEvent::AuditLogEntryRecorded(entry) => {
             format!(
