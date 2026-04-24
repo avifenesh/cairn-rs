@@ -802,10 +802,7 @@ fn tool_calls_to_proposals(
 /// match (missing `tool_name`, non-object args, etc.), the original
 /// `(name, args)` tuple is returned unchanged so downstream error
 /// handling can surface a clear "unknown tool" diagnostic.
-fn unwrap_meta_envelope(
-    name: &str,
-    args: serde_json::Value,
-) -> (String, serde_json::Value) {
+fn unwrap_meta_envelope(name: &str, args: serde_json::Value) -> (String, serde_json::Value) {
     if name != "invoke_tool" && name != "spawn_subagent" {
         return (name.to_owned(), args);
     }
@@ -1216,7 +1213,10 @@ mod tests {
         assert_eq!(proposals.len(), 1);
         assert_eq!(proposals[0].tool_name.as_deref(), Some("bash"));
         assert_eq!(
-            proposals[0].tool_args.as_ref().and_then(|a| a.get("command")),
+            proposals[0]
+                .tool_args
+                .as_ref()
+                .and_then(|a| a.get("command")),
             Some(&serde_json::Value::String("echo hi".to_owned())),
         );
     }
