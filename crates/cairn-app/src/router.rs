@@ -1274,6 +1274,19 @@ impl AppBootstrap {
                     .put(set_model_handler)
                     .delete(delete_model_handler),
             )
+            // ── Public model catalog (read-only, filter + paginate) ───────────────────
+            // Read-only projection of the bundled LiteLLM catalog + TOML overlay +
+            // any admin overrides. Callable by any authenticated operator — the UI
+            // provider wizard and cost calculator read from here so the operator
+            // doesn't have to hand-type model IDs.
+            .route(
+                "/v1/models/catalog",
+                get(crate::handlers::model_catalog::list_model_catalog_handler),
+            )
+            .route(
+                "/v1/models/catalog/providers",
+                get(crate::handlers::model_catalog::list_catalog_providers_handler),
+            )
             // ── Settings ──────────────────────────────────────────────────────────────
             .route("/v1/settings/defaults/all", get(list_all_defaults_handler))
             .route(

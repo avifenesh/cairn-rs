@@ -1460,3 +1460,90 @@ export interface ProjectRepoDetail {
   recent_register_repo_decisions: string[];
   host?: string;
 }
+
+// ── Model catalog (GET /v1/models/catalog) ───────────────────────────────────
+
+/**
+ * Routing tier for a model. Mirrors `cairn_domain::model_catalog::ModelTier`
+ * (serialized snake_case by serde).
+ */
+export type ModelTier = "brain" | "mid" | "light";
+
+/**
+ * Billing model. Mirrors `cairn_domain::providers::ProviderCostType`.
+ * `metered` = pay per token; `free` = zero cost; `flat_rate` = fixed
+ * subscription (cost fields are informational only for flat-rate).
+ */
+export type ModelCostType = "metered" | "free" | "flat_rate";
+
+/**
+ * One row from `GET /v1/models/catalog`. Shape matches
+ * `cairn_domain::model_catalog::ModelEntry` verbatim — DO NOT rename
+ * fields without updating the Rust struct too.
+ */
+export interface ModelCatalogEntry {
+  /** Unique model ID, e.g. `gpt-4o`, `anthropic/claude-sonnet-4-6`. */
+  id: string;
+  /** Provider family (`openai`, `anthropic`, `bedrock`, `openrouter`, ...). */
+  provider: string;
+  /** Human-readable display name. */
+  display_name: string;
+  /** Max total context window (input + output). */
+  context_len: number;
+
+  tier: ModelTier;
+  tags: string[];
+  enabled: boolean;
+
+  cost_type: ModelCostType;
+  /** USD per 1M input tokens. Always 0.0 for free models. */
+  cost_per_1m_input: number;
+  /** USD per 1M output tokens. Always 0.0 for free models. */
+  cost_per_1m_output: number;
+  cache_read_per_1m: number;
+  cache_write_per_1m: number;
+
+  max_tokens: number;
+  min_cacheable_tokens: number;
+  cache_type: string;
+
+  reasoning: boolean;
+  supports_tools: boolean;
+  supports_streaming: boolean;
+  supports_json_mode: boolean;
+  input_modalities: string[];
+  output_modalities: string[];
+}
+
+/** Query parameters accepted by `GET /v1/models/catalog`. */
+export interface ModelCatalogQuery {
+  provider?:           string;
+  tier?:               ModelTier;
+  search?:             string;
+  supports_tools?:     boolean;
+  supports_json_mode?: boolean;
+  reasoning?:          boolean;
+  max_cost_per_1m?:    number;
+  free_only?:          boolean;
+  limit?:              number;
+  offset?:             number;
+}
+
+/** Response shape of `GET /v1/models/catalog`. */
+export interface ModelCatalogResponse {
+  items:   ModelCatalogEntry[];
+  total:   number;
+  hasMore: boolean;
+}
+
+/** One entry in `GET /v1/models/catalog/providers`. */
+export interface ModelCatalogProvider {
+  name:  string;
+  count: number;
+}
+
+/** Response shape of `GET /v1/models/catalog/providers`. */
+export interface ModelCatalogProvidersResponse {
+  providers: ModelCatalogProvider[];
+}
+

@@ -133,6 +133,8 @@ GET	/v1/memory/related/:document_id	preserve	-	-
 GET	/v1/memory/search	preserve	query: q, limit?	{ results }
 GET	/v1/metrics	preserve	-	metrics read model
 GET	/v1/metrics/prometheus	preserve	-	-
+GET	/v1/models/catalog	preserve	-	-
+GET	/v1/models/catalog/providers	preserve	-	-
 GET	/v1/notifications	preserve	-	-
 GET	/v1/onboarding/status	preserve	-	onboarding progress
 GET	/v1/onboarding/templates	preserve	-	{ items }

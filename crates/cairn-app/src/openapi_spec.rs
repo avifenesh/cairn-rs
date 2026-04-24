@@ -776,6 +776,58 @@ pub const OPENAPI_JSON: &str = r##"{
         }
       }
     },
+    "/v1/models/catalog": {
+      "get": {
+        "tags": ["Models"],
+        "summary": "List the bundled model catalog (LiteLLM + cairn overlay)",
+        "description": "Read-only projection of the bundled LiteLLM pricing catalog plus any cairn TOML overlay and operator overrides. Supports filter, search, capability filters, cost ceiling, free-only shortcut, and pagination. Callable by any authenticated operator — the UI provider wizard and cost calculator read from here.",
+        "operationId": "listModelCatalog",
+        "parameters": [
+          { "name": "provider",          "in": "query", "schema": { "type": "string" }, "description": "Exact-match provider family (e.g. openai, anthropic, openrouter)." },
+          { "name": "tier",              "in": "query", "schema": { "type": "string", "enum": ["brain", "mid", "light"] }, "description": "Routing tier." },
+          { "name": "search",            "in": "query", "schema": { "type": "string" }, "description": "Case-insensitive substring across id, display_name, and provider." },
+          { "name": "supports_tools",    "in": "query", "schema": { "type": "boolean" } },
+          { "name": "supports_json_mode","in": "query", "schema": { "type": "boolean" } },
+          { "name": "reasoning",         "in": "query", "schema": { "type": "boolean" } },
+          { "name": "max_cost_per_1m",   "in": "query", "schema": { "type": "number" }, "description": "Upper bound on cost_per_1m_input (USD)." },
+          { "name": "free_only",         "in": "query", "schema": { "type": "boolean" }, "description": "When true, only models with zero input+output cost." },
+          { "name": "limit",             "in": "query", "schema": { "type": "integer", "default": 100, "maximum": 1000 } },
+          { "name": "offset",            "in": "query", "schema": { "type": "integer", "default": 0 } }
+        ],
+        "responses": {
+          "200": {
+            "description": "Filtered, paginated model list",
+            "content": { "application/json": { "schema": { "type": "object", "properties": {
+              "items":   { "type": "array", "items": { "type": "object" } },
+              "total":   { "type": "integer" },
+              "hasMore": { "type": "boolean" }
+            }, "required": ["items", "total", "hasMore"] } } }
+          },
+          "422": { "description": "Validation error (invalid limit/offset/tier)" },
+          "503": { "description": "model_catalog_unavailable — bundled catalog is empty" }
+        }
+      }
+    },
+    "/v1/models/catalog/providers": {
+      "get": {
+        "tags": ["Models"],
+        "summary": "Unique provider families in the model catalog, with counts",
+        "description": "Lets the UI build a provider-filter dropdown without a full catalog scan. Cached after the first call for the process lifetime; admin CRUD overrides do NOT invalidate this cache.",
+        "operationId": "listCatalogProviders",
+        "responses": {
+          "200": {
+            "description": "Providers with entry counts",
+            "content": { "application/json": { "schema": { "type": "object", "properties": {
+              "providers": { "type": "array", "items": { "type": "object", "properties": {
+                "name":  { "type": "string" },
+                "count": { "type": "integer" }
+              }, "required": ["name", "count"] } }
+            }, "required": ["providers"] } } }
+          },
+          "503": { "description": "model_catalog_unavailable" }
+        }
+      }
+    },
     "/v1/providers/ollama/models": {
       "get": {
         "tags": ["Providers"],

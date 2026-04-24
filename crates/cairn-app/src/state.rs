@@ -333,6 +333,12 @@ pub struct AppState {
     /// Starts empty — UI shows an empty-state prompt until a worker
     /// registers a skill.
     pub skill_catalog: Arc<tokio::sync::RwLock<cairn_domain::skills::SkillCatalog>>,
+    /// Cached providers-with-counts summary for `GET /v1/models/catalog/providers`.
+    /// Populated on first request; immutable thereafter for the process
+    /// lifetime. Runtime overrides via the admin CRUD API do NOT invalidate
+    /// this cache — see module doc on `handlers::model_catalog`.
+    pub model_catalog_providers_cache:
+        Arc<std::sync::OnceLock<Vec<crate::handlers::model_catalog::ProviderCount>>>,
     /// Background task that derives lifecycle metrics from the event
     /// log broadcast. Kept on `AppState` so its lifetime tracks the
     /// process; drop/cancel is managed by shutdown paths.
@@ -1044,6 +1050,7 @@ impl AppState {
             skill_catalog: Arc::new(tokio::sync::RwLock::new(
                 cairn_domain::skills::SkillCatalog::new(),
             )),
+            model_catalog_providers_cache: Arc::new(std::sync::OnceLock::new()),
             #[cfg(any(feature = "metrics-core", feature = "metrics-providers"))]
             metrics_tap: None,
         };

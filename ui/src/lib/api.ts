@@ -2096,6 +2096,35 @@ export function createApiClient(config: ApiClientConfig) {
       const path = encodeURIComponent(`${s.tenant_id}/${s.workspace_id}/${s.project_id}`);
       return del(`/v1/projects/${path}/triggers/${encodeURIComponent(triggerId)}`);
     },
+
+    // ── Model catalog (read-only) ────────────────────────────────────────────
+    // Bundled LiteLLM catalog + cairn TOML overlay + operator overrides.
+    // Exposed via GET /v1/models/catalog so the UI doesn't have to hard-code
+    // model IDs or prices. See ui/src/components/ModelCatalogPicker.tsx for
+    // the primary consumer.
+
+    /** GET /v1/models/catalog — filtered, paginated model list. */
+    listModelCatalog: (
+      params?: import("./types").ModelCatalogQuery,
+    ): Promise<import("./types").ModelCatalogResponse> => {
+      const qs = new URLSearchParams();
+      if (params?.provider)                           qs.set("provider",           params.provider);
+      if (params?.tier)                               qs.set("tier",               params.tier);
+      if (params?.search)                             qs.set("search",             params.search);
+      if (params?.supports_tools     !== undefined)   qs.set("supports_tools",     String(params.supports_tools));
+      if (params?.supports_json_mode !== undefined)   qs.set("supports_json_mode", String(params.supports_json_mode));
+      if (params?.reasoning          !== undefined)   qs.set("reasoning",          String(params.reasoning));
+      if (params?.max_cost_per_1m    !== undefined)   qs.set("max_cost_per_1m",    String(params.max_cost_per_1m));
+      if (params?.free_only          !== undefined)   qs.set("free_only",          String(params.free_only));
+      if (params?.limit              !== undefined)   qs.set("limit",              String(params.limit));
+      if (params?.offset             !== undefined)   qs.set("offset",             String(params.offset));
+      const query = qs.toString() ? `?${qs}` : "";
+      return get(`/v1/models/catalog${query}`);
+    },
+
+    /** GET /v1/models/catalog/providers — unique providers with counts. */
+    listCatalogProviders: (): Promise<import("./types").ModelCatalogProvidersResponse> =>
+      get("/v1/models/catalog/providers"),
   };
 }
 
