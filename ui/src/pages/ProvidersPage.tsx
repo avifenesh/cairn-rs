@@ -167,7 +167,11 @@ const PROVIDER_KINDS: Record<ProviderKind, ProviderKindMeta> = {
     description: "GLM 4.7 / 5 / 5.1 via the coding-plan endpoint. Native adapter with thinking-mode + cached-token accounting.",
     icon: <Zap size={16} />,
     defaultFamily: "zai",
-    defaultAdapter: "zai",
+    // Coding-plan connections must register with adapter_type="zai-coding"
+    // so the backend resolves Backend::ZaiCoding (→ ZaiConfig::CODING).
+    // Previously this used "zai", which silently routed to the general
+    // tier and broke the coding-tier defaults. Copilot review on #280.
+    defaultAdapter: "zai-coding",
     defaultUrl: "https://api.z.ai/api/coding/paas/v4",
     defaultModel: "glm-4.7",
   },
