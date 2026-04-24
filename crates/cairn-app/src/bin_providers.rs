@@ -13,6 +13,7 @@ use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::IntoResponse;
 use axum::response::Response;
 use axum::Json;
+use cairn_providers::redact_secrets;
 #[allow(unused_imports)]
 use cairn_runtime::{OllamaEmbeddingProvider, OllamaModel};
 
@@ -138,7 +139,7 @@ pub(crate) async fn ollama_models_handler(State(state): State<AppState>) -> impl
             Err(e) => (
                 StatusCode::BAD_GATEWAY,
                 axum::Json(serde_json::json!({
-                    "error": format!("Ollama unreachable: {e}")
+                    "error": redact_secrets(&format!("Ollama unreachable: {e}"))
                 })),
             )
                 .into_response(),
@@ -599,7 +600,7 @@ pub(crate) async fn discover_ollama_models_live(
         Err(e) => (
             StatusCode::BAD_GATEWAY,
             axum::Json(serde_json::json!({
-                "error": format!("Ollama unreachable: {e}"),
+                "error": redact_secrets(&format!("Ollama unreachable: {e}")),
             })),
         )
             .into_response(),
@@ -706,7 +707,7 @@ pub(crate) async fn discover_openai_compat_models_live(
         Err(e) => (
             StatusCode::BAD_GATEWAY,
             axum::Json(serde_json::json!({
-                "error": format!("Provider unreachable: {e}"),
+                "error": redact_secrets(&format!("Provider unreachable: {e}")),
             })),
         )
             .into_response(),
@@ -990,7 +991,7 @@ pub(crate) async fn test_connection_handler(
                 "latency_ms": start.elapsed().as_millis() as u64,
                 "provider":   adapter_type,
                 "status":     0u16,
-                "detail":     format!("connection error: {e}"),
+                "detail":     redact_secrets(&format!("connection error: {e}")),
             })),
         )
             .into_response(),

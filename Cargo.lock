@@ -764,6 +764,8 @@ dependencies = [
  "http-body-util",
  "httpmock",
  "hyper",
+ "once_cell",
+ "regex",
  "reqwest",
  "serde",
  "serde_json",

@@ -13,7 +13,8 @@ use serde_json::Value;
 
 use crate::backends::bedrock::Bedrock;
 use crate::chat::{ChatMessage, ChatRole, FunctionDef, MessageContent, Tool};
-use crate::error::truncate_raw_response;
+use crate::error::safe_raw_response;
+use crate::redact::redact_secrets;
 use crate::wire::openai_compat::OpenAiCompat;
 use crate::{FunctionCall, ToolCall};
 
@@ -292,7 +293,7 @@ impl DomainEmbeddingProvider for OpenAiCompat {
         let url = self
             .base_url
             .join("embeddings")
-            .map_err(|e| ProviderAdapterError::TransportFailure(e.to_string()))?;
+            .map_err(|e| ProviderAdapterError::TransportFailure(redact_secrets(&e.to_string())))?;
         let model = if _model_id.is_empty() {
             &self.model
         } else {
@@ -309,13 +310,13 @@ impl DomainEmbeddingProvider for OpenAiCompat {
             .json(&body)
             .send()
             .await
-            .map_err(|e| ProviderAdapterError::TransportFailure(e.to_string()))?;
+            .map_err(|e| ProviderAdapterError::TransportFailure(redact_secrets(&e.to_string())))?;
         if !resp.status().is_success() {
             let status = resp.status();
             if status.as_u16() == 429 {
                 return Err(ProviderAdapterError::RateLimited);
             }
-            let text = truncate_raw_response(&resp.text().await.unwrap_or_default());
+            let text = safe_raw_response(&resp.text().await.unwrap_or_default());
             return Err(ProviderAdapterError::ProviderError(format!(
                 "embedding {status}: {text}"
             )));
@@ -323,7 +324,7 @@ impl DomainEmbeddingProvider for OpenAiCompat {
         let json: serde_json::Value = resp
             .json()
             .await
-            .map_err(|e| ProviderAdapterError::TransportFailure(e.to_string()))?;
+            .map_err(|e| ProviderAdapterError::TransportFailure(redact_secrets(&e.to_string())))?;
         let embeddings: Vec<Vec<f32>> = json["data"]
             .as_array()
             .map(|arr| {
