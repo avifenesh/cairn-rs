@@ -25,6 +25,7 @@ pub mod completion;
 pub mod embedding;
 pub mod error;
 pub mod models;
+pub mod redact;
 pub mod wire;
 
 pub use builder::{Backend, ProviderBuilder};
@@ -35,6 +36,7 @@ pub use chat::{
 pub use completion::{CompletionProvider, CompletionRequest, CompletionResponse};
 pub use embedding::EmbeddingProvider;
 pub use error::ProviderError;
+pub use redact::{redact_and_truncate, redact_secrets};
 pub use wire::openai_compat;
 
 pub use async_trait::async_trait;

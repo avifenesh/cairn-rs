@@ -17,7 +17,8 @@ use crate::chat::{
     ChatMessage, ChatProvider, ChatResponse, ChatRole, MessageContent, StreamChoice, StreamChunk,
     StreamDelta, StreamResponse, StructuredOutput, Tool, ToolChoice,
 };
-use crate::error::{ProviderError, truncate_raw_response};
+use crate::error::{ProviderError, safe_raw_response};
+use crate::redact::redact_secrets;
 use crate::{FunctionCall, ToolCall, Usage};
 
 // ── Provider config (runtime, not generic) ───────────────────────────────────
@@ -389,8 +390,11 @@ impl OpenAiCompat {
         let text = resp.text().await?;
         let parsed: WireChatResponse =
             serde_json::from_str(&text).map_err(|e| ProviderError::ResponseFormat {
-                message: format!("failed to decode {} response: {e}", self.config.name),
-                raw_response: truncate_raw_response(&text),
+                message: redact_secrets(&format!(
+                    "failed to decode {} response: {e}",
+                    self.config.name
+                )),
+                raw_response: safe_raw_response(&text),
             })?;
         Ok(Box::new(parsed))
     }
@@ -408,7 +412,7 @@ impl OpenAiCompat {
         let url = self
             .base_url
             .join(self.config.chat_endpoint)
-            .map_err(|e| ProviderError::Http(e.to_string()))?;
+            .map_err(|e| ProviderError::Http(redact_secrets(&e.to_string())))?;
         let mut req = self.client.post(url).bearer_auth(&self.api_key).json(body);
         for (k, v) in &self.config.custom_headers {
             req = req.header(k, v);
@@ -422,7 +426,7 @@ impl OpenAiCompat {
             if status.as_u16() == 429 {
                 return Err(ProviderError::RateLimited);
             }
-            let body = truncate_raw_response(&resp.text().await.unwrap_or_default());
+            let body = safe_raw_response(&resp.text().await.unwrap_or_default());
             return Err(ProviderError::ResponseFormat {
                 message: format!("{} returned HTTP {status}", self.config.name),
                 raw_response: body,
@@ -914,8 +918,12 @@ fn create_sse_stream(
         .bytes_stream()
         .scan(SseParser::new(normalize), |parser, chunk| {
             let results = match chunk {
+                // `From<reqwest::Error> for ProviderError` already runs
+                // the error string through `redact_secrets`, so `.into()`
+                // is enough — an extra `redact_secrets` call here would
+                // be a no-op on already-redacted text.
                 Ok(bytes) => parser.consume(&bytes),
-                Err(e) => vec![Err(ProviderError::Http(e.to_string()))],
+                Err(e) => vec![Err(e.into())],
             };
             futures::future::ready(Some(results))
         })
@@ -956,7 +964,8 @@ fn create_tool_sse_stream(
                         }
                         out
                     }
-                    Err(e) => vec![Err(ProviderError::Http(e.to_string()))],
+                    // `From<reqwest::Error>` redacts; `.into()` is enough.
+                    Err(e) => vec![Err(e.into())],
                 };
                 async move { Some(results) }
             },
@@ -1031,8 +1040,9 @@ fn parse_tool_chunk(
             arguments: String,
         }
 
-        let chunk: C =
-            serde_json::from_str(data).map_err(|e| ProviderError::Json(e.to_string()))?;
+        // `From<serde_json::Error> for ProviderError` redacts the error
+        // text; `?` propagates through that impl.
+        let chunk: C = serde_json::from_str(data)?;
         let mut usage_opt = chunk.usage;
         for choice in &chunk.choices {
             if let Some(ref text) = choice.delta.content

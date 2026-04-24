@@ -10,8 +10,9 @@ use serde_json::Value;
 use crate::chat::{ChatMessage, ChatProvider, ChatResponse, ChatRole, StructuredOutput, Tool};
 use crate::completion::{CompletionProvider, CompletionRequest, CompletionResponse};
 use crate::embedding::EmbeddingProvider;
-use crate::error::{ProviderError, truncate_raw_response};
+use crate::error::{ProviderError, safe_raw_response};
 use crate::models::ModelsProvider;
+use crate::redact::redact_secrets;
 use crate::{CairnProvider, ToolCall, Usage};
 
 pub struct Bedrock {
@@ -138,19 +139,19 @@ impl Bedrock {
             .json(&body)
             .send()
             .await
-            .map_err(|e| ProviderError::Http(format!("Bedrock: {e}")))?;
+            .map_err(|e| ProviderError::Http(redact_secrets(&format!("Bedrock: {e}"))))?;
         if !resp.status().is_success() {
             let status = resp.status();
             if status.as_u16() == 429 {
                 return Err(ProviderError::RateLimited);
             }
-            let body = truncate_raw_response(&resp.text().await.unwrap_or_default());
+            let body = safe_raw_response(&resp.text().await.unwrap_or_default());
             return Err(ProviderError::Provider(format!("Bedrock {status}: {body}")));
         }
         let resp_body: Value = resp
             .json()
             .await
-            .map_err(|e| ProviderError::Http(format!("parse: {e}")))?;
+            .map_err(|e| ProviderError::Http(redact_secrets(&format!("parse: {e}"))))?;
         let text = resp_body["output"]["message"]["content"]
             .as_array()
             .map(|arr| {
