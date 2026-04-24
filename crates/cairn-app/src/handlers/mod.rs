@@ -24,5 +24,6 @@ pub(crate) mod sqeq;
 // `bin_websocket.rs` can re-use `ws_event_tenant_id` for tenant filtering.
 pub mod sse;
 pub(crate) mod tasks;
+pub(crate) mod tool_call_approvals;
 pub(crate) mod tools;
 pub(crate) mod workers;

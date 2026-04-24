@@ -613,6 +613,49 @@ export interface ApprovalRecord {
   updated_at: number; // unix ms
 }
 
+// ── Tool-call approvals (PR BP-6) ────────────────────────────────────────────
+
+/** Match policy captured on a tool-call proposal — decides how a
+ *  `session`-scoped approval widens to future matching calls. */
+export type ApprovalMatchPolicy =
+  | { kind: "exact" }
+  | { kind: "project_scoped_path"; project_root: string }
+  | { kind: "exact_path"; path: string };
+
+/** Scope of an operator decision on a tool-call proposal. */
+export type ApprovalScope =
+  | { kind: "once" }
+  | { kind: "session"; match_policy: ApprovalMatchPolicy };
+
+/** Current state of a tool-call approval record. */
+export type ToolCallApprovalState = "pending" | "approved" | "rejected" | "timeout";
+
+/** Projection row for a tool-call approval (wire shape from
+ *  `cairn_store::projections::ToolCallApprovalRecord`). */
+export interface ToolCallApprovalRecord {
+  call_id: string;
+  session_id: string;
+  run_id: string;
+  project: ProjectKey;
+  tool_name: string;
+  original_tool_args: unknown;
+  amended_tool_args: unknown | null;
+  approved_tool_args: unknown | null;
+  display_summary: string | null;
+  match_policy: ApprovalMatchPolicy;
+  state: ToolCallApprovalState;
+  operator_id: string | null;
+  scope: ApprovalScope | null;
+  reason: string | null;
+  proposed_at_ms: number;
+  approved_at_ms: number | null;
+  rejected_at_ms: number | null;
+  last_amended_at_ms: number | null;
+  version: number;
+  created_at: number;
+  updated_at: number;
+}
+
 // ── Memory / Knowledge ───────────────────────────────────────────────────────
 
 /** One chunk returned by /v1/memory/search */

@@ -135,6 +135,8 @@ pub(crate) use handlers::sse::*;
 #[allow(unused_imports)]
 pub(crate) use handlers::tasks::*;
 #[allow(unused_imports)]
+pub(crate) use handlers::tool_call_approvals::*;
+#[allow(unused_imports)]
 pub(crate) use handlers::tools::*;
 #[allow(unused_imports)]
 pub(crate) use handlers::workers::*;

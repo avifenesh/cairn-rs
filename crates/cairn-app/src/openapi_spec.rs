@@ -637,6 +637,105 @@ pub const OPENAPI_JSON: &str = r##"{
         "responses": { "200": { "description": "Rejected", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ApprovalRecord" } } } } }
       }
     },
+    "/v1/tool-call-approvals": {
+      "get": {
+        "tags": ["Approvals"],
+        "summary": "List tool-call approvals (operator inbox)",
+        "description": "Tool-call approvals are the BP-v2 approval flow for LLM-proposed tool invocations. Filter by `run_id`, `session_id`, or project triple. `state` accepts `pending | approved | rejected | timeout`.",
+        "operationId": "listToolCallApprovals",
+        "parameters": [
+          { "name": "run_id",       "in": "query", "schema": { "type": "string" } },
+          { "name": "session_id",   "in": "query", "schema": { "type": "string" } },
+          { "name": "state",        "in": "query", "schema": { "type": "string", "enum": ["pending","approved","rejected","timeout"] } },
+          { "name": "tenant_id",    "in": "query", "schema": { "type": "string" } },
+          { "name": "workspace_id", "in": "query", "schema": { "type": "string" } },
+          { "name": "project_id",   "in": "query", "schema": { "type": "string" } },
+          { "name": "limit",        "in": "query", "schema": { "type": "integer", "default": 100 } },
+          { "name": "offset",       "in": "query", "schema": { "type": "integer", "default": 0 } }
+        ],
+        "responses": { "200": { "description": "Tool-call approval records" } }
+      }
+    },
+    "/v1/tool-call-approvals/{call_id}": {
+      "get": {
+        "tags": ["Approvals"],
+        "summary": "Fetch a single tool-call approval",
+        "operationId": "getToolCallApproval",
+        "parameters": [{ "name": "call_id", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": {
+          "200": { "description": "Tool-call approval record" },
+          "404": { "description": "Not found (including cross-tenant)" }
+        }
+      }
+    },
+    "/v1/tool-call-approvals/{call_id}/approve": {
+      "post": {
+        "tags": ["Approvals"],
+        "summary": "Approve a tool-call proposal",
+        "description": "`scope.type=once` resolves this call only; `scope.type=session` widens the decision to future matching calls in the same session. When `match_policy` is omitted on `session`, the server inherits the match policy captured on the original proposal. `approved_tool_args` overrides any prior amendment and the original arguments with operator-supplied final args. The `operator_id` in the body is only accepted when it matches the authenticated principal; bodies that disagree are rejected with 400 `identity_mismatch`.",
+        "operationId": "approveToolCallApproval",
+        "parameters": [{ "name": "call_id", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "type": "object", "properties": {
+            "operator_id": { "type": "string" },
+            "scope": { "type": "object", "oneOf": [
+              { "type": "object", "properties": { "type": { "type": "string", "enum": ["once"] } }, "required": ["type"] },
+              { "type": "object", "properties": { "type": { "type": "string", "enum": ["session"] }, "match_policy": { "type": "object" } }, "required": ["type"] }
+            ] },
+            "approved_tool_args": {}
+          }, "required": ["scope"] } } }
+        },
+        "responses": {
+          "200": { "description": "Approved" },
+          "400": { "description": "operator_id in body does not match authenticated principal" },
+          "409": { "description": "Proposal already resolved" },
+          "404": { "description": "Unknown call_id" }
+        }
+      }
+    },
+    "/v1/tool-call-approvals/{call_id}/reject": {
+      "post": {
+        "tags": ["Approvals"],
+        "summary": "Reject a tool-call proposal",
+        "operationId": "rejectToolCallApproval",
+        "parameters": [{ "name": "call_id", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "type": "object", "properties": {
+            "operator_id": { "type": "string" },
+            "reason":      { "type": "string" }
+          } } } }
+        },
+        "responses": {
+          "200": { "description": "Rejected" },
+          "400": { "description": "operator_id mismatch" },
+          "409": { "description": "Proposal already resolved" }
+        }
+      }
+    },
+    "/v1/tool-call-approvals/{call_id}/amend": {
+      "patch": {
+        "tags": ["Approvals"],
+        "summary": "Preview-edit tool arguments without resolving",
+        "description": "Amendments are non-resolving — after amending the operator still needs to approve or reject. Refused with 403 `self_amend_forbidden` when the proposal's `tool_name` is `amend_approval` (confused-deputy guard).",
+        "operationId": "amendToolCallApproval",
+        "parameters": [{ "name": "call_id", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "type": "object", "properties": {
+            "operator_id":   { "type": "string" },
+            "new_tool_args": {}
+          }, "required": ["new_tool_args"] } } }
+        },
+        "responses": {
+          "200": { "description": "Amended; state remains pending" },
+          "400": { "description": "operator_id mismatch" },
+          "403": { "description": "Cannot amend amend_approval tool calls" },
+          "409": { "description": "Proposal already resolved" }
+        }
+      }
+    },
     "/v1/providers": {
       "get": {
         "tags": ["Providers"],

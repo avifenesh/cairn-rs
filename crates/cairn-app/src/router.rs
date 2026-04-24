@@ -1292,6 +1292,27 @@ impl AppBootstrap {
                 post(delegate_approval_handler),
             )
             .route("/v1/approvals/:id/reject", post(reject_approval_handler))
+            // ── Tool-call approvals (PR BP-6) ─────────────────────────────────────────
+            .route(
+                "/v1/tool-call-approvals",
+                get(list_tool_call_approvals_handler),
+            )
+            .route(
+                "/v1/tool-call-approvals/:call_id",
+                get(get_tool_call_approval_handler),
+            )
+            .route(
+                "/v1/tool-call-approvals/:call_id/approve",
+                post(approve_tool_call_approval_handler),
+            )
+            .route(
+                "/v1/tool-call-approvals/:call_id/reject",
+                post(reject_tool_call_approval_handler),
+            )
+            .route(
+                "/v1/tool-call-approvals/:call_id/amend",
+                patch(amend_tool_call_approval_handler),
+            )
             // ── Decisions (RFC 019) ───────────────────────────────────────────────────
             // All decision routes use nest() to avoid static/dynamic path conflicts.
             .nest("/v1/decisions", {
