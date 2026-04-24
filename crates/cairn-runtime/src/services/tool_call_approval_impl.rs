@@ -760,11 +760,20 @@ fn stored_to_entry(stored: StoredProposal) -> ProposalEntry {
             ProposalState::Rejected
         }
     };
+    // Preserve the `"operator_timeout"` sentinel when the projection
+    // records a timeout but no reason text was persisted. Downstream
+    // error reporting and the await_decision fast path distinguish
+    // operator-initiated rejections from auto-timeouts using this
+    // exact string (see `handle_timeout`).
+    let rejection_reason = match (stored.state, stored.rejection_reason) {
+        (StoredProposalState::Timeout, None) => Some("operator_timeout".to_owned()),
+        (_, r) => r,
+    };
     ProposalEntry {
         proposal: stored.proposal,
         state,
         amended_args: stored.amended_args,
         approved_args: stored.approved_args,
-        rejection_reason: stored.rejection_reason,
+        rejection_reason,
     }
 }

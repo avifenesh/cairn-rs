@@ -29,6 +29,8 @@
 
 mod support;
 
+use std::sync::Arc;
+
 use axum::{
     body::{to_bytes, Body},
     http::{Request, StatusCode},
@@ -41,7 +43,7 @@ use cairn_domain::tenancy::TenantKey;
 use cairn_domain::{
     ApprovalMatchPolicy, ApprovalScope, OperatorId, ProjectKey, RunId, SessionId, ToolCallId,
 };
-use cairn_runtime::services::ToolCallApprovalServiceImpl;
+use cairn_runtime::services::{ToolCallApprovalReaderAdapter, ToolCallApprovalServiceImpl};
 use cairn_runtime::tool_call_approvals::{ToolCallApprovalService, ToolCallProposal};
 use cairn_store::projections::{ToolCallApprovalReadModel, ToolCallApprovalState};
 use serde_json::{json, Value};
@@ -127,13 +129,8 @@ async fn approve_succeeds_after_service_restart_with_same_store() {
 
     // Sanity: HTTP GET on router A sees the pending record (projection
     // is populated).
-    let (get_status, get_body) = http_json(
-        router_a,
-        "GET",
-        "/v1/tool-call-approvals/tc_restart",
-        None,
-    )
-    .await;
+    let (get_status, get_body) =
+        http_json(router_a, "GET", "/v1/tool-call-approvals/tc_restart", None).await;
     assert_eq!(get_status, StatusCode::OK, "GET pre-restart: {get_body}");
     assert_eq!(get_body["state"], "pending");
 
@@ -141,7 +138,12 @@ async fn approve_succeeds_after_service_restart_with_same_store() {
     //    over the same store. Its in-memory cache is empty — same world
     //    a new process sees after failover.
     let store = state_a.runtime.store.clone();
-    let service_b = ToolCallApprovalServiceImpl::new(store.clone(), store.clone());
+    // Wire the reader through ToolCallApprovalReaderAdapter to match
+    // production wiring (AppState::boot uses the adapter). This keeps
+    // get_tool_call_approval's state-filter semantics under test
+    // rather than relying on the blanket impl's default behaviour.
+    let reader = Arc::new(ToolCallApprovalReaderAdapter::new(store.clone()));
+    let service_b = ToolCallApprovalServiceImpl::new(store.clone(), reader);
 
     // 3. Core repro: approve via service B, whose cache has no entry for
     //    tc_restart. Before the F22 fix this returned NotFound (→ HTTP
@@ -180,7 +182,12 @@ async fn reject_succeeds_after_service_restart_with_same_store() {
         .expect("submit");
 
     let store = state_a.runtime.store.clone();
-    let service_b = ToolCallApprovalServiceImpl::new(store.clone(), store.clone());
+    // Wire the reader through ToolCallApprovalReaderAdapter to match
+    // production wiring (AppState::boot uses the adapter). This keeps
+    // get_tool_call_approval's state-filter semantics under test
+    // rather than relying on the blanket impl's default behaviour.
+    let reader = Arc::new(ToolCallApprovalReaderAdapter::new(store.clone()));
+    let service_b = ToolCallApprovalServiceImpl::new(store.clone(), reader);
 
     service_b
         .reject(
@@ -214,7 +221,12 @@ async fn amend_succeeds_after_service_restart_with_same_store() {
         .expect("submit");
 
     let store = state_a.runtime.store.clone();
-    let service_b = ToolCallApprovalServiceImpl::new(store.clone(), store.clone());
+    // Wire the reader through ToolCallApprovalReaderAdapter to match
+    // production wiring (AppState::boot uses the adapter). This keeps
+    // get_tool_call_approval's state-filter semantics under test
+    // rather than relying on the blanket impl's default behaviour.
+    let reader = Arc::new(ToolCallApprovalReaderAdapter::new(store.clone()));
+    let service_b = ToolCallApprovalServiceImpl::new(store.clone(), reader);
 
     service_b
         .amend(

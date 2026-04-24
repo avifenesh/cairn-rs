@@ -185,7 +185,17 @@ where
         let record = cairn_store::projections::ToolCallApprovalReadModel::get(self, call_id)
             .await
             .map_err(RuntimeError::Store)?;
-        Ok(record.map(|r| ApprovedProposal {
+        let Some(r) = record else {
+            return Ok(None);
+        };
+        // Critical: only surface Approved records. Pending/Rejected/Timeout
+        // rows must not leak into the runtime's "approved" fast path —
+        // otherwise `retrieve_approved_proposal` on a cache miss could
+        // execute a tool call that was never approved (or was rejected).
+        if r.state != cairn_store::projections::ToolCallApprovalState::Approved {
+            return Ok(None);
+        }
+        Ok(Some(ApprovedProposal {
             call_id: r.call_id.clone(),
             tool_name: r.tool_name.clone(),
             tool_args: r
