@@ -37,11 +37,11 @@ use cairn_runtime::{
     },
     ApprovalService, CheckpointService, RunService, TaskService,
 };
-use std::time::Duration;
 use cairn_tools::builtins::BuiltinToolRegistry;
 #[allow(unused_imports)]
 use cairn_tools::builtins::ToolHandler;
 use std::sync::Mutex;
+use std::time::Duration;
 
 use crate::context::{
     ActionResult, ActionStatus, DecideOutput, ExecuteOutcome, LoopSignal, OrchestrationContext,
@@ -180,10 +180,7 @@ impl RuntimeExecutePhaseBuilder {
     /// Inject the BP-v2 tool-call approval service. Required in production
     /// for the propose-then-await flow; tests omit it to exercise legacy
     /// `ApprovalService::request_with_context` paths.
-    pub fn tool_call_approval_service(
-        mut self,
-        svc: Arc<dyn ToolCallApprovalService>,
-    ) -> Self {
+    pub fn tool_call_approval_service(mut self, svc: Arc<dyn ToolCallApprovalService>) -> Self {
         self.tool_call_approval_service = Some(svc);
         self
     }
@@ -251,9 +248,8 @@ impl ExecutePhase for RuntimeExecutePhase {
         // (tool_called, tool_result, FF attempt_stream frames) still see
         // results indexed to the LLM's emitted proposals.
 
-        let mut results: Vec<Option<ActionResult>> = (0..decide.proposals.len())
-            .map(|_| None)
-            .collect();
+        let mut results: Vec<Option<ActionResult>> =
+            (0..decide.proposals.len()).map(|_| None).collect();
         let mut loop_signal = LoopSignal::Continue;
 
         // ── Phase 1: parallel InvokeTool dispatch ────────────────────────
@@ -269,8 +265,7 @@ impl ExecutePhase for RuntimeExecutePhase {
                 let proposal = decide.proposals[i].clone();
                 async move {
                     let started_at = std::time::Instant::now();
-                    let mut result =
-                        self.dispatch_one(ctx, &proposal, i as u32).await?;
+                    let mut result = self.dispatch_one(ctx, &proposal, i as u32).await?;
                     result.duration_ms = started_at.elapsed().as_millis() as u64;
                     Ok::<_, OrchestratorError>((i, result))
                 }
@@ -280,6 +275,34 @@ impl ExecutePhase for RuntimeExecutePhase {
                 let (i, result) = outcome?;
                 results[i] = Some(result);
             }
+
+            // ── Derive loop signal from parallel InvokeTool results ──────
+            //
+            // `dispatch_one(InvokeTool)` CAN return `AwaitingApproval` from
+            // two paths that predate this PR:
+            //
+            //   1. Legacy approval-gate fallback (no `ToolCallApprovalService`
+            //      wired) — `request_with_context` short-circuit returns
+            //      `AwaitingApproval`.
+            //   2. RFC 020 Track 3 `DangerousPause` recovery branch — on
+            //      crash-mid-dispatch of a non-idempotent tool, operator
+            //      must confirm re-invocation.
+            //
+            // Both MUST escalate to `LoopSignal::WaitApproval` so the loop
+            // runner suspends. Missing this is a production-critical hole
+            // in the recovery-pause case (dangerous tools would silently
+            // skip the operator gate). Earliest-index wins so the ordering
+            // matches what the old sequential path produced.
+            for i in &invoke_indices {
+                let Some(result) = results[*i].as_ref() else {
+                    continue;
+                };
+                let next_signal = derive_signal(result, &loop_signal);
+                if !matches!(next_signal, LoopSignal::Continue) {
+                    loop_signal = next_signal;
+                    break;
+                }
+            }
         }
 
         // ── Phase 2: sequential non-InvokeTool dispatch ──────────────────
@@ -287,19 +310,27 @@ impl ExecutePhase for RuntimeExecutePhase {
         // These carry terminal signals (CompleteRun → Done, SpawnSubagent
         // → WaitSubagent, EscalateToOperator → WaitApproval). Original
         // short-circuit semantics: first terminal signal stops the batch.
-        for (i, proposal) in decide.proposals.iter().enumerate() {
-            if proposal.action_type == ActionType::InvokeTool {
-                continue;
-            }
-            let started_at = std::time::Instant::now();
-            let mut result = self.dispatch_one(ctx, proposal, i as u32).await?;
-            result.duration_ms = started_at.elapsed().as_millis() as u64;
+        //
+        // If Phase 1 already set a terminal signal (e.g. an InvokeTool hit
+        // a recovery pause), we skip Phase 2 entirely — running bookkeeping
+        // steps after the batch has already committed to suspending would
+        // trip downstream invariants (double-completion, extra subagent
+        // spawn).
+        if matches!(loop_signal, LoopSignal::Continue) {
+            for (i, proposal) in decide.proposals.iter().enumerate() {
+                if proposal.action_type == ActionType::InvokeTool {
+                    continue;
+                }
+                let started_at = std::time::Instant::now();
+                let mut result = self.dispatch_one(ctx, proposal, i as u32).await?;
+                result.duration_ms = started_at.elapsed().as_millis() as u64;
 
-            let new_signal = derive_signal(&result, &loop_signal);
-            results[i] = Some(result);
-            if !matches!(new_signal, LoopSignal::Continue) {
-                loop_signal = new_signal;
-                break;
+                let new_signal = derive_signal(&result, &loop_signal);
+                results[i] = Some(result);
+                if !matches!(new_signal, LoopSignal::Continue) {
+                    loop_signal = new_signal;
+                    break;
+                }
             }
         }
 
@@ -316,8 +347,7 @@ impl ExecutePhase for RuntimeExecutePhase {
                     Some(ActionResult {
                         proposal: decide.proposals[i].clone(),
                         status: ActionStatus::Failed {
-                            reason: "skipped: earlier proposal terminated the batch"
-                                .to_owned(),
+                            reason: "skipped: earlier proposal terminated the batch".to_owned(),
                         },
                         tool_output: None,
                         invocation_id: None,
@@ -1070,9 +1100,10 @@ impl RuntimeExecutePhase {
         };
 
         // 1. Submit proposal.
-        let decision = svc.submit_proposal(tcp).await.map_err(|e| {
-            OrchestratorError::Execute(format!("submit_proposal failed: {e}"))
-        })?;
+        let decision = svc
+            .submit_proposal(tcp)
+            .await
+            .map_err(|e| OrchestratorError::Execute(format!("submit_proposal failed: {e}")))?;
 
         // 2. Resolve to an OperatorDecision, awaiting if pending.
         let operator_decision = match decision {
@@ -1119,8 +1150,7 @@ impl RuntimeExecutePhase {
             OperatorDecision::Rejected { reason } => Ok(ActionResult {
                 proposal: proposal.clone(),
                 status: ActionStatus::Failed {
-                    reason: reason
-                        .unwrap_or_else(|| "operator rejected tool call".to_owned()),
+                    reason: reason.unwrap_or_else(|| "operator rejected tool call".to_owned()),
                 },
                 tool_output: None,
                 invocation_id: None,
@@ -1139,10 +1169,7 @@ impl RuntimeExecutePhase {
     }
 }
 
-fn build_display_summary(
-    proposal: &cairn_domain::ActionProposal,
-    tool_name: &str,
-) -> String {
+fn build_display_summary(proposal: &cairn_domain::ActionProposal, tool_name: &str) -> String {
     // The operator dashboard renders this verbatim — keep it
     // short (one line) and include tool_name + the description
     // hint the LLM supplied so the operator sees intent at a glance.
@@ -1359,4 +1386,98 @@ fn truncate_text_for_context(text: &str, token_limit: usize) -> String {
         .collect();
 
     format!("{prefix}... [truncated: {omitted} chars omitted] ...{suffix}")
+}
+
+// ── Tests ────────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod signal_aggregation_tests {
+    use super::*;
+    use cairn_domain::{ActionProposal, ActionType, ApprovalId, TaskId};
+
+    fn invoke_result(status: ActionStatus) -> ActionResult {
+        ActionResult {
+            proposal: ActionProposal {
+                action_type: ActionType::InvokeTool,
+                description: "test".to_owned(),
+                confidence: 1.0,
+                tool_name: Some("t".to_owned()),
+                tool_args: None,
+                requires_approval: false,
+            },
+            status,
+            tool_output: None,
+            invocation_id: None,
+            duration_ms: 0,
+        }
+    }
+
+    /// Regression for the Cursor Bugbot finding on PR-5.
+    ///
+    /// Pre-fix, `execute()` only ran `derive_signal` on non-InvokeTool
+    /// proposals (Phase 2). Any `AwaitingApproval` that escaped the
+    /// parallel InvokeTool batch (legacy approval-gate fallback or
+    /// RFC 020 `DangerousPause` recovery branch) silently downgraded
+    /// to `Continue`, which is a production hole: the loop would
+    /// advance instead of suspending for the operator.
+    ///
+    /// Post-fix, `execute()` runs `derive_signal` on the parallel batch
+    /// too (earliest-index wins) and Phase 2 is skipped entirely if a
+    /// terminal signal was already set. This test pins that derivation.
+    #[test]
+    fn derive_signal_escalates_awaiting_approval_to_wait_approval() {
+        let awaiting = invoke_result(ActionStatus::AwaitingApproval {
+            approval_id: ApprovalId::new("appr-1"),
+        });
+        let got = derive_signal(&awaiting, &LoopSignal::Continue);
+        match got {
+            LoopSignal::WaitApproval { approval_id } => {
+                assert_eq!(approval_id.as_str(), "appr-1");
+            }
+            other => panic!("expected WaitApproval, got {other:?}"),
+        }
+    }
+
+    /// Parallel-batch aggregation: earliest-index `AwaitingApproval`
+    /// wins over later `Succeeded`. If the earlier entry escaped the
+    /// fold, the loop would miss the suspension entirely.
+    #[test]
+    fn parallel_batch_aggregation_picks_earliest_terminal_signal() {
+        let results = vec![
+            invoke_result(ActionStatus::AwaitingApproval {
+                approval_id: ApprovalId::new("appr-early"),
+            }),
+            invoke_result(ActionStatus::Succeeded),
+        ];
+        let mut loop_signal = LoopSignal::Continue;
+        for r in &results {
+            let next = derive_signal(r, &loop_signal);
+            if !matches!(next, LoopSignal::Continue) {
+                loop_signal = next;
+                break;
+            }
+        }
+        match loop_signal {
+            LoopSignal::WaitApproval { approval_id } => {
+                assert_eq!(approval_id.as_str(), "appr-early");
+            }
+            other => panic!("expected WaitApproval(appr-early), got {other:?}"),
+        }
+    }
+
+    /// SubagentSpawned also escalates. Covers the other InvokeTool
+    /// status that carries a terminal signal.
+    #[test]
+    fn derive_signal_escalates_subagent_spawned_to_wait_subagent() {
+        let spawned = invoke_result(ActionStatus::SubagentSpawned {
+            child_task_id: TaskId::new("child-1"),
+        });
+        let got = derive_signal(&spawned, &LoopSignal::Continue);
+        match got {
+            LoopSignal::WaitSubagent { child_task_id } => {
+                assert_eq!(child_task_id.as_str(), "child-1");
+            }
+            other => panic!("expected WaitSubagent, got {other:?}"),
+        }
+    }
 }

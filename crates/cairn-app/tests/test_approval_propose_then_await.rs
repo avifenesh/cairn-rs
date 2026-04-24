@@ -35,8 +35,8 @@ use cairn_orchestrator::context::{DecideOutput, OrchestrationContext};
 use cairn_orchestrator::execute::ExecutePhase;
 use cairn_orchestrator::execute_impl::RuntimeExecutePhase;
 use cairn_runtime::services::{
-    ApprovalServiceImpl, CheckpointServiceImpl, MailboxServiceImpl,
-    ToolCallApprovalReaderAdapter, ToolCallApprovalServiceImpl, ToolInvocationServiceImpl,
+    ApprovalServiceImpl, CheckpointServiceImpl, MailboxServiceImpl, ToolCallApprovalReaderAdapter,
+    ToolCallApprovalServiceImpl, ToolInvocationServiceImpl,
 };
 use cairn_runtime::startup::ToolCallResultCache;
 use cairn_runtime::tool_call_approvals::ToolCallApprovalService;
@@ -73,11 +73,7 @@ fn ctx(run_id: &str, session_id: &str) -> OrchestrationContext {
     }
 }
 
-fn ctx_with_timeout(
-    run_id: &str,
-    session_id: &str,
-    timeout: Duration,
-) -> OrchestrationContext {
+fn ctx_with_timeout(run_id: &str, session_id: &str, timeout: Duration) -> OrchestrationContext {
     let mut c = ctx(run_id, session_id);
     c.approval_timeout = Some(timeout);
     c
@@ -179,19 +175,29 @@ fn build_phase(
 
 fn build_service(
     store: Arc<InMemoryStore>,
-) -> Arc<
-    ToolCallApprovalServiceImpl<InMemoryStore, ToolCallApprovalReaderAdapter<InMemoryStore>>,
-> {
+) -> Arc<ToolCallApprovalServiceImpl<InMemoryStore, ToolCallApprovalReaderAdapter<InMemoryStore>>> {
     let reader = Arc::new(ToolCallApprovalReaderAdapter::new(store.clone()));
     Arc::new(ToolCallApprovalServiceImpl::new(store, reader))
 }
 
-fn derive_expected_call_id(run_id: &str, iteration: u32, call_index: u32, tool: &str, args: &Value) -> ToolCallId {
+fn derive_expected_call_id(
+    run_id: &str,
+    iteration: u32,
+    call_index: u32,
+    tool: &str,
+    args: &Value,
+) -> ToolCallId {
     // Mirrors `ToolCallId::derive` normalisation used by the execute phase.
     let normalized = args.to_string();
     ToolCallId::new(
-        cairn_runtime::startup::ToolCallId::derive(run_id, iteration, call_index, tool, &normalized)
-            .as_str(),
+        cairn_runtime::startup::ToolCallId::derive(
+            run_id,
+            iteration,
+            call_index,
+            tool,
+            &normalized,
+        )
+        .as_str(),
     )
 }
 

@@ -30,6 +30,7 @@ pub mod task_sink;
 
 // ── Public re-exports ─────────────────────────────────────────────────────────
 
+pub use approval_policy::derive_match_policy;
 pub use context::{
     ActionResult, ActionStatus, CompactionConfig, DecideOutput, ExecuteOutcome, GatherOutput,
     LoopConfig, LoopSignal, LoopTermination, OrchestrationContext, StepSummary,
@@ -44,7 +45,6 @@ pub use loop_runner::{
     CheckpointHook, DualCheckpointHook, NoOpCheckpointHook, OrchestratorLoop,
     LEASE_UNHEALTHY_REASON,
 };
-pub use approval_policy::derive_match_policy;
 pub use task_sink::{NoOpTaskSink, TaskFrameSink};
 
 pub mod gather_impl;

@@ -171,8 +171,7 @@ mod tests {
 
     #[test]
     fn read_without_project_root_gets_exact_path() {
-        let policy =
-            derive_match_policy(ToolEffect::Observational, &json!({"path": "/x/y"}), None);
+        let policy = derive_match_policy(ToolEffect::Observational, &json!({"path": "/x/y"}), None);
         match policy {
             ApprovalMatchPolicy::ExactPath { path } => assert_eq!(path, "/x/y"),
             other => panic!("expected exact path, got {other:?}"),

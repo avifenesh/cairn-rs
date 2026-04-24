@@ -47,11 +47,7 @@ where
         &self,
         call_id: &ToolCallId,
     ) -> Result<Option<ApprovedProposal>, RuntimeError> {
-        let record = self
-            .inner
-            .get(call_id)
-            .await
-            .map_err(RuntimeError::Store)?;
+        let record = self.inner.get(call_id).await.map_err(RuntimeError::Store)?;
 
         let Some(record) = record else {
             return Ok(None);
