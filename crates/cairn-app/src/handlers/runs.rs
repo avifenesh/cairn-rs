@@ -1655,7 +1655,7 @@ pub(crate) async fn orchestrate_run_handler(
     use cairn_domain::RunId;
     use cairn_harness_tools::{
         HarnessBash, HarnessBashKill, HarnessBashOutput, HarnessBuiltin, HarnessEdit, HarnessGlob,
-        HarnessGrep, HarnessMultiEdit, HarnessRead, HarnessWebFetch, HarnessWrite,
+        HarnessGrep, HarnessLsp, HarnessMultiEdit, HarnessRead, HarnessWebFetch, HarnessWrite,
     };
     use cairn_orchestrator::{
         LlmDecidePhase, LoopConfig, LoopTermination, OrchestrationContext, OrchestratorLoop,
@@ -1912,6 +1912,8 @@ pub(crate) async fn orchestrate_run_handler(
             std::sync::Arc::new(HarnessBuiltin::<HarnessRead>::new());
         let glob_find: std::sync::Arc<dyn cairn_tools::ToolHandler> =
             std::sync::Arc::new(HarnessBuiltin::<HarnessGlob>::new());
+        let lsp_tool: std::sync::Arc<dyn cairn_tools::ToolHandler> =
+            std::sync::Arc::new(HarnessBuiltin::<HarnessLsp>::new());
         let json_extract: std::sync::Arc<dyn cairn_tools::ToolHandler> =
             std::sync::Arc::new(JsonExtractTool);
         let calculate: std::sync::Arc<dyn cairn_tools::ToolHandler> =
@@ -1974,6 +1976,7 @@ pub(crate) async fn orchestrate_run_handler(
                 .register(grep_search.clone())
                 .register(file_read.clone())
                 .register(glob_find.clone())
+                .register(lsp_tool.clone())
                 .register(json_extract.clone())
                 .register(calculate.clone())
                 .register(graph_query.clone())

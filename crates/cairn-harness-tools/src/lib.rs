@@ -28,6 +28,7 @@ pub mod adapter;
 pub mod error;
 pub mod hook;
 pub mod sensitive;
+#[doc(hidden)]
 pub mod tools;
 
 pub use adapter::{HarnessBuiltin, HarnessTool};
@@ -35,5 +36,8 @@ pub use hook::build_cairn_hook;
 pub use sensitive::default_sensitive_patterns;
 pub use tools::{
     HarnessBash, HarnessBashKill, HarnessBashOutput, HarnessEdit, HarnessGlob, HarnessGrep,
-    HarnessMultiEdit, HarnessRead, HarnessWebFetch, HarnessWrite,
+    HarnessLsp, HarnessMultiEdit, HarnessRead, HarnessWebFetch, HarnessWrite,
 };
+
+#[doc(hidden)]
+pub use tools::__clear_client_cache_for_tests;

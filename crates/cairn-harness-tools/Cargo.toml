@@ -20,6 +20,7 @@ harness-grep     = "0.1"
 harness-glob     = "0.1"
 harness-write    = "0.1"
 harness-webfetch = "0.1"
+harness-lsp      = "0.1"
 
 async-trait = "0.1"
 serde       = { version = "1", features = ["derive"] }
