@@ -179,7 +179,11 @@ function TaskRow({ task, fresh }: { task: TaskRecord; fresh: boolean }) {
 
 // ── Run quick actions (issues #166/#173) ──────────────────────────────────────
 
-const RUNNING_STATES = new Set(["pending", "running", "waiting_approval", "waiting_dependency"]);
+// States from which backend pause (`ff_suspend_execution`) can succeed.
+// `pending` has no lease yet, so the backend rejects pause with
+// `fence_required` / `partial_fence_triple`; we exclude it to avoid
+// offering a button that cannot succeed.
+const RUNNING_STATES = new Set(["running", "waiting_approval", "waiting_dependency"]);
 const TERMINAL_STATES = new Set(["completed", "failed", "canceled"]);
 
 /**

@@ -502,8 +502,14 @@ function PlanArtifactPanel({ runId, run }: { runId: string; run?: import("../lib
 
 // ── Operator actions (issues #166/#173) ──────────────────────────────────────
 
+// States from which `ff_suspend_execution` (backend pause) can succeed.
+// `pending` is deliberately excluded: a pending run has no lease yet, so
+// the backend rejects pause with `fence_required` / `partial_fence_triple`
+// (surfaced as HTTP 409 `invalid run transition: partial_fence_triple ->
+// suspended`). We gate the Pause button on states that imply an active
+// lease.
 const RUNNING_STATES = new Set([
-  "pending", "running", "waiting_approval", "waiting_dependency",
+  "running", "waiting_approval", "waiting_dependency",
 ]);
 // Mirrors `cairn_domain::RunState::is_terminal()` (completed|failed|canceled)
 // and defensively includes `dead_lettered` — the backend never emits it for a
