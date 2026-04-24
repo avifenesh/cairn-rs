@@ -457,7 +457,7 @@ pub fn build_full_tool_registry(
 ) -> BuiltinToolRegistry {
     use cairn_harness_tools::{
         HarnessBash, HarnessBashKill, HarnessBashOutput, HarnessBuiltin, HarnessEdit, HarnessGlob,
-        HarnessGrep, HarnessMultiEdit, HarnessRead, HarnessWebFetch, HarnessWrite,
+        HarnessGrep, HarnessLsp, HarnessMultiEdit, HarnessRead, HarnessWebFetch, HarnessWrite,
     };
     use cairn_tools::builtins::{ScratchPadTool, ToolSearchTool};
     let _ = working_dir; // harness tools use ToolContext.working_dir at exec time.
@@ -472,6 +472,8 @@ pub fn build_full_tool_registry(
             .register(Arc::new(HarnessBuiltin::<HarnessMultiEdit>::new()))
             .register(Arc::new(HarnessBuiltin::<HarnessGlob>::new()))
             .register(Arc::new(HarnessBuiltin::<HarnessGrep>::new()))
+            // LSP — precise code navigation (hover, definition, references, symbols).
+            .register(Arc::new(HarnessBuiltin::<HarnessLsp>::new()))
             // Shell — agents invoke git/gh CLI through bash.
             .register(Arc::new(HarnessBuiltin::<HarnessBash>::new()))
             .register(Arc::new(HarnessBuiltin::<HarnessBashOutput>::new()))
