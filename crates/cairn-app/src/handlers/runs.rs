@@ -2247,6 +2247,7 @@ pub(crate) async fn orchestrate_run_handler(
         inner: std::sync::Arc<crate::sse_hooks::SseOrchestratorEmitter>,
         store: std::sync::Arc<cairn_store::InMemoryStore>,
         exporter: std::sync::Arc<cairn_runtime::telemetry::OtlpExporter>,
+        fatal_error: std::sync::Mutex<Option<String>>,
     }
     #[async_trait::async_trait]
     impl cairn_orchestrator::OrchestratorEventEmitter for TracingEmitter {
@@ -2266,26 +2267,62 @@ pub(crate) async fn orchestrate_run_handler(
             d: &cairn_orchestrator::DecideOutput,
         ) {
             self.inner.on_decide_completed(ctx, d).await;
-            // Emit ProviderCallCompleted so LLM traces are populated.
+            // Emit RouteDecisionMade + ProviderCallCompleted so LLM traces
+            // are populated.
+            //
+            // **Event order matters for Postgres (F24 dogfood fix,
+            // 2026-04-23).** `provider_calls.route_decision_id` has a FK
+            // to `route_decisions(route_decision_id)`. Both events share
+            // the same `PgEventLog::append` transaction and are applied
+            // by `PgSyncProjection` in slice order, so we MUST emit
+            // `RouteDecisionMade` first — otherwise the
+            // `provider_calls` INSERT fires before the parent row exists
+            // and Postgres raises a FK violation. The old code emitted
+            // only `ProviderCallCompleted` with a synthetic
+            // `route_decision_id`, which silently worked on the
+            // InMemory primary (no FK) but blew up on the Postgres
+            // secondary under dogfood `--mode team`. The divergence was
+            // logged at WARN "non-fatal" and the orchestrator loop
+            // kept spinning — dropping the proposed tool_call.
             let now = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap_or_default()
                 .as_millis() as u64;
             let call_id = format!("orch_{}_{}", ctx.run_id.as_str(), now);
-            let event = cairn_domain::EventEnvelope::for_runtime_event(
+            let route_decision_id =
+                cairn_domain::RouteDecisionId::new(format!("rd_{call_id}"));
+            let route_attempt_id =
+                cairn_domain::RouteAttemptId::new(format!("ra_{call_id}"));
+            let provider_binding_id = cairn_domain::ProviderBindingId::new("brain");
+
+            let route_event = cairn_domain::EventEnvelope::for_runtime_event(
+                cairn_domain::EventId::new(format!("evt_route_{call_id}")),
+                cairn_domain::EventSource::Runtime,
+                cairn_domain::RuntimeEvent::RouteDecisionMade(
+                    cairn_domain::events::RouteDecisionMade {
+                        project: ctx.project.clone(),
+                        route_decision_id: route_decision_id.clone(),
+                        operation_kind: cairn_domain::providers::OperationKind::Generate,
+                        selected_provider_binding_id: Some(provider_binding_id.clone()),
+                        final_status:
+                            cairn_domain::providers::RouteDecisionStatus::Selected,
+                        attempt_count: 1,
+                        fallback_used: false,
+                        decided_at: now,
+                    },
+                ),
+            );
+
+            let provider_event = cairn_domain::EventEnvelope::for_runtime_event(
                 cairn_domain::EventId::new(format!("evt_trace_{call_id}")),
                 cairn_domain::EventSource::Runtime,
                 cairn_domain::RuntimeEvent::ProviderCallCompleted(
                     cairn_domain::events::ProviderCallCompleted {
                         project: ctx.project.clone(),
                         provider_call_id: cairn_domain::ProviderCallId::new(&call_id),
-                        route_decision_id: cairn_domain::RouteDecisionId::new(format!(
-                            "rd_{call_id}"
-                        )),
-                        route_attempt_id: cairn_domain::RouteAttemptId::new(format!(
-                            "ra_{call_id}"
-                        )),
-                        provider_binding_id: cairn_domain::ProviderBindingId::new("brain"),
+                        route_decision_id,
+                        route_attempt_id,
+                        provider_binding_id,
                         provider_connection_id: cairn_domain::ProviderConnectionId::new("brain"),
                         provider_model_id: cairn_domain::ProviderModelId::new(&d.model_id),
                         operation_kind: cairn_domain::providers::OperationKind::Generate,
@@ -2315,11 +2352,33 @@ pub(crate) async fn orchestrate_run_handler(
                     },
                 ),
             );
-            let payload = event.payload.clone();
-            if let Err(e) = self.store.append(&[event]).await {
-                tracing::warn!("event store append failed (non-fatal): {e}");
+            let provider_payload = provider_event.payload.clone();
+            if let Err(e) = self
+                .store
+                .append(&[route_event, provider_event])
+                .await
+            {
+                // Fail LOUD: a dual-write failure against the durable
+                // secondary (Postgres in team mode) means the in-memory
+                // and durable event logs have diverged. Continuing the
+                // orchestrator loop would silently lose this iteration's
+                // tool_call because the next iteration reads from the
+                // in-memory primary which no longer matches the
+                // secondary. The loop runner consults
+                // `take_fatal_error()` after `on_decide_completed` and
+                // aborts with `OrchestratorError::Store`.
+                tracing::error!(
+                    run_id    = %ctx.run_id,
+                    error     = %e,
+                    "event store append failed — in-memory/secondary logs have diverged, aborting run"
+                );
+                let mut slot = self.fatal_error.lock().unwrap_or_else(|p| p.into_inner());
+                *slot = Some(format!(
+                    "dual-write divergence on run={}: {e}",
+                    ctx.run_id.as_str()
+                ));
             }
-            let _ = self.exporter.export_event(&payload).await;
+            let _ = self.exporter.export_event(&provider_payload).await;
 
             // Insert into the LlmCallTrace read model so /v1/traces is populated.
             use cairn_store::projections::LlmCallTraceReadModel;
@@ -2380,12 +2439,17 @@ pub(crate) async fn orchestrate_run_handler(
         ) {
             self.inner.on_finished(ctx, t).await;
         }
+        fn take_fatal_error(&self) -> Option<String> {
+            let mut slot = self.fatal_error.lock().unwrap_or_else(|p| p.into_inner());
+            slot.take()
+        }
     }
     let emitter: std::sync::Arc<dyn cairn_orchestrator::OrchestratorEventEmitter> =
         std::sync::Arc::new(TracingEmitter {
             inner: sse_emitter,
             store: state.runtime.store.clone(),
             exporter: state.otlp_exporter.clone(),
+            fatal_error: std::sync::Mutex::new(None),
         });
 
     // RFC 020 Track 4 — dual checkpoint hook. Wires the orchestrator loop

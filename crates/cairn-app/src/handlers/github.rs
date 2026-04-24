@@ -463,6 +463,7 @@ pub(crate) fn build_orchestrator_emitter(
         inner: std::sync::Arc<crate::sse_hooks::SseOrchestratorEmitter>,
         store: std::sync::Arc<cairn_store::InMemoryStore>,
         exporter: std::sync::Arc<cairn_runtime::telemetry::OtlpExporter>,
+        fatal_error: std::sync::Mutex<Option<String>>,
     }
 
     #[async_trait::async_trait]
@@ -483,25 +484,50 @@ pub(crate) fn build_orchestrator_emitter(
             d: &cairn_orchestrator::DecideOutput,
         ) {
             self.inner.on_decide_completed(ctx, d).await;
+            // Emit RouteDecisionMade + ProviderCallCompleted in a single
+            // append so the Postgres projection applies RouteDecisionMade
+            // before ProviderCallCompleted's FK reference to it. See
+            // `handlers/runs.rs::on_decide_completed` for the F24 fix
+            // rationale (2026-04-23).
             let now = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap_or_default()
                 .as_millis() as u64;
             let call_id = format!("orch_{}_{}", ctx.run_id.as_str(), now);
-            let event = cairn_domain::EventEnvelope::for_runtime_event(
+            let route_decision_id =
+                cairn_domain::RouteDecisionId::new(format!("rd_{call_id}"));
+            let route_attempt_id =
+                cairn_domain::RouteAttemptId::new(format!("ra_{call_id}"));
+            let provider_binding_id = cairn_domain::ProviderBindingId::new("brain");
+
+            let route_event = cairn_domain::EventEnvelope::for_runtime_event(
+                cairn_domain::EventId::new(format!("evt_route_{call_id}")),
+                cairn_domain::EventSource::Runtime,
+                cairn_domain::RuntimeEvent::RouteDecisionMade(
+                    cairn_domain::events::RouteDecisionMade {
+                        project: ctx.project.clone(),
+                        route_decision_id: route_decision_id.clone(),
+                        operation_kind: cairn_domain::providers::OperationKind::Generate,
+                        selected_provider_binding_id: Some(provider_binding_id.clone()),
+                        final_status:
+                            cairn_domain::providers::RouteDecisionStatus::Selected,
+                        attempt_count: 1,
+                        fallback_used: false,
+                        decided_at: now,
+                    },
+                ),
+            );
+
+            let provider_event = cairn_domain::EventEnvelope::for_runtime_event(
                 cairn_domain::EventId::new(format!("evt_trace_{call_id}")),
                 cairn_domain::EventSource::Runtime,
                 cairn_domain::RuntimeEvent::ProviderCallCompleted(
                     cairn_domain::events::ProviderCallCompleted {
                         project: ctx.project.clone(),
                         provider_call_id: cairn_domain::ProviderCallId::new(&call_id),
-                        route_decision_id: cairn_domain::RouteDecisionId::new(format!(
-                            "rd_{call_id}"
-                        )),
-                        route_attempt_id: cairn_domain::RouteAttemptId::new(format!(
-                            "ra_{call_id}"
-                        )),
-                        provider_binding_id: cairn_domain::ProviderBindingId::new("brain"),
+                        route_decision_id,
+                        route_attempt_id,
+                        provider_binding_id,
                         provider_connection_id: cairn_domain::ProviderConnectionId::new("brain"),
                         provider_model_id: cairn_domain::ProviderModelId::new(&d.model_id),
                         operation_kind: cairn_domain::providers::OperationKind::Generate,
@@ -531,11 +557,24 @@ pub(crate) fn build_orchestrator_emitter(
                     },
                 ),
             );
-            let payload = event.payload.clone();
-            if let Err(e) = self.store.append(&[event]).await {
-                tracing::warn!("event store append failed (non-fatal): {e}");
+            let provider_payload = provider_event.payload.clone();
+            if let Err(e) = self
+                .store
+                .append(&[route_event, provider_event])
+                .await
+            {
+                tracing::error!(
+                    run_id = %ctx.run_id,
+                    error = %e,
+                    "event store append failed — in-memory/secondary logs have diverged, aborting run"
+                );
+                let mut slot = self.fatal_error.lock().unwrap_or_else(|p| p.into_inner());
+                *slot = Some(format!(
+                    "dual-write divergence on run={}: {e}",
+                    ctx.run_id.as_str()
+                ));
             }
-            let _ = self.exporter.export_event(&payload).await;
+            let _ = self.exporter.export_event(&provider_payload).await;
 
             use cairn_store::projections::LlmCallTraceReadModel;
             let input_tokens = d.input_tokens.unwrap_or(0);
@@ -612,12 +651,17 @@ pub(crate) fn build_orchestrator_emitter(
         ) {
             self.inner.on_finished(ctx, t).await;
         }
+        fn take_fatal_error(&self) -> Option<String> {
+            let mut slot = self.fatal_error.lock().unwrap_or_else(|p| p.into_inner());
+            slot.take()
+        }
     }
 
     std::sync::Arc::new(TracingEmitter {
         inner: sse_emitter,
         store: state.runtime.store.clone(),
         exporter: state.otlp_exporter.clone(),
+        fatal_error: std::sync::Mutex::new(None),
     })
 }
 

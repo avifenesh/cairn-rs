@@ -188,6 +188,24 @@ pub trait OrchestratorEventEmitter: Send + Sync {
 
     /// Called once after the loop terminates (terminal or suspended).
     async fn on_finished(&self, _ctx: &OrchestrationContext, _termination: &LoopTermination) {}
+
+    /// Drain a pending fatal error stashed by the emitter since the last
+    /// call. The loop runner consults this after each phase-boundary
+    /// callback and — if `Some` — aborts the loop with a `Store` error
+    /// carrying the message.
+    ///
+    /// The contract is "take": the emitter MUST return the error exactly
+    /// once. Subsequent calls return `None` until another fatal error is
+    /// recorded. This lets the emitter surface side-effect failures
+    /// (e.g. dual-write divergence against the durable secondary) that
+    /// the trait methods can't express through their `()` return type,
+    /// without silently continuing the loop on top of a diverged store.
+    ///
+    /// Default is `None` — emitters that never record fatal errors
+    /// don't need to override this.
+    fn take_fatal_error(&self) -> Option<String> {
+        None
+    }
 }
 
 // ── NoOpEmitter ───────────────────────────────────────────────────────────────
