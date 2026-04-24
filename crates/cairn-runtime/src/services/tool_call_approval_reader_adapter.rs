@@ -18,7 +18,9 @@ use cairn_domain::ToolCallId;
 use cairn_store::projections::{ToolCallApprovalReadModel, ToolCallApprovalState};
 
 use crate::error::RuntimeError;
-use crate::tool_call_approvals::{ApprovedProposal, ToolCallApprovalReader};
+use crate::tool_call_approvals::{
+    store_record_to_stored_proposal, ApprovedProposal, StoredProposal, ToolCallApprovalReader,
+};
 
 /// Generic adapter over any store that implements
 /// [`ToolCallApprovalReadModel`].
@@ -74,6 +76,14 @@ where
             tool_name: record.tool_name.clone(),
             tool_args,
         }))
+    }
+
+    async fn get_tool_call_proposal(
+        &self,
+        call_id: &ToolCallId,
+    ) -> Result<Option<StoredProposal>, RuntimeError> {
+        let record = self.inner.get(call_id).await.map_err(RuntimeError::Store)?;
+        Ok(record.map(store_record_to_stored_proposal))
     }
 }
 

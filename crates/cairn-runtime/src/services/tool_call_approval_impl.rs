@@ -37,7 +37,8 @@ use super::event_helpers::make_envelope;
 use crate::error::RuntimeError;
 use crate::tool_call_approvals::{
     proposal_matches_rule, AllowRule, ApprovalDecision, ApprovedProposal, OperatorDecision,
-    ToolCallApprovalReader, ToolCallApprovalService, ToolCallProposal,
+    StoredProposal, StoredProposalState, ToolCallApprovalReader, ToolCallApprovalService,
+    ToolCallProposal,
 };
 
 /// Current lifecycle state of a proposal held in the cache.
@@ -552,27 +553,40 @@ where
         timeout: Duration,
     ) -> Result<OperatorDecision, RuntimeError> {
         // Fast path: if approve/reject already landed (race between
-        // submit_proposal and the await), return immediately based on
-        // the cached state without opening a oneshot channel. Rejection
-        // reason is preserved so callers see the actual reason (incl.
-        // the `"operator_timeout"` sentinel), not an ambiguous `None`.
-        {
-            let guard = lock(&self.inner);
-            if let Some(entry) = guard.proposals.get(call_id) {
-                match entry.state {
-                    ProposalState::Approved => {
-                        return Ok(OperatorDecision::Approved {
-                            approved_args: entry.effective_args(),
-                        });
-                    }
-                    ProposalState::Rejected => {
-                        return Ok(OperatorDecision::Rejected {
-                            reason: entry.rejection_reason.clone(),
-                        });
-                    }
-                    _ => {}
+        // submit_proposal and the await, or a process restart where the
+        // decision is on disk but not in cache), return immediately
+        // based on the durable state without opening a oneshot channel.
+        // Rejection reason is preserved so callers see the actual
+        // reason (incl. the `"operator_timeout"` sentinel), not an
+        // ambiguous `None`.
+        //
+        // `load_or_fetch` consults the cache first, then falls back to
+        // the projection, so resumed orchestrators after restart hit
+        // the persisted decision instead of registering a oneshot that
+        // will only ever time out. A genuine NotFound (no cache, no
+        // projection row) is surfaced now rather than masked as a
+        // silent timeout.
+        match self.load_or_fetch(call_id).await {
+            Ok(entry) => match entry.state {
+                ProposalState::Approved => {
+                    return Ok(OperatorDecision::Approved {
+                        approved_args: entry.effective_args(),
+                    });
                 }
+                ProposalState::Rejected => {
+                    return Ok(OperatorDecision::Rejected {
+                        reason: entry.rejection_reason.clone(),
+                    });
+                }
+                _ => {}
+            },
+            Err(RuntimeError::NotFound { .. }) => {
+                return Err(RuntimeError::NotFound {
+                    entity: "tool_call_approval",
+                    id: call_id.to_string(),
+                });
             }
+            Err(e) => return Err(e),
         }
 
         let (tx, rx) = oneshot::channel();
@@ -692,20 +706,74 @@ where
 {
     /// Load a proposal from cache, falling back to a store re-hydration
     /// from the projection. Used by approve/reject/amend.
+    ///
+    /// On cache miss we ask the [`ToolCallApprovalReader`] for the full
+    /// projection row and, if present, materialise a `ProposalEntry`
+    /// reflecting whatever state the projection recorded. The entry is
+    /// inserted into the cache so subsequent calls are cheap.
+    ///
+    /// Oneshot senders deliberately do **not** survive rehydration: any
+    /// orchestrator task that was awaiting this proposal died with the
+    /// previous process. The persisted decision event remains the source
+    /// of truth — a follow-up `retrieve_approved_proposal` after the
+    /// operator resolves will still hit the approved-state fast-path.
     async fn load_or_fetch(&self, call_id: &ToolCallId) -> Result<ProposalEntry, RuntimeError> {
         if let Some(entry) = self.cached_entry(call_id) {
             return Ok(entry);
         }
-        // Cache miss — best-effort re-hydration from projection. Without
-        // the projection we cannot reconstruct the ProjectKey / SessionId
-        // required to emit the decision event, so a miss is fatal.
-        //
-        // PR-2 extends `ToolCallApprovalReader` so miss-path callers can
-        // rebuild a `ProposalEntry`. For now, surface a clean NotFound.
-        let _approved = self.reader.get_tool_call_approval(call_id).await?;
-        Err(RuntimeError::NotFound {
-            entity: "tool_call_approval",
-            id: call_id.to_string(),
-        })
+        let stored = self
+            .reader
+            .get_tool_call_proposal(call_id)
+            .await?
+            .ok_or_else(|| RuntimeError::NotFound {
+                entity: "tool_call_approval",
+                id: call_id.to_string(),
+            })?;
+
+        let entry = stored_to_entry(stored);
+
+        // Insert, but don't clobber a cache entry that appeared between
+        // the miss and the store fetch (concurrent `submit_proposal` or a
+        // parallel decision call). The first writer wins: returning the
+        // live cache value keeps decision flows consistent with what any
+        // other in-flight path already observed.
+        let mut guard = lock(&self.inner);
+        let inserted = guard
+            .proposals
+            .entry(call_id.clone())
+            .or_insert(entry)
+            .clone();
+        Ok(inserted)
+    }
+}
+
+/// Translate a [`StoredProposal`] (projection-facing shape) into the
+/// private [`ProposalEntry`] the service caches.
+fn stored_to_entry(stored: StoredProposal) -> ProposalEntry {
+    let state = match (stored.state, stored.amended_args.is_some()) {
+        (StoredProposalState::Pending, true) => ProposalState::Amended,
+        (StoredProposalState::Pending, false) => ProposalState::Pending,
+        (StoredProposalState::Approved, _) => ProposalState::Approved,
+        // `Timeout` is a projection-level distinction; internally a
+        // timeout is a rejection (with `reason = "operator_timeout"`).
+        (StoredProposalState::Rejected | StoredProposalState::Timeout, _) => {
+            ProposalState::Rejected
+        }
+    };
+    // Preserve the `"operator_timeout"` sentinel when the projection
+    // records a timeout but no reason text was persisted. Downstream
+    // error reporting and the await_decision fast path distinguish
+    // operator-initiated rejections from auto-timeouts using this
+    // exact string (see `handle_timeout`).
+    let rejection_reason = match (stored.state, stored.rejection_reason) {
+        (StoredProposalState::Timeout, None) => Some("operator_timeout".to_owned()),
+        (_, r) => r,
+    };
+    ProposalEntry {
+        proposal: stored.proposal,
+        state,
+        amended_args: stored.amended_args,
+        approved_args: stored.approved_args,
+        rejection_reason,
     }
 }

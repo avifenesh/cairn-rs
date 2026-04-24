@@ -128,7 +128,8 @@ pub use tasks::TaskService;
 pub use tenants::TenantService;
 pub use tool_call_approvals::{
     AllowRule, ApprovalDecision as ToolCallApprovalDecision, ApprovedProposal, OperatorDecision,
-    ToolCallApprovalReader, ToolCallApprovalService, ToolCallProposal,
+    StoredProposal, StoredProposalState, ToolCallApprovalReader, ToolCallApprovalService,
+    ToolCallProposal,
 };
 pub use workspaces::WorkspaceService;
 // Service trait exports

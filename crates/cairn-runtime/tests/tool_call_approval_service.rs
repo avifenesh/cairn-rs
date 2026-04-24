@@ -16,8 +16,8 @@ use cairn_domain::{
 use cairn_runtime::error::RuntimeError;
 use cairn_runtime::services::ToolCallApprovalServiceImpl;
 use cairn_runtime::tool_call_approvals::{
-    ApprovalDecision, ApprovedProposal, OperatorDecision, ToolCallApprovalReader,
-    ToolCallApprovalService, ToolCallProposal,
+    ApprovalDecision, ApprovedProposal, OperatorDecision, StoredProposal, StoredProposalState,
+    ToolCallApprovalReader, ToolCallApprovalService, ToolCallProposal,
 };
 use cairn_store::InMemoryStore;
 use serde_json::{json, Value};
@@ -43,11 +43,16 @@ impl ToolCallApprovalReader for EmptyReader {
 #[derive(Default)]
 struct SeededReader {
     entries: Mutex<Vec<(ToolCallId, ApprovedProposal)>>,
+    proposals: Mutex<Vec<(ToolCallId, StoredProposal)>>,
 }
 
 impl SeededReader {
     fn insert(&self, id: ToolCallId, p: ApprovedProposal) {
         self.entries.lock().unwrap().push((id, p));
+    }
+
+    fn insert_proposal(&self, id: ToolCallId, p: StoredProposal) {
+        self.proposals.lock().unwrap().push((id, p));
     }
 }
 
@@ -64,6 +69,33 @@ impl ToolCallApprovalReader for SeededReader {
             .iter()
             .find(|(id, _)| id == call_id)
             .map(|(_, p)| p.clone()))
+    }
+
+    async fn get_tool_call_proposal(
+        &self,
+        call_id: &ToolCallId,
+    ) -> Result<Option<StoredProposal>, RuntimeError> {
+        Ok(self
+            .proposals
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|(id, _)| id == call_id)
+            .map(|(_, p)| p.clone()))
+    }
+}
+
+/// Build a `StoredProposal` representing a pending record in the
+/// projection — the exact shape the service sees after restart when the
+/// in-memory cache is empty but the event log + projection retain the
+/// proposal.
+fn stored_pending(call: &str, tool: &str, args: Value) -> StoredProposal {
+    StoredProposal {
+        proposal: proposal(call, tool, args),
+        state: StoredProposalState::Pending,
+        amended_args: None,
+        approved_args: None,
+        rejection_reason: None,
     }
 }
 
@@ -604,4 +636,213 @@ async fn concurrent_await_decision_is_rejected() {
     );
     // Clean up the first awaiter (it'll time-out).
     let _ = first.await.unwrap();
+}
+
+// ── Cache-miss fallback (F22 dogfood unblocker) ─────────────────────────────
+//
+// Proposals live in the durable projection across process restart, but the
+// in-memory cache does not. Before the fix, approve/reject/amend looked
+// *only* in the cache and returned NotFound the instant a restart happened
+// — even though the event log + projection still held a perfectly valid
+// pending record. These tests pin the fallback: the service now re-hydrates
+// the cache from the projection and proceeds with the decision flow.
+
+fn svc_with_seeded_reader() -> (
+    ToolCallApprovalServiceImpl<InMemoryStore, SeededReader>,
+    Arc<SeededReader>,
+) {
+    let store = Arc::new(InMemoryStore::new());
+    let reader = Arc::new(SeededReader::default());
+    let svc = ToolCallApprovalServiceImpl::new(store, reader.clone());
+    (svc, reader)
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn approve_after_cache_eviction_falls_back_to_projection() {
+    // Simulates: proposal was submitted before a restart → projection has
+    // the row, but the cache is empty. Approve must rehydrate and succeed.
+    let (svc, reader) = svc_with_seeded_reader();
+    reader.insert_proposal(
+        ToolCallId::new("tc_restart"),
+        stored_pending("tc_restart", "read", json!({ "path": "/a" })),
+    );
+
+    svc.approve(
+        ToolCallId::new("tc_restart"),
+        OperatorId::new("op-1"),
+        ApprovalScope::Once,
+        None,
+    )
+    .await
+    .expect("approve must succeed on cache miss when projection has the row");
+
+    // Post-condition: the approved fast-path now resolves against the
+    // rehydrated entry.
+    let approved = svc
+        .retrieve_approved_proposal(&ToolCallId::new("tc_restart"))
+        .await
+        .expect("retrieve approved");
+    assert_eq!(approved.tool_name, "read");
+    assert_eq!(approved.tool_args, json!({ "path": "/a" }));
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn reject_after_cache_eviction_falls_back_to_projection() {
+    let (svc, reader) = svc_with_seeded_reader();
+    reader.insert_proposal(
+        ToolCallId::new("tc_restart"),
+        stored_pending("tc_restart", "bash", json!({ "cmd": "rm -rf /" })),
+    );
+
+    svc.reject(
+        ToolCallId::new("tc_restart"),
+        OperatorId::new("op-1"),
+        Some("too spicy".into()),
+    )
+    .await
+    .expect("reject must succeed on cache miss when projection has the row");
+
+    // Post-condition: the cache reflects the rejection; a re-approve is
+    // now an invalid transition (not a NotFound).
+    let err = svc
+        .approve(
+            ToolCallId::new("tc_restart"),
+            OperatorId::new("op-2"),
+            ApprovalScope::Once,
+            None,
+        )
+        .await
+        .unwrap_err();
+    assert!(matches!(err, RuntimeError::InvalidTransition { .. }));
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn amend_after_cache_eviction_falls_back_to_projection() {
+    let (svc, reader) = svc_with_seeded_reader();
+    reader.insert_proposal(
+        ToolCallId::new("tc_restart"),
+        stored_pending("tc_restart", "write", json!({ "body": "v1" })),
+    );
+
+    svc.amend(
+        ToolCallId::new("tc_restart"),
+        OperatorId::new("op-1"),
+        json!({ "body": "v2" }),
+    )
+    .await
+    .expect("amend must succeed on cache miss when projection has the row");
+
+    // Post-condition: a subsequent approve (no override) executes with
+    // the amended args, proving the rehydrated entry carried forward.
+    svc.approve(
+        ToolCallId::new("tc_restart"),
+        OperatorId::new("op-1"),
+        ApprovalScope::Once,
+        None,
+    )
+    .await
+    .unwrap();
+    let approved = svc
+        .retrieve_approved_proposal(&ToolCallId::new("tc_restart"))
+        .await
+        .unwrap();
+    assert_eq!(approved.tool_args, json!({ "body": "v2" }));
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn approve_genuinely_not_found_still_returns_not_found() {
+    // Neither cache nor projection holds the call_id — must surface a
+    // clean NotFound (not a panic, not an Internal error).
+    let (svc, _reader) = svc_with_seeded_reader();
+    let err = svc
+        .approve(
+            ToolCallId::new("tc_nonexistent"),
+            OperatorId::new("op-1"),
+            ApprovalScope::Once,
+            None,
+        )
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(err, RuntimeError::NotFound { entity, .. } if entity == "tool_call_approval"),
+        "expected NotFound, got {err:?}"
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn approve_rehydrates_terminal_state_as_invalid_transition() {
+    // Projection says the proposal was already approved before the
+    // restart. Re-approving must surface InvalidTransition — not
+    // NotFound, and definitely not a silent double-approve.
+    let (svc, reader) = svc_with_seeded_reader();
+    reader.insert_proposal(
+        ToolCallId::new("tc_done"),
+        StoredProposal {
+            proposal: proposal("tc_done", "read", json!({ "path": "/a" })),
+            state: StoredProposalState::Approved,
+            amended_args: None,
+            approved_args: None,
+            rejection_reason: None,
+        },
+    );
+
+    let err = svc
+        .approve(
+            ToolCallId::new("tc_done"),
+            OperatorId::new("op-1"),
+            ApprovalScope::Once,
+            None,
+        )
+        .await
+        .unwrap_err();
+    assert!(matches!(err, RuntimeError::InvalidTransition { .. }));
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn await_decision_falls_back_to_projection_after_restart() {
+    // A resumed orchestrator after restart calls await_decision with
+    // an empty cache. Before this fix it would register a oneshot and
+    // time out even though the projection carried an approval. The
+    // fast path now re-hydrates from the projection and returns the
+    // persisted decision immediately.
+    let (svc, reader) = svc_with_seeded_reader();
+    reader.insert_proposal(
+        ToolCallId::new("tc_resume"),
+        StoredProposal {
+            proposal: proposal("tc_resume", "read", json!({ "path": "/a" })),
+            state: StoredProposalState::Approved,
+            amended_args: None,
+            approved_args: Some(json!({ "path": "/a" })),
+            rejection_reason: None,
+        },
+    );
+
+    let decision = svc
+        .await_decision(&ToolCallId::new("tc_resume"), Duration::from_millis(50))
+        .await
+        .expect("await_decision must surface the persisted approval, not time out");
+    match decision {
+        OperatorDecision::Approved { approved_args } => {
+            assert_eq!(approved_args, json!({ "path": "/a" }));
+        }
+        other => panic!("expected Approved, got {other:?}"),
+    }
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn await_decision_on_unknown_call_surfaces_not_found() {
+    // Historical behaviour was to register a oneshot and time out on
+    // an unknown call_id — operators then saw a "timeout" that was
+    // actually a typo. The new fast path lifts the projection lookup
+    // before the oneshot, so a genuinely-missing row is surfaced as
+    // NotFound immediately.
+    let (svc, _reader) = svc_with_seeded_reader();
+    let err = svc
+        .await_decision(&ToolCallId::new("tc_nope"), Duration::from_millis(50))
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(err, RuntimeError::NotFound { entity, .. } if entity == "tool_call_approval"),
+        "expected NotFound, got {err:?}"
+    );
 }
