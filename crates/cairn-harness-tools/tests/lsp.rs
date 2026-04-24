@@ -118,6 +118,25 @@ async fn different_projects_get_isolated_lsp_clients() {
     );
 }
 
+#[tokio::test]
+async fn missing_session_id_bypasses_the_cache() {
+    // Without a session_id each call must return a fresh client — otherwise
+    // unrelated default-ctx callers (unit tests, plain `execute()`) would
+    // silently fan into the same LSP process.
+    __clear_client_cache_for_tests().await;
+    let dir = TempDir::new().unwrap();
+    let mut ctx = ToolContext::default();
+    ctx.working_dir = dir.path().to_path_buf();
+    // session_id deliberately left unset.
+
+    let a = cairn_harness_tools::tools::lsp::client_for(&ctx, &project());
+    let b = cairn_harness_tools::tools::lsp::client_for(&ctx, &project());
+    assert!(
+        !Arc::ptr_eq(&a, &b),
+        "without a session_id each call must return a fresh, uncached client",
+    );
+}
+
 // ── Failure paths through ToolHandler ────────────────────────────────────────
 
 #[tokio::test]

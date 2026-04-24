@@ -16,7 +16,13 @@
 //! The cache grows unbounded over the cairn-app process lifetime. Eviction on
 //! run-finalize is a follow-up, same pattern as the write-ledger cache. For
 //! typical single-run lifetimes this is not urgent; for long-lived servers it
-//! is worth wiring to the `SessionEnded` event. Tracked alongside #228.
+//! is worth wiring to the `SessionEnded` event.
+//!
+//! Calls made without a `session_id` (typically unit-test harness paths that
+//! construct `ToolContext::default()` and hit the `execute()` entrypoint)
+//! bypass the cache and get a fresh `SpawnLspClient` every time — this
+//! prevents unrelated default-ctx calls from silently sharing a cached
+//! language server across completely unrelated invocations.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -38,6 +44,12 @@ use crate::adapter::HarnessTool;
 use crate::error::map_harness;
 use crate::sensitive::default_sensitive_patterns;
 
+/// Structured cache key: `(tenant_id, workspace_id, project_id, session_id)`.
+///
+/// Using a tuple instead of a delimiter-joined string removes the risk of
+/// key collisions when ids contain `/` or other reserved characters.
+type ClientKey = (String, String, String, String);
+
 /// Per-session LSP client cache.
 ///
 /// Keyed by `(tenant_id, workspace_id, project_id, session_id)` so
@@ -45,31 +57,41 @@ use crate::sensitive::default_sensitive_patterns;
 /// The inner `Arc<SpawnLspClient>` owns the spawned `rust-analyzer` /
 /// `gopls` / `typescript-language-server` / etc. child processes for the
 /// lifetime of that session.
-static CLIENTS: Lazy<Mutex<HashMap<String, Arc<SpawnLspClient>>>> =
+static CLIENTS: Lazy<Mutex<HashMap<ClientKey, Arc<SpawnLspClient>>>> =
     Lazy::new(|| Mutex::new(HashMap::new()));
 
-fn client_key(ctx: &ToolContext, project: &ProjectKey) -> String {
-    format!(
-        "{}/{}/{}/{}",
-        project.tenant_id,
-        project.workspace_id,
-        project.project_id,
-        ctx.session_id.as_deref().unwrap_or(""),
-    )
+fn client_key(ctx: &ToolContext, project: &ProjectKey) -> Option<ClientKey> {
+    // Only cache when we have a concrete session_id. Without it, every
+    // caller (including unrelated `ToolHandler::execute()` entry-points
+    // using `ToolContext::default()`) would otherwise collapse onto the
+    // same cached client — risking stale-server reuse across unrelated
+    // invocations. Returning `None` signals "build a fresh client, do
+    // not insert".
+    let session_id = ctx.session_id.as_ref()?.to_owned();
+    Some((
+        project.tenant_id.to_string(),
+        project.workspace_id.to_string(),
+        project.project_id.to_string(),
+        session_id,
+    ))
 }
 
 /// Look up or spawn the cached `SpawnLspClient` for this session.
 ///
 /// First call in a session spawns a fresh client (which lazily spawns LSP
-/// processes on first operation). Subsequent calls reuse the same client,
-/// so warm servers are preserved across tool invocations.
+/// processes on first operation). Subsequent calls in the same session
+/// reuse the same client, so warm servers are preserved across tool
+/// invocations. Calls without a `session_id` (unit-test paths) bypass the
+/// cache and always get a fresh client — see module docs.
 ///
 /// On mutex poisoning (a prior panic under the lock) we recover the inner
 /// map rather than propagating; tool calls should not fail because of an
 /// unrelated panic in another task.
 #[doc(hidden)]
 pub fn client_for(ctx: &ToolContext, project: &ProjectKey) -> Arc<SpawnLspClient> {
-    let key = client_key(ctx, project);
+    let Some(key) = client_key(ctx, project) else {
+        return Arc::new(SpawnLspClient::new());
+    };
     let mut guard = CLIENTS.lock().unwrap_or_else(|e| e.into_inner());
     guard
         .entry(key)
@@ -127,21 +149,21 @@ impl HarnessTool for HarnessLsp {
                 },
                 "path": {
                     "type": "string",
-                    "description": "Absolute or workspace-relative file path. Required for every op except workspaceSymbol."
+                    "description": "Absolute or workspace-relative file path. Needed for every op except workspaceSymbol; enforced at runtime by the operation-specific validator."
                 },
                 "line": {
                     "type": "integer",
                     "minimum": 1,
-                    "description": "1-INDEXED line. Required for hover, definition, references, implementation."
+                    "description": "1-INDEXED line. Needed for hover, definition, references, implementation; enforced at runtime."
                 },
                 "character": {
                     "type": "integer",
                     "minimum": 1,
-                    "description": "1-INDEXED column. Required for hover, definition, references, implementation."
+                    "description": "1-INDEXED column. Needed for hover, definition, references, implementation; enforced at runtime."
                 },
                 "query": {
                     "type": "string",
-                    "description": "Symbol-name substring. Required for workspaceSymbol."
+                    "description": "Symbol-name substring. Needed for workspaceSymbol; enforced at runtime."
                 },
                 "head_limit": {
                     "type": "integer",
