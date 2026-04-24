@@ -185,6 +185,44 @@ where
         &self,
         proposal: ToolCallProposal,
     ) -> Result<ApprovalDecision, RuntimeError> {
+        // F25 shadowing guard: if this `call_id` is already resolved as
+        // `Approved` (e.g. the run is being re-orchestrated after the
+        // operator approved the first attempt), short-circuit without
+        // appending a second `ToolCallProposed` event. Appending would
+        // duplicate the proposal in the projection (fresh `Pending` row
+        // over an `Approved` row) and hide the operator's decision from
+        // any reader that joins by `(run_id, call_id)`. The execute
+        // phase that called us will read the already-approved args via
+        // `retrieve_approved_proposal`.
+        //
+        // Rejected / Timeout states are NOT shadowed here: the execute
+        // phase never resubmits an approved proposal's twin — those are
+        // fresh LLM outputs with their own deterministic `call_id`, and
+        // the operator resolution was final. Falling through triggers
+        // the normal "propose → await" flow, which will observe the
+        // terminal state and resolve immediately.
+        {
+            let cached = self.cached_entry(&proposal.call_id);
+            let already_approved = match cached {
+                Some(entry) => entry.state == ProposalState::Approved,
+                None => {
+                    // Cache miss — consult the projection so a restart
+                    // between approval and re-orchestrate still dedupes.
+                    match self
+                        .reader
+                        .get_tool_call_proposal(&proposal.call_id)
+                        .await?
+                    {
+                        Some(stored) => matches!(stored.state, StoredProposalState::Approved),
+                        None => false,
+                    }
+                }
+            };
+            if already_approved {
+                return Ok(ApprovalDecision::AutoApproved);
+            }
+        }
+
         // 1. Persist the proposal event.
         self.append(RuntimeEvent::ToolCallProposed(ToolCallProposed {
             project: proposal.project.clone(),

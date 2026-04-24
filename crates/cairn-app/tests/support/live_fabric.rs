@@ -372,10 +372,20 @@ fn spawn_subprocess_internal(
         .env("CAIRN_FABRIC_WAITPOINT_HMAC_KID", "cairn-test-k1")
         // Silence noisy tracing so stderr is dominated by structured
         // startup lines; integration tests don't need debug spam.
-        .env("RUST_LOG", "warn,cairn_app=info")
+        // Tests can override via `CAIRN_TEST_RUST_LOG` when they need
+        // to trace a failure through orchestrator/runtime spans.
+        .env(
+            "RUST_LOG",
+            std::env::var("CAIRN_TEST_RUST_LOG")
+                .unwrap_or_else(|_| "warn,cairn_app=info".to_owned()),
+        )
         // Avoid inheriting the parent test process's log-dir setting.
         .env_remove("CAIRN_LOG_DIR")
-        .stdout(Stdio::null())
+        .stdout(if std::env::var("CAIRN_TEST_LOG_FILE").is_ok() {
+            Stdio::piped()
+        } else {
+            Stdio::null()
+        })
         .stderr(Stdio::piped())
         .kill_on_drop(true);
 
@@ -391,6 +401,32 @@ async fn read_listening_banner(mut child: Child) -> (Child, String) {
         .await
         .expect("cairn-app did not print listening banner within timeout")
         .expect("cairn-app exited before printing listening banner");
+    // Drain stdout too when a log file is requested — cairn-app's
+    // default tracing-subscriber writes to stdout, not stderr.
+    if let Some(stdout) = child.stdout.take() {
+        let log_file = std::env::var("CAIRN_TEST_LOG_FILE").ok();
+        tokio::spawn(async move {
+            use tokio::fs::OpenOptions;
+            use tokio::io::AsyncBufReadExt;
+            use tokio::io::AsyncWriteExt;
+            let mut writer = match log_file {
+                Some(p) => OpenOptions::new()
+                    .append(true)
+                    .create(true)
+                    .open(p)
+                    .await
+                    .ok(),
+                None => None,
+            };
+            let mut lines = BufReader::new(stdout).lines();
+            while let Ok(Some(line)) = lines.next_line().await {
+                if let Some(w) = writer.as_mut() {
+                    let _ = w.write_all(format!("[app-out] {line}\n").as_bytes()).await;
+                    let _ = w.flush().await;
+                }
+            }
+        });
+    }
     (child, bound_url)
 }
 
@@ -408,10 +444,32 @@ async fn wait_for_listening(stderr: tokio::process::ChildStderr) -> Option<Strin
             // test stderr — invaluable when a test triggers server-side
             // behavior you want to see (claim contention, FF rejections).
             let echo = std::env::var("CAIRN_TEST_ECHO_SERVER_STDERR").is_ok();
+            // When `CAIRN_TEST_LOG_FILE` is set, tee stderr to that path
+            // too — useful under `cargo test` where the harness eats
+            // plain eprintln. Path is shared across subprocesses in the
+            // same test invocation (append mode).
+            let log_file = std::env::var("CAIRN_TEST_LOG_FILE").ok();
             tokio::spawn(async move {
+                use tokio::fs::OpenOptions;
+                use tokio::io::AsyncWriteExt;
+                let mut writer = match log_file {
+                    Some(p) => OpenOptions::new()
+                        .append(true)
+                        .create(true)
+                        .open(p)
+                        .await
+                        .ok(),
+                    None => None,
+                };
                 while let Ok(Some(line)) = lines.next_line().await {
                     if echo {
                         eprintln!("[cairn-app] {line}");
+                    }
+                    if let Some(w) = writer.as_mut() {
+                        let _ = w
+                            .write_all(format!("[cairn-app] {line}\n").as_bytes())
+                            .await;
+                        let _ = w.flush().await;
                     }
                 }
             });

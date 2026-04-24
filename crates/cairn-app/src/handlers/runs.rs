@@ -2208,14 +2208,21 @@ pub(crate) async fn orchestrate_run_handler(
     // projection (`ToolCallApprovalReadModel`) to the runtime-facing
     // `ToolCallApprovalReader` trait so cache misses re-hydrate from the
     // persistent projection (restart, eviction, cross-process resume).
-    let tool_call_approval_reader = Arc::new(
-        cairn_runtime::services::ToolCallApprovalReaderAdapter::new(store.clone()),
-    );
+    // F25: use the shared `tool_call_approvals` from AppState so the
+    // `await_decision` park (inside this handler's execute phase) and
+    // the operator `approve` path (`/v1/tool-call-approvals/:id/approve`
+    // → `state.runtime.tool_call_approvals.approve`) target the same
+    // service instance + PendingMap. Previously each orchestrate call
+    // constructed a fresh `ToolCallApprovalServiceImpl`, so the
+    // operator's approve fired a oneshot in an instance nobody was
+    // parked on — every run timed out after `approval_timeout_ms`.
     let tool_call_approval_service: Arc<dyn cairn_runtime::ToolCallApprovalService> =
-        Arc::new(cairn_runtime::services::ToolCallApprovalServiceImpl::new(
-            store.clone(),
-            tool_call_approval_reader,
-        ));
+        state.runtime.tool_call_approvals.clone();
+    let tool_call_approval_reader_for_drain: Arc<
+        dyn cairn_runtime::tool_call_approvals::ToolCallApprovalReader,
+    > = Arc::new(cairn_runtime::services::ToolCallApprovalReaderAdapter::new(
+        store.clone(),
+    ));
 
     let execute = RuntimeExecutePhase::builder()
         .tool_registry(registry)
@@ -2338,6 +2345,7 @@ pub(crate) async fn orchestrate_run_handler(
     match OrchestratorLoop::new(gather, decide, execute, cfg)
         .with_emitter(emitter)
         .with_checkpoint_hook(dual_ckpt_hook)
+        .with_approval_reader(tool_call_approval_reader_for_drain)
         .run(ctx)
         .await
     {

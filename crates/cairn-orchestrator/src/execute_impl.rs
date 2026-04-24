@@ -47,7 +47,7 @@ use crate::context::{
     ActionResult, ActionStatus, DecideOutput, ExecuteOutcome, LoopSignal, OrchestrationContext,
 };
 use crate::error::OrchestratorError;
-use crate::execute::ExecutePhase;
+use crate::execute::{ApprovedDispatch, ExecutePhase};
 
 // ── RuntimeExecutePhase ───────────────────────────────────────────────────────
 
@@ -387,9 +387,194 @@ impl ExecutePhase for RuntimeExecutePhase {
             loop_signal,
         })
     }
+
+    async fn dispatch_approved(
+        &self,
+        ctx: &OrchestrationContext,
+        approved: &ApprovedDispatch,
+    ) -> Result<ActionResult, OrchestratorError> {
+        self.dispatch_approved_inner(ctx, approved).await
+    }
 }
 
 impl RuntimeExecutePhase {
+    /// F25 drain path: execute a tool whose operator approval has already
+    /// landed. This mirrors the non-approval branch of `dispatch_one` but:
+    ///
+    /// * Uses the pre-minted `ToolCallId` from the approval record — NO
+    ///   re-derivation, because `ctx.iteration` has reset to 0 after the
+    ///   approval round-trip and would produce a different deterministic
+    ///   hash for the same logical call. That mismatch is the core of the
+    ///   F25 shadowing bug.
+    /// * Skips the approval gate entirely (the operator already approved).
+    /// * Consults + populates the shared `ToolCallResultCache` so the
+    ///   same call re-driven in a later iteration or after a process
+    ///   restart hits the cache instead of re-invoking the tool.
+    async fn dispatch_approved_inner(
+        &self,
+        ctx: &OrchestrationContext,
+        approved: &ApprovedDispatch,
+    ) -> Result<ActionResult, OrchestratorError> {
+        let tool_name = approved.tool_name.clone();
+        // Synthetic proposal mirrors what an `InvokeTool` ActionProposal
+        // would have looked like had DECIDE emitted it. `requires_approval`
+        // MUST be false — the approval round-trip is complete.
+        let synth_proposal = cairn_domain::ActionProposal {
+            action_type: cairn_domain::ActionType::InvokeTool,
+            description: format!("drain approved tool call: {tool_name}"),
+            confidence: 1.0,
+            tool_name: Some(tool_name.clone()),
+            tool_args: Some(approved.tool_args.clone()),
+            requires_approval: false,
+        };
+
+        // ── Cache pre-check (F25 "has this already executed?") ─────────
+        let startup_id = ToolCallId::from_raw(approved.call_id.as_str().to_owned());
+        if let Some(cache_arc) = &self.tool_result_cache {
+            let hit = {
+                let guard = cache_arc.lock().unwrap_or_else(|e| e.into_inner());
+                guard.get(&startup_id).cloned()
+            };
+            if let Some(cached) = hit {
+                let context_output = truncate_tool_output_for_context(
+                    cached.result_json.clone(),
+                    self.tool_output_token_limit,
+                );
+                return Ok(ActionResult {
+                    proposal: synth_proposal,
+                    status: ActionStatus::Succeeded,
+                    tool_output: Some(context_output),
+                    invocation_id: None,
+                    duration_ms: 0,
+                });
+            }
+        }
+
+        // ── Record invocation start ────────────────────────────────────
+        let inv_id = ToolInvocationId::new(new_id("inv"));
+        self.tool_invocation_service
+            .record_start(
+                &ctx.project,
+                inv_id.clone(),
+                Some(ctx.session_id.clone()),
+                Some(ctx.run_id.clone()),
+                ctx.task_id.clone(),
+                ToolInvocationTarget::Builtin {
+                    tool_name: tool_name.clone(),
+                },
+                ExecutionClass::SandboxedProcess,
+            )
+            .await
+            .map_err(OrchestratorError::Runtime)?;
+
+        // ── Dispatch via registry (required for drain) ─────────────────
+        let registry = match self.tool_registry.as_ref() {
+            Some(r) => r,
+            None => {
+                let reason = format!(
+                    "tool_registry not wired — cannot drain approved tool `{}`",
+                    tool_name
+                );
+                self.tool_invocation_service
+                    .record_failed(
+                        &ctx.project,
+                        inv_id.clone(),
+                        ctx.task_id.clone(),
+                        tool_name.clone(),
+                        ToolInvocationOutcomeKind::PermanentFailure,
+                        Some(reason.clone()),
+                    )
+                    .await
+                    .map_err(OrchestratorError::Runtime)?;
+                return Ok(ActionResult {
+                    proposal: synth_proposal,
+                    status: ActionStatus::Failed { reason },
+                    tool_output: None,
+                    invocation_id: Some(inv_id),
+                    duration_ms: 0,
+                });
+            }
+        };
+
+        let mut tool_ctx = cairn_tools::builtins::ToolContext::default();
+        tool_ctx.session_id = Some(ctx.session_id.to_string());
+        tool_ctx.run_id = Some(ctx.run_id.to_string());
+        tool_ctx.working_dir = ctx.working_dir.clone();
+        let tool_args = tool_args_with_working_dir(
+            &tool_name,
+            &ctx.working_dir,
+            Some(approved.tool_args.clone()),
+        );
+
+        let output_result = registry
+            .execute_with_context(&tool_name, &ctx.project, tool_args, &tool_ctx)
+            .await
+            .map(|r| r.output)
+            .map_err(|e| e.to_string());
+
+        let buffered = tool_ctx.drain_buffered_events();
+
+        match output_result {
+            Ok(output) => {
+                // Completion event carries the approval's call_id so the
+                // startup replay rebuilds the cache entry on next boot.
+                self.tool_invocation_service
+                    .record_completed(
+                        &ctx.project,
+                        inv_id.clone(),
+                        ctx.task_id.clone(),
+                        tool_name.clone(),
+                        &buffered,
+                        Some(approved.call_id.as_str().to_owned()),
+                        Some(output.clone()),
+                    )
+                    .await
+                    .map_err(OrchestratorError::Runtime)?;
+
+                // Populate runtime cache so an in-process re-drain hits.
+                if let Some(cache_arc) = &self.tool_result_cache {
+                    let mut guard = cache_arc.lock().unwrap_or_else(|e| e.into_inner());
+                    guard.insert(CachedToolResult {
+                        tool_call_id: startup_id,
+                        tool_name: tool_name.clone(),
+                        result_json: output.clone(),
+                        completed_at: now_ms_u64(),
+                    });
+                }
+
+                let context_output =
+                    truncate_tool_output_for_context(output, self.tool_output_token_limit);
+                Ok(ActionResult {
+                    proposal: synth_proposal,
+                    status: ActionStatus::Succeeded,
+                    tool_output: Some(context_output),
+                    invocation_id: Some(inv_id),
+                    duration_ms: 0,
+                })
+            }
+            Err(reason) => {
+                self.tool_invocation_service
+                    .record_failed(
+                        &ctx.project,
+                        inv_id.clone(),
+                        ctx.task_id.clone(),
+                        tool_name.clone(),
+                        ToolInvocationOutcomeKind::PermanentFailure,
+                        Some(reason.clone()),
+                    )
+                    .await
+                    .map_err(OrchestratorError::Runtime)?;
+                Ok(ActionResult {
+                    proposal: synth_proposal,
+                    status: ActionStatus::Failed { reason },
+                    tool_output: None,
+                    invocation_id: Some(inv_id),
+                    duration_ms: 0,
+                })
+            }
+        }
+    }
+
     /// Dispatch a single proposal to the appropriate runtime service.
     async fn dispatch_one(
         &self,

@@ -85,6 +85,33 @@ where
         let record = self.inner.get(call_id).await.map_err(RuntimeError::Store)?;
         Ok(record.map(store_record_to_stored_proposal))
     }
+
+    async fn list_approved_for_run(
+        &self,
+        run_id: &cairn_domain::RunId,
+    ) -> Result<Vec<ApprovedProposal>, RuntimeError> {
+        let rows = self
+            .inner
+            .list_for_run(run_id)
+            .await
+            .map_err(RuntimeError::Store)?;
+        Ok(rows
+            .into_iter()
+            .filter(|r| r.state == ToolCallApprovalState::Approved)
+            .map(|r| {
+                let tool_args = r
+                    .approved_tool_args
+                    .clone()
+                    .or_else(|| r.amended_tool_args.clone())
+                    .unwrap_or_else(|| r.original_tool_args.clone());
+                ApprovedProposal {
+                    call_id: r.call_id,
+                    tool_name: r.tool_name,
+                    tool_args,
+                }
+            })
+            .collect())
+    }
 }
 
 #[cfg(test)]
