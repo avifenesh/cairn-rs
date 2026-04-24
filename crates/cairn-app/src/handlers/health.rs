@@ -1019,6 +1019,9 @@ async fn validate_setting_value(
         //      Bedrock: `bedrock/us-east-1/…`, Baseten: `baseten/…`) and
         //      the operator's connection IS the authoritative list for
         //      what that tenant can route to.
+        //  (c) The in-memory `provider_registry` snapshot — connections
+        //      materialized from startup env fallbacks that haven't been
+        //      persisted to the store yet.
         //
         // Why (a) AND (b): The LiteLLM catalog is big (2 600+ entries) but
         // not exhaustive — operators can connect custom endpoints (Ollama
@@ -1028,44 +1031,60 @@ async fn validate_setting_value(
         // has a connection for yet (e.g. immediately after setup) — we
         // still accept it so the dashboard flow works in any order.
         //
-        // Legacy BC: the static `provider_registry::resolve_model_string`
-        // and `provider_registry::all()` membership are folded into (a) via
-        // the `with_bundled` TOML overlay, so no separate code path needed.
+        // The legacy static `cairn_domain::provider_registry::*` tables are
+        // intentionally NOT consulted here: they predate LiteLLM import
+        // and the IDs they carry (e.g. `openai/gpt-4o`, `anthropic/claude-*`)
+        // are already present in the bundled catalog (a). Operator-connected
+        // routes with their own provider-family namespaces (e.g. OpenRouter
+        // `qwen/qwen3-coder:free`) were never in the static tables, which is
+        // precisely what F20/F21 reported.
         //
-        // Closes #228 (server-side validation), #F20/F21 (OpenRouter IDs).
+        // Closes #228 (server-side validation), F20/F21 (OpenRouter IDs).
 
-        // (a) LiteLLM catalog check.
+        // (a) LiteLLM catalog check — in-memory, no IO.
         if state.model_registry.get(model_id).is_some() {
+            return Ok(());
+        }
+
+        // (c) In-memory registry snapshot. Checked BEFORE the per-tenant
+        // store scan in (b) because it's zero-latency and commonly covers
+        // env-provisioned startup fallbacks before any store row exists.
+        let snapshot = state.runtime.provider_registry.snapshot();
+        if snapshot.connections.iter().any(|c| c.model == model_id) {
             return Ok(());
         }
 
         // (b) Operator-connected provider models. Walk every tenant the
         // scope covers — a system-scope default is valid as long as *some*
         // tenant configured a connection for this model; a tenant-scope
-        // default must be valid for that specific tenant.
+        // default must be valid for that specific tenant. Paginate until
+        // exhaustion so large installs (>200 connections per tenant) don't
+        // false-reject on the second page.
+        const PAGE_SIZE: usize = 200;
+        const MAX_PAGES_PER_TENANT: usize = 50; // 10 000-connection ceiling
         let tenants = resolve_tenants_for_scope(state, scope, scope_id).await;
         for tenant in &tenants {
-            if let Ok(records) = state
-                .runtime
-                .provider_connections
-                .list(tenant, 200, 0)
-                .await
-            {
+            for page in 0..MAX_PAGES_PER_TENANT {
+                let offset = page * PAGE_SIZE;
+                let records = match state
+                    .runtime
+                    .provider_connections
+                    .list(tenant, PAGE_SIZE, offset)
+                    .await
+                {
+                    Ok(r) => r,
+                    Err(_) => break, // store error — skip this tenant
+                };
                 if records
                     .iter()
                     .any(|r| r.supported_models.iter().any(|m| m == model_id))
                 {
                     return Ok(());
                 }
+                if records.len() < PAGE_SIZE {
+                    break; // last page reached
+                }
             }
-        }
-
-        // Fall back to the cached registry snapshot — connections that
-        // haven't yet been enumerated via `list()` (e.g. startup fallbacks
-        // loaded from env) still appear here.
-        let snapshot = state.runtime.provider_registry.snapshot();
-        if snapshot.connections.iter().any(|c| c.model == model_id) {
-            return Ok(());
         }
 
         // Nothing matched. 422 with an actionable message pointing the
