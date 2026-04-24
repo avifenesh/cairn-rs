@@ -269,16 +269,33 @@ pub(crate) async fn list_tool_call_approvals_handler(
     //   yields an empty set (the projection doesn't return resolved
     //   records on this path); return `[]` up front instead of doing an
     //   expensive fetch + filter that we already know will be empty.
-    let push_down_inbox_pagination = query.run_id.is_none()
-        && query.session_id.is_none()
-        && matches!(state_filter, None | Some(ToolCallApprovalState::Pending));
+    let is_project_inbox = query.run_id.is_none() && query.session_id.is_none();
+    let inbox_state_is_pending_only =
+        matches!(state_filter, None | Some(ToolCallApprovalState::Pending));
+
+    // Reject non-pending state filter on the project-inbox path up
+    // front (projection has no `list_all_for_project` equivalent; a
+    // caller wanting resolved records must scope by run_id or
+    // session_id). Silently returning `[]` would surprise operators who
+    // see approved records on the run view but an empty project inbox.
+    if is_project_inbox && !inbox_state_is_pending_only {
+        return AppApiError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "unsupported_filter",
+            "listing by project triple only returns pending records; \
+             use run_id or session_id to list resolved state",
+        )
+        .into_response();
+    }
+
+    let push_down_inbox_pagination = is_project_inbox && inbox_state_is_pending_only;
 
     if offset.saturating_add(limit) > MAX_LIST_FETCH && !push_down_inbox_pagination {
         return AppApiError::new(
             StatusCode::UNPROCESSABLE_ENTITY,
             "pagination_out_of_range",
             format!(
-                "offset + limit must be <= {MAX_LIST_FETCH} when listing by run_id / session_id or when filtering by non-pending state"
+                "offset + limit must be <= {MAX_LIST_FETCH} when listing by run_id / session_id"
             ),
         )
         .into_response();
@@ -289,16 +306,12 @@ pub(crate) async fn list_tool_call_approvals_handler(
         reader.list_for_run(&RunId::new(rid)).await
     } else if let Some(sid) = query.session_id.as_deref() {
         reader.list_for_session(&SessionId::new(sid)).await
-    } else if push_down_inbox_pagination {
-        // Fetch one extra row to detect `has_more` without a second
-        // round-trip.
+    } else {
+        // Inbox path: push `offset`/`limit` to the projection, fetch
+        // `limit + 1` to detect has_more in a single round trip.
         reader
             .list_pending_for_project(&project, limit.saturating_add(1), offset)
             .await
-    } else {
-        // Non-pending state filter on the inbox: projection never
-        // produces these records. Short-circuit.
-        Ok(Vec::new())
     };
 
     match records {

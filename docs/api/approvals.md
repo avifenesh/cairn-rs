@@ -18,7 +18,7 @@ Source of truth: [`tests/compat/http_routes.tsv`](../../tests/compat/http_routes
 | `POST` | `/v1/approvals/:id/reject` | Preserve |  |
 | `POST` | `/v1/approvals/:id/resolve` | Preserve |  |
 | `GET` | `/v1/approvals/pending` | Preserve |  |
-| `GET` | `/v1/tool-call-approvals` | Preserve | BP-v2 tool-call inbox; filter by run_id / session_id / project triple + state; limit/offset + hasMore |
+| `GET` | `/v1/tool-call-approvals` | Preserve | BP-v2 tool-call inbox; selection is first-match of `run_id` / `session_id` / project triple. The project-triple branch lists the **pending** inbox only (matches the `list_pending_for_project` projection); `run_id` and `session_id` return all states. `state` + `limit`/`offset` + `hasMore` apply on top. |
 | `GET` | `/v1/tool-call-approvals/:call_id` | Preserve | single record; 404 on cross-tenant |
 | `POST` | `/v1/tool-call-approvals/:call_id/approve` | Preserve | body: `{ scope, approved_tool_args? }`; scope is `{type: once \| session{match_policy?}}`; 400 on operator_id impersonation |
 | `POST` | `/v1/tool-call-approvals/:call_id/reject` | Preserve | body: `{ reason? }` |

@@ -259,6 +259,78 @@ async fn operator_id_mismatch_is_rejected() {
 }
 
 #[tokio::test]
+async fn list_by_project_returns_pending_inbox() {
+    let (app, state) = support::build_test_router_fake_fabric(BootstrapConfig::default()).await;
+    seed_principal_for(&state, ACTOR, "default_tenant");
+    seed_proposal(&state, "tc_inbox_1").await;
+    seed_proposal(&state, "tc_inbox_2").await;
+    // Resolve one so only one remains pending.
+    state
+        .runtime
+        .tool_call_approvals
+        .approve(
+            ToolCallId::new("tc_inbox_2"),
+            OperatorId::new(ACTOR),
+            cairn_domain::ApprovalScope::Once,
+            None,
+        )
+        .await
+        .expect("approve");
+
+    // Query by project triple — default tenant/workspace/project,
+    // matches the seeded proposals.
+    let (status, body) = get_json(
+        app.clone(),
+        "GET",
+        "/v1/tool-call-approvals?tenant_id=default_tenant&workspace_id=default_workspace&project_id=default_project",
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "inbox: {body}");
+    let items = body["items"].as_array().unwrap();
+    assert_eq!(items.len(), 1, "inbox returns only pending");
+    assert_eq!(items[0]["call_id"], "tc_inbox_1");
+    assert_eq!(items[0]["state"], "pending");
+}
+
+#[tokio::test]
+async fn list_by_project_rejects_non_pending_state_filter() {
+    let (app, state) = support::build_test_router_fake_fabric(BootstrapConfig::default()).await;
+    seed_principal_for(&state, ACTOR, "default_tenant");
+
+    let (status, body) = get_json(
+        app,
+        "GET",
+        "/v1/tool-call-approvals?tenant_id=default_tenant&workspace_id=default_workspace&project_id=default_project&state=approved",
+        None,
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::UNPROCESSABLE_ENTITY,
+        "inbox filter: {body}"
+    );
+    assert_eq!(body["code"], "unsupported_filter");
+}
+
+#[tokio::test]
+async fn list_run_pagination_rejects_out_of_range_window() {
+    let (app, state) = support::build_test_router_fake_fabric(BootstrapConfig::default()).await;
+    seed_principal_for(&state, ACTOR, "default_tenant");
+
+    let (status, body) = get_json(
+        app,
+        "GET",
+        "/v1/tool-call-approvals?run_id=run_x&limit=500&offset=4700",
+        None,
+    )
+    .await;
+    // 500 + 4700 = 5200 > MAX_LIST_FETCH (5000).
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "oob: {body}");
+    assert_eq!(body["code"], "pagination_out_of_range");
+}
+
+#[tokio::test]
 async fn list_pagination_applies_after_state_filter() {
     let (app, state) = support::build_test_router_fake_fabric(BootstrapConfig::default()).await;
     seed_principal_for(&state, ACTOR, "default_tenant");

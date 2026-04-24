@@ -784,7 +784,10 @@ export function createApiClient(config: ApiClientConfig) {
 
     /** GET /v1/tool-call-approvals — list tool-call approval records.
      *  Accepts any one of `run_id | session_id | project triple`. The
-     *  server enforces tenant visibility on the returned items. */
+     *  server enforces tenant visibility on the returned items.
+     *
+     *  Returns the items only; use `listToolCallApprovalsPage()` if the
+     *  caller needs `hasMore` for pagination. */
     listToolCallApprovals: (params?: {
       run_id?: string;
       session_id?: string;
@@ -807,6 +810,35 @@ export function createApiClient(config: ApiClientConfig) {
       if (params?.offset != null) qs.set("offset", String(params.offset));
       const query = qs.toString() ? `?${qs}` : "";
       return getList(`/v1/tool-call-approvals${query}`);
+    },
+
+    /** Paginated variant of `listToolCallApprovals`. Preserves the
+     *  backend's `{ items, hasMore }` envelope so the caller can drive
+     *  "load more" / offset pagination. */
+    listToolCallApprovalsPage: (params?: {
+      run_id?: string;
+      session_id?: string;
+      state?: ToolCallApprovalState;
+      limit?: number;
+      offset?: number;
+      tenant_id?: string;
+      workspace_id?: string;
+      project_id?: string;
+    }): Promise<{ items: ToolCallApprovalRecord[]; hasMore: boolean }> => {
+      const merged = withScope(params);
+      const qs = new URLSearchParams();
+      if (merged.tenant_id)    qs.set("tenant_id",    merged.tenant_id);
+      if (merged.workspace_id) qs.set("workspace_id", merged.workspace_id);
+      if (merged.project_id)   qs.set("project_id",   merged.project_id);
+      if (params?.run_id)      qs.set("run_id",       params.run_id);
+      if (params?.session_id)  qs.set("session_id",   params.session_id);
+      if (params?.state)       qs.set("state",        params.state);
+      if (params?.limit != null)  qs.set("limit",  String(params.limit));
+      if (params?.offset != null) qs.set("offset", String(params.offset));
+      const query = qs.toString() ? `?${qs}` : "";
+      return get<{ items: ToolCallApprovalRecord[]; hasMore: boolean }>(
+        `/v1/tool-call-approvals${query}`,
+      );
     },
 
     /** GET /v1/tool-call-approvals/:call_id — fetch a single record. */
