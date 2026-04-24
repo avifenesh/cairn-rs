@@ -1,14 +1,15 @@
 /**
  * CostCalculatorPage — estimate LLM API costs before committing to a model.
  *
- * Enter expected token counts, pick a model, and see the estimated spend.
- * The pricing comparison table shows all models ranked by cost for those
- * exact token volumes, making it easy to find the cheapest option.
+ * Data source is the bundled LiteLLM catalog at GET /v1/models/catalog.
+ * That's the single source of truth for model pricing in cairn — the same
+ * registry the router uses for cost accounting. We layer the provider
+ * registry (`GET /v1/providers/connections`) on top purely to mark which
+ * catalog entries are actually configured in this deployment (the "configured"
+ * pill); the *prices* always come from the catalog.
  *
- * Models are fetched dynamically from the provider registry API.
- * Available (configured) providers are shown first, followed by reference
- * entries for unconfigured providers. A hardcoded fallback array is used
- * while the registry is loading.
+ * Filters match the API surface: provider dropdown, free-only chip, max-cost
+ * slider, tools / reasoning capability chips.
  */
 
 import { useState, useMemo } from "react";
@@ -17,139 +18,57 @@ import { Calculator, ChevronDown, ChevronUp, Coins, Info } from "lucide-react";
 import { clsx } from "clsx";
 import { defaultApi } from "../lib/api";
 import { ErrorFallback } from "../components/ErrorFallback";
-import type { ProviderRegistryEntry } from "../lib/types";
+import type { ModelCatalogEntry } from "../lib/types";
 
-// ── Pricing data ──────────────────────────────────────────────────────────────
-// Prices in USD per 1 000 000 tokens (input / output).
-// Sources: provider pricing pages, approximate as of early 2026.
+// ── Types + helpers ──────────────────────────────────────────────────────────
 
-export interface ModelPrice {
-  id:         string;
-  name:       string;
-  provider:   string;
-  inputPer1M: number;   // USD per 1M input tokens
-  outputPer1M: number;  // USD per 1M output tokens
-  contextK:   number;   // context window in thousands
-  note?:      string;
-  /** true when the provider has an API key configured (or doesn't need one). */
-  configured?: boolean;
+interface ModelRow {
+  id:           string;
+  name:         string;
+  provider:     string;
+  inputPer1M:   number;
+  outputPer1M:  number;
+  contextK:     number;
+  tier:         string;
+  supportsTools: boolean;
+  reasoning:    boolean;
+  free:         boolean;
+  /** true when the deployment has a configured provider-connection that
+   *  advertises this model ID. Purely informational — the price is the
+   *  catalog price either way. */
+  configured:   boolean;
 }
 
-// Hardcoded fallback — used while registry is loading.
-const FALLBACK_MODELS: ModelPrice[] = [
-  // OpenAI (2025–2026)
-  { id: "gpt-4.1",            name: "GPT-4.1",              provider: "OpenAI",     inputPer1M:  2.00,  outputPer1M:  8.00,  contextK: 1000 },
-  { id: "gpt-4.1-mini",       name: "GPT-4.1 mini",         provider: "OpenAI",     inputPer1M:  0.40,  outputPer1M:  1.60,  contextK: 1000 },
-  { id: "gpt-4.1-nano",       name: "GPT-4.1 nano",         provider: "OpenAI",     inputPer1M:  0.10,  outputPer1M:  0.40,  contextK: 1000 },
-  { id: "gpt-4o",             name: "GPT-4o",               provider: "OpenAI",     inputPer1M:  2.50,  outputPer1M: 10.00,  contextK: 128  },
-  { id: "gpt-4o-mini",        name: "GPT-4o mini",          provider: "OpenAI",     inputPer1M:  0.15,  outputPer1M:  0.60,  contextK: 128  },
-  { id: "o3",                 name: "o3",                   provider: "OpenAI",     inputPer1M: 10.00,  outputPer1M: 40.00,  contextK: 200, note: "reasoning" },
-  { id: "o4-mini",            name: "o4-mini",              provider: "OpenAI",     inputPer1M:  1.10,  outputPer1M:  4.40,  contextK: 200, note: "reasoning" },
-  // Anthropic (Claude 4.x family)
-  { id: "claude-opus-4.6",    name: "Claude Opus 4.6",      provider: "Anthropic",  inputPer1M: 15.00,  outputPer1M: 75.00,  contextK: 200  },
-  { id: "claude-sonnet-4.6",  name: "Claude Sonnet 4.6",    provider: "Anthropic",  inputPer1M:  3.00,  outputPer1M: 15.00,  contextK: 200  },
-  { id: "claude-sonnet-4.5",  name: "Claude Sonnet 4.5",    provider: "Anthropic",  inputPer1M:  3.00,  outputPer1M: 15.00,  contextK: 200  },
-  { id: "claude-haiku-4.5",   name: "Claude Haiku 4.5",     provider: "Anthropic",  inputPer1M:  0.80,  outputPer1M:  4.00,  contextK: 200  },
-  // Google (Gemini 2.5)
-  { id: "gemini-2.5-flash",   name: "Gemini 2.5 Flash",     provider: "Google",     inputPer1M:  0.15,  outputPer1M:  0.60,  contextK: 1000 },
-  { id: "gemini-2.5-pro",     name: "Gemini 2.5 Pro",       provider: "Google",     inputPer1M:  1.25,  outputPer1M: 10.00,  contextK: 1000 },
-  // DeepSeek
-  { id: "deepseek-v3",        name: "DeepSeek V3",          provider: "DeepSeek",   inputPer1M:  0.27,  outputPer1M:  1.10,  contextK: 128  },
-  { id: "deepseek-r1",        name: "DeepSeek R1",          provider: "DeepSeek",   inputPer1M:  0.55,  outputPer1M:  2.19,  contextK: 128, note: "reasoning" },
-  // Meta (Llama 4)
-  { id: "llama-4-maverick",   name: "Llama 4 Maverick",     provider: "Meta/Groq",  inputPer1M:  0.20,  outputPer1M:  0.60,  contextK: 1000 },
-  { id: "llama-4-scout",      name: "Llama 4 Scout",        provider: "Meta/Groq",  inputPer1M:  0.15,  outputPer1M:  0.40,  contextK: 512  },
-  // Mistral
-  { id: "mistral-large",      name: "Mistral Large",        provider: "Mistral",    inputPer1M:  2.00,  outputPer1M:  6.00,  contextK: 128  },
-  { id: "codestral",          name: "Codestral",            provider: "Mistral",    inputPer1M:  0.30,  outputPer1M:  0.90,  contextK: 256  },
-  // xAI
-  { id: "grok-3",             name: "Grok 3",               provider: "xAI",        inputPer1M:  3.00,  outputPer1M: 15.00,  contextK: 128  },
-  { id: "grok-3-mini",        name: "Grok 3 mini",          provider: "xAI",        inputPer1M:  0.30,  outputPer1M:  0.50,  contextK: 128, note: "reasoning" },
-  // Local / self-hosted
-  { id: "local",              name: "Local (self-hosted)",   provider: "Self-hosted", inputPer1M:  0.00,  outputPer1M:  0.00,  contextK: 0,   note: "free (hardware cost only)" },
-];
-
-// ── Registry to ModelPrice mapper ────────────────────────────────────────────
-
-function registryToModels(registry: ProviderRegistryEntry[]): ModelPrice[] {
-  const configured: ModelPrice[] = [];
-  const reference: ModelPrice[] = [];
-
-  for (const entry of registry) {
-    for (const m of entry.models) {
-      const model: ModelPrice = {
-        id:         `${entry.id}/${m.id}`,
-        name:       m.id,
-        provider:   entry.name,
-        inputPer1M: m.input_cost_per_1m ?? 0,
-        outputPer1M: m.output_cost_per_1m ?? 0,
-        contextK:   Math.round(m.context_window / 1000),
-        configured: entry.available,
-        note:       m.capabilities.thinking ? "thinking" : undefined,
-      };
-      if (entry.available) {
-        configured.push(model);
-      } else {
-        reference.push(model);
-      }
-    }
-  }
-
-  // Configured providers first, then reference providers
-  return [...configured, ...reference];
+function catalogToRows(
+  entries: ModelCatalogEntry[],
+  configuredIds: Set<string>,
+): ModelRow[] {
+  return entries.map(e => ({
+    id:           e.id,
+    name:         e.display_name,
+    provider:     e.provider,
+    inputPer1M:   e.cost_per_1m_input,
+    outputPer1M:  e.cost_per_1m_output,
+    contextK:     Math.max(1, Math.round(e.context_len / 1000)),
+    tier:         e.tier,
+    supportsTools: e.supports_tools,
+    reasoning:    e.reasoning,
+    free:         e.cost_per_1m_input === 0 && e.cost_per_1m_output === 0,
+    configured:   configuredIds.has(e.id),
+  }));
 }
 
-// ── Provider colours ─────────────────────────────────────────────────────────
-
-const PROVIDER_COLOR: Record<string, string> = {
-  "OpenAI":         "text-emerald-400",
-  "Anthropic":      "text-amber-400",
-  "Google":         "text-blue-400",
-  "DeepSeek":       "text-pink-400",
-  "Meta/Groq":      "text-violet-400",
-  "Groq":           "text-violet-400",
-  "Mistral":        "text-orange-400",
-  "xAI":            "text-cyan-400",
-  "Self-hosted":    "text-gray-400 dark:text-zinc-500",
-  "OpenRouter":     "text-rose-400",
-  "AWS Bedrock":    "text-yellow-400",
-  "Together":       "text-teal-400",
-  "Fireworks":      "text-red-400",
-  "Perplexity":     "text-indigo-400",
-  "Cerebras":       "text-lime-400",
-};
-
-const PROVIDER_DOT: Record<string, string> = {
-  "OpenAI":         "bg-emerald-500",
-  "Anthropic":      "bg-amber-500",
-  "Google":         "bg-blue-500",
-  "DeepSeek":       "bg-pink-500",
-  "Meta/Groq":      "bg-violet-500",
-  "Groq":           "bg-violet-500",
-  "Mistral":        "bg-orange-500",
-  "xAI":            "bg-cyan-500",
-  "Self-hosted":    "bg-zinc-600",
-  "OpenRouter":     "bg-rose-500",
-  "AWS Bedrock":    "bg-yellow-500",
-  "Together":       "bg-teal-500",
-  "Fireworks":      "bg-red-500",
-  "Perplexity":     "bg-indigo-500",
-  "Cerebras":       "bg-lime-500",
-};
-
-// ── Helpers ───────────────────────────────────────────────────────────────────
-
-function calcCost(model: ModelPrice, tokensIn: number, tokensOut: number): number {
-  return (tokensIn / 1_000_000) * model.inputPer1M
-       + (tokensOut / 1_000_000) * model.outputPer1M;
+function calcCost(m: ModelRow, tokensIn: number, tokensOut: number): number {
+  return (tokensIn  / 1_000_000) * m.inputPer1M
+       + (tokensOut / 1_000_000) * m.outputPer1M;
 }
 
 function fmtUSD(n: number): string {
-  if (n === 0) return "$0.00";
-  if (n < 0.0001) return `$${n.toExponential(2)}`;
-  if (n < 0.01)   return `$${n.toFixed(6)}`;
-  if (n < 1)      return `$${n.toFixed(4)}`;
-  if (n < 100)    return `$${n.toFixed(2)}`;
+  if (n === 0)      return "Free";
+  if (n < 0.0001)   return `$${n.toExponential(2)}`;
+  if (n < 0.01)     return `$${n.toFixed(6)}`;
+  if (n < 1)        return `$${n.toFixed(4)}`;
+  if (n < 100)      return `$${n.toFixed(2)}`;
   return `$${n.toLocaleString(undefined, { maximumFractionDigits: 2 })}`;
 }
 
@@ -221,6 +140,25 @@ function CostBar({ cost, maxCost }: { cost: number; maxCost: number }) {
   );
 }
 
+// ── Filter chip ──────────────────────────────────────────────────────────────
+
+function FilterChip({ label, active, onToggle }: { label: string; active: boolean; onToggle: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      className={clsx(
+        "px-2 h-6 rounded-full text-[11px] font-medium transition-colors border",
+        active
+          ? "bg-indigo-600/20 text-indigo-300 border-indigo-600/60"
+          : "text-gray-500 dark:text-zinc-500 border-gray-200 dark:border-zinc-700 hover:border-gray-400 dark:hover:border-zinc-500",
+      )}
+    >
+      {label}
+    </button>
+  );
+}
+
 // ── Page ──────────────────────────────────────────────────────────────────────
 
 export function CostCalculatorPage() {
@@ -230,36 +168,61 @@ export function CostCalculatorPage() {
   const [sortBy,         setSortBy]         = useState<"cost" | "provider" | "name">("cost");
   const [sortAsc,        setSortAsc]        = useState(true);
   const [filterProvider, setFilterProvider] = useState<string>("all");
+  const [freeOnly,       setFreeOnly]       = useState(false);
+  const [toolsOnly,      setToolsOnly]      = useState(false);
+  const [reasoningOnly,  setReasoningOnly]  = useState(false);
+  const [configuredOnly, setConfiguredOnly] = useState(false);
 
-  // ── Fetch provider registry ───────────────────────────────────────────────
-  const { data: registry, isLoading: registryLoading, isError: regError, error: regErr, refetch: regRefetch } = useQuery({
+  // ── Fetch provider registry (for the "configured" badge only) ───────────
+  const { data: registry } = useQuery({
     queryKey: ["provider-registry"],
     queryFn:  () => defaultApi.getProviderRegistry(),
     staleTime: 120_000,
     retry: 1,
   });
-
-  // Merge registry models with fallback — configured providers first.
-  const MODELS = useMemo(() => {
-    if (!registry || registry.length === 0) return FALLBACK_MODELS;
-    return registryToModels(registry);
+  const configuredIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const entry of registry ?? []) {
+      if (!entry.available) continue;
+      for (const m of entry.models) ids.add(m.id);
+    }
+    return ids;
   }, [registry]);
 
-  const PROVIDERS = useMemo(() => [...new Set(MODELS.map(m => m.provider))], [MODELS]);
+  // ── Fetch bundled catalog ───────────────────────────────────────────────
+  // limit=1000 is the server cap, sufficient for the full catalog (~500
+  // chat-mode entries). If a deployment ever ships a catalog larger than
+  // that, bump the cap on both ends together.
+  const { data: catalog, isLoading: catalogLoading, isError: catalogError,
+          error: catalogErr, refetch: catalogRefetch } = useQuery({
+    queryKey: ["model-catalog-all"],
+    queryFn:  () => defaultApi.listModelCatalog({ limit: 1000 }),
+    staleTime: 300_000,
+    retry: 1,
+  });
 
-  // When registry loads, try to select the first available model if the
-  // current selection doesn't exist in the new model list.
+  const MODELS: ModelRow[] = useMemo(() => {
+    if (!catalog?.items) return [];
+    return catalogToRows(catalog.items, configuredIds);
+  }, [catalog, configuredIds]);
+
+  const PROVIDERS = useMemo(
+    () => [...new Set(MODELS.map(m => m.provider))].sort(),
+    [MODELS],
+  );
+
   const selected = MODELS.find(m => m.id === selectedId) ?? MODELS[0];
-  const selectedCost = calcCost(selected, tokensIn, tokensOut);
+  const selectedCost = selected ? calcCost(selected, tokensIn, tokensOut) : 0;
+  const inputCost  = selected ? (tokensIn  / 1_000_000) * selected.inputPer1M  : 0;
+  const outputCost = selected ? (tokensOut / 1_000_000) * selected.outputPer1M : 0;
 
-  // Cost breakdown
-  const inputCost  = (tokensIn  / 1_000_000) * selected.inputPer1M;
-  const outputCost = (tokensOut / 1_000_000) * selected.outputPer1M;
-
-  // Sorted + filtered table
   const tableRows = useMemo(() => {
     let rows = MODELS.map(m => ({ ...m, cost: calcCost(m, tokensIn, tokensOut) }));
     if (filterProvider !== "all") rows = rows.filter(r => r.provider === filterProvider);
+    if (freeOnly)       rows = rows.filter(r => r.free);
+    if (toolsOnly)      rows = rows.filter(r => r.supportsTools);
+    if (reasoningOnly)  rows = rows.filter(r => r.reasoning);
+    if (configuredOnly) rows = rows.filter(r => r.configured);
     rows.sort((a, b) => {
       let v = 0;
       if (sortBy === "cost")     v = a.cost - b.cost;
@@ -268,7 +231,8 @@ export function CostCalculatorPage() {
       return sortAsc ? v : -v;
     });
     return rows;
-  }, [MODELS, tokensIn, tokensOut, sortBy, sortAsc, filterProvider]);
+  }, [MODELS, tokensIn, tokensOut, sortBy, sortAsc, filterProvider,
+      freeOnly, toolsOnly, reasoningOnly, configuredOnly]);
 
   const maxCost = Math.max(...tableRows.map(r => r.cost), 0.0001);
 
@@ -282,7 +246,9 @@ export function CostCalculatorPage() {
     sortAsc ? <ChevronUp size={10} className="inline ml-0.5" /> :
               <ChevronDown size={10} className="inline ml-0.5" />;
 
-  if (regError) return <ErrorFallback error={regErr} resource="cost calculator" onRetry={() => void regRefetch()} />;
+  if (catalogError) {
+    return <ErrorFallback error={catalogErr} resource="model catalog" onRetry={() => void catalogRefetch()} />;
+  }
 
   return (
     <div className="flex flex-col h-full bg-white dark:bg-zinc-950 overflow-y-auto">
@@ -296,11 +262,11 @@ export function CostCalculatorPage() {
           <div>
             <h1 className="text-[15px] font-semibold text-gray-900 dark:text-zinc-100">Cost Calculator</h1>
             <p className="text-[11px] text-gray-400 dark:text-zinc-600 mt-0.5">
-              Estimate LLM API spend before choosing a model. Pricing per 1M tokens, approximate.
-              {registryLoading && <span className="ml-1 text-indigo-400">Loading providers...</span>}
-              {registry && !registryLoading && (
+              Estimate LLM API spend from the bundled LiteLLM catalog. Pricing per 1M tokens.
+              {catalogLoading && <span className="ml-1 text-indigo-400">Loading catalog…</span>}
+              {catalog && !catalogLoading && (
                 <span className="ml-1">
-                  {registry.filter(r => r.available).length} configured provider{registry.filter(r => r.available).length !== 1 ? "s" : ""}
+                  {MODELS.length} model{MODELS.length === 1 ? "" : "s"} · {configuredIds.size} configured
                 </span>
               )}
             </p>
@@ -311,7 +277,7 @@ export function CostCalculatorPage() {
         <div className="rounded-xl border border-gray-200 dark:border-zinc-800 bg-gray-50 dark:bg-zinc-900 p-5 space-y-5">
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-5">
             {/* Token inputs */}
-            <TokenInput label="Input tokens" value={tokensIn}  onChange={setTokensIn}  />
+            <TokenInput label="Input tokens"  value={tokensIn}  onChange={setTokensIn}  />
             <TokenInput label="Output tokens" value={tokensOut} onChange={setTokensOut} />
 
             {/* Model selector */}
@@ -324,7 +290,7 @@ export function CostCalculatorPage() {
                   <optgroup key={prov} label={prov}>
                     {MODELS.filter(m => m.provider === prov).map(m => (
                       <option key={m.id} value={m.id}>
-                        {m.name}{m.configured === false ? " (ref)" : ""}
+                        {m.name}{m.configured ? " ✓" : ""}
                       </option>
                     ))}
                   </optgroup>
@@ -334,71 +300,85 @@ export function CostCalculatorPage() {
           </div>
 
           {/* Result */}
-          <div className="rounded-lg border border-gray-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 divide-y divide-gray-200 dark:divide-zinc-800">
-            {/* Main estimate */}
-            <div className="flex items-center justify-between px-4 py-3">
-              <div className="flex items-center gap-3">
-                <span className={clsx("text-[11px] font-medium", PROVIDER_COLOR[selected.provider] ?? "text-gray-500 dark:text-zinc-400")}>
-                  {selected.provider}
-                </span>
-                <span className="text-[14px] font-medium text-gray-800 dark:text-zinc-200">{selected.name}</span>
-                {selected.note && (
-                  <span className="text-[10px] text-gray-400 dark:text-zinc-600 bg-gray-100 dark:bg-zinc-800 rounded px-1.5 py-0.5">{selected.note}</span>
-                )}
-                {selected.configured === false && (
-                  <span className="text-[10px] text-gray-400 dark:text-zinc-600 bg-gray-100 dark:bg-zinc-800 rounded px-1.5 py-0.5">reference only</span>
-                )}
-              </div>
-              <div className="text-right">
-                <p className="text-[22px] font-semibold text-gray-900 dark:text-zinc-100 tabular-nums leading-none">
-                  {fmtUSD(selectedCost)}
-                </p>
-                <p className="text-[10px] text-gray-400 dark:text-zinc-600 mt-0.5">estimated total</p>
-              </div>
-            </div>
-
-            {/* Breakdown */}
-            <div className="grid grid-cols-2 divide-x divide-gray-200 dark:divide-zinc-800">
-              <div className="px-4 py-2.5">
-                <p className="text-[10px] text-gray-400 dark:text-zinc-600 mb-1">Input: {fmtTokens(tokensIn)} tokens</p>
-                <p className="text-[13px] font-mono text-gray-700 dark:text-zinc-300 tabular-nums">{fmtUSD(inputCost)}</p>
-                <p className="text-[10px] text-gray-300 dark:text-zinc-600 mt-0.5">${selected.inputPer1M.toFixed(4)} / 1M</p>
-              </div>
-              <div className="px-4 py-2.5">
-                <p className="text-[10px] text-gray-400 dark:text-zinc-600 mb-1">Output: {fmtTokens(tokensOut)} tokens</p>
-                <p className="text-[13px] font-mono text-gray-700 dark:text-zinc-300 tabular-nums">{fmtUSD(outputCost)}</p>
-                <p className="text-[10px] text-gray-300 dark:text-zinc-600 mt-0.5">${selected.outputPer1M.toFixed(4)} / 1M</p>
-              </div>
-            </div>
-
-            {/* Context window note */}
-            {selected.contextK > 0 && (
-              <div className="px-4 py-2 flex items-center gap-2">
-                <Info size={11} className="text-gray-400 dark:text-zinc-600 shrink-0" />
-                <p className="text-[11px] text-gray-400 dark:text-zinc-600">
-                  Context window: <span className="text-gray-400 dark:text-zinc-500 font-mono">{selected.contextK}K tokens</span>
-                  {selected.contextK * 1000 < tokensIn + tokensOut && (
-                    <span className="ml-2 text-amber-500">-- exceeds context window</span>
+          {selected && (
+            <div className="rounded-lg border border-gray-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 divide-y divide-gray-200 dark:divide-zinc-800">
+              <div className="flex items-center justify-between px-4 py-3">
+                <div className="flex items-center gap-3">
+                  <span className="text-[11px] font-medium text-gray-500 dark:text-zinc-400">
+                    {selected.provider}
+                  </span>
+                  <span className="text-[14px] font-medium text-gray-800 dark:text-zinc-200">{selected.name}</span>
+                  {selected.reasoning && (
+                    <span className="text-[10px] bg-violet-600/20 text-violet-300 rounded px-1.5 py-0.5">reasoning</span>
                   )}
-                </p>
+                  {selected.free && (
+                    <span className="text-[10px] bg-emerald-600/20 text-emerald-400 rounded px-1.5 py-0.5">free</span>
+                  )}
+                  {!selected.configured && (
+                    <span className="text-[10px] text-gray-400 dark:text-zinc-600 bg-gray-100 dark:bg-zinc-800 rounded px-1.5 py-0.5">not configured</span>
+                  )}
+                </div>
+                <div className="text-right">
+                  <p className="text-[22px] font-semibold text-gray-900 dark:text-zinc-100 tabular-nums leading-none">
+                    {fmtUSD(selectedCost)}
+                  </p>
+                  <p className="text-[10px] text-gray-400 dark:text-zinc-600 mt-0.5">estimated total</p>
+                </div>
               </div>
-            )}
-          </div>
+
+              <div className="grid grid-cols-2 divide-x divide-gray-200 dark:divide-zinc-800">
+                <div className="px-4 py-2.5">
+                  <p className="text-[10px] text-gray-400 dark:text-zinc-600 mb-1">Input: {fmtTokens(tokensIn)} tokens</p>
+                  <p className="text-[13px] font-mono text-gray-700 dark:text-zinc-300 tabular-nums">{fmtUSD(inputCost)}</p>
+                  <p className="text-[10px] text-gray-300 dark:text-zinc-600 mt-0.5">
+                    {selected.free ? "free" : `$${selected.inputPer1M.toFixed(4)} / 1M`}
+                  </p>
+                </div>
+                <div className="px-4 py-2.5">
+                  <p className="text-[10px] text-gray-400 dark:text-zinc-600 mb-1">Output: {fmtTokens(tokensOut)} tokens</p>
+                  <p className="text-[13px] font-mono text-gray-700 dark:text-zinc-300 tabular-nums">{fmtUSD(outputCost)}</p>
+                  <p className="text-[10px] text-gray-300 dark:text-zinc-600 mt-0.5">
+                    {selected.free ? "free" : `$${selected.outputPer1M.toFixed(4)} / 1M`}
+                  </p>
+                </div>
+              </div>
+
+              {selected.contextK > 0 && (
+                <div className="px-4 py-2 flex items-center gap-2">
+                  <Info size={11} className="text-gray-400 dark:text-zinc-600 shrink-0" />
+                  <p className="text-[11px] text-gray-400 dark:text-zinc-600">
+                    Context window: <span className="text-gray-400 dark:text-zinc-500 font-mono">{selected.contextK}K tokens</span>
+                    {selected.contextK * 1000 < tokensIn + tokensOut && (
+                      <span className="ml-2 text-amber-500">— exceeds context window</span>
+                    )}
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Pricing comparison table */}
         <div>
-          <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
             <div className="flex items-center gap-2">
               <Coins size={13} className="text-gray-400 dark:text-zinc-500" />
-              <span className="text-[12px] font-medium text-gray-700 dark:text-zinc-300">All Models — Cost for {fmtTokens(tokensIn)} in / {fmtTokens(tokensOut)} out</span>
+              <span className="text-[12px] font-medium text-gray-700 dark:text-zinc-300">
+                All Models — Cost for {fmtTokens(tokensIn)} in / {fmtTokens(tokensOut)} out
+              </span>
             </div>
-            <select value={filterProvider} onChange={e => setFilterProvider(e.target.value)}
-              className="rounded border border-gray-200 dark:border-zinc-800 bg-gray-50 dark:bg-zinc-900 text-[11px] text-gray-500 dark:text-zinc-400 px-2 py-1
-                         focus:outline-none focus:border-indigo-500 transition-colors">
-              <option value="all">All providers</option>
-              {PROVIDERS.map(p => <option key={p} value={p}>{p}</option>)}
-            </select>
+            <div className="flex items-center gap-2 flex-wrap">
+              <FilterChip label="Free"       active={freeOnly}       onToggle={() => setFreeOnly(v => !v)} />
+              <FilterChip label="Tools"      active={toolsOnly}      onToggle={() => setToolsOnly(v => !v)} />
+              <FilterChip label="Reasoning"  active={reasoningOnly}  onToggle={() => setReasoningOnly(v => !v)} />
+              <FilterChip label="Configured" active={configuredOnly} onToggle={() => setConfiguredOnly(v => !v)} />
+              <select value={filterProvider} onChange={e => setFilterProvider(e.target.value)}
+                className="rounded border border-gray-200 dark:border-zinc-800 bg-gray-50 dark:bg-zinc-900 text-[11px] text-gray-500 dark:text-zinc-400 px-2 py-1
+                           focus:outline-none focus:border-indigo-500 transition-colors">
+                <option value="all">All providers</option>
+                {PROVIDERS.map(p => <option key={p} value={p}>{p}</option>)}
+              </select>
+            </div>
           </div>
 
           <div className="rounded-xl border border-gray-200 dark:border-zinc-800 overflow-hidden">
@@ -440,25 +420,20 @@ export function CostCalculatorPage() {
                       )}>
                       <td className="px-4 py-2.5">
                         <div className="flex items-center gap-2">
-                          <span className={clsx("w-1.5 h-1.5 rounded-full shrink-0",
-                            PROVIDER_DOT[m.provider] ?? "bg-zinc-600")} />
                           <span className={clsx("font-medium", isSelected ? "text-indigo-300" : "text-gray-800 dark:text-zinc-200")}>
                             {m.name}
                           </span>
-                          {m.note && (
-                            <span className="text-[9px] text-gray-400 dark:text-zinc-600 bg-gray-100 dark:bg-zinc-800 rounded px-1 py-0.5 hidden sm:inline">
-                              {m.note}
-                            </span>
+                          {m.reasoning && (
+                            <span className="text-[9px] text-violet-300 bg-violet-600/20 rounded px-1 py-0.5 hidden sm:inline">reasoning</span>
                           )}
-                          {m.configured === false && (
-                            <span className="text-[9px] text-gray-400 dark:text-zinc-600 bg-gray-100 dark:bg-zinc-800/60 rounded px-1 py-0.5 hidden sm:inline">
-                              ref
-                            </span>
+                          {m.configured && (
+                            <span className="text-[9px] text-emerald-400 bg-emerald-600/20 rounded px-1 py-0.5 hidden sm:inline">✓</span>
                           )}
                         </div>
+                        <div className="text-[10px] font-mono text-gray-400 dark:text-zinc-500 mt-0.5">{m.id}</div>
                       </td>
                       <td className="px-3 py-2.5 hidden sm:table-cell">
-                        <span className={clsx("text-[11px] font-medium", PROVIDER_COLOR[m.provider] ?? "text-gray-400 dark:text-zinc-500")}>
+                        <span className="text-[11px] font-medium text-gray-500 dark:text-zinc-400">
                           {m.provider}
                         </span>
                       </td>
@@ -485,13 +460,19 @@ export function CostCalculatorPage() {
                     </tr>
                   );
                 })}
+                {tableRows.length === 0 && (
+                  <tr>
+                    <td colSpan={6} className="px-4 py-6 text-center text-[12px] text-gray-400 dark:text-zinc-500">
+                      No models match these filters.
+                    </td>
+                  </tr>
+                )}
               </tbody>
             </table>
           </div>
 
           <p className="mt-2 text-[10px] text-gray-300 dark:text-zinc-600 text-center">
-            Prices are approximate and subject to change. Always verify with the provider's official pricing page.
-            {registry && " Models sourced from your cairn provider registry."}
+            Prices from the bundled LiteLLM catalog; verify with the provider's official pricing page before committing. ✓ = configured in this deployment.
           </p>
         </div>
 

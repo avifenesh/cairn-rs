@@ -12,6 +12,7 @@ pub(crate) mod graph;
 pub(crate) mod health;
 pub(crate) mod integrations;
 pub(crate) mod memory;
+pub(crate) mod model_catalog;
 pub(crate) mod plugins;
 pub(crate) mod prompts;
 pub(crate) mod providers;
