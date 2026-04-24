@@ -73,9 +73,24 @@ pub struct Usage {
     #[serde(alias = "output_tokens")]
     pub completion_tokens: u32,
     pub total_tokens: u32,
-    /// Server-side cached prompt tokens (Anthropic `cache_read_input_tokens`,
-    /// OpenAI-compat / Z.ai `prompt_tokens_details.cached_tokens`).  Optional
-    /// because most providers don't report it.  Parsed where present.
+    /// Server-side cached prompt tokens.
+    ///
+    /// Populated by provider adapters that parse their upstream's cache-hit
+    /// metric:
+    /// * [`wire::zai`] reads `prompt_tokens_details.cached_tokens` from
+    ///   Z.ai responses (coding + general tiers).
+    /// * Anthropic upstreams that report `cache_read_input_tokens` map via
+    ///   the `serde(alias)` below.
+    ///
+    /// [`wire::openai_compat`] currently does NOT populate this field. OpenAI
+    /// itself reports `prompt_tokens_details.cached_tokens`, but the generic
+    /// adapter drops nested usage details because Groq / DeepSeek / xAI / Ollama
+    /// all omit that block — parsing it there would shadow the real usage
+    /// with zeros. Left as `None` for now; a follow-up can add a per-backend
+    /// flag if the real OpenAI endpoint is ever the primary target.
+    ///
+    /// Zero values from the wire are normalised to `None` to avoid metric
+    /// noise when caching is simply inactive.
     #[serde(
         default,
         skip_serializing_if = "Option::is_none",
