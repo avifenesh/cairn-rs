@@ -51,6 +51,13 @@ use crate::{FunctionCall, ToolCall, Usage};
 
 // ── Z.ai tier presets ────────────────────────────────────────────────────────
 
+/// Default client timeout for Z.ai requests (seconds).
+///
+/// GLM reasoning with `thinking: enabled` routinely takes 30–90s; 120s leaves
+/// headroom without letting a hung socket block the orchestrator forever. See
+/// F27 dogfood blocker.
+pub const DEFAULT_TIMEOUT_SECS: u64 = 120;
+
 /// Z.ai endpoint tier.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ZaiTier {
@@ -82,6 +89,13 @@ pub struct ZaiConfig {
     /// `"thinking": {"type": "disabled"}` on every request and suppresses
     /// `reasoning_tokens` in usage.
     pub enable_thinking: bool,
+    /// Default HTTP client timeout in seconds when the caller does NOT
+    /// supply an explicit `timeout_secs`. GLM reasoning can be slow
+    /// (multi-minute completions with long `thinking` chains), so we bias
+    /// generous but finite. Never `None`: a hung TCP connect from our
+    /// datacenter to `api.z.ai` was the F27 dogfood blocker that motivated
+    /// making this non-optional.
+    pub default_timeout_secs: u64,
 }
 
 impl Default for ZaiConfig {
@@ -99,6 +113,7 @@ impl ZaiConfig {
         default_model: "glm-4.7",
         chat_endpoint: "chat/completions",
         enable_thinking: true,
+        default_timeout_secs: DEFAULT_TIMEOUT_SECS,
     };
 
     /// General pay-as-you-go tier.
@@ -107,6 +122,7 @@ impl ZaiConfig {
         default_model: "glm-4.7",
         chat_endpoint: "chat/completions",
         enable_thinking: true,
+        default_timeout_secs: DEFAULT_TIMEOUT_SECS,
     };
 
     pub fn from_tier(tier: ZaiTier) -> Self {
@@ -149,10 +165,14 @@ impl ZaiProvider {
         temperature: Option<f32>,
         timeout_secs: Option<u64>,
     ) -> Result<Self, ProviderError> {
-        let mut builder = Client::builder();
-        if let Some(sec) = timeout_secs {
-            builder = builder.timeout(std::time::Duration::from_secs(sec));
-        }
+        // ALWAYS install a client-level timeout. `None` resolves to the
+        // per-tier default (120s today). Leaving reqwest's default (which
+        // is effectively unbounded for connect-idle) caused F27: an
+        // unresponsive Z.ai upstream hung the orchestrator forever
+        // because no socket-level deadline ever fired. See
+        // `DEFAULT_TIMEOUT_SECS` and the module-level doc.
+        let effective_timeout = timeout_secs.unwrap_or(config.default_timeout_secs);
+        let builder = Client::builder().timeout(std::time::Duration::from_secs(effective_timeout));
         let raw_url = base_url.unwrap_or_else(|| config.default_base_url.to_owned());
         let normalized = format!("{}/", raw_url.trim_end_matches('/'));
         let base_url = Url::parse(&normalized).map_err(|err| {
@@ -295,10 +315,17 @@ impl ZaiProvider {
             .base_url
             .join(self.config.chat_endpoint)
             .map_err(|e| ProviderError::Http(redact_secrets(&e.to_string())))?;
-        let mut req = self.client.post(url).bearer_auth(&self.api_key).json(body);
-        if let Some(timeout) = self.timeout_secs {
-            req = req.timeout(std::time::Duration::from_secs(timeout));
-        }
+        // Per-request timeout: explicit override if set, otherwise the
+        // per-tier default. Redundant with the client-level timeout but
+        // belt-and-suspenders — reqwest applies the lower of the two and
+        // we want a hard ceiling either way.
+        let per_request_timeout = self.timeout_secs.unwrap_or(self.config.default_timeout_secs);
+        let req = self
+            .client
+            .post(url)
+            .bearer_auth(&self.api_key)
+            .json(body)
+            .timeout(std::time::Duration::from_secs(per_request_timeout));
         let resp = req.send().await?;
         if !resp.status().is_success() {
             let status = resp.status();

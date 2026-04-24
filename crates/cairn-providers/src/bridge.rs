@@ -229,6 +229,7 @@ fn provider_error_to_adapter_error(e: crate::error::ProviderError) -> ProviderAd
     use crate::error::ProviderError;
     match e {
         ProviderError::RateLimited => ProviderAdapterError::RateLimited,
+        ProviderError::TimedOut => ProviderAdapterError::TimedOut,
         ProviderError::Auth(msg) => ProviderAdapterError::Auth(msg),
         ProviderError::InvalidRequest(msg) => ProviderAdapterError::InvalidRequest(msg),
         ProviderError::ServerError { status, message } => {

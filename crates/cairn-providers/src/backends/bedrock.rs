@@ -15,6 +15,12 @@ use crate::models::ModelsProvider;
 use crate::redact::redact_secrets;
 use crate::{CairnProvider, ToolCall, Usage};
 
+/// Default HTTP client timeout for Bedrock (seconds).
+///
+/// Bounded on purpose: a hung upstream can never stall the orchestrator for
+/// longer than one call's worth of latency.
+pub const DEFAULT_BEDROCK_TIMEOUT_SECS: u64 = 120;
+
 pub struct Bedrock {
     model_id: String,
     region: String,
@@ -32,8 +38,15 @@ impl Bedrock {
             model_id: model_id.into(),
             region: region.into(),
             api_key: api_key.into(),
+            // 120s default: Bedrock Converse with MiniMax / Claude Sonnet
+            // reasoning can exceed 60s on long contexts. Bounded (never
+            // unbounded) to guarantee the orchestrator can always escape
+            // a hung upstream within one call's worth of latency — see
+            // F27 dogfood blocker for the non-bounded failure mode.
             client: reqwest::Client::builder()
-                .timeout(std::time::Duration::from_secs(60))
+                .timeout(std::time::Duration::from_secs(
+                    DEFAULT_BEDROCK_TIMEOUT_SECS,
+                ))
                 .build()
                 .unwrap_or_default(),
         }
