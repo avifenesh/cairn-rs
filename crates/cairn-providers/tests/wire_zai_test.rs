@@ -211,6 +211,107 @@ async fn zai_streaming_delivers_reasoning_content_deltas() {
     mock.assert();
 }
 
+#[tokio::test]
+async fn zai_streaming_surfaces_1305_error_envelope_on_http_200() {
+    // BUGBOT#280: Z.ai serves `{"error":{"code":"1305",...}}` with HTTP 200
+    // on the streaming endpoint during overload. Must not be swallowed.
+    let server = MockServer::start();
+    let _mock = server.mock(|_when, then| {
+        then.status(200)
+            .header("content-type", "application/json")
+            .body(
+                r#"{"error":{"code":"1305","message":"The service may be temporarily overloaded, please try again later"}}"#,
+            );
+    });
+
+    let p = provider(&server);
+    let mut stream = p
+        .chat_stream_structured(&[ChatMessage::user("hi")], None, None)
+        .await
+        .expect("stream open");
+
+    let first = stream.next().await.expect("first chunk");
+    let err = first.expect_err("envelope should surface as error");
+    assert!(
+        matches!(err, cairn_providers::ProviderError::RateLimited),
+        "expected RateLimited, got {err:?}"
+    );
+}
+
+#[tokio::test]
+async fn zai_tool_streaming_surfaces_1305_error_envelope_on_http_200() {
+    let server = MockServer::start();
+    let _mock = server.mock(|_when, then| {
+        then.status(200)
+            .header("content-type", "application/json")
+            .body(r#"{"error":{"code":"1305","message":"overload"}}"#);
+    });
+
+    let p = provider(&server);
+    let mut stream = p
+        .chat_stream_with_tools(&[ChatMessage::user("hi")], None, None)
+        .await
+        .expect("stream open");
+    let first = stream.next().await.expect("first chunk");
+    let err = first.expect_err("envelope should surface as error");
+    assert!(
+        matches!(err, cairn_providers::ProviderError::RateLimited),
+        "expected RateLimited, got {err:?}"
+    );
+}
+
+#[tokio::test]
+async fn zai_streaming_preserves_reasoning_alongside_tool_calls() {
+    // BUGBOT#280: a single SSE frame can carry BOTH reasoning_content AND
+    // tool_calls. Normalize mode must not drop the reasoning delta.
+    let server = MockServer::start();
+    let _mock = server.mock(|_when, then| {
+        let body = [
+            // Frame 1: reasoning + tool name (both present in one delta).
+            r#"data: {"id":"x","choices":[{"index":0,"delta":{"role":"assistant","reasoning_content":"Decide to call tool","tool_calls":[{"id":"call_a","index":0,"function":{"name":"search","arguments":""}}]}}]}"#,
+            // Frame 2: argument delta only.
+            r#"data: {"id":"x","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\"q\":\"rust\"}"}}]}}]}"#,
+            // Frame 3: finish.
+            r#"data: {"id":"x","choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}"#,
+            "data: [DONE]",
+            "",
+        ]
+        .join("\n\n");
+        then.status(200)
+            .header("content-type", "text/event-stream")
+            .body(body);
+    });
+
+    let p = provider(&server);
+    let mut stream = p
+        .chat_stream_structured(&[ChatMessage::user("hi")], None, None)
+        .await
+        .expect("stream open");
+
+    let mut reasoning = String::new();
+    let mut saw_tool_call = false;
+    while let Some(chunk) = stream.next().await {
+        let sr = chunk.expect("chunk ok");
+        for choice in &sr.choices {
+            if let Some(ref r) = choice.delta.reasoning_content {
+                reasoning.push_str(r);
+            }
+            if let Some(ref calls) = choice.delta.tool_calls
+                && calls
+                    .iter()
+                    .any(|c| !c.function.name.is_empty() || !c.function.arguments.is_empty())
+            {
+                saw_tool_call = true;
+            }
+        }
+    }
+    assert_eq!(
+        reasoning, "Decide to call tool",
+        "reasoning delta must not be dropped when tool_calls are present in the same frame"
+    );
+    assert!(saw_tool_call, "tool_call must still be emitted");
+}
+
 /// Live smoke against the coding endpoint.  Requires `ZAI_API_KEY` in env.
 /// Ignored by default — run with
 /// `ZAI_API_KEY=... cargo test -p cairn-providers --test wire_zai_test \

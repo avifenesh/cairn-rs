@@ -803,6 +803,7 @@ impl SseParser {
                     if self.normalize
                         && let Some(ref call_list) = calls
                     {
+                        // Accumulate tool_call deltas; flush on name change.
                         for tc in call_list {
                             if !tc.function.name.is_empty() {
                                 self.flush_tool();
@@ -817,6 +818,25 @@ impl SseParser {
                             if !tc.id.is_empty() {
                                 self.tool_buf.id.clone_from(&tc.id);
                             }
+                        }
+                        // BUGBOT#280: Z.ai deltas can carry BOTH content/reasoning
+                        // AND tool_calls in the same frame (the coding endpoint
+                        // always emits `reasoning_content` alongside whatever
+                        // else is in the delta). Previously the normalize branch
+                        // silently dropped text/reasoning when tool_calls were
+                        // present. Emit them as a separate StreamResponse so
+                        // callers that tee reasoning→UI don't lose frames.
+                        if content.is_some() || reasoning.is_some() {
+                            self.results.push(Ok(StreamResponse {
+                                choices: vec![StreamChoice {
+                                    delta: StreamDelta {
+                                        content,
+                                        reasoning_content: reasoning,
+                                        tool_calls: None,
+                                    },
+                                }],
+                                usage: None,
+                            }));
                         }
                     } else {
                         self.flush_tool();
@@ -838,12 +858,51 @@ impl SseParser {
 
     fn consume(&mut self, bytes: &[u8]) -> Vec<Result<StreamResponse, ProviderError>> {
         self.buf.extend_from_slice(bytes);
+        // BUGBOT#280: Z.ai occasionally returns `{"error":{"code":"1305",...}}`
+        // as a plain JSON body with HTTP 200 on the streaming endpoint
+        // (observed 2026-04-24). The SSE parser would otherwise never find a
+        // `data:` frame and close the stream silently — defeating the
+        // fallback chain. Detect the envelope as soon as we have enough bytes
+        // and surface it as RateLimited/InvalidRequest.
+        if let Some(err) = detect_error_envelope(&self.buf) {
+            self.buf.clear();
+            self.results.push(Err(err));
+            return self.results.drain(..).collect();
+        }
         while let Some((pos, len)) = find_sse_boundary(&self.buf) {
             let event = self.buf[..pos].to_vec();
             self.buf.drain(..pos + len);
             self.parse_event(&event);
         }
         self.results.drain(..).collect()
+    }
+}
+
+/// Checks whether a streaming response body starts with the Z.ai error
+/// envelope (`{"error":{"code":"...","message":"..."}}`) and returns the
+/// mapped `ProviderError`.  Returns `None` if the body does not parse as a
+/// complete envelope yet (so the caller can keep accumulating bytes).
+fn detect_error_envelope(buf: &[u8]) -> Option<ProviderError> {
+    // Quick guard: SSE frames start with `data:` or `event:` or `id:` or `:`.
+    // The error envelope is raw JSON. Cheap check before parsing.
+    let trimmed_start = buf
+        .iter()
+        .position(|b| !b.is_ascii_whitespace())
+        .map(|i| &buf[i..])
+        .unwrap_or(buf);
+    if !trimmed_start.starts_with(b"{") {
+        return None;
+    }
+    // Try a full JSON parse; only act if it deserialises to the error shape.
+    let envelope: ZaiErrorEnvelope = serde_json::from_slice(trimmed_start).ok()?;
+    let err = envelope.error?;
+    if err.code == "1305" || err.code == "429" {
+        Some(ProviderError::RateLimited)
+    } else {
+        Some(ProviderError::InvalidRequest(redact_secrets(&format!(
+            "Z.ai stream error code {}: {}",
+            err.code, err.message
+        ))))
     }
 }
 
@@ -886,7 +945,17 @@ fn create_tool_sse_stream(
                     Ok(bytes) => {
                         let mut out = Vec::new();
                         buf.extend_from_slice(&bytes);
-                        while let Some((pos, len)) = find_sse_boundary(buf) {
+                        // BUGBOT#280: surface HTTP-200 error envelopes on
+                        // the tool-streaming path too. Same rationale as
+                        // `SseParser::consume`. When the envelope parses, we
+                        // drain the buffer and skip SSE framing entirely.
+                        let mut aborted = false;
+                        if let Some(err) = detect_error_envelope(buf) {
+                            buf.clear();
+                            out.push(Err(err));
+                            aborted = true;
+                        }
+                        while !aborted && let Some((pos, len)) = find_sse_boundary(buf) {
                             let event = buf[..pos].to_vec();
                             buf.drain(..pos + len);
                             let text = String::from_utf8_lossy(&event);
