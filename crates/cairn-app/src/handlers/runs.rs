@@ -2492,10 +2492,9 @@ pub(crate) async fn orchestrate_run_handler(
                     // may embed upstream response bodies; those can echo
                     // bearer tokens if a misconfigured provider rejected
                     // the request with the auth header included.
-                    let summary =
-                        cairn_providers::redact_secrets(&cairn_orchestrator::format_attempt_summary(
-                            attempts,
-                        ));
+                    let summary = cairn_providers::redact_secrets(
+                        &cairn_orchestrator::format_attempt_summary(attempts),
+                    );
                     // Best-effort: if the approval submission itself fails
                     // (store-append error, cache issue) we still return 502
                     // with the inline summary, but we MUST log the drop so
