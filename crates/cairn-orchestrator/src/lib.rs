@@ -17,6 +17,7 @@
 //! All three phases are traits: implementations are injected at construction
 //! time so each phase can be tested and replaced independently.
 
+pub mod approval_policy;
 pub mod context;
 pub mod decide;
 pub mod decide_impl;
@@ -43,6 +44,7 @@ pub use loop_runner::{
     CheckpointHook, DualCheckpointHook, NoOpCheckpointHook, OrchestratorLoop,
     LEASE_UNHEALTHY_REASON,
 };
+pub use approval_policy::derive_match_policy;
 pub use task_sink::{NoOpTaskSink, TaskFrameSink};
 
 pub mod gather_impl;

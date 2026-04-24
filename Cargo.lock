@@ -723,6 +723,7 @@ dependencies = [
  "cairn-runtime",
  "cairn-store",
  "cairn-tools",
+ "futures",
  "reqwest",
  "serde",
  "serde_json",
