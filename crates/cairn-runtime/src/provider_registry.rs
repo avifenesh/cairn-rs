@@ -946,7 +946,14 @@ fn build_embedding_provider(
     connection: &ProviderConnectionRecord,
     requested_model: &str,
 ) -> Result<Option<Arc<dyn DomainEmbeddingProvider>>, cairn_providers::error::ProviderError> {
-    if matches!(backend, Backend::Bedrock) {
+    // Bedrock has its own SDK path; Zai/ZaiCoding don't expose embeddings on
+    // the coding endpoint (would need the general `/v4/embeddings` path which
+    // is a separate product).  Operators needing Z.ai embeddings can point an
+    // OpenAI-compatible connection at `https://api.z.ai/api/paas/v4/`.
+    if matches!(
+        backend,
+        Backend::Bedrock | Backend::Zai | Backend::ZaiCoding
+    ) {
         return Ok(None);
     }
 

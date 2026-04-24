@@ -66,13 +66,22 @@ pub struct FunctionCall {
 }
 
 /// Token usage metadata returned by providers.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Usage {
     #[serde(alias = "input_tokens")]
     pub prompt_tokens: u32,
     #[serde(alias = "output_tokens")]
     pub completion_tokens: u32,
     pub total_tokens: u32,
+    /// Server-side cached prompt tokens (Anthropic `cache_read_input_tokens`,
+    /// OpenAI-compat / Z.ai `prompt_tokens_details.cached_tokens`).  Optional
+    /// because most providers don't report it.  Parsed where present.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        alias = "cache_read_input_tokens"
+    )]
+    pub cached_tokens: Option<u32>,
 }
 
 /// Super-trait combining chat + completion + embedding + model listing.
