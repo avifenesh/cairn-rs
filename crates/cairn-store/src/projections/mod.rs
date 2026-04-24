@@ -52,6 +52,7 @@ pub mod signal;
 pub mod signal_subscription;
 pub mod snapshot;
 pub mod task;
+pub mod tool_call_approval;
 pub mod tool_invocation;
 pub mod workspace_membership;
 
@@ -96,6 +97,9 @@ pub use signal::*;
 pub use signal_subscription::{SignalSubscriptionReadModel, SignalSubscriptionRecord};
 pub use snapshot::*;
 pub use task::*;
+pub use tool_call_approval::{
+    ToolCallApprovalReadModel, ToolCallApprovalRecord, ToolCallApprovalState,
+};
 pub use tool_invocation::*;
 pub use workspace_membership::{WorkspaceMemberRecord, WorkspaceMembershipReadModel};
 

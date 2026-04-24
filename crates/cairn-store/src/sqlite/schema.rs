@@ -85,6 +85,42 @@ CREATE TABLE IF NOT EXISTS approvals (
     updated_at   INTEGER NOT NULL
 );
 
+-- PR BP-2: projection for ToolCall* approval events.
+-- `state` is one of pending|approved|rejected|timeout. JSON fields are
+-- stored as TEXT since SQLite has no native JSONB.
+CREATE TABLE IF NOT EXISTS tool_call_approvals (
+    call_id              TEXT PRIMARY KEY,
+    session_id           TEXT NOT NULL,
+    run_id               TEXT NOT NULL,
+    tenant_id            TEXT NOT NULL,
+    workspace_id         TEXT NOT NULL,
+    project_id           TEXT NOT NULL,
+    tool_name            TEXT NOT NULL,
+    original_tool_args   TEXT NOT NULL,
+    amended_tool_args    TEXT,
+    approved_tool_args   TEXT,
+    display_summary      TEXT,
+    match_policy         TEXT NOT NULL,
+    state                TEXT NOT NULL DEFAULT 'pending',
+    operator_id          TEXT,
+    scope                TEXT,
+    reason               TEXT,
+    proposed_at_ms       INTEGER NOT NULL,
+    approved_at_ms       INTEGER,
+    rejected_at_ms       INTEGER,
+    last_amended_at_ms   INTEGER,
+    version              INTEGER NOT NULL DEFAULT 1,
+    created_at           INTEGER NOT NULL,
+    updated_at           INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_tool_call_approvals_project_state
+    ON tool_call_approvals (tenant_id, workspace_id, project_id, state);
+CREATE INDEX IF NOT EXISTS idx_tool_call_approvals_session
+    ON tool_call_approvals (session_id);
+CREATE INDEX IF NOT EXISTS idx_tool_call_approvals_run
+    ON tool_call_approvals (run_id);
+
 CREATE TABLE IF NOT EXISTS checkpoints (
     checkpoint_id TEXT PRIMARY KEY,
     tenant_id     TEXT NOT NULL,

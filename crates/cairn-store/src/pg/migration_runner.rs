@@ -130,6 +130,11 @@ const MIGRATIONS: &[(u32, &str, &str)] = &[
         "harden_prompt_schema",
         include_str!("migrations/V023__harden_prompt_schema.sql"),
     ),
+    (
+        24,
+        "create_tool_call_approvals",
+        include_str!("migrations/V024__create_tool_call_approvals.sql"),
+    ),
 ];
 
 /// Return the compile-time migration registry as (version, name, sql) triples.

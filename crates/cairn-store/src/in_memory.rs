@@ -77,6 +77,8 @@ struct State {
     runs: HashMap<String, RunRecord>,
     tasks: HashMap<String, TaskRecord>,
     approvals: HashMap<String, ApprovalRecord>,
+    /// PR BP-2: projection of `ToolCall*` approval events keyed by call_id.
+    tool_call_approvals: HashMap<String, ToolCallApprovalRecord>,
     checkpoints: HashMap<String, CheckpointRecord>,
     mailbox_messages: HashMap<String, MailboxRecord>,
     tool_invocations: HashMap<String, ToolInvocationRecord>,
@@ -184,6 +186,7 @@ impl InMemoryStore {
                 runs: HashMap::new(),
                 tasks: HashMap::new(),
                 approvals: HashMap::new(),
+                tool_call_approvals: HashMap::new(),
                 checkpoints: HashMap::new(),
                 mailbox_messages: HashMap::new(),
                 tool_invocations: HashMap::new(),
@@ -1304,13 +1307,78 @@ impl InMemoryStore {
             | RuntimeEvent::ToolRecoveryPaused(_)
             // RFC 020 Track 4: boot-level recovery audit event.
             | RuntimeEvent::RecoverySummaryEmitted(_)
-            // PR BP-1: tool-call approval foundation events — no
-            // in-memory projection update yet; a later PR in the wave
-            // wires in the projection state.
-            | RuntimeEvent::ToolCallProposed(_)
-            | RuntimeEvent::ToolCallApproved(_)
-            | RuntimeEvent::ToolCallRejected(_)
-            | RuntimeEvent::ToolCallAmended(_) => {}
+            => {}
+            // PR BP-2: project tool-call approval events into the
+            // `tool_call_approvals` map.
+            RuntimeEvent::ToolCallProposed(e) => {
+                // Idempotent: mirror the SQL backends' `ON CONFLICT DO
+                // NOTHING` so a replayed ToolCallProposed does NOT reset
+                // an already-amended/approved/rejected record.
+                state
+                    .tool_call_approvals
+                    .entry(e.call_id.as_str().to_owned())
+                    .or_insert_with(|| ToolCallApprovalRecord {
+                        call_id: e.call_id.clone(),
+                        session_id: e.session_id.clone(),
+                        run_id: e.run_id.clone(),
+                        project: e.project.clone(),
+                        tool_name: e.tool_name.clone(),
+                        original_tool_args: e.tool_args.clone(),
+                        amended_tool_args: None,
+                        approved_tool_args: None,
+                        display_summary: if e.display_summary.is_empty() {
+                            None
+                        } else {
+                            Some(e.display_summary.clone())
+                        },
+                        match_policy: e.match_policy.clone(),
+                        state: ToolCallApprovalState::Pending,
+                        operator_id: None,
+                        scope: None,
+                        reason: None,
+                        proposed_at_ms: e.proposed_at_ms,
+                        approved_at_ms: None,
+                        rejected_at_ms: None,
+                        last_amended_at_ms: None,
+                        version: 1,
+                        created_at: now,
+                        updated_at: now,
+                    });
+            }
+            RuntimeEvent::ToolCallAmended(e) => {
+                if let Some(rec) = state.tool_call_approvals.get_mut(e.call_id.as_str()) {
+                    rec.amended_tool_args = Some(e.new_tool_args.clone());
+                    rec.last_amended_at_ms = Some(e.amended_at_ms);
+                    rec.version += 1;
+                    rec.updated_at = now;
+                }
+            }
+            RuntimeEvent::ToolCallApproved(e) => {
+                if let Some(rec) = state.tool_call_approvals.get_mut(e.call_id.as_str()) {
+                    rec.state = ToolCallApprovalState::Approved;
+                    rec.operator_id = Some(e.operator_id.clone());
+                    rec.scope = Some(e.scope.clone());
+                    // Mirror SQL behaviour (binding NULL clears the
+                    // override): assign unconditionally so a replayed
+                    // Approved-with-None cannot leave stale override
+                    // args. Preserves the "Approved-with-None must NOT
+                    // populate approved_tool_args" invariant.
+                    rec.approved_tool_args = e.approved_tool_args.clone();
+                    rec.approved_at_ms = Some(e.approved_at_ms);
+                    rec.version += 1;
+                    rec.updated_at = now;
+                }
+            }
+            RuntimeEvent::ToolCallRejected(e) => {
+                if let Some(rec) = state.tool_call_approvals.get_mut(e.call_id.as_str()) {
+                    rec.state = ToolCallApprovalState::Rejected;
+                    rec.operator_id = Some(e.operator_id.clone());
+                    rec.reason = e.reason.clone();
+                    rec.rejected_at_ms = Some(e.rejected_at_ms);
+                    rec.version += 1;
+                    rec.updated_at = now;
+                }
+            }
             RuntimeEvent::ScheduledTaskCreated(e) => {
                 state.scheduled_tasks.insert(
                     e.scheduled_task_id.as_str().to_owned(),
@@ -2379,6 +2447,78 @@ impl ApprovalReadModel for InMemoryStore {
             .approvals
             .values()
             .any(|a| a.run_id.as_ref() == Some(run_id) && a.decision.is_none()))
+    }
+}
+
+// -- ToolCallApprovalReadModel --
+
+#[async_trait]
+impl ToolCallApprovalReadModel for InMemoryStore {
+    async fn get(
+        &self,
+        call_id: &ToolCallId,
+    ) -> Result<Option<ToolCallApprovalRecord>, StoreError> {
+        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        Ok(state.tool_call_approvals.get(call_id.as_str()).cloned())
+    }
+
+    async fn list_for_run(
+        &self,
+        run_id: &RunId,
+    ) -> Result<Vec<ToolCallApprovalRecord>, StoreError> {
+        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        let mut results: Vec<ToolCallApprovalRecord> = state
+            .tool_call_approvals
+            .values()
+            .filter(|r| r.run_id == *run_id)
+            .cloned()
+            .collect();
+        results.sort_by(|a, b| {
+            a.proposed_at_ms
+                .cmp(&b.proposed_at_ms)
+                .then_with(|| a.call_id.as_str().cmp(b.call_id.as_str()))
+        });
+        Ok(results)
+    }
+
+    async fn list_for_session(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<Vec<ToolCallApprovalRecord>, StoreError> {
+        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        let mut results: Vec<ToolCallApprovalRecord> = state
+            .tool_call_approvals
+            .values()
+            .filter(|r| r.session_id == *session_id)
+            .cloned()
+            .collect();
+        results.sort_by(|a, b| {
+            a.proposed_at_ms
+                .cmp(&b.proposed_at_ms)
+                .then_with(|| a.call_id.as_str().cmp(b.call_id.as_str()))
+        });
+        Ok(results)
+    }
+
+    async fn list_pending_for_project(
+        &self,
+        project: &ProjectKey,
+        limit: usize,
+        offset: usize,
+    ) -> Result<Vec<ToolCallApprovalRecord>, StoreError> {
+        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        let mut results: Vec<ToolCallApprovalRecord> = state
+            .tool_call_approvals
+            .values()
+            .filter(|r| r.project == *project && r.state == ToolCallApprovalState::Pending)
+            .cloned()
+            .collect();
+        results.sort_by(|a, b| {
+            a.proposed_at_ms
+                .cmp(&b.proposed_at_ms)
+                .then_with(|| a.call_id.as_str().cmp(b.call_id.as_str()))
+        });
+        Ok(results.into_iter().skip(offset).take(limit).collect())
     }
 }
 

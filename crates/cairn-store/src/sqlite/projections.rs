@@ -764,10 +764,122 @@ impl SqliteSyncProjection {
             // PR BP-1: tool-call approval foundation events — no
             // projection table yet; a later PR in the wave wires these
             // into the approvals / tool-call projections.
-            RuntimeEvent::ToolCallProposed(_) => log_stub("ToolCallProposed"),
-            RuntimeEvent::ToolCallApproved(_) => log_stub("ToolCallApproved"),
-            RuntimeEvent::ToolCallRejected(_) => log_stub("ToolCallRejected"),
-            RuntimeEvent::ToolCallAmended(_) => log_stub("ToolCallAmended"),
+            // PR BP-2: project tool-call approval events into the
+            // `tool_call_approvals` table. JSON fields are stored as
+            // TEXT because SQLite has no native JSONB.
+            RuntimeEvent::ToolCallProposed(e) => {
+                let tool_args_text = serde_json::to_string(&e.tool_args)
+                    .map_err(|err| StoreError::Serialization(err.to_string()))?;
+                let match_policy_text = serde_json::to_string(&e.match_policy)
+                    .map_err(|err| StoreError::Serialization(err.to_string()))?;
+                let display_summary_opt: Option<&str> = if e.display_summary.is_empty() {
+                    None
+                } else {
+                    Some(e.display_summary.as_str())
+                };
+                sqlx::query(
+                    "INSERT INTO tool_call_approvals (
+                         call_id, session_id, run_id, tenant_id, workspace_id, project_id,
+                         tool_name, original_tool_args, amended_tool_args, approved_tool_args,
+                         display_summary, match_policy, state, operator_id, scope, reason,
+                         proposed_at_ms, approved_at_ms, rejected_at_ms, last_amended_at_ms,
+                         version, created_at, updated_at
+                     )
+                     VALUES (
+                         ?, ?, ?, ?, ?, ?,
+                         ?, ?, NULL, NULL,
+                         ?, ?, 'pending', NULL, NULL, NULL,
+                         ?, NULL, NULL, NULL,
+                         1, ?, ?
+                     )
+                     ON CONFLICT(call_id) DO NOTHING",
+                )
+                .bind(e.call_id.as_str())
+                .bind(e.session_id.as_str())
+                .bind(e.run_id.as_str())
+                .bind(e.project.tenant_id.as_str())
+                .bind(e.project.workspace_id.as_str())
+                .bind(e.project.project_id.as_str())
+                .bind(&e.tool_name)
+                .bind(tool_args_text)
+                .bind(display_summary_opt)
+                .bind(match_policy_text)
+                .bind(e.proposed_at_ms as i64)
+                .bind(now)
+                .bind(now)
+                .execute(&mut **tx)
+                .await
+                .map_err(|err| StoreError::Internal(err.to_string()))?;
+            }
+            RuntimeEvent::ToolCallAmended(e) => {
+                let new_args_text = serde_json::to_string(&e.new_tool_args)
+                    .map_err(|err| StoreError::Serialization(err.to_string()))?;
+                sqlx::query(
+                    "UPDATE tool_call_approvals
+                     SET amended_tool_args = ?,
+                         last_amended_at_ms = ?,
+                         version = version + 1,
+                         updated_at = ?
+                     WHERE call_id = ?",
+                )
+                .bind(new_args_text)
+                .bind(e.amended_at_ms as i64)
+                .bind(now)
+                .bind(e.call_id.as_str())
+                .execute(&mut **tx)
+                .await
+                .map_err(|err| StoreError::Internal(err.to_string()))?;
+            }
+            RuntimeEvent::ToolCallApproved(e) => {
+                let scope_text = serde_json::to_string(&e.scope)
+                    .map_err(|err| StoreError::Serialization(err.to_string()))?;
+                let approved_args_text: Option<String> = e
+                    .approved_tool_args
+                    .as_ref()
+                    .map(serde_json::to_string)
+                    .transpose()
+                    .map_err(|err| StoreError::Serialization(err.to_string()))?;
+                sqlx::query(
+                    "UPDATE tool_call_approvals
+                     SET state = 'approved',
+                         operator_id = ?,
+                         scope = ?,
+                         approved_tool_args = ?,
+                         approved_at_ms = ?,
+                         version = version + 1,
+                         updated_at = ?
+                     WHERE call_id = ?",
+                )
+                .bind(e.operator_id.as_str())
+                .bind(scope_text)
+                .bind(approved_args_text)
+                .bind(e.approved_at_ms as i64)
+                .bind(now)
+                .bind(e.call_id.as_str())
+                .execute(&mut **tx)
+                .await
+                .map_err(|err| StoreError::Internal(err.to_string()))?;
+            }
+            RuntimeEvent::ToolCallRejected(e) => {
+                sqlx::query(
+                    "UPDATE tool_call_approvals
+                     SET state = 'rejected',
+                         operator_id = ?,
+                         reason = ?,
+                         rejected_at_ms = ?,
+                         version = version + 1,
+                         updated_at = ?
+                     WHERE call_id = ?",
+                )
+                .bind(e.operator_id.as_str())
+                .bind(e.reason.as_deref())
+                .bind(e.rejected_at_ms as i64)
+                .bind(now)
+                .bind(e.call_id.as_str())
+                .execute(&mut **tx)
+                .await
+                .map_err(|err| StoreError::Internal(err.to_string()))?;
+            }
         }
 
         Ok(())

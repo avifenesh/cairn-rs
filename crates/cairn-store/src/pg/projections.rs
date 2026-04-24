@@ -398,13 +398,111 @@ impl PgSyncProjection {
             // RFC 020 Track 4: boot-level recovery audit event.
             RuntimeEvent::RecoverySummaryEmitted(_) => log_stub("RecoverySummaryEmitted"),
 
-            // PR BP-1: tool-call approval foundation events — no projection
-            // table yet; a later PR in the wave wires these into the
-            // approvals / tool-call projections.
-            RuntimeEvent::ToolCallProposed(_) => log_stub("ToolCallProposed"),
-            RuntimeEvent::ToolCallApproved(_) => log_stub("ToolCallApproved"),
-            RuntimeEvent::ToolCallRejected(_) => log_stub("ToolCallRejected"),
-            RuntimeEvent::ToolCallAmended(_) => log_stub("ToolCallAmended"),
+            // PR BP-2: project tool-call approval events into the
+            // `tool_call_approvals` table. ToolCallProposed inserts a
+            // new pending row; Amended/Approved/Rejected update it.
+            RuntimeEvent::ToolCallProposed(e) => {
+                let match_policy_json = serde_json::to_value(&e.match_policy)
+                    .map_err(|err| StoreError::Serialization(err.to_string()))?;
+                let display_summary_opt: Option<&str> = if e.display_summary.is_empty() {
+                    None
+                } else {
+                    Some(e.display_summary.as_str())
+                };
+                sqlx::query(
+                    "INSERT INTO tool_call_approvals (
+                         call_id, session_id, run_id, tenant_id, workspace_id, project_id,
+                         tool_name, original_tool_args, amended_tool_args, approved_tool_args,
+                         display_summary, match_policy, state, operator_id, scope, reason,
+                         proposed_at_ms, approved_at_ms, rejected_at_ms, last_amended_at_ms,
+                         version, created_at, updated_at
+                     )
+                     VALUES (
+                         $1, $2, $3, $4, $5, $6,
+                         $7, $8, NULL, NULL,
+                         $9, $10, 'pending', NULL, NULL, NULL,
+                         $11, NULL, NULL, NULL,
+                         1, $12, $12
+                     )
+                     ON CONFLICT (call_id) DO NOTHING",
+                )
+                .bind(e.call_id.as_str())
+                .bind(e.session_id.as_str())
+                .bind(e.run_id.as_str())
+                .bind(e.project.tenant_id.as_str())
+                .bind(e.project.workspace_id.as_str())
+                .bind(e.project.project_id.as_str())
+                .bind(&e.tool_name)
+                .bind(&e.tool_args)
+                .bind(display_summary_opt)
+                .bind(&match_policy_json)
+                .bind(e.proposed_at_ms as i64)
+                .bind(now)
+                .execute(&mut **tx)
+                .await
+                .map_err(|err| StoreError::Internal(err.to_string()))?;
+            }
+            RuntimeEvent::ToolCallAmended(e) => {
+                sqlx::query(
+                    "UPDATE tool_call_approvals
+                     SET amended_tool_args = $1,
+                         last_amended_at_ms = $2,
+                         version = version + 1,
+                         updated_at = $3
+                     WHERE call_id = $4",
+                )
+                .bind(&e.new_tool_args)
+                .bind(e.amended_at_ms as i64)
+                .bind(now)
+                .bind(e.call_id.as_str())
+                .execute(&mut **tx)
+                .await
+                .map_err(|err| StoreError::Internal(err.to_string()))?;
+            }
+            RuntimeEvent::ToolCallApproved(e) => {
+                let scope_json = serde_json::to_value(&e.scope)
+                    .map_err(|err| StoreError::Serialization(err.to_string()))?;
+                sqlx::query(
+                    "UPDATE tool_call_approvals
+                     SET state = 'approved',
+                         operator_id = $1,
+                         scope = $2,
+                         approved_tool_args = $3,
+                         approved_at_ms = $4,
+                         version = version + 1,
+                         updated_at = $5
+                     WHERE call_id = $6",
+                )
+                .bind(e.operator_id.as_str())
+                .bind(&scope_json)
+                .bind(e.approved_tool_args.as_ref())
+                .bind(e.approved_at_ms as i64)
+                .bind(now)
+                .bind(e.call_id.as_str())
+                .execute(&mut **tx)
+                .await
+                .map_err(|err| StoreError::Internal(err.to_string()))?;
+            }
+            RuntimeEvent::ToolCallRejected(e) => {
+                sqlx::query(
+                    "UPDATE tool_call_approvals
+                     SET state = 'rejected',
+                         operator_id = $1,
+                         reason = $2,
+                         rejected_at_ms = $3,
+                         version = version + 1,
+                         updated_at = $4
+                     WHERE call_id = $5",
+                )
+                .bind(e.operator_id.as_str())
+                .bind(e.reason.as_deref())
+                .bind(e.rejected_at_ms as i64)
+                .bind(now)
+                .bind(e.call_id.as_str())
+                .execute(&mut **tx)
+                .await
+                .map_err(|err| StoreError::Internal(err.to_string()))?;
+            }
 
             RuntimeEvent::TenantCreated(e) => {
                 sqlx::query(
