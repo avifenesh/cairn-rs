@@ -44,9 +44,7 @@ impl Bedrock {
             // a hung upstream within one call's worth of latency — see
             // F27 dogfood blocker for the non-bounded failure mode.
             client: reqwest::Client::builder()
-                .timeout(std::time::Duration::from_secs(
-                    DEFAULT_BEDROCK_TIMEOUT_SECS,
-                ))
+                .timeout(std::time::Duration::from_secs(DEFAULT_BEDROCK_TIMEOUT_SECS))
                 .build()
                 .unwrap_or_default(),
         }

@@ -456,7 +456,9 @@ impl OpenAiCompat {
         // back to the backend-specific default. Belt-and-suspenders with
         // the client-level timeout — reqwest picks the stricter of the
         // two. Never unbounded.
-        let per_request_timeout = self.timeout_secs.unwrap_or(self.config.default_timeout_secs);
+        let per_request_timeout = self
+            .timeout_secs
+            .unwrap_or(self.config.default_timeout_secs);
         req = req.timeout(std::time::Duration::from_secs(per_request_timeout));
         let resp = req.send().await?;
         if !resp.status().is_success() {

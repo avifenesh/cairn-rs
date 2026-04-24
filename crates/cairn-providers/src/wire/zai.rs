@@ -319,7 +319,9 @@ impl ZaiProvider {
         // per-tier default. Redundant with the client-level timeout but
         // belt-and-suspenders — reqwest applies the lower of the two and
         // we want a hard ceiling either way.
-        let per_request_timeout = self.timeout_secs.unwrap_or(self.config.default_timeout_secs);
+        let per_request_timeout = self
+            .timeout_secs
+            .unwrap_or(self.config.default_timeout_secs);
         let req = self
             .client
             .post(url)

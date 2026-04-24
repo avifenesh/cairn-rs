@@ -1722,8 +1722,7 @@ mod tests {
             _: &OrchestrationContext,
             _: &GatherOutput,
         ) -> Result<DecideOutput, OrchestratorError> {
-            self.count
-                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            self.count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             Ok(decide_done())
         }
     }
