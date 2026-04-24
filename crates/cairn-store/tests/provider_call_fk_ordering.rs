@@ -69,7 +69,11 @@ fn provider_call(
         route_decision_id: RouteDecisionId::new(decision_id),
         route_attempt_id: RouteAttemptId::new(attempt_id),
         provider_binding_id: ProviderBindingId::new(binding_id),
-        provider_connection_id: ProviderConnectionId::new(binding_id),
+        // A binding is a named provider configuration; a connection is
+        // the underlying credential/endpoint record. The test helper
+        // pins a fixed connection_id so the two identifiers don't
+        // accidentally conflate in future readers.
+        provider_connection_id: ProviderConnectionId::new("conn_fk"),
         provider_model_id: ProviderModelId::new("glm-4.7"),
         operation_kind: OperationKind::Generate,
         status: ProviderCallStatus::Succeeded,

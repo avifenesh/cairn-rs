@@ -63,7 +63,24 @@ pub(crate) async fn record_decide_trace(
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_millis() as u64;
-    let call_id = format!("orch_{}_{}", ctx.run_id.as_str(), now);
+    // Include `ctx.iteration` AND a monotonic nonce so two DECIDE
+    // completions in the same millisecond for the same run produce
+    // distinct event_ids. `event_log.event_id` is UNIQUE on the
+    // durable backends; a collision there would cascade into a
+    // spurious "dual-write divergence" fatal under the new
+    // fail-loud contract. The nonce is a process-wide counter —
+    // cheap, wait-free, and sufficient since event_id uniqueness
+    // is only enforced per-instance (each cairn-app has its own
+    // sequence space).
+    static NONCE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let nonce = NONCE.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let call_id = format!(
+        "orch_{}_i{}_{}_{}",
+        ctx.run_id.as_str(),
+        ctx.iteration,
+        now,
+        nonce
+    );
     let route_decision_id = RouteDecisionId::new(format!("rd_{call_id}"));
     let route_attempt_id = RouteAttemptId::new(format!("ra_{call_id}"));
     let provider_binding_id = ProviderBindingId::new("brain");
@@ -140,6 +157,13 @@ pub(crate) async fn record_decide_trace(
             "dual-write divergence on run={}",
             ctx.run_id.as_str()
         ));
+        // Skip OTLP export and LlmCallTrace insert: the loop will
+        // abort on the latched fatal on the next `take_fatal_error`
+        // consult, and neither downstream side-effect is safe to
+        // perform while the primary/secondary have diverged — the
+        // trace would reference a provider_call row that never
+        // landed on the durable backend.
+        return;
     }
 
     let _ = exporter.export_event(&provider_payload).await;
