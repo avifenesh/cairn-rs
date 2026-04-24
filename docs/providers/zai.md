@@ -177,6 +177,7 @@ UI for display purposes.
 ```
 $ curl -X POST "https://api.z.ai/api/coding/paas/v4/chat/completions" \
     -H "Authorization: Bearer $ZAI_API_KEY" \
+    -H "Content-Type: application/json" \
     -d '{"model":"glm-4.7","messages":[{"role":"user","content":"Reply with just: hello"}],"max_tokens":30,"stream":false}'
 
 {"choices":[{"finish_reason":"length","index":0,"message":{
