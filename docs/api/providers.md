@@ -21,6 +21,7 @@ Source of truth: [`tests/compat/http_routes.tsv`](../../tests/compat/http_routes
 | `DELETE` | `/v1/providers/connections/:id` | Preserve |  |
 | `PUT` | `/v1/providers/connections/:id` | Preserve |  |
 | `GET` | `/v1/providers/connections/:id/discover-models` | Preserve |  |
+| `POST` | `/v1/providers/connections/discover-preview` | Preserve | ad-hoc discover BEFORE registration |
 | `GET` | `/v1/providers/connections/:id/health-schedule` | Preserve |  |
 | `POST` | `/v1/providers/connections/:id/health-schedule` | Preserve |  |
 | `GET` | `/v1/providers/connections/:id/models` | Preserve |  |

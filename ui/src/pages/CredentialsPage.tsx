@@ -396,12 +396,14 @@ function CredentialRow({
         </span>
       </div>
 
-      {/* Encrypted indicator */}
+      {/* Encrypted indicator — both variants use a leading dot so the
+          visual weight matches, preventing the "one has a dot, the other
+          doesn't" inconsistency flagged in #251. */}
       <div className="w-24 shrink-0 px-2 flex items-center gap-1.5">
         {encrypted ? (
           <Badge variant="success" dot compact>Encrypted</Badge>
         ) : (
-          <Badge variant="warning" compact>Plaintext</Badge>
+          <Badge variant="warning" dot compact>Plaintext</Badge>
         )}
       </div>
 
@@ -412,11 +414,24 @@ function CredentialRow({
         </span>
       </div>
 
-      {/* Last rotated */}
-      <div className="w-28 shrink-0 px-2">
-        <span className="text-[11px] text-gray-400 dark:text-zinc-600 tabular-nums">
-          {fmtRelative(cred.revoked_at_ms ?? (encrypted ? cred.encrypted_at_ms : null))}
-        </span>
+      {/* Rotated / revoked — two distinct timestamps. Pre-fix the column
+          conflated `revoked_at_ms` with `encrypted_at_ms` so a revoked
+          credential would show a misleading "rotation" time. Now each is
+          rendered only when its timestamp is set. */}
+      <div className="w-28 shrink-0 px-2 flex flex-col gap-0.5">
+        {encrypted && cred.encrypted_at_ms && (
+          <span className="text-[11px] text-gray-400 dark:text-zinc-500 tabular-nums" title="Last time the credential was encrypted or rotated">
+            Rotated: {fmtRelative(cred.encrypted_at_ms)}
+          </span>
+        )}
+        {cred.revoked_at_ms && (
+          <span className="text-[11px] text-red-400 tabular-nums" title="Time the credential was revoked">
+            Revoked: {fmtRelative(cred.revoked_at_ms)}
+          </span>
+        )}
+        {!cred.encrypted_at_ms && !cred.revoked_at_ms && (
+          <span className="text-[11px] text-gray-300 dark:text-zinc-600">—</span>
+        )}
       </div>
 
       {/* Actions */}
@@ -577,7 +592,7 @@ export function CredentialsPage() {
                 <span className="text-[10px] text-gray-400 dark:text-zinc-600 uppercase tracking-wider">Created</span>
               </div>
               <div className="w-28 shrink-0 px-2">
-                <span className="text-[10px] text-gray-400 dark:text-zinc-600 uppercase tracking-wider">Last Rotated</span>
+                <span className="text-[10px] text-gray-400 dark:text-zinc-600 uppercase tracking-wider">Rotated / Revoked</span>
               </div>
               <div className="w-20 shrink-0 px-2" />
             </div>

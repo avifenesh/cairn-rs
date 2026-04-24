@@ -922,6 +922,28 @@ export function createApiClient(config: ApiClientConfig) {
       }>;
     }> => get(`/v1/providers/connections/${encodeURIComponent(id)}/discover-models`),
 
+    /** POST /v1/providers/connections/discover-preview — ad-hoc discovery BEFORE
+     *  a connection record exists. Accepts the same fields the registration
+     *  form collects (adapter_type, endpoint_url, optional api_key/api_key_ref)
+     *  and returns discovered models without persisting a connection. */
+    discoverModelsPreview: (body: {
+      adapter_type?: "ollama" | "openai_compat";
+      endpoint_url?: string;
+      api_key?: string;
+      api_key_ref?: string;
+    }): Promise<{
+      provider: string;
+      endpoint: string;
+      models: Array<{
+        model_id: string;
+        name: string;
+        parameter_size?: string;
+        quantization?: string;
+        capabilities: string[];
+        context_window_tokens?: number;
+      }>;
+    }> => post(`/v1/providers/connections/discover-preview`, body),
+
     /** Convenience wrapper: return only the model IDs from `discoverModels`. */
     discoverModelIds: async (id: string): Promise<string[]> => {
       const r = await get<{ models: Array<{ model_id: string }> }>(

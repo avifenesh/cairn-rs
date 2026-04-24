@@ -364,6 +364,7 @@ POST	/v1/providers/budget	preserve	-	-
 POST	/v1/providers/connections	preserve	-	-
 POST	/v1/providers/connections/:id/health-schedule	preserve	-	-
 POST	/v1/providers/connections/:id/models	preserve	-	-
+POST	/v1/providers/connections/discover-preview	preserve	-	-
 POST	/v1/providers/ollama/delete	preserve	-	-
 POST	/v1/providers/ollama/generate	preserve	-	-
 POST	/v1/providers/ollama/pull	preserve	-	-
