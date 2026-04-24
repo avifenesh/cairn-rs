@@ -15,6 +15,7 @@
 pub mod config;
 pub mod github;
 pub mod linear;
+pub mod local_fs;
 pub mod notion;
 pub mod obsidian;
 pub mod types;

@@ -1380,13 +1380,17 @@ export interface FleetReport {
 /** One entry in a project's repo allowlist. Mirrors
  *  `crates/cairn-app/src/repo_routes.rs :: RepoAllowlistEntryResponse`. */
 export interface ProjectRepoEntry {
-  /** Canonical "owner/repo" identifier. */
+  /** Canonical "owner/repo" identifier for `host == "github"`; an
+   *  absolute filesystem path for `host == "local_fs"`. */
   repo_id: string;
-  /** "present" once the local clone cache has hydrated; "missing" otherwise. */
+  /** "present"/"missing" for GitHub clones; "local" for local_fs. */
   clone_status: string;
   added_by?: string | null;
   added_at?: number | null;
   last_used_at?: number | null;
+  /** Git host — defaults to "github" for backward compat with
+   *  pre-multi-host persisted entries. */
+  host?: string;
 }
 
 /** Response from `POST /v1/projects/:project/repos` (`RepoMutationResponse`). */
@@ -1396,6 +1400,7 @@ export interface ProjectRepoMutation {
   allowlisted: boolean;
   clone_status: string;
   clone_created: boolean;
+  host?: string;
 }
 
 /** Response from `GET /v1/projects/:project/repos/:owner/:repo`
@@ -1410,4 +1415,5 @@ export interface ProjectRepoDetail {
   last_used_at?: number | null;
   recent_sandbox_usage: string[];
   recent_register_repo_decisions: string[];
+  host?: string;
 }

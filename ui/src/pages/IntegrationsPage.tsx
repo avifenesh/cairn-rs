@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   Loader2, GitBranch, Play, Pause, SkipForward,
   RotateCcw, Search, CheckCircle2, XCircle, Clock, Zap,
-  ExternalLink, AlertTriangle, Inbox, Cable,
+  ExternalLink, AlertTriangle, Inbox, Cable, ShieldCheck,
 } from "lucide-react";
 import { clsx } from "clsx";
 import { useToast } from "../components/Toast";
@@ -229,6 +229,163 @@ function IssueRow({ entry, onSkip, onRetry, onNavigate }: {
         >
           <ExternalLink size={14} />
         </a>
+      </div>
+    </div>
+  );
+}
+
+// ── Connect GitHub App (verify-installation card) ──────────────────────────
+//
+// Lets an operator paste app_id, private-key PEM, and installation_id
+// and get a round-trip-verified answer from GitHub without mutating
+// server state. Success renders the owner + repo_count; failure
+// surfaces the backend's error message verbatim.
+
+function VerifyGitHubInstallationCard() {
+  const toast = useToast();
+  const [appId, setAppId] = useState("");
+  const [privateKey, setPrivateKey] = useState("");
+  const [installationId, setInstallationId] = useState("");
+  const [result, setResult] = useState<{
+    owner: string;
+    repo_count: number;
+    expires_at: string;
+  } | null>(null);
+
+  const verifyMut = useMutation({
+    mutationFn: () =>
+      defaultApi.verifyGitHubInstallation({
+        app_id: Number(appId),
+        private_key: privateKey,
+        installation_id: Number(installationId),
+      }),
+    onSuccess: (res) => {
+      setResult({ owner: res.owner, repo_count: res.repo_count, expires_at: res.expires_at });
+      toast.success(`Verified — ${res.owner}, ${res.repo_count} repos`);
+    },
+    onError: (err: unknown) => {
+      setResult(null);
+      const msg = err instanceof Error ? err.message : String(err);
+      toast.error(`Verification failed: ${msg}`);
+    },
+  });
+
+  const disabled =
+    verifyMut.isPending ||
+    appId.trim() === "" ||
+    privateKey.trim() === "" ||
+    installationId.trim() === "" ||
+    Number.isNaN(Number(appId)) ||
+    Number.isNaN(Number(installationId));
+
+  return (
+    <div className={clsx("rounded-xl border mb-6", surface.card, border.default)}>
+      <div className="flex items-center justify-between px-5 py-4 border-b border-zinc-800/50">
+        <div className="flex items-center gap-3">
+          <div className="flex items-center justify-center w-9 h-9 rounded-lg bg-zinc-800">
+            <ShieldCheck size={18} className="text-zinc-100" />
+          </div>
+          <div>
+            <h3 className={clsx("text-sm font-semibold", text.heading)}>Connect GitHub App</h3>
+            <p className={clsx("text-[11px]", text.muted)}>
+              Paste app_id, private key, and installation_id — cairn will verify against GitHub.
+            </p>
+          </div>
+        </div>
+        <a
+          href="https://docs.github.com/en/apps/creating-github-apps/about-creating-github-apps/about-creating-github-apps"
+          target="_blank"
+          rel="noopener noreferrer"
+          className={clsx(
+            "inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors",
+            border.default, text.secondary,
+            "hover:bg-zinc-100 dark:hover:bg-zinc-800"
+          )}
+          title="Open GitHub's docs for creating/installing an App"
+        >
+          <ExternalLink size={12} /> GitHub App docs
+        </a>
+      </div>
+
+      <div className="p-5 space-y-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <label className="block">
+            <span className={clsx("text-[11px]", text.muted)}>App ID</span>
+            <input
+              value={appId}
+              onChange={(e) => setAppId(e.target.value)}
+              placeholder="123456"
+              inputMode="numeric"
+              autoComplete="off"
+              className={clsx(
+                "mt-1 w-full rounded-lg border px-2 py-1.5 text-[12px] font-mono",
+                surface.elevated, border.default, text.body,
+                "focus:outline-none focus:ring-1 focus:ring-indigo-500/40"
+              )}
+            />
+          </label>
+          <label className="block">
+            <span className={clsx("text-[11px]", text.muted)}>Installation ID</span>
+            <input
+              value={installationId}
+              onChange={(e) => setInstallationId(e.target.value)}
+              placeholder="98765432"
+              inputMode="numeric"
+              autoComplete="off"
+              className={clsx(
+                "mt-1 w-full rounded-lg border px-2 py-1.5 text-[12px] font-mono",
+                surface.elevated, border.default, text.body,
+                "focus:outline-none focus:ring-1 focus:ring-indigo-500/40"
+              )}
+            />
+          </label>
+        </div>
+
+        <label className="block">
+          <span className={clsx("text-[11px]", text.muted)}>
+            Private key (PEM)
+          </span>
+          <textarea
+            value={privateKey}
+            onChange={(e) => setPrivateKey(e.target.value)}
+            placeholder={"-----BEGIN RSA PRIVATE KEY-----\n...\n-----END RSA PRIVATE KEY-----"}
+            rows={6}
+            autoComplete="off"
+            spellCheck={false}
+            className={clsx(
+              "mt-1 w-full rounded-lg border px-2 py-1.5 text-[11px] font-mono",
+              surface.elevated, border.default, text.body,
+              "focus:outline-none focus:ring-1 focus:ring-indigo-500/40"
+            )}
+          />
+        </label>
+
+        <div className="flex items-center justify-between gap-2">
+          <div>
+            {result && (
+              <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-md border border-emerald-500/30 bg-emerald-500/10 text-emerald-400 text-[12px]">
+                <CheckCircle2 size={12} />
+                <span>
+                  Verified — <span className="font-mono">{result.owner}</span>,{" "}
+                  {result.repo_count} repos
+                </span>
+              </div>
+            )}
+          </div>
+          <button
+            onClick={() => verifyMut.mutate()}
+            disabled={disabled}
+            className={clsx(
+              "inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors",
+              disabled
+                ? "bg-zinc-800 text-zinc-500 cursor-not-allowed"
+                : "bg-indigo-600 hover:bg-indigo-700 text-white"
+            )}
+          >
+            {verifyMut.isPending ? <Loader2 size={12} className="animate-spin" /> : <ShieldCheck size={12} />}
+            Verify
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -522,6 +679,8 @@ export function IntegrationsPage() {
           </div>
         )}
       </div>
+
+      <VerifyGitHubInstallationCard />
 
       {/* Placeholder for future integrations */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">

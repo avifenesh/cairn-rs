@@ -9,7 +9,13 @@ description = "GitHub App integration for Cairn — authentication, webhooks, an
 async-trait = "0.1"
 base64 = "0.22"
 hmac = "0.12"
-jsonwebtoken = "10"
+# jsonwebtoken 10 requires a crypto provider to be selected at compile
+# time (or installed at runtime via `CryptoProvider::install_default`).
+# We pick aws-lc-rs because it's already transitive via reqwest's
+# `rustls-tls` and FIPS-capable; otherwise `generate_jwt` panics on
+# first call on cold processes (e.g. test subprocesses spawned by
+# LiveHarness).
+jsonwebtoken = { version = "10", default-features = false, features = ["aws_lc_rs", "use_pem"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
