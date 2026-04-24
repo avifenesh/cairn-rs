@@ -1254,7 +1254,7 @@ export function DashboardPage() {
         <div
           role="tablist"
           aria-label="Dashboard sections"
-          className="flex items-center gap-0 border-b border-gray-200 dark:border-zinc-800 -mb-2"
+          className="flex items-center gap-0 border-b border-gray-200 dark:border-zinc-800"
           onKeyDown={e => {
             const idx = DASH_TABS.indexOf(activeTab);
             if (e.key === 'ArrowRight') setActiveTab(DASH_TABS[(idx + 1) % DASH_TABS.length]);
@@ -1281,11 +1281,14 @@ export function DashboardPage() {
           ))}
         </div>
 
-        {/* Tab panels */}
+        {/* Tab panels — pt-4 so panel content has breathing room beneath the
+            tab strip (previously used `-mb-2` on the tablist which pulled the
+            panel up and crowded the headers; see issue #258). */}
         <div
           role="tabpanel"
           id={`dash-panel-${activeTab.toLowerCase()}`}
           aria-labelledby={`dash-tab-${activeTab.toLowerCase()}`}
+          className="pt-4"
         >
           {activeTab === 'Overview' && (
             <div className="space-y-6">

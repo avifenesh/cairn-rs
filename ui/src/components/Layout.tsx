@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, type ReactNode } from 'react';
-import { useIsFetching } from '@tanstack/react-query';
+import { useIsFetching, useIsMutating } from '@tanstack/react-query';
 import { clsx } from 'clsx';
 import { Sidebar, type NavPage } from './Sidebar';
 import { TopBar } from './TopBar';
@@ -198,21 +198,71 @@ function PlaceholderPage({ page }: { page: NavPage }) {
 
 // ── Loading bar ───────────────────────────────────────────────────────────────
 
+// Debounce threshold before showing the top loading bar. Background polling
+// queries (health 15s, stats 5s, queue 3s, etc.) typically complete in well
+// under 500ms on localhost, so gating on this threshold means the bar only
+// appears for genuinely slow fetches + mutations — not every routine poll.
+// Without this, the bar flashes every few seconds and makes the app feel
+// like it's constantly reconnecting (issue #259).
+const LOADING_BAR_SHOW_DELAY_MS = 500;
+
 function LoadingBar() {
-  const isFetching = useIsFetching();
+  // Union of queries + mutations so writes (create session, rotate token,
+  // etc.) still surface the bar even though `useIsFetching` counts only
+  // read-side query activity.
+  const isFetching  = useIsFetching();
+  const isMutating  = useIsMutating();
+  const busyCount   = isFetching + isMutating;
   const [phase, setPhase] = useState<'idle' | 'loading' | 'done'>('idle');
-  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const showTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const finishTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
-    if (isFetching > 0) {
-      if (timerRef.current) clearTimeout(timerRef.current);
-      setPhase('loading');
-    } else if (phase === 'loading') {
-      setPhase('done');
-      timerRef.current = setTimeout(() => setPhase('idle'), 450);
+    if (busyCount > 0) {
+      if (phase === 'done') {
+        // A finish animation is in flight but new work arrived — the bar is
+        // still on screen, so bounce straight back to 'loading' instead of
+        // debouncing again. Without this we'd stay in the fade-out animation
+        // (often ending at opacity 0) while requests are actively in-flight
+        // and the indicator would disappear mid-fetch.
+        if (finishTimerRef.current) {
+          clearTimeout(finishTimerRef.current);
+          finishTimerRef.current = null;
+        }
+        setPhase('loading');
+      } else if (phase === 'idle' && showTimerRef.current === null) {
+        // Only arm the show-timer if we aren't already displaying the bar
+        // and no show-timer is pending — otherwise overlapping background
+        // fetches would keep resetting the 500ms window and the bar could
+        // never finish debouncing.
+        showTimerRef.current = setTimeout(() => {
+          showTimerRef.current = null;
+          setPhase('loading');
+        }, LOADING_BAR_SHOW_DELAY_MS);
+      }
+    } else {
+      // Fetch finished. If it completed before the debounce elapsed, cancel
+      // the show-timer and the bar never appears at all.
+      if (showTimerRef.current) {
+        clearTimeout(showTimerRef.current);
+        showTimerRef.current = null;
+      }
+      if (phase === 'loading') {
+        setPhase('done');
+        finishTimerRef.current = setTimeout(() => setPhase('idle'), 450);
+      }
     }
-    return () => { if (timerRef.current) clearTimeout(timerRef.current); };
-  }, [isFetching, phase]);
+  }, [busyCount, phase]);
+
+  // Clear any outstanding timers on unmount. Kept separate from the main
+  // effect so normal re-renders (isFetching changes) don't clear the
+  // in-flight debounce timer between ticks.
+  useEffect(() => {
+    return () => {
+      if (showTimerRef.current) clearTimeout(showTimerRef.current);
+      if (finishTimerRef.current) clearTimeout(finishTimerRef.current);
+    };
+  }, []);
 
   if (phase === 'idle') return null;
 
