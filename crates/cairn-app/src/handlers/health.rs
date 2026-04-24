@@ -1009,64 +1009,78 @@ async fn validate_setting_value(
                 "{key} exceeds max length {MODEL_ID_MAX_LEN}"
             )));
         }
-        // Registry membership: either auto-resolve via `resolve_model_string`
-        // (accepts `provider/model` or bare model id) or a literal id listed
-        // in some provider's models table.
-        let in_registry = cairn_domain::provider_registry::resolve_model_string(model_id).is_some()
-            || cairn_domain::provider_registry::all()
-                .iter()
-                .any(|p| p.models.iter().any(|m| m.id == model_id));
-        if !in_registry {
-            return Err(AppApiError::new(
-                StatusCode::UNPROCESSABLE_ENTITY,
-                "unknown_model",
-                format!("{key}={model_id} is not in the provider registry"),
-            )
-            .into_response());
+        // Valid model-ID set = union of:
+        //  (a) LiteLLM catalog (+ cairn TOML overlay + operator overrides)
+        //      — the reference catalog at `state.model_registry`, used for
+        //      cost metadata and the UI "pick a model" pickers.
+        //  (b) `supported_models` declared on ANY provider connection in
+        //      scope for this setting. Each provider family carries its own
+        //      ID namespace (OpenRouter: `qwen/qwen3-coder:free`,
+        //      Bedrock: `bedrock/us-east-1/…`, Baseten: `baseten/…`) and
+        //      the operator's connection IS the authoritative list for
+        //      what that tenant can route to.
+        //
+        // Why (a) AND (b): The LiteLLM catalog is big (2 600+ entries) but
+        // not exhaustive — operators can connect custom endpoints (Ollama
+        // local models, private OpenAI-compatible gateways, new OpenRouter
+        // models shipped between catalog refreshes). Conversely, a system-
+        // scope default may reference a catalog-only model that no tenant
+        // has a connection for yet (e.g. immediately after setup) — we
+        // still accept it so the dashboard flow works in any order.
+        //
+        // Legacy BC: the static `provider_registry::resolve_model_string`
+        // and `provider_registry::all()` membership are folded into (a) via
+        // the `with_bundled` TOML overlay, so no separate code path needed.
+        //
+        // Closes #228 (server-side validation), #F20/F21 (OpenRouter IDs).
+
+        // (a) LiteLLM catalog check.
+        if state.model_registry.get(model_id).is_some() {
+            return Ok(());
         }
-        // Active connections: at least one registered provider connection
-        // (any tenant) must list this model as supported. We check the
-        // cached registry snapshot plus the connection records.
-        let snapshot = state.runtime.provider_registry.snapshot();
-        let supported_by_cached = snapshot.connections.iter().any(|c| c.model == model_id);
-        if !supported_by_cached {
-            // Fall back to the broader provider_connections read model:
-            // caching is populated lazily, so an un-exercised connection
-            // may not appear in the snapshot even though it's configured.
-            // Query every tenant the scope covers — a system-scope
-            // default is valid as long as *some* tenant configured a
-            // connection for this model, and a tenant-scope default
-            // must be valid for that specific tenant.
-            let tenants = resolve_tenants_for_scope(state, scope, scope_id).await;
-            let mut any_supports = false;
-            for tenant in &tenants {
-                if let Ok(records) = state
-                    .runtime
-                    .provider_connections
-                    .list(tenant, 200, 0)
-                    .await
+
+        // (b) Operator-connected provider models. Walk every tenant the
+        // scope covers — a system-scope default is valid as long as *some*
+        // tenant configured a connection for this model; a tenant-scope
+        // default must be valid for that specific tenant.
+        let tenants = resolve_tenants_for_scope(state, scope, scope_id).await;
+        for tenant in &tenants {
+            if let Ok(records) = state
+                .runtime
+                .provider_connections
+                .list(tenant, 200, 0)
+                .await
+            {
+                if records
+                    .iter()
+                    .any(|r| r.supported_models.iter().any(|m| m == model_id))
                 {
-                    if records
-                        .iter()
-                        .any(|r| r.supported_models.iter().any(|m| m == model_id))
-                    {
-                        any_supports = true;
-                        break;
-                    }
+                    return Ok(());
                 }
             }
-            if !any_supports {
-                return Err(AppApiError::new(
-                    StatusCode::UNPROCESSABLE_ENTITY,
-                    "model_not_active",
-                    format!(
-                        "{key}={model_id} is in the registry but not supported by any active provider connection",
-                    ),
-                )
-                .into_response());
-            }
         }
-        return Ok(());
+
+        // Fall back to the cached registry snapshot — connections that
+        // haven't yet been enumerated via `list()` (e.g. startup fallbacks
+        // loaded from env) still appear here.
+        let snapshot = state.runtime.provider_registry.snapshot();
+        if snapshot.connections.iter().any(|c| c.model == model_id) {
+            return Ok(());
+        }
+
+        // Nothing matched. 422 with an actionable message pointing the
+        // operator at both surfaces they can fix it from.
+        return Err(AppApiError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "unknown_model",
+            format!(
+                "{key}={model_id} is not available. Valid values are either \
+                 a LiteLLM catalog ID (browse via GET /v1/models/catalog) or \
+                 a model listed in `supported_models` on one of your \
+                 configured provider connections (GET /v1/providers/connections).",
+            ),
+        )
+        .into_response());
     }
 
     // Generic string-length cap for everything else.

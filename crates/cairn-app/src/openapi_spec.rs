@@ -1005,6 +1005,61 @@ pub const OPENAPI_JSON: &str = r##"{
         "responses": { "200": { "description": "Settings including mode, backend, feature flags" } }
       }
     },
+    "/v1/settings/defaults/{scope}/{scope_id}/{key}": {
+      "put": {
+        "tags": ["Admin"],
+        "summary": "Set a scoped default setting",
+        "description": "Persists `value` as the default for `key` at the given scope. Scope layers cascade: System < Tenant < Workspace < Project (project overrides tenant overrides system). For `scope=system`, the conventional `scope_id` is `system`. For Tenant/Workspace/Project, `scope_id` is the respective entity id. Model-id keys (`brain_model`, `generate_model`, `stream_model`, `embed_model`) validate the value against the LiteLLM catalog union'd with every in-scope provider connection's `supported_models` — 422 with an actionable message if unknown.",
+        "operationId": "setDefaultSetting",
+        "parameters": [
+          { "name": "scope", "in": "path", "required": true, "schema": { "type": "string", "enum": ["system", "tenant", "workspace", "project"] } },
+          { "name": "scope_id", "in": "path", "required": true, "schema": { "type": "string" }, "description": "Scope entity id (`system` for system scope)." },
+          { "name": "key", "in": "path", "required": true, "schema": { "type": "string" }, "description": "Setting key (e.g. `brain_model`, `generate_model`, `max_tokens`, `temperature`)." }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "type": "object", "required": ["value"], "properties": { "value": { "description": "Setting value — type depends on the key (string for models, number for tokens/temperature)." } } } } }
+        },
+        "responses": {
+          "200": { "description": "Persisted setting" },
+          "400": { "description": "Invalid scope or malformed body" },
+          "422": { "description": "Value failed per-key validation (unknown model, out-of-range numeric, oversized string)" }
+        }
+      },
+      "delete": {
+        "tags": ["Admin"],
+        "summary": "Clear a scoped default setting",
+        "operationId": "clearDefaultSetting",
+        "parameters": [
+          { "name": "scope", "in": "path", "required": true, "schema": { "type": "string", "enum": ["system", "tenant", "workspace", "project"] } },
+          { "name": "scope_id", "in": "path", "required": true, "schema": { "type": "string" } },
+          { "name": "key", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": { "200": { "description": "Cleared; resolution now falls through to the next scope layer or the hardcoded default" } }
+      }
+    },
+    "/v1/settings/defaults/all": {
+      "get": {
+        "tags": ["Admin"],
+        "summary": "List every persisted default setting across all scopes",
+        "description": "Flat list of all settings explicitly set via `PUT /v1/settings/defaults/...`. Unset keys are omitted. For the effective value of a specific key with fallback resolution, use `GET /v1/settings/defaults/resolve/{key}?project=...`.",
+        "operationId": "listAllDefaultSettings",
+        "responses": { "200": { "description": "`{ settings: [...], total: n }`" } }
+      }
+    },
+    "/v1/settings/defaults/resolve/{key}": {
+      "get": {
+        "tags": ["Admin"],
+        "summary": "Resolve the effective default for a key",
+        "description": "Walks the scope cascade (Project → Workspace → Tenant → System → env → hardcoded) and returns the first layer's value. Requires `?project=<project_id>` to anchor the resolution.",
+        "operationId": "resolveDefaultSetting",
+        "parameters": [
+          { "name": "key", "in": "path", "required": true, "schema": { "type": "string" } },
+          { "name": "project", "in": "query", "required": true, "schema": { "type": "string" }, "description": "Project id anchoring the scope cascade." }
+        ],
+        "responses": { "200": { "description": "`{ key, value }`" } }
+      }
+    },
     "/v1/db/status": {
       "get": {
         "tags": ["Admin"],

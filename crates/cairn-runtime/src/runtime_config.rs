@@ -4,17 +4,23 @@
 //! model settings and operational knobs.  Every accessor follows this priority
 //! chain:
 //!
-//! 1. **DefaultsService** (store-backed, changeable via `PUT /v1/settings/defaults/…`
-//!    without a server restart)
+//! 1. **DefaultsService** (store-backed, changeable via
+//!    `PUT /v1/settings/defaults/:scope/:scope_id/:key` without a server
+//!    restart)
 //! 2. **Environment variable** (set at process startup)
 //! 3. **Hardcoded default** (compile-time constant)
 //!
 //! The key names used for DefaultsService are intentionally short
-//! (e.g. `"generate_model"`) so they can be set via the API:
+//! (e.g. `"generate_model"`) so they can be set via the API. The scope /
+//! scope_id segments identify which layer a default applies to — system,
+//! tenant, workspace, or project:
 //!
 //! ```text
-//! PUT /v1/settings/defaults/system/generate_model
+//! PUT /v1/settings/defaults/system/system/generate_model
 //! { "value": "llama3.2:3b" }
+//!
+//! PUT /v1/settings/defaults/tenant/acme/generate_model
+//! { "value": "gpt-4o" }
 //! ```
 
 use std::sync::Arc;
