@@ -15,6 +15,7 @@ import { clsx } from 'clsx';
 import { defaultApi } from '../lib/api';
 import { useScope, DEFAULT_SCOPE } from '../hooks/useScope';
 import { ErrorFallback } from '../components/ErrorFallback';
+import { EmptyScopeHint } from '../components/EmptyScopeHint';
 import { useToast } from '../components/Toast';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -519,6 +520,12 @@ export function WorkspacesPage() {
             Clicking a workspace updates the global scope — all data views filter to that workspace immediately.
           </p>
         )}
+
+        {/* F28 — default-scope nudge. The page always renders the default
+            workspace card (see ensureWs default fallback) so `workspaceRecords`
+            is the right signal for "operator has no real workspaces here",
+            not `filtered.length`. */}
+        <EmptyScopeHint empty={!isLoading && (workspaceRecords?.length ?? 0) === 0} />
 
       </div>
     </div>
