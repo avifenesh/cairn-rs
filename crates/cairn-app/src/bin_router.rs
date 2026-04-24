@@ -93,6 +93,14 @@ pub(crate) fn build_router(lib_state: Arc<cairn_app::AppState>, state: AppState)
             "/v1/providers/connections/:id/discover-models",
             get(discover_models_handler),
         )
+        // Ad-hoc discover: probe a provider for its model catalog BEFORE the
+        // connection is registered. Lets the Add-Provider wizard preview
+        // discovered models without leaving stale connection rows behind if
+        // the operator cancels the flow.
+        .route(
+            "/v1/providers/connections/discover-preview",
+            post(discover_models_preview_handler),
+        )
         .route(
             "/v1/providers/connections/:id/test",
             get(test_connection_handler),

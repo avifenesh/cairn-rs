@@ -277,6 +277,197 @@ pub(crate) async fn resolve_connection_probe_material(
     (endpoint_url, api_key)
 }
 
+/// Request body for `POST /v1/providers/connections/discover-preview`.
+///
+/// Lets operators probe a provider for its model catalog **before** registering a
+/// connection record. Accepts the same fields the registration form collects so
+/// the preview step can be driven entirely from the Add-Provider wizard.
+#[derive(serde::Deserialize, Default)]
+pub(crate) struct DiscoverPreviewRequest {
+    /// "ollama" | "openai_compat" (inferred to `openai_compat` when absent).
+    #[serde(default, alias = "provider_type")]
+    pub adapter_type: Option<String>,
+    /// Base URL of the provider — required unless `api_key_ref` points to an
+    /// already-registered connection whose endpoint we can reuse (future work).
+    #[serde(default)]
+    pub endpoint_url: Option<String>,
+    /// Literal API key (or `$ENV_VAR` reference) to use for the probe.
+    #[serde(default)]
+    pub api_key: Option<String>,
+    /// Optional reference to an existing stored credential (by ID). When set
+    /// the handler decrypts the credential and uses it as the API key,
+    /// preserving the "no plaintext leaves browser twice" RFC 011 guarantee.
+    #[serde(default)]
+    pub api_key_ref: Option<String>,
+}
+
+/// `POST /v1/providers/connections/discover-preview`
+///
+/// Same live-probe logic as [`discover_models_handler`], but drives from a JSON
+/// body instead of a registered connection + query params. Nothing is persisted
+/// — it's purely a read-side call against the provider.
+///
+/// Tenancy: `api_key_ref` lookups are scoped to the caller's `TenantScope`
+/// (admin tokens may cross tenants). Supplying another tenant's credential
+/// ID as a non-admin caller returns `403 forbidden_cross_tenant_credential`.
+///
+/// Returns `{ provider, endpoint, models: DiscoveredModel[] }` on success.
+pub(crate) async fn discover_models_preview_handler(
+    State(state): State<AppState>,
+    tenant_scope: cairn_app::extractors::TenantScope,
+    Json(body): Json<DiscoverPreviewRequest>,
+) -> impl IntoResponse {
+    let adapter_type = body
+        .adapter_type
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .unwrap_or("openai_compat")
+        .to_lowercase();
+
+    let endpoint_url = body
+        .endpoint_url
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
+    if endpoint_url.is_none() && adapter_type != "ollama" {
+        return (
+            StatusCode::BAD_REQUEST,
+            axum::Json(serde_json::json!({
+                "error": "endpoint_url is required for discover-preview",
+            })),
+        )
+            .into_response();
+    }
+
+    // Resolve API key: inline value wins, else fall back to credential
+    // reference. The credential path validates tenant ownership and
+    // surfaces decryption failures as 5xx instead of silently continuing
+    // unauthenticated — per Bugbot rules, handlers must not `.ok()` away
+    // store errors and must never leak another tenant's secret material.
+    let api_key = match body
+        .api_key
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        Some(inline) => {
+            // SECURITY: inline values from the request body are treated
+            // literally. We deliberately do NOT expand `$ENV_VAR` here,
+            // because the caller also controls `endpoint_url` and could
+            // otherwise exfiltrate server-side environment secrets via
+            // the outbound Authorization header. Values starting with `$`
+            // are rejected outright rather than either literally-sent
+            // (which leaks the var name) or expanded (which leaks the
+            // value). `$ENV_VAR` expansion remains valid for server-side
+            // stored credentials via `resolve_connection_probe_material`.
+            if inline.starts_with('$') {
+                return (
+                    StatusCode::BAD_REQUEST,
+                    axum::Json(serde_json::json!({
+                        "error": "inline_api_key_env_expansion_forbidden",
+                        "detail": "inline api_key must not start with '$'; store the credential and pass api_key_ref instead",
+                    })),
+                )
+                    .into_response();
+            }
+            Some(inline.to_owned())
+        }
+        None => match body
+            .api_key_ref
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+        {
+            Some(cred_id) => {
+                match state
+                    .runtime
+                    .credentials
+                    .get(&cairn_domain::CredentialId::new(cred_id))
+                    .await
+                {
+                    Ok(Some(record)) if record.active => {
+                        // Tenant guard: a non-admin caller may only
+                        // reference credentials owned by their own tenant.
+                        // Admin tokens bypass this check so operators with
+                        // cross-tenant tooling can still run previews.
+                        if !tenant_scope.is_admin
+                            && record.tenant_id.as_str() != tenant_scope.tenant_id().as_str()
+                        {
+                            return (
+                                StatusCode::FORBIDDEN,
+                                axum::Json(serde_json::json!({
+                                    "error": "forbidden_cross_tenant_credential",
+                                    "detail": "api_key_ref refers to a credential owned by a different tenant",
+                                })),
+                            )
+                                .into_response();
+                        }
+                        match decrypt_provider_credential(&record) {
+                            Ok(plaintext) => Some(plaintext),
+                            Err(e) => {
+                                tracing::error!(
+                                    credential_id = %cred_id,
+                                    "discover-preview: credential decryption failed: {e}",
+                                );
+                                return (
+                                    StatusCode::INTERNAL_SERVER_ERROR,
+                                    axum::Json(serde_json::json!({
+                                        "error": "credential_decrypt_failed",
+                                        "detail": format!("credential decryption failed: {e}"),
+                                    })),
+                                )
+                                    .into_response();
+                            }
+                        }
+                    }
+                    Ok(Some(_)) => {
+                        return (
+                            StatusCode::GONE,
+                            axum::Json(serde_json::json!({
+                                "error": "credential_revoked",
+                                "detail": "api_key_ref points to a revoked credential",
+                            })),
+                        )
+                            .into_response();
+                    }
+                    Ok(None) => {
+                        return (
+                            StatusCode::NOT_FOUND,
+                            axum::Json(serde_json::json!({
+                                "error": "credential_not_found",
+                                "detail": "api_key_ref does not resolve to any credential",
+                            })),
+                        )
+                            .into_response();
+                    }
+                    Err(e) => {
+                        tracing::error!(
+                            credential_id = %cred_id,
+                            "discover-preview: credential lookup failed: {e}",
+                        );
+                        return (
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            axum::Json(serde_json::json!({
+                                "error": "credential_lookup_failed",
+                                "detail": format!("credential lookup failed: {e}"),
+                            })),
+                        )
+                            .into_response();
+                    }
+                }
+            }
+            None => None,
+        },
+    };
+
+    if adapter_type == "ollama" {
+        discover_ollama_models_live(&state, endpoint_url).await
+    } else {
+        discover_openai_compat_models_live(&state, endpoint_url, api_key.as_deref()).await
+    }
+}
+
 /// `GET /v1/providers/connections/:id/discover-models`
 ///
 /// Queries the live provider endpoint for available models.
