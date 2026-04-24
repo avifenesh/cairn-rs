@@ -27,6 +27,7 @@ pub mod state;
 pub mod telemetry_routes;
 pub mod tokens;
 pub mod tool_impls;
+pub(crate) mod tracing_emitter;
 pub mod trigger_routes;
 pub mod triggers;
 pub mod validate;

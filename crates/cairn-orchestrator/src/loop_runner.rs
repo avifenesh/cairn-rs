@@ -533,6 +533,26 @@ where
             );
             self.emitter.on_decide_completed(ctx, &decide_output).await;
 
+            // ── (3a') Emitter fatal-error check ──────────────────────────────
+            // `on_decide_completed` is the only callback that dual-writes
+            // provider-call telemetry into the durable secondary (see the
+            // `TracingEmitter` implementation in `cairn-app`). When its
+            // append fails, the in-memory and durable logs have diverged
+            // — the next iteration would read stale state from the
+            // primary, so the loop must abort with a store error rather
+            // than silently continue toward the iteration cap.
+            if let Some(msg) = self.emitter.take_fatal_error() {
+                tracing::error!(
+                    run_id    = %ctx.run_id,
+                    iteration = ctx.iteration,
+                    error     = %msg,
+                    "orchestrator emitter reported fatal error — aborting loop"
+                );
+                return Err(OrchestratorError::Store(cairn_store::StoreError::Internal(
+                    msg,
+                )));
+            }
+
             // ── (3b') FF stream: llm_response frame ──────────────────────────
             // DecideOutput already carries model_id, token counts, and
             // latency. Surface those on FF's attempt stream so cost
@@ -1418,6 +1438,66 @@ mod tests {
                 );
             }
             other => panic!("expected Failed {{ reason: 'lease unhealthy' }}, got {other:?}"),
+        }
+    }
+
+    // ── (1c) Emitter fatal-error gate ────────────────────────────────────────
+    //
+    // F24 dogfood (2026-04-23): when a composite emitter's side-effect
+    // append to the durable secondary fails, the loop must abort
+    // rather than silently continue on top of a diverged store. The
+    // new `take_fatal_error()` contract lets emitters surface errors
+    // that their `()`-returning callbacks can't express.
+
+    struct FatalEmitter {
+        consumed: std::sync::Mutex<bool>,
+    }
+    #[async_trait]
+    impl crate::emitter::OrchestratorEventEmitter for FatalEmitter {
+        fn take_fatal_error(&self) -> Option<String> {
+            let mut consumed = self.consumed.lock().unwrap();
+            if *consumed {
+                None
+            } else {
+                *consumed = true;
+                Some("dual-write divergence on run=run: boom".to_owned())
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn emitter_fatal_error_aborts_loop_with_store_error() {
+        let config = LoopConfig {
+            max_iterations: 5,
+            ..Default::default()
+        };
+        let lp = OrchestratorLoop::new(
+            FixedGather,
+            ScriptedDecide::always(decide_done()),
+            ScriptedExecute {
+                signal: LoopSignal::Done,
+            },
+            config,
+        )
+        .with_emitter(std::sync::Arc::new(FatalEmitter {
+            consumed: std::sync::Mutex::new(false),
+        }));
+
+        let err = lp.run(ctx()).await.expect_err(
+            "emitter-signalled fatal error must propagate as OrchestratorError, \
+             not be silently swallowed",
+        );
+        match err {
+            OrchestratorError::Store(msg) => {
+                let s = msg.to_string();
+                assert!(
+                    s.contains("dual-write divergence"),
+                    "expected divergence detail in error, got: {s}"
+                );
+            }
+            other => {
+                panic!("expected OrchestratorError::Store(dual-write divergence), got {other:?}")
+            }
         }
     }
 

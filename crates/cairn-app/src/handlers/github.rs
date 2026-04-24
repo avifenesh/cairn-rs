@@ -463,6 +463,7 @@ pub(crate) fn build_orchestrator_emitter(
         inner: std::sync::Arc<crate::sse_hooks::SseOrchestratorEmitter>,
         store: std::sync::Arc<cairn_store::InMemoryStore>,
         exporter: std::sync::Arc<cairn_runtime::telemetry::OtlpExporter>,
+        fatal_error: std::sync::Mutex<Option<String>>,
     }
 
     #[async_trait::async_trait]
@@ -483,79 +484,14 @@ pub(crate) fn build_orchestrator_emitter(
             d: &cairn_orchestrator::DecideOutput,
         ) {
             self.inner.on_decide_completed(ctx, d).await;
-            let now = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_millis() as u64;
-            let call_id = format!("orch_{}_{}", ctx.run_id.as_str(), now);
-            let event = cairn_domain::EventEnvelope::for_runtime_event(
-                cairn_domain::EventId::new(format!("evt_trace_{call_id}")),
-                cairn_domain::EventSource::Runtime,
-                cairn_domain::RuntimeEvent::ProviderCallCompleted(
-                    cairn_domain::events::ProviderCallCompleted {
-                        project: ctx.project.clone(),
-                        provider_call_id: cairn_domain::ProviderCallId::new(&call_id),
-                        route_decision_id: cairn_domain::RouteDecisionId::new(format!(
-                            "rd_{call_id}"
-                        )),
-                        route_attempt_id: cairn_domain::RouteAttemptId::new(format!(
-                            "ra_{call_id}"
-                        )),
-                        provider_binding_id: cairn_domain::ProviderBindingId::new("brain"),
-                        provider_connection_id: cairn_domain::ProviderConnectionId::new("brain"),
-                        provider_model_id: cairn_domain::ProviderModelId::new(&d.model_id),
-                        operation_kind: cairn_domain::providers::OperationKind::Generate,
-                        status: cairn_domain::providers::ProviderCallStatus::Succeeded,
-                        latency_ms: Some(d.latency_ms),
-                        input_tokens: d.input_tokens,
-                        output_tokens: d.output_tokens,
-                        cost_micros: Some(
-                            ((d.input_tokens.unwrap_or(0) as u64).saturating_mul(500)
-                                + (d.output_tokens.unwrap_or(0) as u64).saturating_mul(1500))
-                                / 1_000,
-                        ),
-                        completed_at: now,
-                        session_id: Some(ctx.session_id.clone()),
-                        run_id: Some(ctx.run_id.clone()),
-                        error_class: None,
-                        raw_error_message: None,
-                        retry_count: 0,
-                        task_id: ctx
-                            .task_id
-                            .as_ref()
-                            .map(|t| cairn_domain::TaskId::new(t.as_str())),
-                        prompt_release_id: None,
-                        fallback_position: 0,
-                        started_at: now.saturating_sub(d.latency_ms),
-                        finished_at: now,
-                    },
-                ),
-            );
-            let payload = event.payload.clone();
-            if let Err(e) = self.store.append(&[event]).await {
-                tracing::warn!("event store append failed (non-fatal): {e}");
-            }
-            let _ = self.exporter.export_event(&payload).await;
-
-            use cairn_store::projections::LlmCallTraceReadModel;
-            let input_tokens = d.input_tokens.unwrap_or(0);
-            let output_tokens = d.output_tokens.unwrap_or(0);
-            let cost_micros = ((input_tokens as u64).saturating_mul(500)
-                + (output_tokens as u64).saturating_mul(1500))
-                / 1_000;
-            let trace = cairn_domain::LlmCallTrace {
-                trace_id: call_id,
-                model_id: d.model_id.clone(),
-                prompt_tokens: input_tokens,
-                completion_tokens: output_tokens,
-                latency_ms: d.latency_ms,
-                cost_micros,
-                session_id: Some(ctx.session_id.clone()),
-                run_id: Some(ctx.run_id.clone()),
-                created_at_ms: now,
-                is_error: false,
-            };
-            let _ = self.store.insert_trace(trace).await;
+            crate::tracing_emitter::record_decide_trace(
+                ctx,
+                d,
+                &self.store,
+                &self.exporter,
+                &self.fatal_error,
+            )
+            .await;
         }
         async fn on_tool_called(
             &self,
@@ -612,12 +548,17 @@ pub(crate) fn build_orchestrator_emitter(
         ) {
             self.inner.on_finished(ctx, t).await;
         }
+        fn take_fatal_error(&self) -> Option<String> {
+            let mut slot = self.fatal_error.lock().unwrap_or_else(|p| p.into_inner());
+            slot.take()
+        }
     }
 
     std::sync::Arc::new(TracingEmitter {
         inner: sse_emitter,
         store: state.runtime.store.clone(),
         exporter: state.otlp_exporter.clone(),
+        fatal_error: std::sync::Mutex::new(None),
     })
 }
 
