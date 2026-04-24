@@ -70,6 +70,16 @@ pub struct OrchestrationContext {
     /// Defaults to `false` for fresh (non-recovered) runs. Set only for the
     /// first post-recovery iteration; subsequent iterations use `false`.
     pub is_recovery: bool,
+
+    /// Maximum wall-clock the execute phase will wait on an operator
+    /// approval before auto-rejecting the proposal. Threaded from
+    /// `OrchestrateRequest.approval_timeout_ms` (HTTP) or defaulted to
+    /// 24h when the caller didn't provide one.
+    ///
+    /// `None` means "never set" — downstream defaults to 24h. We keep the
+    /// field `Option<Duration>` so `Default` / `Clone`-constructed contexts
+    /// continue to work without having to pick a sentinel value here.
+    pub approval_timeout: Option<std::time::Duration>,
 }
 
 // ── GatherOutput ─────────────────────────────────────────────────────────────

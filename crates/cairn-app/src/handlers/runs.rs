@@ -317,6 +317,16 @@ pub(crate) struct OrchestrateRequest {
     /// RFC 018: execution mode override for this orchestration.
     #[serde(default)]
     pub(crate) mode: Option<cairn_domain::decisions::RunMode>,
+    /// BP-v2: maximum milliseconds the execute phase will block waiting on
+    /// operator approval for each in-flight tool call before auto-rejecting
+    /// with a "timeout" reason. Defaults to 24h (86_400_000 ms) when unset.
+    ///
+    /// The HTTP client can shorten this for automated flows — e.g. a
+    /// GitHub-webhook-driven run that should expire after 15 minutes if
+    /// no reviewer shows up. Operator-approved amendments to args are
+    /// still honoured as long as the decision arrives inside the window.
+    #[serde(default)]
+    pub(crate) approval_timeout_ms: Option<u64>,
 }
 
 // ── Handlers ─────────────────────────────────────────────────────────────────
@@ -1740,6 +1750,9 @@ pub(crate) async fn orchestrate_run_handler(
         discovered_tool_names: vec![],
         step_history: vec![],
         is_recovery: false,
+        approval_timeout: body
+            .approval_timeout_ms
+            .map(std::time::Duration::from_millis),
     };
 
     let model_id = match body.model_id {
@@ -2033,6 +2046,22 @@ pub(crate) async fn orchestrate_run_handler(
     // All service impls share the same Arc<InMemoryStore> so writes from one
     // service are immediately visible to reads from another.
     let store = state.runtime.store.clone();
+
+    // BP-v2 (research doc `docs/research/llm-agent-approval-systems.md`):
+    // wire the tool-call approval service so the execute phase drives
+    // the propose-then-await flow. The reader adapter bridges the store
+    // projection (`ToolCallApprovalReadModel`) to the runtime-facing
+    // `ToolCallApprovalReader` trait so cache misses re-hydrate from the
+    // persistent projection (restart, eviction, cross-process resume).
+    let tool_call_approval_reader = Arc::new(
+        cairn_runtime::services::ToolCallApprovalReaderAdapter::new(store.clone()),
+    );
+    let tool_call_approval_service: Arc<dyn cairn_runtime::ToolCallApprovalService> =
+        Arc::new(cairn_runtime::services::ToolCallApprovalServiceImpl::new(
+            store.clone(),
+            tool_call_approval_reader,
+        ));
+
     let execute = RuntimeExecutePhase::builder()
         .tool_registry(registry)
         .run_service(state.runtime.runs.clone())
@@ -2041,6 +2070,7 @@ pub(crate) async fn orchestrate_run_handler(
         .checkpoint_service(Arc::new(CheckpointServiceImpl::new(store.clone())))
         .mailbox_service(Arc::new(MailboxServiceImpl::new(store.clone())))
         .tool_invocation_service(Arc::new(ToolInvocationServiceImpl::new(store)))
+        .tool_call_approval_service(tool_call_approval_service)
         .decision_service(Arc::new(
             crate::telemetry_routes::UsageMeteredDecisionService::new(
                 state.runtime.decision_service.clone(),

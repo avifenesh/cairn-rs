@@ -31,12 +31,17 @@ use cairn_runtime::{
     mailbox::MailboxService,
     services::ToolInvocationService,
     startup::{CachedToolResult, RecoveryDispatchDecision, ToolCallId, ToolCallResultCache},
+    tool_call_approvals::{
+        ApprovalDecision as ToolCallApprovalDecision, OperatorDecision, ToolCallApprovalService,
+        ToolCallProposal,
+    },
     ApprovalService, CheckpointService, RunService, TaskService,
 };
 use cairn_tools::builtins::BuiltinToolRegistry;
 #[allow(unused_imports)]
 use cairn_tools::builtins::ToolHandler;
 use std::sync::Mutex;
+use std::time::Duration;
 
 use crate::context::{
     ActionResult, ActionStatus, DecideOutput, ExecuteOutcome, LoopSignal, OrchestrationContext,
@@ -82,6 +87,21 @@ pub struct RuntimeExecutePhase {
     /// Optional so existing callers (tests) can omit wiring; production
     /// always injects a shared cache via the builder.
     tool_result_cache: Option<Arc<Mutex<ToolCallResultCache>>>,
+    /// BP-v2 (research doc `docs/research/llm-agent-approval-systems.md`)
+    /// propose-then-await service. When wired, the execute phase drives
+    /// `requires_approval` tool calls through `submit_proposal` +
+    /// `await_decision` + `retrieve_approved_proposal` so the proposal
+    /// survives across the operator decision — killing the dogfood bug
+    /// where the approval gate discarded the LLM's args and re-queried
+    /// the model after approval.
+    ///
+    /// `None` preserves the legacy `ApprovalService::request_with_context`
+    /// short-circuit used by existing tests.
+    tool_call_approval_service: Option<Arc<dyn ToolCallApprovalService>>,
+    /// Fallback wall-clock timeout applied to
+    /// `ToolCallApprovalService::await_decision` when the orchestration
+    /// context didn't override it. Defaults to 24h.
+    approval_timeout_default: Duration,
 }
 
 impl RuntimeExecutePhase {
@@ -105,6 +125,8 @@ pub struct RuntimeExecutePhaseBuilder {
     checkpoint_every_n_tool_calls: u32,
     tool_output_token_limit: Option<usize>,
     tool_result_cache: Option<Arc<Mutex<ToolCallResultCache>>>,
+    tool_call_approval_service: Option<Arc<dyn ToolCallApprovalService>>,
+    approval_timeout_default: Option<Duration>,
 }
 
 impl RuntimeExecutePhaseBuilder {
@@ -155,6 +177,20 @@ impl RuntimeExecutePhaseBuilder {
         self.tool_result_cache = Some(cache);
         self
     }
+    /// Inject the BP-v2 tool-call approval service. Required in production
+    /// for the propose-then-await flow; tests omit it to exercise legacy
+    /// `ApprovalService::request_with_context` paths.
+    pub fn tool_call_approval_service(mut self, svc: Arc<dyn ToolCallApprovalService>) -> Self {
+        self.tool_call_approval_service = Some(svc);
+        self
+    }
+    /// Default timeout for operator approval decisions. Defaults to 24h
+    /// when unset. Per-run override flows via
+    /// `OrchestrationContext.approval_timeout`.
+    pub fn approval_timeout_default(mut self, d: Duration) -> Self {
+        self.approval_timeout_default = Some(d);
+        self
+    }
     pub fn build(self) -> RuntimeExecutePhase {
         RuntimeExecutePhase {
             run_service: self.run_service.expect("run_service required"),
@@ -173,6 +209,10 @@ impl RuntimeExecutePhaseBuilder {
             tool_output_token_limit: self.tool_output_token_limit.unwrap_or(2000),
             tool_call_count: std::sync::atomic::AtomicU32::new(0),
             tool_result_cache: self.tool_result_cache,
+            tool_call_approval_service: self.tool_call_approval_service,
+            approval_timeout_default: self
+                .approval_timeout_default
+                .unwrap_or_else(|| Duration::from_secs(24 * 60 * 60)),
         }
     }
 }
@@ -186,30 +226,156 @@ impl ExecutePhase for RuntimeExecutePhase {
         ctx: &OrchestrationContext,
         decide: &DecideOutput,
     ) -> Result<ExecuteOutcome, OrchestratorError> {
-        let mut results: Vec<ActionResult> = Vec::with_capacity(decide.proposals.len());
+        // ── Parallel batch for InvokeTool ─────────────────────────────────
+        //
+        // When the LLM emits multiple tool_calls in a single turn (modern
+        // models do this — "read fileA AND read fileB in parallel"), we
+        // MUST NOT serialize the batch on the slowest approval. One
+        // tool-call waiting on operator approval cannot block N auto-
+        // approved siblings from running.
+        //
+        // Strategy: drive every `InvokeTool` proposal concurrently via
+        // `futures::future::join_all`. Each call owns its own oneshot in
+        // the ToolCallApprovalService, so pending approvals block only
+        // their own future. Non-InvokeTool proposals (CompleteRun,
+        // SpawnSubagent, SendNotification, EscalateToOperator,
+        // CreateMemory) are processed sequentially afterwards — those are
+        // bookkeeping / control-flow steps that carry loop-terminal signals
+        // (Done, WaitSubagent, WaitApproval) and must honour the original
+        // short-circuit semantics.
+        //
+        // Original positional ordering is preserved so downstream emitters
+        // (tool_called, tool_result, FF attempt_stream frames) still see
+        // results indexed to the LLM's emitted proposals.
+
+        let mut results: Vec<Option<ActionResult>> =
+            (0..decide.proposals.len()).map(|_| None).collect();
         let mut loop_signal = LoopSignal::Continue;
 
-        for (proposal_index, proposal) in decide.proposals.iter().enumerate() {
-            // Per-proposal wall-clock; `dispatch_one` initialises
-            // `duration_ms: 0` and we overwrite with the real elapsed.
-            let started_at = std::time::Instant::now();
-            let mut result = self
-                .dispatch_one(ctx, proposal, proposal_index as u32)
-                .await?;
-            result.duration_ms = started_at.elapsed().as_millis() as u64;
+        // ── Phase 1: parallel InvokeTool dispatch ────────────────────────
+        //
+        // Only parallel-batch InvokeTool proposals whose position is
+        // BEFORE the first always-terminal control-flow proposal
+        // (`CompleteRun`, `SpawnSubagent`, `EscalateToOperator`). The old
+        // sequential path would break on those before reaching later
+        // InvokeTool proposals, and we must preserve that semantic — a
+        // `[CompleteRun, invoke_foo]` decide output must NOT run `foo`.
+        //
+        // `SendNotification` and `CreateMemory` are non-InvokeTool but
+        // never set terminal signals, so they do NOT split the batch.
+        let first_terminal_idx = decide.proposals.iter().position(|p| {
+            matches!(
+                p.action_type,
+                ActionType::CompleteRun
+                    | ActionType::SpawnSubagent
+                    | ActionType::EscalateToOperator
+            )
+        });
+        let invoke_indices: Vec<usize> = decide
+            .proposals
+            .iter()
+            .enumerate()
+            .filter_map(|(i, p)| {
+                if p.action_type != ActionType::InvokeTool {
+                    return None;
+                }
+                match first_terminal_idx {
+                    Some(k) if i > k => None,
+                    _ => Some(i),
+                }
+            })
+            .collect();
 
-            // Capture any terminal loop signal from this action before pushing.
-            let new_signal = derive_signal(&result, &loop_signal);
+        if !invoke_indices.is_empty() {
+            let futs = invoke_indices.iter().map(|&i| {
+                let proposal = decide.proposals[i].clone();
+                async move {
+                    let started_at = std::time::Instant::now();
+                    let mut result = self.dispatch_one(ctx, &proposal, i as u32).await?;
+                    result.duration_ms = started_at.elapsed().as_millis() as u64;
+                    Ok::<_, OrchestratorError>((i, result))
+                }
+            });
+            let joined = futures::future::join_all(futs).await;
+            for outcome in joined {
+                let (i, result) = outcome?;
+                results[i] = Some(result);
+            }
 
-            results.push(result);
-
-            if !matches!(new_signal, LoopSignal::Continue) {
-                loop_signal = new_signal;
-                break; // short-circuit: first terminal action stops the batch
+            // ── Derive loop signal from parallel InvokeTool results ──────
+            //
+            // `dispatch_one(InvokeTool)` CAN return `AwaitingApproval` from
+            // two paths that predate this PR:
+            //
+            //   1. Legacy approval-gate fallback (no `ToolCallApprovalService`
+            //      wired) — `request_with_context` short-circuit returns
+            //      `AwaitingApproval`.
+            //   2. RFC 020 Track 3 `DangerousPause` recovery branch — on
+            //      crash-mid-dispatch of a non-idempotent tool, operator
+            //      must confirm re-invocation.
+            //
+            // Both MUST escalate to `LoopSignal::WaitApproval` so the loop
+            // runner suspends. Missing this is a production-critical hole
+            // in the recovery-pause case (dangerous tools would silently
+            // skip the operator gate). Earliest-index wins so the ordering
+            // matches what the old sequential path produced.
+            for i in &invoke_indices {
+                let Some(result) = results[*i].as_ref() else {
+                    continue;
+                };
+                let next_signal = derive_signal(result, &loop_signal);
+                if !matches!(next_signal, LoopSignal::Continue) {
+                    loop_signal = next_signal;
+                    break;
+                }
             }
         }
 
-        // If nothing set a terminal signal but any action failed, derive Failed.
+        // ── Phase 2: sequential non-InvokeTool dispatch ──────────────────
+        //
+        // These carry terminal signals (CompleteRun → Done, SpawnSubagent
+        // → WaitSubagent, EscalateToOperator → WaitApproval). Original
+        // short-circuit semantics: first terminal signal stops the batch.
+        //
+        // If Phase 1 already set a terminal signal (e.g. an InvokeTool hit
+        // a recovery pause), we skip Phase 2 entirely — running bookkeeping
+        // steps after the batch has already committed to suspending would
+        // trip downstream invariants (double-completion, extra subagent
+        // spawn).
+        if matches!(loop_signal, LoopSignal::Continue) {
+            for (i, proposal) in decide.proposals.iter().enumerate() {
+                if proposal.action_type == ActionType::InvokeTool {
+                    continue;
+                }
+                let started_at = std::time::Instant::now();
+                let mut result = self.dispatch_one(ctx, proposal, i as u32).await?;
+                result.duration_ms = started_at.elapsed().as_millis() as u64;
+
+                let new_signal = derive_signal(&result, &loop_signal);
+                results[i] = Some(result);
+                if !matches!(new_signal, LoopSignal::Continue) {
+                    loop_signal = new_signal;
+                    break;
+                }
+            }
+        }
+
+        // Drop `None` slots — these are non-InvokeTool proposals that a
+        // terminal short-circuit prevented from running. Emitting them
+        // as synthesized `Failed` would inflate the loop runner's
+        // `failed_count` telemetry and mislead any downstream consumer
+        // that treats `Failed` as "dispatch was attempted and it
+        // errored." A skipped proposal never got that far.
+        //
+        // The loop runner iterates `execute_outcome.results` without
+        // zipping to `decide.proposals`, so a shorter results vector
+        // is safe. This matches the pre-PR behaviour where the
+        // sequential `break` also stopped adding results to the vec.
+        let results: Vec<ActionResult> = results.into_iter().flatten().collect();
+
+        // Re-check loop signal against parallel results: an InvokeTool
+        // failure shouldn't carry a terminal signal, but any Failed status
+        // should surface if no stronger signal is present.
         if matches!(loop_signal, LoopSignal::Continue) {
             if let Some(reason) = first_failure_reason(&results) {
                 loop_signal = LoopSignal::Failed { reason };
@@ -236,74 +402,50 @@ impl RuntimeExecutePhase {
             ActionType::InvokeTool => {
                 let tool_name = proposal.tool_name.clone().unwrap_or_default();
 
-                // T5-C1: approval gate MUST short-circuit before record_start
-                // or registry.execute_with_context. A proposal with
-                // requires_approval=true represents an operator-review
-                // decision; running the tool first and then reporting
-                // AwaitingApproval to the loop runner bypasses the gate.
+                // ── BP-v2 propose-then-await approval gate ────────────────
+                //
+                // Research doc `docs/research/llm-agent-approval-systems.md`
+                // §§ "Execute Phase Pseudocode (Fixed)". Previous (broken)
+                // behaviour: mint a fresh ApprovalId, fire
+                // `request_with_context`, return `AwaitingApproval` without
+                // persisting the proposal — after operator approval the
+                // system had nothing to retrieve, so it re-queried the LLM
+                // and often lost the args entirely. That was the dogfood
+                // blocker.
+                //
+                // Now: if a `ToolCallApprovalService` is wired AND the
+                // proposal requests approval, we:
+                //   1. submit the proposal (persists `ToolCallProposed`
+                //      + stashes args by `ToolCallId`),
+                //   2. evaluate session allow-registry inside the service,
+                //   3. if the service reports `PendingOperator`, block on
+                //      `await_decision(call_id, timeout)` — the oneshot
+                //      fires when the operator approves / rejects / amends+
+                //      approves, or times out,
+                //   4. on approval, retrieve the effective args (with
+                //      operator amendments applied) and invoke the tool
+                //      *inline* so the tool result flows back to the LLM
+                //      in the same execute batch,
+                //   5. on rejection / timeout, surface a tool_result error
+                //      back to the LLM so it can revise its plan.
+                //
+                // When no `ToolCallApprovalService` is wired (existing
+                // tests), we keep the legacy `ApprovalService` short-circuit
+                // so those tests don't need rewriting.
                 if proposal.requires_approval {
-                    let approval_id = ApprovalId::new(new_id("appr"));
-                    let title = Some(format!("Agent requests approval for tool: {}", tool_name));
-                    let description = {
-                        let mut desc = format!(
-                            "**Run:** `{}`\n**Goal:** {}\n\n**Agent says:**\n{}\n\n**Tool:** `{}`",
-                            ctx.run_id.as_str(),
-                            ctx.goal,
-                            proposal.description,
-                            tool_name,
-                        );
-                        if let Some(ref args) = proposal.tool_args {
-                            let args_str = serde_json::to_string_pretty(args).unwrap_or_default();
-                            // Truncate inline rather than hiding entirely —
-                            // the operator needs *some* visibility into
-                            // tools like `write_document` whose payloads
-                            // routinely exceed 2000 chars.
-                            const MAX_ARGS_INLINE: usize = 4000;
-                            if args_str.len() <= MAX_ARGS_INLINE {
-                                desc.push_str(&format!("\n**Args:**\n```json\n{}\n```", args_str));
-                            } else {
-                                let truncated: String =
-                                    args_str.chars().take(MAX_ARGS_INLINE).collect();
-                                desc.push_str(&format!(
-                                    "\n**Args (truncated, {} chars of {}):**\n```json\n{}\n… [truncated]\n```",
-                                    MAX_ARGS_INLINE,
-                                    args_str.len(),
-                                    truncated
-                                ));
-                            }
-                        }
-                        Some(desc)
-                    };
-                    return match self
-                        .approval_service
-                        .request_with_context(
-                            &ctx.project,
-                            approval_id.clone(),
-                            Some(ctx.run_id.clone()),
-                            ctx.task_id.clone(),
-                            ApprovalRequirement::Required,
-                            title,
-                            description,
-                        )
-                        .await
-                    {
-                        Ok(_) => Ok(ActionResult {
-                            proposal: proposal.clone(),
-                            status: ActionStatus::AwaitingApproval { approval_id },
-                            tool_output: None,
-                            invocation_id: None,
-                            duration_ms: 0,
-                        }),
-                        Err(e) => Ok(ActionResult {
-                            proposal: proposal.clone(),
-                            status: ActionStatus::Failed {
-                                reason: e.to_string(),
-                            },
-                            tool_output: None,
-                            invocation_id: None,
-                            duration_ms: 0,
-                        }),
-                    };
+                    if let Some(ref svc) = self.tool_call_approval_service {
+                        return self
+                            .run_with_approval_gate(ctx, proposal, call_index, svc.clone())
+                            .await;
+                    }
+                    // Legacy fallback: `ApprovalService` short-circuit.
+                    return legacy_approval_gate_result(
+                        &self.approval_service,
+                        ctx,
+                        proposal,
+                        &tool_name,
+                    )
+                    .await;
                 }
 
                 let inv_id = ToolInvocationId::new(new_id("inv"));
@@ -897,6 +1039,250 @@ impl RuntimeExecutePhase {
     }
 }
 
+// ── BP-v2 approval gate helpers ───────────────────────────────────────────────
+
+impl RuntimeExecutePhase {
+    /// Run the propose-then-await flow for a single `InvokeTool` proposal
+    /// whose `requires_approval` is true and whose execute phase has a
+    /// [`ToolCallApprovalService`] wired.
+    ///
+    /// Returns a final `ActionResult`:
+    ///
+    /// * `Succeeded` — tool approved (possibly with amended args) and ran.
+    /// * `Failed`   — tool rejected, timed out, or its invocation errored
+    ///   after approval. The `reason` mirrors what the LLM will see as a
+    ///   tool_result error on the next GATHER turn.
+    ///
+    /// The tool is invoked *inline* (not via re-entry into the outer loop)
+    /// so the operator approval and the tool's side effect land in the
+    /// same execute batch — this is the core of what fixes the dogfood
+    /// bug.
+    async fn run_with_approval_gate(
+        &self,
+        ctx: &OrchestrationContext,
+        proposal: &cairn_domain::ActionProposal,
+        call_index: u32,
+        svc: Arc<dyn ToolCallApprovalService>,
+    ) -> Result<ActionResult, OrchestratorError> {
+        let tool_name = proposal.tool_name.clone().unwrap_or_default();
+        let raw_args = proposal
+            .tool_args
+            .clone()
+            .unwrap_or(serde_json::Value::Null);
+
+        // The ToolCallId is deterministic (run_id + iteration + call_index
+        // + tool_name + normalized_args) so a resume that re-enters this
+        // path for the same iteration sees the same id — the underlying
+        // service short-circuits via the projection reader.
+        // Fall back to `default_normalize_for_cache` (not
+        // `raw_args.to_string()`) so the derived id stays deterministic
+        // across re-entry even if the proposal is reconstructed from a
+        // different source whose JSON key ordering differs. The two
+        // diverge for object payloads because `Value::to_string()`
+        // preserves insertion order; the normaliser sorts keys.
+        // (Copilot review feedback on PR #270.)
+        let normalized = self
+            .tool_registry
+            .as_ref()
+            .and_then(|reg| reg.get(&tool_name))
+            .map(|h| h.normalize_for_cache(&raw_args))
+            .unwrap_or_else(|| cairn_tools::builtins::default_normalize_for_cache(&raw_args));
+        let call_id = ToolCallId::derive(
+            ctx.run_id.as_str(),
+            ctx.iteration,
+            call_index,
+            &tool_name,
+            &normalized,
+        );
+
+        // Derive match policy from tool effect + args + project root.
+        let tool_effect = self
+            .tool_registry
+            .as_ref()
+            .and_then(|reg| reg.get(&tool_name))
+            .map(|h| h.tool_effect())
+            .unwrap_or(cairn_domain::decisions::ToolEffect::External);
+        let match_policy = crate::approval_policy::derive_match_policy(
+            tool_effect,
+            &raw_args,
+            Some(ctx.working_dir.as_path()),
+        );
+
+        let display_summary = Some(build_display_summary(proposal, &tool_name));
+
+        let domain_call_id = cairn_domain::ToolCallId::new(call_id.as_str());
+        let tcp = ToolCallProposal {
+            call_id: domain_call_id.clone(),
+            session_id: ctx.session_id.clone(),
+            run_id: ctx.run_id.clone(),
+            project: ctx.project.clone(),
+            tool_name: tool_name.clone(),
+            tool_args: raw_args.clone(),
+            display_summary,
+            match_policy,
+        };
+
+        // 1. Submit proposal.
+        let decision = svc
+            .submit_proposal(tcp)
+            .await
+            .map_err(|e| OrchestratorError::Execute(format!("submit_proposal failed: {e}")))?;
+
+        // 2. Resolve to an OperatorDecision, awaiting if pending.
+        let operator_decision = match decision {
+            ToolCallApprovalDecision::AutoApproved => {
+                // Short-circuit: session allow-registry match, retrieve
+                // args (which may differ from raw_args if a prior
+                // approval amended — though for auto-approve the path
+                // it's always the original).
+                let approved = svc
+                    .retrieve_approved_proposal(&domain_call_id)
+                    .await
+                    .map_err(|e| {
+                        OrchestratorError::Execute(format!(
+                            "retrieve_approved_proposal (auto) failed: {e}"
+                        ))
+                    })?;
+                OperatorDecision::Approved {
+                    approved_args: approved.tool_args,
+                }
+            }
+            ToolCallApprovalDecision::PendingOperator => {
+                let timeout = ctx
+                    .approval_timeout
+                    .unwrap_or(self.approval_timeout_default);
+                svc.await_decision(&domain_call_id, timeout)
+                    .await
+                    .map_err(|e| {
+                        OrchestratorError::Execute(format!("await_decision failed: {e}"))
+                    })?
+            }
+        };
+
+        // 3. On approval, invoke the tool with the operator-approved args.
+        match operator_decision {
+            OperatorDecision::Approved { approved_args } => {
+                let mut revised = proposal.clone();
+                revised.tool_args = Some(approved_args);
+                revised.requires_approval = false;
+                // Recurse. The revised proposal goes through the regular
+                // dispatch path (cache consultation, decision service,
+                // registry dispatch, completion event, etc.).
+                //
+                // `Box::pin` is required here because this is indirect
+                // async recursion: `dispatch_one` can call back into
+                // `run_with_approval_gate` (though with
+                // `requires_approval=false` on the revised proposal it
+                // does not in practice). Without the pin the compiler
+                // errors with "recursion in an async fn requires
+                // boxing" — the future size is undecidable.
+                Box::pin(self.dispatch_one(ctx, &revised, call_index)).await
+            }
+            OperatorDecision::Rejected { reason } => Ok(ActionResult {
+                proposal: proposal.clone(),
+                status: ActionStatus::Failed {
+                    reason: reason.unwrap_or_else(|| "operator rejected tool call".to_owned()),
+                },
+                tool_output: None,
+                invocation_id: None,
+                duration_ms: 0,
+            }),
+            OperatorDecision::Timeout => Ok(ActionResult {
+                proposal: proposal.clone(),
+                status: ActionStatus::Failed {
+                    reason: "operator did not respond within approval timeout".to_owned(),
+                },
+                tool_output: None,
+                invocation_id: None,
+                duration_ms: 0,
+            }),
+        }
+    }
+}
+
+fn build_display_summary(proposal: &cairn_domain::ActionProposal, tool_name: &str) -> String {
+    // The operator dashboard renders this verbatim — keep it
+    // short (one line) and include tool_name + the description
+    // hint the LLM supplied so the operator sees intent at a glance.
+    let desc = proposal.description.trim();
+    if desc.is_empty() {
+        format!("invoke {tool_name}")
+    } else {
+        format!("{tool_name}: {desc}")
+    }
+}
+
+/// Legacy fallback when no [`ToolCallApprovalService`] is wired. Preserves
+/// the pre-BP-v2 `ApprovalService::request_with_context` short-circuit so
+/// existing tests that construct the execute phase without the new service
+/// continue to see `AwaitingApproval` results.
+///
+/// New code should wire the BP-v2 service via
+/// [`RuntimeExecutePhaseBuilder::tool_call_approval_service`].
+async fn legacy_approval_gate_result(
+    approval_service: &Arc<dyn ApprovalService>,
+    ctx: &OrchestrationContext,
+    proposal: &cairn_domain::ActionProposal,
+    tool_name: &str,
+) -> Result<ActionResult, OrchestratorError> {
+    let approval_id = ApprovalId::new(new_id("appr"));
+    let title = Some(format!("Agent requests approval for tool: {}", tool_name));
+    let description = {
+        let mut desc = format!(
+            "**Run:** `{}`\n**Goal:** {}\n\n**Agent says:**\n{}\n\n**Tool:** `{}`",
+            ctx.run_id.as_str(),
+            ctx.goal,
+            proposal.description,
+            tool_name,
+        );
+        if let Some(ref args) = proposal.tool_args {
+            let args_str = serde_json::to_string_pretty(args).unwrap_or_default();
+            const MAX_ARGS_INLINE: usize = 4000;
+            if args_str.len() <= MAX_ARGS_INLINE {
+                desc.push_str(&format!("\n**Args:**\n```json\n{}\n```", args_str));
+            } else {
+                let truncated: String = args_str.chars().take(MAX_ARGS_INLINE).collect();
+                desc.push_str(&format!(
+                    "\n**Args (truncated, {} chars of {}):**\n```json\n{}\n… [truncated]\n```",
+                    MAX_ARGS_INLINE,
+                    args_str.len(),
+                    truncated
+                ));
+            }
+        }
+        Some(desc)
+    };
+    match approval_service
+        .request_with_context(
+            &ctx.project,
+            approval_id.clone(),
+            Some(ctx.run_id.clone()),
+            ctx.task_id.clone(),
+            ApprovalRequirement::Required,
+            title,
+            description,
+        )
+        .await
+    {
+        Ok(_) => Ok(ActionResult {
+            proposal: proposal.clone(),
+            status: ActionStatus::AwaitingApproval { approval_id },
+            tool_output: None,
+            invocation_id: None,
+            duration_ms: 0,
+        }),
+        Err(e) => Ok(ActionResult {
+            proposal: proposal.clone(),
+            status: ActionStatus::Failed {
+                reason: e.to_string(),
+            },
+            tool_output: None,
+            invocation_id: None,
+            duration_ms: 0,
+        }),
+    }
+}
+
 // ── Signal derivation ─────────────────────────────────────────────────────────
 
 /// Derive the `LoopSignal` from a freshly executed `ActionResult`.
@@ -1031,4 +1417,98 @@ fn truncate_text_for_context(text: &str, token_limit: usize) -> String {
         .collect();
 
     format!("{prefix}... [truncated: {omitted} chars omitted] ...{suffix}")
+}
+
+// ── Tests ────────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod signal_aggregation_tests {
+    use super::*;
+    use cairn_domain::{ActionProposal, ActionType, ApprovalId, TaskId};
+
+    fn invoke_result(status: ActionStatus) -> ActionResult {
+        ActionResult {
+            proposal: ActionProposal {
+                action_type: ActionType::InvokeTool,
+                description: "test".to_owned(),
+                confidence: 1.0,
+                tool_name: Some("t".to_owned()),
+                tool_args: None,
+                requires_approval: false,
+            },
+            status,
+            tool_output: None,
+            invocation_id: None,
+            duration_ms: 0,
+        }
+    }
+
+    /// Regression for the Cursor Bugbot finding on PR-5.
+    ///
+    /// Pre-fix, `execute()` only ran `derive_signal` on non-InvokeTool
+    /// proposals (Phase 2). Any `AwaitingApproval` that escaped the
+    /// parallel InvokeTool batch (legacy approval-gate fallback or
+    /// RFC 020 `DangerousPause` recovery branch) silently downgraded
+    /// to `Continue`, which is a production hole: the loop would
+    /// advance instead of suspending for the operator.
+    ///
+    /// Post-fix, `execute()` runs `derive_signal` on the parallel batch
+    /// too (earliest-index wins) and Phase 2 is skipped entirely if a
+    /// terminal signal was already set. This test pins that derivation.
+    #[test]
+    fn derive_signal_escalates_awaiting_approval_to_wait_approval() {
+        let awaiting = invoke_result(ActionStatus::AwaitingApproval {
+            approval_id: ApprovalId::new("appr-1"),
+        });
+        let got = derive_signal(&awaiting, &LoopSignal::Continue);
+        match got {
+            LoopSignal::WaitApproval { approval_id } => {
+                assert_eq!(approval_id.as_str(), "appr-1");
+            }
+            other => panic!("expected WaitApproval, got {other:?}"),
+        }
+    }
+
+    /// Parallel-batch aggregation: earliest-index `AwaitingApproval`
+    /// wins over later `Succeeded`. If the earlier entry escaped the
+    /// fold, the loop would miss the suspension entirely.
+    #[test]
+    fn parallel_batch_aggregation_picks_earliest_terminal_signal() {
+        let results = vec![
+            invoke_result(ActionStatus::AwaitingApproval {
+                approval_id: ApprovalId::new("appr-early"),
+            }),
+            invoke_result(ActionStatus::Succeeded),
+        ];
+        let mut loop_signal = LoopSignal::Continue;
+        for r in &results {
+            let next = derive_signal(r, &loop_signal);
+            if !matches!(next, LoopSignal::Continue) {
+                loop_signal = next;
+                break;
+            }
+        }
+        match loop_signal {
+            LoopSignal::WaitApproval { approval_id } => {
+                assert_eq!(approval_id.as_str(), "appr-early");
+            }
+            other => panic!("expected WaitApproval(appr-early), got {other:?}"),
+        }
+    }
+
+    /// SubagentSpawned also escalates. Covers the other InvokeTool
+    /// status that carries a terminal signal.
+    #[test]
+    fn derive_signal_escalates_subagent_spawned_to_wait_subagent() {
+        let spawned = invoke_result(ActionStatus::SubagentSpawned {
+            child_task_id: TaskId::new("child-1"),
+        });
+        let got = derive_signal(&spawned, &LoopSignal::Continue);
+        match got {
+            LoopSignal::WaitSubagent { child_task_id } => {
+                assert_eq!(child_task_id.as_str(), "child-1");
+            }
+            other => panic!("expected WaitSubagent, got {other:?}"),
+        }
+    }
 }

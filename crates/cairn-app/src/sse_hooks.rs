@@ -390,6 +390,7 @@ mod sse_orchestrator_tests {
             discovered_tool_names: vec![],
             step_history: vec![],
             is_recovery: false,
+            approval_timeout: None,
         }
     }
 

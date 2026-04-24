@@ -73,6 +73,7 @@ fn base_ctx(run_id: &str, is_recovery: bool) -> OrchestrationContext {
         discovered_tool_names: vec![],
         step_history: vec![],
         is_recovery,
+        approval_timeout: None,
     }
 }
 
