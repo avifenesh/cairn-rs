@@ -7,12 +7,8 @@
 use std::sync::Arc;
 
 use cairn_domain::ProjectKey;
-use cairn_harness_tools::{
-    __clear_client_cache_for_tests, HarnessBuiltin, HarnessLsp,
-};
-use cairn_tools::builtins::{
-    PermissionLevel, ToolCategory, ToolContext, ToolEffect, ToolHandler,
-};
+use cairn_harness_tools::{__clear_client_cache_for_tests, HarnessBuiltin, HarnessLsp};
+use cairn_tools::builtins::{PermissionLevel, ToolCategory, ToolContext, ToolEffect, ToolHandler};
 use serde_json::json;
 use tempfile::TempDir;
 
@@ -43,8 +39,14 @@ fn lsp_handler_metadata_is_read_only_observational() {
     // Description mirrors harness-lsp's LSP_TOOL_DESCRIPTION and must mention
     // 1-indexed positions so the model uses the right convention.
     let desc = tool.description();
-    assert!(desc.contains("1-INDEXED"), "description must flag 1-indexed positions: {desc}");
-    assert!(desc.contains("server_starting"), "description must mention server_starting retry");
+    assert!(
+        desc.contains("1-INDEXED"),
+        "description must flag 1-indexed positions: {desc}"
+    );
+    assert!(
+        desc.contains("server_starting"),
+        "description must mention server_starting retry"
+    );
 }
 
 #[test]
@@ -210,11 +212,7 @@ path = "src/lib.rs"
     .unwrap();
     std::fs::create_dir_all(dir.path().join("src")).unwrap();
     let src_path = dir.path().join("src").join("lib.rs");
-    std::fs::write(
-        &src_path,
-        "pub fn greet() -> &'static str { \"hi\" }\n",
-    )
-    .unwrap();
+    std::fs::write(&src_path, "pub fn greet() -> &'static str { \"hi\" }\n").unwrap();
 
     // .lsp.json so harness-lsp finds a profile for `.rs`.
     let mut servers = HashMap::new();
@@ -266,7 +264,10 @@ path = "src/lib.rs"
                 if other.output["kind"] == "no_results" {
                     return;
                 }
-                panic!("unexpected ok result on attempt {attempt}: {:?}", other.output);
+                panic!(
+                    "unexpected ok result on attempt {attempt}: {:?}",
+                    other.output
+                );
             }
             Err(e) => panic!("lsp call errored on attempt {attempt}: {e:?}"),
         }
