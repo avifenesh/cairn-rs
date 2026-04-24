@@ -40,12 +40,13 @@ use serde::{Deserialize, Serialize};
 /// (what the operator is being asked to match on) and
 /// [`ApprovalScope::Session`] (how a "approve for session" decision widens).
 ///
-/// The variants are ordered from narrowest (`Exact`) to widest
-/// (`ProjectScopedPath`). The matcher is expected to compare arguments
-/// *after* canonicalisation (symlink resolution, trailing-slash handling,
-/// etc.) — that canonicalisation is deliberately not encoded in the type
-/// so that the same policy can be reused in contexts where only a subset
-/// of canonicalisation is available (e.g. replay).
+/// In terms of matching breadth, `Exact` is the narrowest policy,
+/// `ExactPath` is broader, and `ProjectScopedPath` is the widest. The
+/// matcher is expected to compare arguments *after* canonicalisation
+/// (symlink resolution, trailing-slash handling, etc.) — that
+/// canonicalisation is deliberately not encoded in the type so that
+/// the same policy can be reused in contexts where only a subset of
+/// canonicalisation is available (e.g. replay).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ApprovalMatchPolicy {

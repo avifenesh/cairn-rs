@@ -717,6 +717,7 @@ fn all_variants() -> Vec<RuntimeEvent> {
         RuntimeEvent::ToolCallAmended(cairn_domain::ToolCallAmended {
             project: p(),
             call_id: cairn_domain::ToolCallId::new("tc_exh_3"),
+            session_id: sess(),
             operator_id: OperatorId::new("op1"),
             new_tool_args: serde_json::json!({"path": "/tmp/y"}),
             amended_at_ms: ts,

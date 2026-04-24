@@ -1055,10 +1055,10 @@ Before implementing BP-v2, the following questions need answers:
 | [Claude Code Hooks Guide](https://code.claude.com/docs/en/hooks-guide) | Official Docs | `PreToolUse` + `PermissionRequest` hook input/output schemas |
 | [OpenCode permission/index.ts](https://raw.githubusercontent.com/sst/opencode/dev/packages/opencode/src/permission/index.ts) | Source | Effect-TS Deferred suspension model for ask/allow/once semantics |
 | [Codex exec_policy.rs](https://raw.githubusercontent.com/openai/codex/main/codex-rs/core/src/exec_policy.rs) | Source | Rust reference implementation of policy evaluation + amendment persistence |
-| [harness-core permissions.rs](/tmp/ref-tools/crates/harness-core/src/permissions.rs) | Local | Direct ancestor of cairn's permission model; `PermissionDecision` variants |
+| `harness-core permissions.rs` | Local | Direct ancestor of cairn's permission model; `PermissionDecision` variants |
 | [pledge(2) man page](https://man.openbsd.org/pledge.2) | Reference | OS analogy: monotonic capability reduction, fail-closed violation |
 
 ---
 
 *This guide was synthesized from 32 primary sources.*
-*See `/home/ubuntu/agent-knowledge/resources/llm-agent-approval-systems-sources.json` for full source metadata.*
+*Full source metadata is not included in this repository copy of the guide.*

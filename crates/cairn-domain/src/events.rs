@@ -857,6 +857,11 @@ pub struct ToolCallRejected {
 pub struct ToolCallAmended {
     pub project: ProjectKey,
     pub call_id: ToolCallId,
+    /// Session the amended call belongs to. Included (like the other
+    /// three tool-call approval events) so downstream projections can
+    /// index by session without walking prior events to recover the
+    /// association.
+    pub session_id: SessionId,
     pub operator_id: OperatorId,
     pub new_tool_args: serde_json::Value,
     pub amended_at_ms: u64,
@@ -2720,6 +2725,7 @@ mod tests {
         let event = RuntimeEvent::ToolCallAmended(super::ToolCallAmended {
             project: project.clone(),
             call_id: crate::ids::ToolCallId::new("tc_4"),
+            session_id: "sess_4".into(),
             operator_id: crate::ids::OperatorId::new("op_1"),
             new_tool_args: serde_json::json!({"path": "/tmp/y"}),
             amended_at_ms: 3_000,
