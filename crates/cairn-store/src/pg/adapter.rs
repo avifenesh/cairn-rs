@@ -1065,7 +1065,8 @@ impl ToolCallApprovalRow {
     }
 }
 
-const TOOL_CALL_APPROVAL_SELECT: &str = "SELECT call_id, session_id, run_id, tenant_id, workspace_id, project_id, \
+const TOOL_CALL_APPROVAL_SELECT: &str =
+    "SELECT call_id, session_id, run_id, tenant_id, workspace_id, project_id, \
      tool_name, original_tool_args, amended_tool_args, approved_tool_args, \
      display_summary, match_policy, state, operator_id, scope, reason, \
      proposed_at_ms, approved_at_ms, rejected_at_ms, last_amended_at_ms, \
@@ -1099,7 +1100,9 @@ impl ToolCallApprovalReadModel for PgAdapter {
             .fetch_all(&self.pool)
             .await
             .map_err(|e| StoreError::Internal(e.to_string()))?;
-        rows.into_iter().map(ToolCallApprovalRow::into_record).collect()
+        rows.into_iter()
+            .map(ToolCallApprovalRow::into_record)
+            .collect()
     }
 
     async fn list_for_session(
@@ -1115,7 +1118,9 @@ impl ToolCallApprovalReadModel for PgAdapter {
             .fetch_all(&self.pool)
             .await
             .map_err(|e| StoreError::Internal(e.to_string()))?;
-        rows.into_iter().map(ToolCallApprovalRow::into_record).collect()
+        rows.into_iter()
+            .map(ToolCallApprovalRow::into_record)
+            .collect()
     }
 
     async fn list_pending_for_project(
@@ -1140,6 +1145,8 @@ impl ToolCallApprovalReadModel for PgAdapter {
             .fetch_all(&self.pool)
             .await
             .map_err(|e| StoreError::Internal(e.to_string()))?;
-        rows.into_iter().map(ToolCallApprovalRow::into_record).collect()
+        rows.into_iter()
+            .map(ToolCallApprovalRow::into_record)
+            .collect()
     }
 }

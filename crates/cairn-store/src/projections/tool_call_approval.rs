@@ -111,16 +111,12 @@ pub struct ToolCallApprovalRecord {
 #[async_trait]
 pub trait ToolCallApprovalReadModel: Send + Sync {
     /// Fetch the projection record for a single tool-call id.
-    async fn get(
-        &self,
-        call_id: &ToolCallId,
-    ) -> Result<Option<ToolCallApprovalRecord>, StoreError>;
+    async fn get(&self, call_id: &ToolCallId)
+        -> Result<Option<ToolCallApprovalRecord>, StoreError>;
 
     /// List every tool-call approval for a run, oldest-first.
-    async fn list_for_run(
-        &self,
-        run_id: &RunId,
-    ) -> Result<Vec<ToolCallApprovalRecord>, StoreError>;
+    async fn list_for_run(&self, run_id: &RunId)
+        -> Result<Vec<ToolCallApprovalRecord>, StoreError>;
 
     /// List every tool-call approval for a session, oldest-first.
     async fn list_for_session(

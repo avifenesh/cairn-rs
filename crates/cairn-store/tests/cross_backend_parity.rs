@@ -1532,15 +1532,13 @@ mod sqlite_parity {
             .into_iter()
             .map(|r| r.call_id.as_str().to_owned())
             .collect::<Vec<_>>();
-        let sql_for_run = ToolCallApprovalReadModel::list_for_run(
-            &sqlite_adapter,
-            &RunId::new("run_1"),
-        )
-        .await
-        .unwrap()
-        .into_iter()
-        .map(|r| r.call_id.as_str().to_owned())
-        .collect::<Vec<_>>();
+        let sql_for_run =
+            ToolCallApprovalReadModel::list_for_run(&sqlite_adapter, &RunId::new("run_1"))
+                .await
+                .unwrap()
+                .into_iter()
+                .map(|r| r.call_id.as_str().to_owned())
+                .collect::<Vec<_>>();
         assert_eq!(mem_for_run, sql_for_run);
         assert_eq!(mem_for_run, vec!["tc_a", "tc_b", "tc_c"]);
 
@@ -1552,15 +1550,13 @@ mod sqlite_parity {
             .into_iter()
             .map(|r| r.call_id.as_str().to_owned())
             .collect::<Vec<_>>();
-        let sql_for_session = ToolCallApprovalReadModel::list_for_session(
-            &sqlite_adapter,
-            &SessionId::new("sess_1"),
-        )
-        .await
-        .unwrap()
-        .into_iter()
-        .map(|r| r.call_id.as_str().to_owned())
-        .collect::<Vec<_>>();
+        let sql_for_session =
+            ToolCallApprovalReadModel::list_for_session(&sqlite_adapter, &SessionId::new("sess_1"))
+                .await
+                .unwrap()
+                .into_iter()
+                .map(|r| r.call_id.as_str().to_owned())
+                .collect::<Vec<_>>();
         assert_eq!(mem_for_session, sql_for_session);
 
         // list_pending_for_project parity: only tc_c remains pending
@@ -1572,17 +1568,13 @@ mod sqlite_parity {
             .into_iter()
             .map(|r| (r.call_id.as_str().to_owned(), r.state))
             .collect::<Vec<_>>();
-        let sql_pending = ToolCallApprovalReadModel::list_pending_for_project(
-            &sqlite_adapter,
-            &proj,
-            100,
-            0,
-        )
-        .await
-        .unwrap()
-        .into_iter()
-        .map(|r| (r.call_id.as_str().to_owned(), r.state))
-        .collect::<Vec<_>>();
+        let sql_pending =
+            ToolCallApprovalReadModel::list_pending_for_project(&sqlite_adapter, &proj, 100, 0)
+                .await
+                .unwrap()
+                .into_iter()
+                .map(|r| (r.call_id.as_str().to_owned(), r.state))
+                .collect::<Vec<_>>();
         assert_eq!(mem_pending, sql_pending);
         assert_eq!(
             mem_pending,

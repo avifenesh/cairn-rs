@@ -289,10 +289,7 @@ async fn list_for_run_returns_oldest_first() {
         .await
         .unwrap();
 
-    let list = store
-        .list_for_run(&RunId::new("run_1"))
-        .await
-        .unwrap();
+    let list = store.list_for_run(&RunId::new("run_1")).await.unwrap();
     let ids: Vec<&str> = list.iter().map(|r| r.call_id.as_str()).collect();
     assert_eq!(ids, vec!["tc_a", "tc_b", "tc_c"]);
 }
