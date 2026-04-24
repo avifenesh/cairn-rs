@@ -1740,10 +1740,11 @@ mod tests {
         let decide_handle = std::sync::Arc::new(decide);
         let decide_for_loop = decide_handle.clone();
 
-        // Wrap so we can inspect count after the run. Using a dedicated
-        // trait adapter is overkill — we leak a raw pointer via Arc here
-        // because `OrchestratorLoop::new` takes the phase by value and
-        // we don't need shared mutation, just post-run inspection.
+        // `OrchestratorLoop::new` takes the phase by value, so we wrap
+        // the shared counter in `Arc` and keep one handle here for
+        // post-run inspection. `ArcDecide` is a thin trait adapter that
+        // forwards to the inner `CountingDecide` — two `Arc` handles to
+        // the same counter, no leaks, no raw pointers.
         struct ArcDecide(std::sync::Arc<CountingDecide>);
         #[async_trait]
         impl DecidePhase for ArcDecide {

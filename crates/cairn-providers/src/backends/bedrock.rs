@@ -43,10 +43,22 @@ impl Bedrock {
             // unbounded) to guarantee the orchestrator can always escape
             // a hung upstream within one call's worth of latency — see
             // F27 dogfood blocker for the non-bounded failure mode.
+            //
+            // `.expect` (not `.unwrap_or_default`): a `Client::default()`
+            // fallback would silently discard the timeout we just set and
+            // reintroduce F27. Building a reqwest client with a static
+            // timeout can only fail on truly catastrophic conditions
+            // (system TLS init broken, rustls unavailable) — panicking is
+            // the right signal to operators; the process wouldn't have
+            // been functional anyway. Copilot review on PR #287.
             client: reqwest::Client::builder()
                 .timeout(std::time::Duration::from_secs(DEFAULT_BEDROCK_TIMEOUT_SECS))
                 .build()
-                .unwrap_or_default(),
+                .unwrap_or_else(|err| {
+                    panic!(
+                        "failed to build Bedrock HTTP client with {DEFAULT_BEDROCK_TIMEOUT_SECS}s timeout: {err}"
+                    )
+                }),
         }
     }
 
