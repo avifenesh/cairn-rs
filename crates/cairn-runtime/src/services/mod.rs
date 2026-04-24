@@ -148,6 +148,18 @@ pub use provider_router::{
     DispatchEntry, ProviderRouter, RoutableProvider, RoutingConfig, RoutingOutcome,
 };
 
+pub mod model_chain;
+pub use model_chain::{
+    format_attempt_summary, CooldownMap, FallbackAttempt, FallbackOutcome, ModelChain,
+    DEFAULT_RATE_LIMIT_COOLDOWN,
+};
+
+pub mod routed_generation;
+pub use routed_generation::{
+    single_model_service, RoutedBinding, RoutedGenerationError, RoutedGenerationService,
+    RoutedGenerationSuccess,
+};
+
 pub mod prompt_release_pipeline;
 pub use prompt_release_pipeline::{
     DiffKind, DiffLine, PromptReleasePipeline, RolloutState, RolloutStatus, RoutingDecision,

@@ -183,6 +183,13 @@ pub use services::{
     RoutingOutcome,
 };
 
+// ── Model chain + composed routed generation ─────────────────────────────────
+pub use services::{
+    format_attempt_summary, single_model_service, CooldownMap, FallbackAttempt, FallbackOutcome,
+    ModelChain, RoutedBinding, RoutedGenerationError, RoutedGenerationService,
+    RoutedGenerationSuccess, DEFAULT_RATE_LIMIT_COOLDOWN,
+};
+
 // ── RFC 007: Plugin lifecycle management ─────────────────────────────────────
 pub use services::{
     CapabilityRegistry, DeliveryFailure, PluginError, PluginEventRouter, PluginHealthMonitor,

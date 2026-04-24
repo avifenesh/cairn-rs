@@ -355,6 +355,72 @@ pub struct AppState {
     /// export is not wired.
     #[cfg(feature = "metrics-otel")]
     pub otlp_batch: Option<Arc<crate::metrics_otel::BatchingSink>>,
+    /// Provider-fallback cooldown storage partitioned by
+    /// `(tenant_id, binding_id)` so a rate-limit on one tenant/connection
+    /// does NOT cool down the same `model_id` for unrelated tenants or
+    /// sibling connections with different credentials. Keyed internally
+    /// by `model_id` inside each scoped `CooldownMap`. Populated when
+    /// `provider.generate()` returns `ProviderAdapterError::RateLimited`
+    /// so subsequent orchestrate calls skip the cooled-down model for
+    /// `DEFAULT_RATE_LIMIT_COOLDOWN` (5 min). Cleared on process
+    /// restart by design (in-memory; event-sourced cooldown is a
+    /// follow-up).
+    pub provider_fallback_cooldown: Arc<ScopedProviderFallbackCooldown>,
+}
+
+/// In-memory provider-fallback cooldown storage partitioned by
+/// `(tenant_id, binding_id)`. Each partition holds its own
+/// [`cairn_orchestrator::CooldownMap`] so rate-limit events are isolated.
+///
+/// See [`AppState::provider_fallback_cooldown`] for semantics.
+#[derive(Debug, Default)]
+pub struct ScopedProviderFallbackCooldown {
+    inner: std::sync::Mutex<
+        std::collections::HashMap<(String, String), cairn_orchestrator::CooldownMap>,
+    >,
+}
+
+impl ScopedProviderFallbackCooldown {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Fetch (or lazily create) the `CooldownMap` for the given
+    /// `(tenant_id, binding_id)` scope.
+    ///
+    /// Prunes scopes whose inner `CooldownMap` is empty before returning —
+    /// this keeps the outer map bounded under tenant/connection churn
+    /// since `CooldownMap` entries already self-expire after their window.
+    /// Without this sweep the outer map could grow unboundedly even
+    /// though every inner entry had long since expired.
+    pub fn get_or_create(
+        &self,
+        tenant_id: &str,
+        binding_id: &str,
+    ) -> cairn_orchestrator::CooldownMap {
+        let mut guard = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+
+        // Light amortised sweep: drop scopes whose CooldownMap is empty.
+        // Cheap because `CooldownMap::is_empty` is a single mutex
+        // acquisition + HashMap::retain. At steady state the outer map
+        // only keeps scopes that are currently cooling down something,
+        // so size is bounded by the number of simultaneously-throttled
+        // (tenant, binding) pairs.
+        guard.retain(|_, cooldown| !cooldown.is_empty());
+
+        guard
+            .entry((tenant_id.to_owned(), binding_id.to_owned()))
+            .or_default()
+            .clone()
+    }
+
+    /// Number of tracked scopes (after pruning). Primarily for
+    /// observability / tests.
+    pub fn scope_count(&self) -> usize {
+        let mut guard = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        guard.retain(|_, cooldown| !cooldown.is_empty());
+        guard.len()
+    }
 }
 
 // ── GitHubIntegration ────────────────────────────────────────────────────────
@@ -1053,6 +1119,7 @@ impl AppState {
             model_catalog_providers_cache: Arc::new(std::sync::OnceLock::new()),
             #[cfg(any(feature = "metrics-core", feature = "metrics-providers"))]
             metrics_tap: None,
+            provider_fallback_cooldown: Arc::new(ScopedProviderFallbackCooldown::new()),
         };
         state.runtime.store.reset_usage_counters();
 

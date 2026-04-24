@@ -24,6 +24,9 @@ use cairn_domain::{
     ActionProposal, ActionType,
 };
 
+use cairn_runtime::{
+    single_model_service, RoutedBinding, RoutedGenerationError, RoutedGenerationService,
+};
 use cairn_tools::builtins::{BuiltinToolDescriptor, BuiltinToolRegistry};
 
 use crate::context::{DecideOutput, GatherOutput, OrchestrationContext};
@@ -102,9 +105,19 @@ impl Default for TokenBudget {
 /// Production implementation of the DECIDE phase.
 ///
 /// Thread-safe: all fields are `Arc` or immutable.
+///
+/// The phase delegates all provider dispatch to [`RoutedGenerationService`],
+/// which composes cross-binding (`ProviderRouter`-style) and per-binding
+/// (`ModelChain`) fallback. The phase never calls `GenerationProvider`
+/// directly — all routing, error classification, and cooldown bookkeeping
+/// live in the runtime layer.
 pub struct LlmDecidePhase {
-    provider: Arc<dyn GenerationProvider>,
-    model_id: String,
+    /// Composed routing service. The orchestrator asks cairn to pick a
+    /// model; cairn walks the bindings × models matrix.
+    routed: RoutedGenerationService,
+    /// Settings forwarded to every provider call (temperature, timeout,
+    /// max_output_tokens). Stays on the phase (not per-binding) because
+    /// the same task-level knobs apply regardless of which binding serves.
     settings: ProviderBindingSettings,
     /// Optional fixed confidence offset applied to every proposal
     /// (replaces a full `ConfidenceCalibrator` when historical data is absent).
@@ -116,11 +129,21 @@ pub struct LlmDecidePhase {
 }
 
 impl LlmDecidePhase {
-    /// Create with the given provider and model.
+    /// Create from a single `GenerationProvider` + `model_id`. The phase
+    /// wraps them in a one-binding, one-model `RoutedGenerationService`
+    /// so the dispatch path is uniform. Production call sites that have
+    /// multi-model chains should use [`LlmDecidePhase::from_routed`] or
+    /// [`LlmDecidePhase::with_bindings`].
     pub fn new(provider: Arc<dyn GenerationProvider>, model_id: impl Into<String>) -> Self {
+        let model = model_id.into();
+        Self::from_routed(single_model_service("single", provider, model))
+    }
+
+    /// Create from a fully-constructed routed generation service (the
+    /// preferred constructor for production).
+    pub fn from_routed(routed: RoutedGenerationService) -> Self {
         Self {
-            provider,
-            model_id: model_id.into(),
+            routed,
             settings: ProviderBindingSettings {
                 max_output_tokens: Some(2048),
                 ..Default::default()
@@ -129,6 +152,19 @@ impl LlmDecidePhase {
             token_budget: None,
             tools: None,
         }
+    }
+
+    /// Attach a binding chain: replaces the routed service on this phase.
+    /// Preserves `settings`, `confidence_bias`, `token_budget`, and `tools`.
+    pub fn with_routed_service(mut self, routed: RoutedGenerationService) -> Self {
+        self.routed = routed;
+        self
+    }
+
+    /// Attach an explicit binding list, replacing the current routed
+    /// service. Convenience for call sites that already have a Vec.
+    pub fn with_bindings(self, bindings: Vec<RoutedBinding>) -> Self {
+        self.with_routed_service(RoutedGenerationService::new(bindings))
     }
 
     /// Override generation settings (e.g. temperature, max_output_tokens).
@@ -230,12 +266,76 @@ impl DecidePhase for LlmDecidePhase {
             serde_json::json!({ "role": "user",   "content": user   }),
         ];
 
+        // ── Routed dispatch ──────────────────────────────────────────────
+        // Delegate to the composed routing service. Cross-binding and
+        // per-binding fallback + cooldown tracking + tool forwarding all
+        // live behind this single call.
         let t0 = Instant::now();
-        let resp = self
-            .provider
-            .generate(&self.model_id, messages.clone(), &self.settings, &tool_defs)
+        let success = match self
+            .routed
+            .generate(messages.clone(), &self.settings, &tool_defs)
             .await
-            .map_err(|e| OrchestratorError::Decide(e.to_string()))?;
+        {
+            Ok(ok) => {
+                if ok.fallback_position > 0 || ok.binding_index > 0 {
+                    tracing::info!(
+                        binding_id = %ok.binding_id,
+                        binding_index = ok.binding_index,
+                        resolved_model = %ok.model_id,
+                        fallback_position = ok.fallback_position,
+                        attempts = ok.attempts_before_success.len(),
+                        "decide phase recovered via routed fallback"
+                    );
+                }
+                ok
+            }
+            Err(RoutedGenerationError::AllProvidersExhausted { attempts }) => {
+                tracing::warn!(
+                    attempt_count = attempts.len(),
+                    "decide phase exhausted every binding × model combination"
+                );
+                return Err(OrchestratorError::AllProvidersExhausted { attempts });
+            }
+            Err(RoutedGenerationError::Auth {
+                binding_id,
+                model_id,
+                detail,
+                attempts,
+            }) => {
+                tracing::error!(
+                    binding_id = %binding_id,
+                    model_id = %model_id,
+                    attempt_count = attempts.len(),
+                    "decide phase hit non-retryable auth failure"
+                );
+                return Err(OrchestratorError::ProviderAuthFailed {
+                    binding_id,
+                    model_id,
+                    detail,
+                });
+            }
+            Err(RoutedGenerationError::InvalidRequest {
+                binding_id,
+                model_id,
+                detail,
+                attempts,
+            }) => {
+                tracing::error!(
+                    binding_id = %binding_id,
+                    model_id = %model_id,
+                    attempt_count = attempts.len(),
+                    "decide phase hit non-retryable invalid-request"
+                );
+                return Err(OrchestratorError::ProviderInvalidRequest {
+                    binding_id,
+                    model_id,
+                    detail,
+                });
+            }
+        };
+
+        let resp = success.response;
+        let resolved_model_id = success.model_id;
         let latency_ms = t0.elapsed().as_millis() as u64;
         let raw_response = resp.text.clone();
 
@@ -251,7 +351,14 @@ impl DecidePhase for LlmDecidePhase {
             // This is the fallback for models that don't support native tool calling.
             let mut parsed = parse_proposals(&resp.text);
             if is_fallback_escalation(&parsed) {
-                // Retry: explicitly ask the LLM to output only JSON
+                // Retry: explicitly ask the LLM to output only JSON. This
+                // is a category-B model-action correction — we loop the
+                // problem back to the model as a prompt nudge, NOT as a
+                // provider fallback (same binding/model are fine; we just
+                // need cleaner output). The routed service will naturally
+                // pick the same first-available model unless it's now
+                // cooled down.
+                let _ = &resolved_model_id; // provenance recorded in trace below
                 let retry_user = format!(
                     "{user}\n\n⚠️ Your last response was not valid JSON. \
                      Return ONLY a JSON array of action objects — no prose, no markdown."
@@ -261,12 +368,12 @@ impl DecidePhase for LlmDecidePhase {
                     serde_json::json!({ "role": "user",   "content": retry_user }),
                 ];
                 match self
-                    .provider
-                    .generate(&self.model_id, retry_messages, &self.settings, &tool_defs)
+                    .routed
+                    .generate(retry_messages, &self.settings, &tool_defs)
                     .await
                 {
-                    Ok(r2) => {
-                        // Check if retry response used native tools
+                    Ok(ok2) => {
+                        let r2 = ok2.response;
                         if !r2.tool_calls.is_empty() {
                             parsed = tool_calls_to_proposals(&r2.tool_calls, &tool_descs);
                         } else {
@@ -311,7 +418,10 @@ impl DecidePhase for LlmDecidePhase {
             proposals,
             calibrated_confidence,
             requires_approval,
-            model_id: self.model_id.clone(),
+            // Reflect the model that actually produced the response, not the
+            // preferred one — downstream `LlmCallTrace` / billing / route
+            // decision records need to know which upstream we hit.
+            model_id: resolved_model_id,
             latency_ms,
             input_tokens: resp.input_tokens,
             output_tokens: resp.output_tokens,
@@ -1393,9 +1503,20 @@ mod tests {
 
     #[tokio::test]
     async fn decide_propagates_provider_error() {
+        // With the fallback chain in place, a retryable provider error
+        // against a single-model chain exhausts immediately and surfaces
+        // `AllProvidersExhausted` with one attempt recorded. Non-retryable
+        // errors (Auth / InvalidRequest) still surface as `Decide(...)`.
         let phase = LlmDecidePhase::new(Arc::new(FailingProvider), "gemma4");
         let err = phase.decide(&ctx(), &empty_gather()).await.unwrap_err();
-        assert!(matches!(err, OrchestratorError::Decide(_)));
+        match err {
+            OrchestratorError::AllProvidersExhausted { attempts } => {
+                assert_eq!(attempts.len(), 1);
+                assert_eq!(attempts[0].model_id, "gemma4");
+                assert_eq!(attempts[0].reason_code, "transport_failure");
+            }
+            other => panic!("expected AllProvidersExhausted, got {other:?}"),
+        }
     }
 
     #[tokio::test]

@@ -304,12 +304,19 @@ fn default_alert_pct() -> u8 {
     80
 }
 
+/// Body for `POST /v1/runs/:id/orchestrate`.
+///
+/// Cairn owns model selection: the caller describes the task (goal, mode,
+/// iteration/timeout/approval budgets) and the control plane picks the
+/// model from the tenant's configured provider bindings. Legacy clients
+/// that still send a `model_id` field are tolerated because this struct
+/// does NOT use `serde(deny_unknown_fields)` — by default Serde ignores
+/// unknown fields on Deserialize, so the legacy payload is accepted
+/// without error and the field is discarded.
 #[derive(serde::Deserialize)]
 pub(crate) struct OrchestrateRequest {
     #[serde(default)]
     pub(crate) goal: Option<String>,
-    #[serde(default)]
-    pub(crate) model_id: Option<String>,
     #[serde(default)]
     pub(crate) max_iterations: Option<u32>,
     #[serde(default)]
@@ -1742,6 +1749,7 @@ pub(crate) async fn orchestrate_run_handler(
             .unwrap_or_else(|| "Execute the run objective.".to_owned()),
         agent_type: run
             .agent_role_id
+            .clone()
             .or(default_agent_role)
             .unwrap_or_else(|| "orchestrator".to_owned()),
         run_started_at_ms: now_ms,
@@ -1755,23 +1763,23 @@ pub(crate) async fn orchestrate_run_handler(
             .map(std::time::Duration::from_millis),
     };
 
-    let model_id = match body.model_id {
-        Some(model_id) => model_id,
-        None => {
-            let brain_model = state.runtime.runtime_config.default_brain_model().await;
-            if brain_model.trim().is_empty() || brain_model == "default" {
-                state.runtime.runtime_config.default_generate_model().await
-            } else {
-                brain_model
-            }
-        }
+    // Cairn picks the model. The caller describes the task; the control
+    // plane resolves the preferred model from system defaults and derives
+    // the full per-binding model chain below.
+    let model_id = {
+        let brain_model = state.runtime.runtime_config.default_brain_model().await;
+        let model = if brain_model.trim().is_empty() || brain_model == "default" {
+            state.runtime.runtime_config.default_generate_model().await
+        } else {
+            brain_model
+        };
+        model.trim().to_owned()
     };
-    let model_id = model_id.trim().to_owned();
     if model_id.is_empty() || model_id == "default" {
         return AppApiError::new(
             StatusCode::SERVICE_UNAVAILABLE,
             "no_brain_provider",
-            "No default LLM model configured. Set brain_model or generate_model, or provide model_id explicitly.",
+            "No default LLM model configured. Set brain_model or generate_model on the system scope, or add a provider connection via POST /v1/providers/connections.",
         )
         .into_response();
     }
@@ -2035,7 +2043,145 @@ pub(crate) async fn orchestrate_run_handler(
         )
     };
 
-    let decide = LlmDecidePhase::new(brain, model_id.clone()).with_tools(registry.clone());
+    // ── Compose the RoutedGenerationService (F17) ────────────────────────
+    // Cross-binding axis: every active provider connection for this tenant
+    // becomes a `RoutedBinding`, with the binding that supports `model_id`
+    // taking preference. Per-binding axis: each binding's ModelChain is
+    // that connection's `supported_models` list (preferred model first on
+    // the preferred binding). Cooldowns are scoped per
+    // `(tenant_id, binding_id)` so a rate-limited model is only skipped
+    // within that tenant's binding — other tenants or sibling connections
+    // with independent credentials are unaffected.
+    //
+    // Dogfood run 2 motivated this: MiniMax empty → Qwen 503 → Llama 429.
+    // A single-model hard-fail is a budget DoS on the operator's day.
+    let routed = {
+        let scoped_cooldowns = state.provider_fallback_cooldown.clone();
+        let tenant_key = run.project.tenant_id.as_str().to_owned();
+        // Surface store/registry failures as an operator-facing 5xx rather
+        // than silently treating them as "no connections" — that would
+        // route requests to the startup fallback and hide an outage.
+        let summaries = match state
+            .runtime
+            .provider_registry
+            .active_connection_summaries(&run.project.tenant_id)
+            .await
+        {
+            Ok(s) => s,
+            Err(err) => return runtime_error_response(err),
+        };
+
+        let mut bindings: Vec<cairn_runtime::RoutedBinding> = Vec::new();
+
+        // Identify the binding that serves `model_id` so it leads the chain.
+        let preferred_idx = summaries
+            .iter()
+            .position(|(_, sup)| sup.iter().any(|m| m.trim() == model_id));
+
+        // If the configured system-default model isn't advertised by any
+        // active connection, fail loudly instead of silently degrading to
+        // "first model on first connection". Operators get an actionable
+        // error with the full list of tenant connections + their models
+        // so they can fix the mismatch (update the default, update the
+        // connection's supported_models, or add a new connection).
+        if preferred_idx.is_none() && !summaries.is_empty() {
+            let inventory = summaries
+                .iter()
+                .map(|(conn, models)| format!("{conn}=[{}]", models.join(",")))
+                .collect::<Vec<_>>()
+                .join("; ");
+            return AppApiError::new(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "preferred_model_not_supported",
+                format!(
+                    "System-default model '{model_id}' is not advertised by any active provider connection. Active connections + supported_models: {inventory}. Fix by updating `brain_model`/`generate_model` defaults, adding the model to a connection's `supported_models`, or creating a new connection via POST /v1/providers/connections.",
+                ),
+            )
+            .into_response();
+        }
+
+        let order: Vec<usize> = match preferred_idx {
+            Some(pref) => {
+                let mut v = vec![pref];
+                v.extend((0..summaries.len()).filter(|i| *i != pref));
+                v
+            }
+            None => (0..summaries.len()).collect(),
+        };
+
+        for idx in order {
+            let (conn_id, supported) = &summaries[idx];
+            // Resolve the adapter by EXACT connection ID. Previously we
+            // probed by model ID, but when multiple connections share a
+            // model slug (e.g. two proxies both exposing `gpt-4o-mini`)
+            // `resolve_generation_for_model` returns the same adapter
+            // for both bindings — conflating their credentials, quotas,
+            // and route records.
+            let probe_model = if Some(idx) == preferred_idx {
+                model_id.clone()
+            } else {
+                supported
+                    .first()
+                    .cloned()
+                    .unwrap_or_else(|| model_id.clone())
+            };
+            let connection_id = cairn_domain::ProviderConnectionId::new(conn_id.as_str());
+            let adapter = match state
+                .runtime
+                .provider_registry
+                .resolve_generation_for_connection(
+                    &run.project.tenant_id,
+                    &connection_id,
+                    &probe_model,
+                )
+                .await
+            {
+                Ok(Some(a)) => a,
+                _ => continue,
+            };
+
+            // Build the per-binding model chain.
+            let mut models: Vec<String> = Vec::new();
+            if Some(idx) == preferred_idx {
+                models.push(model_id.clone());
+            }
+            for m in supported {
+                let m = m.trim();
+                if !m.is_empty() && !models.iter().any(|x| x == m) {
+                    models.push(m.to_owned());
+                }
+            }
+            if models.is_empty() {
+                continue;
+            }
+
+            // Scope cooldown by (tenant, binding) so one tenant's 429 on
+            // model X does not suppress the same model X for another
+            // tenant or for a sibling connection that has its own quota.
+            let cooldown = scoped_cooldowns.get_or_create(&tenant_key, conn_id);
+            bindings.push(cairn_runtime::RoutedBinding {
+                binding_id: conn_id.clone(),
+                provider: adapter,
+                chain: cairn_runtime::ModelChain::new(models).with_cooldown(cooldown),
+            });
+        }
+
+        // Fallback for self-hosted dev with no active-connection records
+        // (CAIRN_BRAIN_URL / OPENROUTER_API_KEY env-only mode): wrap the
+        // startup-resolved adapter as a single-binding chain.
+        if bindings.is_empty() {
+            let cooldown = scoped_cooldowns.get_or_create(&tenant_key, "startup");
+            bindings.push(cairn_runtime::RoutedBinding {
+                binding_id: "startup".to_owned(),
+                provider: brain.clone(),
+                chain: cairn_runtime::ModelChain::single(model_id.clone()).with_cooldown(cooldown),
+            });
+        }
+
+        cairn_runtime::RoutedGenerationService::new(bindings)
+    };
+
+    let decide = LlmDecidePhase::from_routed(routed).with_tools(registry.clone());
 
     // Build loop config first so checkpoint policy is available for execute.
     let mut cfg = LoopConfig::default();
@@ -2329,6 +2475,105 @@ pub(crate) async fn orchestrate_run_handler(
                     "decide_error",
                     "upstream decide phase failed".to_owned(),
                 ),
+                cairn_orchestrator::OrchestratorError::AllProvidersExhausted { attempts } => {
+                    // F15 + F17: every binding × model in the routed chain
+                    // failed with fallback-eligible errors. Surface a
+                    // single ToolCallApprovalService proposal with the
+                    // full summary so the operator can rotate credentials,
+                    // add a provider, or abort.
+                    let summary = cairn_orchestrator::format_attempt_summary(attempts);
+                    // Best-effort: if the approval submission itself fails
+                    // (store-append error, cache issue) we still return 502
+                    // with the inline summary, but we MUST log the drop so
+                    // operators have a trace that no card appeared in the
+                    // tool-call-approvals UI. Never silently discard a
+                    // `store.append`-backed Result.
+                    if let Err(err) = submit_all_providers_exhausted_proposal(
+                        state.as_ref(),
+                        &run,
+                        &model_id,
+                        attempts,
+                        &summary,
+                    )
+                    .await
+                    {
+                        tracing::error!(
+                            run_id = %run.run_id,
+                            error = %err,
+                            "failed to submit providers-exhausted tool-call approval; operator will not see the card in the UI (HTTP 502 body still carries the summary)"
+                        );
+                    }
+                    // SEC-007: `summary` + `a.error_message` are built from
+                    // `ProviderAdapterError::to_string()` which for
+                    // `ServerError` / `StructuredOutputInvalid` carries the
+                    // upstream response body (truncated + redacted, but
+                    // still provider-internal). Log the full detail and
+                    // return only classification to the caller. The
+                    // operator can correlate via `run_id` in the logs or
+                    // view the full summary in the tool-call-approval
+                    // card submitted above.
+                    tracing::warn!(
+                        run_id = %run_id,
+                        attempt_count = attempts.len(),
+                        full_summary = %summary,
+                        "all providers exhausted during orchestration"
+                    );
+                    return (
+                        StatusCode::BAD_GATEWAY,
+                        Json(serde_json::json!({
+                            "termination": "providers_exhausted",
+                            "error_code": "all_providers_exhausted",
+                            "attempts": attempts.iter().map(|a| serde_json::json!({
+                                "model_id": a.model_id,
+                                "reason_code": a.reason_code,
+                            })).collect::<Vec<_>>(),
+                            "remediation": "One or more of: rotate credentials, top up provider credits, add a provider connection via POST /v1/providers/connections, or change the configured model. Full per-model failure summary is available in the tool-call-approvals UI.",
+                        })),
+                    )
+                        .into_response();
+                }
+                cairn_orchestrator::OrchestratorError::ProviderAuthFailed {
+                    binding_id,
+                    model_id: m,
+                    detail,
+                } => {
+                    // SEC-007: `detail` is built by openai_compat from the
+                    // upstream response body + the provider's internal
+                    // config name. Never forward that to the API caller —
+                    // it can carry credential-adjacent fragments or
+                    // proprietary internals. Log the full detail
+                    // server-side; return a stable opaque body.
+                    tracing::warn!(
+                        run_id = %run_id,
+                        binding_id = %binding_id,
+                        model_id = %m,
+                        detail = %detail,
+                        "provider auth failed during orchestration"
+                    );
+                    (
+                        StatusCode::SERVICE_UNAVAILABLE,
+                        "provider_auth_failed",
+                        "Provider authentication failed. Rotate the credential via POST /v1/admin/credentials/rotate or update the provider connection.".to_owned(),
+                    )
+                }
+                cairn_orchestrator::OrchestratorError::ProviderInvalidRequest {
+                    binding_id,
+                    model_id: m,
+                    detail,
+                } => {
+                    tracing::warn!(
+                        run_id = %run_id,
+                        binding_id = %binding_id,
+                        model_id = %m,
+                        detail = %detail,
+                        "provider rejected request during orchestration"
+                    );
+                    (
+                        StatusCode::BAD_GATEWAY,
+                        "provider_invalid_request",
+                        "Provider rejected the request. This indicates a bug in cairn's prompt construction — please file an issue.".to_owned(),
+                    )
+                }
                 _ => (
                     StatusCode::INTERNAL_SERVER_ERROR,
                     "orchestration_error",
@@ -2338,6 +2583,79 @@ pub(crate) async fn orchestrate_run_handler(
             AppApiError::new(status, code, msg).into_response()
         }
     }
+}
+
+/// Submit a `ToolCallApprovalService::submit_proposal` proposal summarising
+/// the fallback-chain exhaustion so the operator gets an actionable card in
+/// the new tool-call-approvals UI.
+///
+/// Best-effort: failures are logged but don't re-fail the caller since the
+/// caller is already returning an HTTP 502 with the summary inline.
+async fn submit_all_providers_exhausted_proposal(
+    state: &AppState,
+    run: &cairn_store::projections::RunRecord,
+    preferred_model: &str,
+    attempts: &[cairn_orchestrator::FallbackAttempt],
+    summary: &str,
+) -> Result<(), String> {
+    use cairn_runtime::ToolCallApprovalService as _;
+
+    let tool_call_approval_reader = Arc::new(
+        cairn_runtime::services::ToolCallApprovalReaderAdapter::new(state.runtime.store.clone()),
+    );
+    let svc = cairn_runtime::services::ToolCallApprovalServiceImpl::new(
+        state.runtime.store.clone(),
+        tool_call_approval_reader,
+    );
+
+    let call_id = cairn_domain::ToolCallId::new(format!(
+        "tc_providers_exhausted_{}_{}",
+        run.run_id.as_str(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis()
+    ));
+    let tcp = cairn_runtime::ToolCallProposal {
+        call_id,
+        project: run.project.clone(),
+        session_id: run.session_id.clone(),
+        run_id: run.run_id.clone(),
+        tool_name: "escalate_to_operator".to_owned(),
+        tool_args: serde_json::json!({
+            "reason": "all_providers_exhausted",
+            "preferred_model": preferred_model,
+            "summary": summary,
+            "attempts": attempts.iter().map(|a| serde_json::json!({
+                "model_id": a.model_id,
+                "reason_code": a.reason_code,
+                "error": a.error_message,
+            })).collect::<Vec<_>>(),
+            "suggested_actions": [
+                "Update system defaults `brain_model` / `generate_model` to a model you have credits for",
+                "Edit a provider connection's `supported_models` list to include a working model",
+                "Top up free-tier credits on your configured provider (OpenRouter, etc.)",
+                "Add a new provider connection via POST /v1/providers/connections",
+                "Abort the run",
+            ],
+        }),
+        // Build a descriptive one-liner that distinguishes this card
+        // from other providers-exhausted events at a glance: include
+        // run_id + the first attempt's reason so the operator can see
+        // the dominant failure mode without expanding the card.
+        display_summary: Some(format!(
+            "providers exhausted on run {} ({} models tried; first failure: {})",
+            run.run_id.as_str(),
+            attempts.len(),
+            attempts.first().map(|a| a.reason_code).unwrap_or("unknown"),
+        )),
+        match_policy: cairn_domain::approvals::ApprovalMatchPolicy::Exact,
+    };
+
+    svc.submit_proposal(tcp).await.map(|_| ()).map_err(|e| {
+        tracing::warn!(error = %e, "failed to submit providers-exhausted tool-call approval");
+        e.to_string()
+    })
 }
 
 /// Deprecated stub. Manual recovery used to drive cairn-side

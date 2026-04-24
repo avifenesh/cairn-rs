@@ -275,6 +275,28 @@ pub trait ChatProvider: Send + Sync {
         schema: Option<StructuredOutput>,
     ) -> Result<Box<dyn ChatResponse>, ProviderError>;
 
+    /// Chat with an explicit per-call `model` override.
+    ///
+    /// The default implementation ignores `model` and delegates to
+    /// [`chat_with_tools`], which preserves backwards compatibility with
+    /// providers that don't yet plumb per-call model routing.
+    ///
+    /// Implementations that DO support per-call model (the OpenAI-compatible
+    /// adapter, Bedrock) override this so the DECIDE-phase fallback chain
+    /// (see `cairn_orchestrator::ModelFallbackChain`) can route each chain
+    /// attempt to the exact upstream model. Without this override, every
+    /// chain step hits the provider's configured default model — defeating
+    /// the fallback.
+    async fn chat_with_tools_for_model(
+        &self,
+        _model: Option<&str>,
+        messages: &[ChatMessage],
+        tools: Option<&[Tool]>,
+        schema: Option<StructuredOutput>,
+    ) -> Result<Box<dyn ChatResponse>, ProviderError> {
+        self.chat_with_tools(messages, tools, schema).await
+    }
+
     async fn chat_stream(
         &self,
         _messages: &[ChatMessage],
