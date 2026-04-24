@@ -1,6 +1,7 @@
 method	route	classification	query_or_body_detail	minimum_contract
 DELETE	/v1/admin/models/:id	preserve	-	-
 DELETE	/v1/admin/tenants/:tenant_id/credentials/:id	preserve	-	-
+DELETE	/v1/admin/tenants/:tenant_id/sessions/:session_id	preserve	-	-
 DELETE	/v1/admin/tenants/:tenant_id/workspaces/:workspace_id	preserve	-	-
 DELETE	/v1/admin/workspaces/:id/shares/:share_id	preserve	-	-
 DELETE	/v1/admin/workspaces/:workspace_id/members/:id	preserve	-	-
@@ -12,6 +13,7 @@ DELETE	/v1/mailbox/:id	preserve	-	-
 DELETE	/v1/plugins/:id	preserve	-	-
 DELETE	/v1/plugins/:id/uninstall	preserve	-	-
 DELETE	/v1/projects/:proj/plugins/:id	preserve	-	-
+DELETE	/v1/projects/:project/local-paths	preserve	-	-
 DELETE	/v1/projects/:project/repos/:owner/:repo	preserve	-	-
 DELETE	/v1/projects/:project/run-templates/:template_id	preserve	-	-
 DELETE	/v1/projects/:project/triggers/:trigger_id	preserve	-	-
@@ -318,6 +320,7 @@ POST	/v1/ingest/jobs	preserve	-	-
 POST	/v1/ingest/jobs/:id/complete	preserve	-	-
 POST	/v1/ingest/jobs/:id/fail	preserve	-	-
 POST	/v1/integrations	preserve	-	-
+POST	/v1/integrations/github/verify-installation	preserve	-	-
 POST	/v1/mailbox	preserve	-	-
 POST	/v1/memories	preserve	body: { content, category }	create memory response object
 POST	/v1/memories/:id/accept	preserve	path param: id	{ ok }
