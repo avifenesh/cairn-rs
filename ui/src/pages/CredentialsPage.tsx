@@ -19,7 +19,7 @@ import {
   KeyRound, Lock, Eye, EyeOff, AlertTriangle,
 } from 'lucide-react';
 import { clsx } from 'clsx';
-import { defaultApi, ApiError } from '../lib/api';
+import { defaultApi } from '../lib/api';
 import { useScope } from '../hooks/useScope';
 import { DEFAULT_SCOPE } from '../lib/scope';
 import { useFocusTrap } from '../hooks/useFocusTrap';
@@ -68,9 +68,7 @@ function typeLabel(credType: string): string {
 }
 
 function errorMessage(e: unknown, fallback: string): string {
-  if (e instanceof ApiError) return e.message || fallback;
-  if (e instanceof Error) return e.message || fallback;
-  return fallback;
+  return e instanceof Error ? e.message || fallback : fallback;
 }
 
 /** Maps credential type to a Badge variant. */
