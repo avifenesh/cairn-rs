@@ -92,15 +92,20 @@ pub struct RoutedGenerationService {
 /// every per-provider default so it only kicks in on adapter bugs, not in
 /// normal operation.
 ///
-/// Set to 360s: Ollama's OpenAI-compat preset ships a 300s default
-/// (local CPU inference on slow hardware can genuinely take minutes), so
-/// the ceiling has to clear 300s. 360s gives a 60s safety margin while
-/// still bounding adapter misbehaviour at 6 minutes — well under the
-/// default loop `timeout_ms` of 5 minutes per run, so the loop-level
-/// wall-clock deadline will still fire first on a healthy chain. If a
-/// future backend needs a longer ceiling, bump both this constant AND
-/// that backend's `default_timeout_secs` together. Review reviewer fix:
-/// Copilot + Cursor Bugbot on PR #287.
+/// Set to 360s: Ollama's OpenAI-compat preset ships a 300s default (local
+/// CPU inference on slow hardware can genuinely take minutes), so the
+/// ceiling has to clear 300s. 360s gives a 60s safety margin.
+///
+/// Relationship to the loop-level deadline: the orchestrator's default
+/// `LoopConfig::timeout_ms` is also 5 minutes (300s). In the default
+/// configuration the loop wall-clock deadline fires before this ceiling
+/// on a healthy chain — this ceiling is the last-resort bound that only
+/// matters when (a) the operator set a longer loop `timeout_ms`, or
+/// (b) an adapter is genuinely misbehaving. If a future backend needs a
+/// longer ceiling, bump both this constant AND that backend's
+/// `default_timeout_secs` together, and consider raising the loop
+/// default in lockstep so the routing-layer bound can actually protect
+/// the operator's configured deadline.
 pub const DEFAULT_PER_CALL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(360);
 
 impl RoutedGenerationService {

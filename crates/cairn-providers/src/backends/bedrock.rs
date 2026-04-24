@@ -29,37 +29,39 @@ pub struct Bedrock {
 }
 
 impl Bedrock {
+    /// Construct a Bedrock client with the default bounded timeout.
+    ///
+    /// Returns a `ProviderError::InvalidRequest` if the underlying
+    /// reqwest client cannot be built. Previously returned `Self` and
+    /// silently fell back to `Client::default()` on failure — which
+    /// discarded the timeout we just set and reintroduced F27. Copilot
+    /// review on PR #287 asked for a proper `Result` return so
+    /// misconfiguration / TLS init failures surface through the same
+    /// error channel as every other provider adapter.
     pub fn new(
         model_id: impl Into<String>,
         region: impl Into<String>,
         api_key: impl Into<String>,
-    ) -> Self {
-        Self {
+    ) -> Result<Self, ProviderError> {
+        // 120s default: Bedrock Converse with MiniMax / Claude Sonnet
+        // reasoning can exceed 60s on long contexts. Bounded (never
+        // unbounded) to guarantee the orchestrator can always escape a
+        // hung upstream within one call's worth of latency — see F27
+        // dogfood blocker for the non-bounded failure mode.
+        let client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(DEFAULT_BEDROCK_TIMEOUT_SECS))
+            .build()
+            .map_err(|err| {
+                ProviderError::InvalidRequest(format!(
+                    "failed to build Bedrock HTTP client with {DEFAULT_BEDROCK_TIMEOUT_SECS}s timeout: {err}"
+                ))
+            })?;
+        Ok(Self {
             model_id: model_id.into(),
             region: region.into(),
             api_key: api_key.into(),
-            // 120s default: Bedrock Converse with MiniMax / Claude Sonnet
-            // reasoning can exceed 60s on long contexts. Bounded (never
-            // unbounded) to guarantee the orchestrator can always escape
-            // a hung upstream within one call's worth of latency — see
-            // F27 dogfood blocker for the non-bounded failure mode.
-            //
-            // `.expect` (not `.unwrap_or_default`): a `Client::default()`
-            // fallback would silently discard the timeout we just set and
-            // reintroduce F27. Building a reqwest client with a static
-            // timeout can only fail on truly catastrophic conditions
-            // (system TLS init broken, rustls unavailable) — panicking is
-            // the right signal to operators; the process wouldn't have
-            // been functional anyway. Copilot review on PR #287.
-            client: reqwest::Client::builder()
-                .timeout(std::time::Duration::from_secs(DEFAULT_BEDROCK_TIMEOUT_SECS))
-                .build()
-                .unwrap_or_else(|err| {
-                    panic!(
-                        "failed to build Bedrock HTTP client with {DEFAULT_BEDROCK_TIMEOUT_SECS}s timeout: {err}"
-                    )
-                }),
-        }
+            client,
+        })
     }
 
     /// Construct from environment variables.
@@ -67,7 +69,10 @@ impl Bedrock {
     /// - `BEDROCK_API_KEY` or `AWS_BEARER_TOKEN_BEDROCK`
     /// - `BEDROCK_MODEL_ID` (default: `minimax.minimax-m2.5`)
     /// - `AWS_REGION` (default: `us-west-2`)
-    pub fn from_env() -> Option<Self> {
+    ///
+    /// Returns `None` if the API key env var is missing, `Some(Err)` if
+    /// the client fails to build.
+    pub fn from_env() -> Option<Result<Self, ProviderError>> {
         let api_key = std::env::var("BEDROCK_API_KEY")
             .or_else(|_| std::env::var("AWS_BEARER_TOKEN_BEDROCK"))
             .ok()
@@ -163,7 +168,12 @@ impl Bedrock {
             .json(&body)
             .send()
             .await
-            .map_err(|e| ProviderError::Http(redact_secrets(&format!("Bedrock: {e}"))))?;
+            // Go through `ProviderError::from(reqwest::Error)` so a
+            // client-side timeout surfaces as `ProviderError::TimedOut`
+            // (and hence `ProviderAdapterError::TimedOut` → fallback-
+            // eligible with a `timed_out` reason code) rather than a
+            // generic `Http` transport failure. Copilot review on #287.
+            .map_err(ProviderError::from)?;
         if !resp.status().is_success() {
             let status = resp.status();
             if status.as_u16() == 429 {

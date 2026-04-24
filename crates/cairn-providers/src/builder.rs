@@ -206,7 +206,7 @@ impl ProviderBuilder {
                 .unwrap_or_else(|| "minimax.minimax-m2.5".to_owned());
             return Ok(Box::new(crate::backends::bedrock::Bedrock::new(
                 model, region, key,
-            )));
+            )?));
         }
 
         // Everything else is OpenAI-compatible — one struct, different config.

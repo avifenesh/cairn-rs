@@ -133,7 +133,11 @@ fn zai_coding_config_has_bounded_default_timeout() {
         cairn_providers::wire::zai::DEFAULT_TIMEOUT_SECS,
     );
     // The module-level constant itself must be bounded-and-positive
-    // (zero would re-introduce F27). `const` block so clippy is happy
-    // about asserting on a constant value.
-    const { assert!(cairn_providers::wire::zai::DEFAULT_TIMEOUT_SECS != 0) };
+    // (zero would re-introduce F27). `#[allow]` the constant-assertion
+    // lint because expressing it as an inline-const block would require
+    // Rust 1.79 and the workspace MSRV is 1.78.
+    #[allow(clippy::assertions_on_constants)]
+    {
+        assert!(cairn_providers::wire::zai::DEFAULT_TIMEOUT_SECS != 0);
+    }
 }

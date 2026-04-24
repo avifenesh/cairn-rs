@@ -776,15 +776,29 @@ async fn main() {
         .or_else(|| openai_compat_worker.clone())
         .or_else(|| openai_compat_openrouter.clone());
 
-    // Bedrock provider via cairn-providers.
-    let bedrock: Option<Arc<CairnBedrock>> = CairnBedrock::from_env().map(|p| {
-        eprintln!(
-            "bedrock: configured — model={} region={}",
-            p.model_id(),
-            p.region()
-        );
-        Arc::new(p)
-    });
+    // Bedrock provider via cairn-providers. `from_env` now returns
+    // `Option<Result<_, ProviderError>>` — outer `None` means "no API
+    // key configured" (boot silently without Bedrock), inner `Err`
+    // means "the env vars are set but the client failed to build"
+    // (log and continue without Bedrock so operators can still use
+    // whichever other providers they configured). Copilot review on
+    // PR #287 asked for a proper `Result` return so TLS init failures
+    // surface instead of panicking.
+    let bedrock: Option<Arc<CairnBedrock>> =
+        CairnBedrock::from_env().and_then(|result| match result {
+            Ok(p) => {
+                eprintln!(
+                    "bedrock: configured — model={} region={}",
+                    p.model_id(),
+                    p.region()
+                );
+                Some(Arc::new(p))
+            }
+            Err(err) => {
+                eprintln!("bedrock: env configured but client build failed: {err}");
+                None
+            }
+        });
 
     {
         use cairn_domain::providers::{EmbeddingProvider, GenerationProvider};
