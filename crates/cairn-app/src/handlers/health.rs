@@ -1060,6 +1060,17 @@ async fn validate_setting_value(
         // default must be valid for that specific tenant. Paginate until
         // exhaustion so large installs (>200 connections per tenant) don't
         // false-reject on the second page.
+        //
+        // Per-tenant scan is an N+1 pattern for system scope. The three
+        // mitigations are: (c) already short-circuits when the cached
+        // snapshot has the model; `resolve_tenants_for_scope` itself caps
+        // at 200 tenants (best-effort); this handler runs on settings PUT
+        // only — a rare, operator-initiated, human-latency path — not the
+        // orchestration hot loop. A bulk `exists_by_model_id` query would
+        // avoid the loop but requires a new trait method on
+        // `ProviderConnectionService` with Postgres/SQLite/InMemory
+        // impls — intentionally deferred (tracked as post-merge follow-up)
+        // to keep this PR scoped to the F20/F21 correctness fix.
         const PAGE_SIZE: usize = 200;
         const MAX_PAGES_PER_TENANT: usize = 50; // 10 000-connection ceiling
         let tenants = resolve_tenants_for_scope(state, scope, scope_id).await;
