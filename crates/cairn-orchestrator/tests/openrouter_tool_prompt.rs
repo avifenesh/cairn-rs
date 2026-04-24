@@ -70,20 +70,27 @@ async fn qwen_does_not_emit_invoke_tool_envelope_under_native_tool_calling() {
 
     // A minimal system prompt that mirrors the native-tool-mode branch of
     // `build_system_prompt`: tools are listed, and the instruction is to
-    // call them directly, never via an envelope.
-    let system = "You are an autonomous coding agent. Call any of the \
-                  following tools directly, by its exact name, using the \
-                  provider's native tool-call mechanism. Do not wrap calls \
-                  in any envelope — emit one tool call per action with the \
-                  tool's JSON arguments.\n\
-                  \n\
-                  ## Available tools\n\
-                  - bash(command: string) — Run a shell command and return stdout+stderr.\n\
-                  - read(path: string) — Read a file from the local filesystem.";
+    // call them directly, never via an envelope. Using `concat!` keeps
+    // whitespace predictable — line-continuation (`\`) escapes keep the
+    // indentation as literal spaces in the prompt, which muddies the
+    // "proven format" signal.
+    let system = concat!(
+        "You are an autonomous coding agent. Call any of the ",
+        "following tools directly, by its exact name, using the ",
+        "provider's native tool-call mechanism. Do not wrap calls ",
+        "in any envelope — emit one tool call per action with the ",
+        "tool's JSON arguments.\n",
+        "\n",
+        "## Available tools\n",
+        "- bash(command: string) — Run a shell command and return stdout+stderr.\n",
+        "- read(path: string) — Read a file from the local filesystem.",
+    );
 
-    let user = "List the files in /tmp by calling the bash tool with \
-                `ls /tmp`. Call the tool directly — do not wrap it in \
-                any envelope.";
+    let user = concat!(
+        "List the files in /tmp by calling the bash tool with ",
+        "`ls /tmp`. Call the tool directly — do not wrap it in ",
+        "any envelope.",
+    );
 
     let tools = vec![
         serde_json::json!({

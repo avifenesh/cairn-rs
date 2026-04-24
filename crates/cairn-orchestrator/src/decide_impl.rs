@@ -406,14 +406,17 @@ When you need to call a tool, emit a native tool call — the provider's
 When no tool call is needed (completing, escalating, recording memory,
 spawning a sub-agent, notifying), respond with ONLY a JSON array of
 action objects — no prose, no markdown fences — with fields:
-- "action_type": one of "complete_run"|"create_memory"|"spawn_subagent"|"send_notification"|"escalate_to_operator"
+- "action_type": one of "invoke_tool"|"complete_run"|"create_memory"|"spawn_subagent"|"send_notification"|"escalate_to_operator"
 - "description": concise explanation (for complete_run: a summary of what was accomplished)
 - "confidence": float 0.0-1.0
 - "requires_approval": boolean
-- "tool_name" (for spawn_subagent): sub-agent role
-- "tool_args" (for spawn_subagent/create_memory): JSON arguments
+- "tool_name" (for invoke_tool/spawn_subagent): tool ID or sub-agent role
+- "tool_args" (for invoke_tool/spawn_subagent/create_memory): JSON arguments
 
 Field conventions:
+- invoke_tool:    ONLY as a text-channel fallback when native tool
+                  calling is unavailable or failed; tool_name = tool ID,
+                  tool_args = {...}. Prefer native tool calls.
 - complete_run:   description = summary of what was accomplished
 - spawn_subagent: tool_name = role,  tool_args = {"goal": "..."}
 - create_memory:  tool_args = {"content": "..."}"#
@@ -467,9 +470,11 @@ Field conventions:
          \n\
          ## Tool usage\n\
          - Prefer read/search/fetch tools before writes.\n\
-         - Writes, code execution, sending messages, and destructive \
-           actions are treated as sensitive and may require operator \
-           approval.\n\
+         - For JSON-fallback actions you emit as text, set \
+           requires_approval=false for read/search/fetch-only operations.\n\
+         - Set requires_approval=true for writes, code execution, sending \
+           messages, or any destructive action. If unsure whether an \
+           action is sensitive, set requires_approval=true.\n\
          - Store key findings with create_memory so they persist.\n\
          - Use spawn_subagent only when the task is genuinely multi-part \
            and benefits from parallel execution.\n\
@@ -757,7 +762,24 @@ fn tool_calls_to_proposals(
             // name and emit e.g. `{"name":"invoke_tool","arguments":
             // {"tool_name":"bash","tool_args":{...}}}`. Unwrap that shape
             // into a normal tool call so the registry lookup succeeds.
+            //
+            // `spawn_subagent` is NOT a real tool — agent roles are not
+            // registered in the tool catalogue. When we see that envelope
+            // we produce a `SpawnSubagent` proposal directly so the loop
+            // dispatches it correctly.
+            let is_spawn_envelope = raw_name == "spawn_subagent";
             let (name, args) = unwrap_meta_envelope(&raw_name, raw_args);
+
+            if is_spawn_envelope {
+                return Some(ActionProposal {
+                    action_type: ActionType::SpawnSubagent,
+                    description: format!("spawn {name}"),
+                    confidence: 0.9,
+                    tool_name: Some(name),
+                    tool_args: Some(args),
+                    requires_approval: false,
+                });
+            }
 
             // Check if this tool is a safe read-only action.
             let requires_approval = tool_descs
@@ -1235,7 +1257,12 @@ mod tests {
         })];
         let proposals = tool_calls_to_proposals(&tool_calls, &[]);
         assert_eq!(proposals.len(), 1);
+        assert_eq!(proposals[0].action_type, ActionType::SpawnSubagent);
         assert_eq!(proposals[0].tool_name.as_deref(), Some("researcher"));
+        assert_eq!(
+            proposals[0].tool_args.as_ref().and_then(|a| a.get("goal")),
+            Some(&serde_json::Value::String("summarise RFCs".to_owned())),
+        );
     }
 
     #[test]
