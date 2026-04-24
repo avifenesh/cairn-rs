@@ -166,6 +166,28 @@ pub trait ToolCallApprovalReader: Send + Sync {
     ) -> Result<Option<StoredProposal>, RuntimeError> {
         Ok(None)
     }
+
+    /// F25 drain: list every `Approved`-state tool-call approval for
+    /// `run_id`, oldest-first. The orchestrator uses this at the top of
+    /// `run_inner` to decide whether any operator-approved proposals
+    /// still need to be dispatched before the next DECIDE turn.
+    ///
+    /// Callers are responsible for filtering out proposals whose
+    /// `ToolCallId` already has a matching `CachedToolResult` (i.e. the
+    /// tool already ran in a previous loop iteration or in a previous
+    /// process before a restart). The projection alone cannot know that
+    /// — only the runtime-side `ToolCallResultCache` tracks
+    /// per-run dispatch completions keyed by `ToolCallId`.
+    ///
+    /// Default impl returns `Ok(vec![])` so older readers keep compiling;
+    /// the runtime treats an empty list as "nothing to drain" which is
+    /// the legacy behaviour.
+    async fn list_approved_for_run(
+        &self,
+        _run_id: &cairn_domain::RunId,
+    ) -> Result<Vec<ApprovedProposal>, RuntimeError> {
+        Ok(Vec::new())
+    }
 }
 
 /// Bridge every store that implements
@@ -214,6 +236,38 @@ where
             .await
             .map_err(RuntimeError::Store)?;
         Ok(record.map(store_record_to_stored_proposal))
+    }
+
+    async fn list_approved_for_run(
+        &self,
+        run_id: &cairn_domain::RunId,
+    ) -> Result<Vec<ApprovedProposal>, RuntimeError> {
+        let rows = cairn_store::projections::ToolCallApprovalReadModel::list_for_run(self, run_id)
+            .await
+            .map_err(RuntimeError::Store)?;
+        // Filter to Approved-state rows and resolve the effective args
+        // per the domain precedence invariant (approved > amended > original).
+        // Pending / Rejected / Timeout rows must NOT leak into the drain
+        // path — doing so would execute a tool the operator did not
+        // sanction. `list_for_run` is oldest-first; preserve that order so
+        // drain replays approvals in the sequence they were minted.
+        use cairn_store::projections::ToolCallApprovalState as S;
+        Ok(rows
+            .into_iter()
+            .filter(|r| r.state == S::Approved)
+            .map(|r| {
+                let tool_args = r
+                    .approved_tool_args
+                    .clone()
+                    .or_else(|| r.amended_tool_args.clone())
+                    .unwrap_or_else(|| r.original_tool_args.clone());
+                ApprovedProposal {
+                    call_id: r.call_id,
+                    tool_name: r.tool_name,
+                    tool_args,
+                }
+            })
+            .collect())
     }
 }
 

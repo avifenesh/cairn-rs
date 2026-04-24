@@ -28,13 +28,13 @@
 use std::sync::Arc;
 
 use crate::context::{
-    ActionStatus, DecideOutput, ExecuteOutcome, GatherOutput, LoopConfig, LoopSignal,
+    ActionResult, ActionStatus, DecideOutput, ExecuteOutcome, GatherOutput, LoopConfig, LoopSignal,
     LoopTermination, OrchestrationContext, StepSummary,
 };
 use crate::decide::DecidePhase;
 use crate::emitter::{NoOpEmitter, OrchestratorEventEmitter};
 use crate::error::OrchestratorError;
-use crate::execute::ExecutePhase;
+use crate::execute::{ApprovedDispatch, ExecutePhase};
 use crate::gather::GatherPhase;
 use crate::task_sink::{NoOpTaskSink, TaskFrameSink};
 
@@ -319,6 +319,15 @@ pub struct OrchestratorLoop<G, D, E> {
     /// sink once the handler has claimed a task. Non-consuming
     /// (frames only); terminal + suspension ops stay at the caller.
     task_sink: Arc<dyn TaskFrameSink>,
+    /// F25 drain: optional read of the tool-call approval projection.
+    /// When wired, the loop drains any operator-approved-but-not-executed
+    /// proposals for the run at the top of each `run_inner` invocation
+    /// BEFORE calling DECIDE. Without this, a re-orchestrate after
+    /// approval never reaches the approved tool — the LLM just sees the
+    /// un-changed context and emits the same proposal again (which the
+    /// approval service then treats as a duplicate and auto-approves
+    /// without re-dispatch, looping forever).
+    approval_reader: Option<Arc<dyn cairn_runtime::tool_call_approvals::ToolCallApprovalReader>>,
 }
 
 impl<G, D, E> OrchestratorLoop<G, D, E>
@@ -339,7 +348,21 @@ where
             checkpoint_hook: Arc::new(NoOpCheckpointHook),
             emitter: Arc::new(NoOpEmitter),
             task_sink: Arc::new(NoOpTaskSink),
+            approval_reader: None,
         }
+    }
+
+    /// F25 drain: install the tool-call approval reader so the loop
+    /// drains operator-approved proposals for the run before the next
+    /// DECIDE iteration. Without this, re-orchestrate after an approval
+    /// round-trip silently drops the approved tool call (the dogfood
+    /// blocker).
+    pub fn with_approval_reader(
+        mut self,
+        reader: Arc<dyn cairn_runtime::tool_call_approvals::ToolCallApprovalReader>,
+    ) -> Self {
+        self.approval_reader = Some(reader);
+        self
     }
 
     /// Replace the checkpoint hook (e.g., a durable Postgres checkpoint writer).
@@ -401,6 +424,61 @@ where
         result
     }
 
+    /// F25 drain: execute any operator-approved tool calls for this run
+    /// whose `ToolCallId` is NOT already present in the shared
+    /// `ToolCallResultCache`. Returns one `ActionResult` per drained
+    /// proposal in oldest-first order.
+    ///
+    /// The cache-presence check is the "has-already-executed" oracle:
+    /// `dispatch_approved` populates the cache on success, and the
+    /// startup replay rebuilds it from `ToolInvocationCompleted` events
+    /// after a restart. An approval whose call_id is missing from the
+    /// cache has never executed on this process AND has no persisted
+    /// completion — dispatch is safe.
+    ///
+    /// When no approval reader is wired (default), the drain is a no-op.
+    async fn drain_approved_pending(
+        &self,
+        ctx: &OrchestrationContext,
+    ) -> Result<Vec<ActionResult>, OrchestratorError> {
+        let Some(reader) = &self.approval_reader else {
+            return Ok(Vec::new());
+        };
+
+        let approved = reader
+            .list_approved_for_run(&ctx.run_id)
+            .await
+            .map_err(OrchestratorError::Runtime)?;
+        if approved.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let mut results = Vec::with_capacity(approved.len());
+        for ap in approved {
+            let started_at = std::time::Instant::now();
+            let dispatch = ApprovedDispatch {
+                call_id: ap.call_id,
+                tool_name: ap.tool_name,
+                tool_args: ap.tool_args,
+            };
+            // NOTE: `dispatch_approved` performs its own cache-presence
+            // check and returns Succeeded-with-cached-output when the
+            // approval has already executed. We don't need to pre-filter
+            // here — doing so would require leaking the runtime cache
+            // Arc into this layer. The inner check is authoritative.
+            let mut result = self.execute.dispatch_approved(ctx, &dispatch).await?;
+            result.duration_ms = started_at.elapsed().as_millis() as u64;
+            tracing::info!(
+                run_id = %ctx.run_id,
+                tool = ?dispatch.tool_name,
+                succeeded = matches!(result.status, ActionStatus::Succeeded),
+                "F25 drain: dispatched approved tool call"
+            );
+            results.push(result);
+        }
+        Ok(results)
+    }
+
     async fn run_inner(
         &self,
         ctx: &mut OrchestrationContext,
@@ -422,6 +500,65 @@ where
             "orchestrator loop starting"
         );
         for _iter in 0..self.config.max_iterations {
+            // ── (0) F25 drain: flush operator-approved tool calls ────────────
+            //
+            // Before GATHER reads the event log, replay any
+            // `ToolCallApproved`-state proposals for this run that don't
+            // yet have a matching `ToolInvocationCompleted`. Without this
+            // step, a re-orchestrate after approval never invokes the
+            // approved tool: the LLM sees the same context as last turn,
+            // emits the same proposal, the approval service (correctly)
+            // returns AutoApproved from its cache, but nothing actually
+            // *runs* the tool — the dogfood F25 blocker. See
+            // `CLAUDE.md` + `project_session_2026_04_22_part4.md`.
+            //
+            // Failures inside the drain surface as synthesized
+            // StepSummary entries + tool_result events so the next
+            // DECIDE sees what went wrong and the LLM can self-correct.
+            let drained = self.drain_approved_pending(ctx).await?;
+            if !drained.is_empty() {
+                for result in &drained {
+                    let Some(tool_name) = result.proposal.tool_name.as_deref() else {
+                        continue;
+                    };
+                    self.emitter
+                        .on_tool_called(ctx, tool_name, result.proposal.tool_args.as_ref())
+                        .await;
+                    let (succeeded, error) = match &result.status {
+                        ActionStatus::Succeeded => (true, None),
+                        ActionStatus::Failed { reason } => (false, Some(reason.as_str())),
+                        _ => (false, None),
+                    };
+                    self.emitter
+                        .on_tool_result(
+                            ctx,
+                            tool_name,
+                            succeeded,
+                            result.tool_output.as_ref(),
+                            error,
+                            result.duration_ms,
+                        )
+                        .await;
+
+                    // Append StepSummary so DECIDE's next gather sees
+                    // the drained action as part of the run's history.
+                    let action_kind = "invoke_tool".to_owned();
+                    let summary = match &result.status {
+                        ActionStatus::Succeeded => format!("drained approved: {tool_name}"),
+                        ActionStatus::Failed { reason } => {
+                            format!("drained approved {tool_name} failed: {reason}")
+                        }
+                        _ => format!("drained approved {tool_name}"),
+                    };
+                    step_history.push(StepSummary {
+                        iteration: ctx.iteration,
+                        action_kind,
+                        summary,
+                        succeeded,
+                    });
+                }
+            }
+
             // ── (1) Timeout check ─────────────────────────────────────────────
             let now_ms = now_millis();
             if now_ms >= deadline_ms {
@@ -674,11 +811,75 @@ where
                     }
                 }
 
-                // Execute returned without setting AwaitingApproval — unexpected.
-                return Err(OrchestratorError::Execute(
-                    "requires_approval=true but execute returned no AwaitingApproval status"
-                        .to_owned(),
-                ));
+                // No AwaitingApproval result — the BP-v2 ToolCallApproval
+                // path ran the whole propose-then-await flow inline: the
+                // proposal was submitted, the operator resolved it (or
+                // it timed out), and the tool already dispatched +
+                // recorded its result in this very execute_outcome.
+                //
+                // Treat the terminal loop_signal from the outcome as
+                // authoritative: Continue (if the tool succeeded and
+                // there's more work) flows back into the main loop via
+                // the logic below; Done/Failed/etc. terminate via the
+                // same match arms the non-approval path uses.
+                //
+                // Emit per-result tool_called/tool_result so SSE mirrors
+                // what the non-approval path emits. (The approval-gate
+                // pre-execute log_tool_call already fired above.)
+                for result in &execute_outcome.results {
+                    let Some(tool_name) = result.proposal.tool_name.as_deref() else {
+                        continue;
+                    };
+                    let (succeeded, error) = match &result.status {
+                        ActionStatus::Succeeded => (true, None),
+                        ActionStatus::Failed { reason } => (false, Some(reason.as_str())),
+                        _ => (false, None),
+                    };
+                    self.emitter
+                        .on_tool_result(
+                            ctx,
+                            tool_name,
+                            succeeded,
+                            result.tool_output.as_ref(),
+                            error,
+                            result.duration_ms,
+                        )
+                        .await;
+                }
+
+                match execute_outcome.loop_signal.clone() {
+                    LoopSignal::Done => {
+                        let summary = decide_output
+                            .proposals
+                            .iter()
+                            .find(|p| p.action_type == cairn_domain::ActionType::CompleteRun)
+                            .map(|p| p.description.clone())
+                            .unwrap_or_else(|| "run completed".to_owned());
+                        return Ok(LoopTermination::Completed { summary });
+                    }
+                    LoopSignal::Failed { reason } => {
+                        return Ok(LoopTermination::Failed { reason });
+                    }
+                    LoopSignal::WaitSubagent { child_task_id } => {
+                        return Ok(LoopTermination::WaitingSubagent { child_task_id });
+                    }
+                    LoopSignal::WaitApproval { approval_id } => {
+                        // Redundant with the `AwaitingApproval` scan
+                        // above, but covers derive_signal paths that
+                        // set WaitApproval without the per-result
+                        // status (legacy Escalate path).
+                        return Ok(LoopTermination::WaitingApproval { approval_id });
+                    }
+                    LoopSignal::PlanProposed { plan_markdown } => {
+                        return Ok(LoopTermination::PlanProposed { plan_markdown });
+                    }
+                    LoopSignal::Continue => {
+                        // BP-v2 dispatched successfully; bump iteration
+                        // and fall through to the next loop turn.
+                        ctx.iteration = ctx.iteration.saturating_add(1);
+                        continue;
+                    }
+                }
             }
 
             // ── (4b) RFC 020 Track 4: INTENT CHECKPOINT ───────────────────────
@@ -2188,6 +2389,253 @@ mod tests {
             last_compaction_iteration,
             Some(0),
             "cooldown should preserve the original compaction iteration"
+        );
+    }
+
+    // ── (D) F25 drain tests ──────────────────────────────────────────────────
+    //
+    // These drive the "approved-but-not-executed" drain the loop runs
+    // before each GATHER. They use stub phases + a stub
+    // `ToolCallApprovalReader` so the unit tests stay hermetic. The
+    // HTTP-level integration test in
+    // `crates/cairn-app/tests/test_drain_approved_executes_bash.rs`
+    // covers the full bash-on-filesystem flow.
+
+    use cairn_domain::{ApprovalMatchPolicy, ApprovalScope};
+    use cairn_runtime::error::RuntimeError;
+    use cairn_runtime::tool_call_approvals::{
+        ApprovedProposal, StoredProposal, ToolCallApprovalReader,
+    };
+
+    /// Stub reader returning a scripted list of approved proposals plus
+    /// a call-count so tests can assert the reader was consulted.
+    struct ScriptedApprovalReader {
+        approved: std::sync::Mutex<Vec<ApprovedProposal>>,
+        list_calls: std::sync::atomic::AtomicU32,
+    }
+    impl ScriptedApprovalReader {
+        fn with(approved: Vec<ApprovedProposal>) -> std::sync::Arc<Self> {
+            std::sync::Arc::new(Self {
+                approved: std::sync::Mutex::new(approved),
+                list_calls: std::sync::atomic::AtomicU32::new(0),
+            })
+        }
+        fn list_calls(&self) -> u32 {
+            self.list_calls.load(std::sync::atomic::Ordering::SeqCst)
+        }
+    }
+    #[async_trait]
+    impl ToolCallApprovalReader for ScriptedApprovalReader {
+        async fn get_tool_call_approval(
+            &self,
+            _call_id: &cairn_domain::ToolCallId,
+        ) -> Result<Option<ApprovedProposal>, RuntimeError> {
+            Ok(None)
+        }
+        async fn get_tool_call_proposal(
+            &self,
+            _call_id: &cairn_domain::ToolCallId,
+        ) -> Result<Option<StoredProposal>, RuntimeError> {
+            Ok(None)
+        }
+        async fn list_approved_for_run(
+            &self,
+            _run_id: &cairn_domain::RunId,
+        ) -> Result<Vec<ApprovedProposal>, RuntimeError> {
+            self.list_calls
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            let mut guard = self.approved.lock().unwrap();
+            // Return once, then empty — the drain should run on the
+            // first iteration and find nothing on subsequent ones.
+            let take = std::mem::take(&mut *guard);
+            Ok(take)
+        }
+    }
+    // Silence "unused match arms via ApprovalMatchPolicy/ApprovalScope"
+    // when the import is only needed by tests below the current edit.
+    const _: Option<ApprovalMatchPolicy> = None;
+    const _: Option<ApprovalScope> = None;
+
+    /// ExecutePhase stub whose `dispatch_approved` records the
+    /// call_ids it was handed and returns a canned status. It still
+    /// implements `execute` as a no-op so the outer loop terminates.
+    struct RecordingDispatch {
+        dispatched: std::sync::Arc<std::sync::Mutex<Vec<String>>>,
+        status: std::sync::Mutex<crate::context::ActionStatus>,
+    }
+    impl RecordingDispatch {
+        fn new(status: crate::context::ActionStatus) -> Self {
+            Self {
+                dispatched: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
+                status: std::sync::Mutex::new(status),
+            }
+        }
+    }
+    #[async_trait]
+    impl ExecutePhase for RecordingDispatch {
+        async fn execute(
+            &self,
+            _ctx: &OrchestrationContext,
+            _decide: &DecideOutput,
+        ) -> Result<ExecuteOutcome, OrchestratorError> {
+            // After the drain, the outer loop calls execute with a
+            // complete_run proposal — short-circuit to Done.
+            Ok(ExecuteOutcome {
+                results: vec![],
+                loop_signal: LoopSignal::Done,
+            })
+        }
+        async fn dispatch_approved(
+            &self,
+            _ctx: &OrchestrationContext,
+            approved: &crate::execute::ApprovedDispatch,
+        ) -> Result<ActionResult, OrchestratorError> {
+            self.dispatched
+                .lock()
+                .unwrap()
+                .push(approved.call_id.as_str().to_owned());
+            let synth = ActionProposal {
+                action_type: ActionType::InvokeTool,
+                description: format!("drained {}", approved.tool_name),
+                confidence: 1.0,
+                tool_name: Some(approved.tool_name.clone()),
+                tool_args: Some(approved.tool_args.clone()),
+                requires_approval: false,
+            };
+            Ok(ActionResult {
+                proposal: synth,
+                status: self.status.lock().unwrap().clone(),
+                tool_output: Some(serde_json::json!({"drained": true})),
+                invocation_id: None,
+                duration_ms: 0,
+            })
+        }
+    }
+
+    fn approved(call_id: &str, tool: &str, args: serde_json::Value) -> ApprovedProposal {
+        ApprovedProposal {
+            call_id: cairn_domain::ToolCallId::new(call_id),
+            tool_name: tool.to_owned(),
+            tool_args: args,
+        }
+    }
+
+    #[tokio::test]
+    async fn drain_dispatches_approved_proposals_before_decide() {
+        // Two approved proposals sit in the projection waiting for
+        // re-orchestrate. The drain must dispatch both, in order, and
+        // pass through to DECIDE (which ends the run via CompleteRun).
+        let reader = ScriptedApprovalReader::with(vec![
+            approved("tc_1", "bash", serde_json::json!({"command": "echo one"})),
+            approved("tc_2", "bash", serde_json::json!({"command": "echo two"})),
+        ]);
+        let dispatch = RecordingDispatch::new(ActionStatus::Succeeded);
+        let dispatched_handle = dispatch.dispatched.clone();
+
+        let lp = OrchestratorLoop::new(
+            FixedGather,
+            ScriptedDecide::always(decide_done()),
+            dispatch,
+            LoopConfig::default(),
+        )
+        .with_approval_reader(reader.clone());
+
+        let result = lp.run(ctx()).await.unwrap();
+        assert!(
+            matches!(result, LoopTermination::Completed { .. }),
+            "loop should complete after drain + decide, got {result:?}"
+        );
+
+        let dispatched = dispatched_handle.lock().unwrap().clone();
+        assert_eq!(
+            dispatched,
+            vec!["tc_1".to_owned(), "tc_2".to_owned()],
+            "drain must dispatch approved proposals in oldest-first order"
+        );
+        assert!(
+            reader.list_calls() >= 1,
+            "approval reader must be consulted at least once"
+        );
+    }
+
+    #[tokio::test]
+    async fn drain_is_noop_when_no_approvals_present() {
+        let reader = ScriptedApprovalReader::with(vec![]);
+        let dispatch = RecordingDispatch::new(ActionStatus::Succeeded);
+        let dispatched_handle = dispatch.dispatched.clone();
+
+        let lp = OrchestratorLoop::new(
+            FixedGather,
+            ScriptedDecide::always(decide_done()),
+            dispatch,
+            LoopConfig::default(),
+        )
+        .with_approval_reader(reader);
+
+        let _ = lp.run(ctx()).await.unwrap();
+        assert!(
+            dispatched_handle.lock().unwrap().is_empty(),
+            "drain must not dispatch anything when the reader returns empty"
+        );
+    }
+
+    #[tokio::test]
+    async fn drain_without_reader_is_noop() {
+        // No `with_approval_reader` — the drain path must skip cleanly
+        // so existing tests (and any deployment that hasn't wired a
+        // reader yet) are unaffected.
+        let dispatch = RecordingDispatch::new(ActionStatus::Succeeded);
+        let dispatched_handle = dispatch.dispatched.clone();
+
+        let lp = OrchestratorLoop::new(
+            FixedGather,
+            ScriptedDecide::always(decide_done()),
+            dispatch,
+            LoopConfig::default(),
+        );
+
+        let _ = lp.run(ctx()).await.unwrap();
+        assert!(
+            dispatched_handle.lock().unwrap().is_empty(),
+            "drain must be a no-op when no approval_reader is wired"
+        );
+    }
+
+    #[tokio::test]
+    async fn drain_tool_failure_continues_to_decide() {
+        // A drained tool that fails must NOT abort the loop — the LLM
+        // needs to see the failure on the next GATHER so it can
+        // self-correct. We wire a RecordingDispatch returning Failed
+        // and assert the loop still reaches its terminal state via
+        // DECIDE's CompleteRun proposal.
+        let reader = ScriptedApprovalReader::with(vec![approved(
+            "tc_failing",
+            "bash",
+            serde_json::json!({"command": "false"}),
+        )]);
+        let dispatch = RecordingDispatch::new(ActionStatus::Failed {
+            reason: "bash exited 1".to_owned(),
+        });
+        let dispatched_handle = dispatch.dispatched.clone();
+
+        let lp = OrchestratorLoop::new(
+            FixedGather,
+            ScriptedDecide::always(decide_done()),
+            dispatch,
+            LoopConfig::default(),
+        )
+        .with_approval_reader(reader);
+
+        let result = lp.run(ctx()).await.unwrap();
+        assert!(
+            matches!(result, LoopTermination::Completed { .. }),
+            "drain failure must not abort; loop should reach DECIDE and terminate, \
+             got {result:?}"
+        );
+        assert_eq!(
+            dispatched_handle.lock().unwrap().len(),
+            1,
+            "failing drain entry must still have been dispatched"
         );
     }
 }
