@@ -451,6 +451,10 @@ function ConnectionRow({
   const [editAdapter, setEditAdapter] = useState(record.adapter_type);
   const [editModels, setEditModels] = useState<string[]>(record.supported_models);
   const [editEndpoint, setEditEndpoint] = useState("");
+  // Escape hatch: freeform ID input for models not in the catalog
+  // (local ollama tags, private openrouter IDs, pre-release model
+  // names that haven't made it into LiteLLM yet).
+  const [editManualModel, setEditManualModel] = useState("");
   const [saving, setSaving] = useState(false);
   const isHealthy = health?.healthy ?? null;
   const toast = useToast();
@@ -460,7 +464,16 @@ function ConnectionRow({
     setEditAdapter(record.adapter_type);
     setEditModels(record.supported_models);
     setEditEndpoint("");
+    setEditManualModel("");
     setEditing(true);
+  };
+
+  const addEditManualModel = () => {
+    const v = editManualModel.trim();
+    if (v && !editModels.includes(v)) {
+      setEditModels(prev => [...prev, v]);
+    }
+    setEditManualModel("");
   };
 
   const saveEdit = async () => {
@@ -676,12 +689,68 @@ function ConnectionRow({
               </label>
             </div>
             <div className="mt-3">
-              <div className="text-[10px] text-gray-400 dark:text-zinc-500 uppercase tracking-wide mb-1.5">Models</div>
+              <div className="flex items-center justify-between mb-1.5">
+                <div className="text-[10px] text-gray-400 dark:text-zinc-500 uppercase tracking-wide">Models</div>
+                <div className="text-[10px] text-gray-400 dark:text-zinc-500">
+                  {editModels.length} selected
+                </div>
+              </div>
               <ModelCatalogPicker
                 selected={editModels}
                 onChange={setEditModels}
-                lockProvider={KIND_TO_PROVIDER_FILTER[record.provider_family as ProviderKind]}
+                // Follow the edit-family input so retargeting a connection
+                // (say, openai → openrouter) re-filters the picker in
+                // real time. KIND_TO_PROVIDER_FILTER returns undefined for
+                // unknown families, which unlocks the picker — the right
+                // default for custom / self-hosted adapters.
+                lockProvider={KIND_TO_PROVIDER_FILTER[editFamily.trim() as ProviderKind]}
               />
+              {/* Escape hatch: manual ID entry for models not in the
+                  bundled catalog (local ollama tags, private openrouter
+                  slugs, pre-release names). Kept as a collapsible hint
+                  so the picker remains the primary affordance. */}
+              <details className="mt-2">
+                <summary className="text-[10px] text-gray-400 dark:text-zinc-500 cursor-pointer hover:text-gray-600 dark:hover:text-zinc-300">
+                  Model not in catalog? Add a custom ID
+                </summary>
+                <div className="flex gap-2 mt-2">
+                  <input
+                    value={editManualModel}
+                    onChange={e => setEditManualModel(e.target.value)}
+                    onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); addEditManualModel(); } }}
+                    placeholder="e.g. llama3.2:custom-tag"
+                    className="flex-1 rounded bg-white dark:bg-zinc-950 border border-gray-200 dark:border-zinc-800 px-2 py-1 text-[11px] font-mono text-gray-800 dark:text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-indigo-500"
+                  />
+                  <button
+                    type="button"
+                    onClick={addEditManualModel}
+                    disabled={!editManualModel.trim()}
+                    className="px-2 py-1 rounded bg-gray-100 dark:bg-zinc-800 hover:bg-gray-200 dark:hover:bg-zinc-700 disabled:opacity-40 text-[11px] font-medium text-gray-700 dark:text-zinc-300"
+                  >
+                    Add
+                  </button>
+                </div>
+              </details>
+              {/* Show any currently-selected custom IDs (not present in
+                  the catalog) as chips so the operator can see + remove
+                  them even when the picker filters them out. */}
+              {editModels.length > 0 && (
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  {editModels.map(m => (
+                    <span key={m} className="flex items-center gap-1 text-[10px] font-mono text-gray-700 dark:text-zinc-300 bg-gray-100 dark:bg-zinc-800 border border-gray-200 dark:border-zinc-700 rounded px-1.5 py-0.5">
+                      {m}
+                      <button
+                        type="button"
+                        onClick={() => setEditModels(prev => prev.filter(x => x !== m))}
+                        className="text-gray-400 dark:text-zinc-500 hover:text-red-400"
+                        aria-label={`Remove ${m}`}
+                      >
+                        <X size={9} />
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              )}
             </div>
             <div className="flex items-center gap-2 mt-3">
               <button onClick={saveEdit} disabled={saving}

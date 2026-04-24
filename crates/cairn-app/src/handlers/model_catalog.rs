@@ -45,7 +45,10 @@ const MAX_LIMIT: usize = 1000;
 /// Query parameters for `GET /v1/models/catalog`.
 ///
 /// All fields optional. Boolean filters are tri-state: absent means "don't
-/// filter on this axis". Query-string booleans accept `true`/`false`/`1`/`0`.
+/// filter on this axis". Query-string booleans accept only `true`/`false`
+/// — serde_urlencoded does not decode `1`/`0` as bool by default, and we
+/// deliberately don't add a custom deserializer here to keep the surface
+/// uniform with the rest of the /v1 API.
 #[derive(Clone, Debug, Default, Deserialize)]
 pub(crate) struct ListModelCatalogQuery {
     /// Exact-match provider family, e.g. `openai`, `anthropic`, `openrouter`.
@@ -174,13 +177,17 @@ pub(crate) async fn list_model_catalog_handler(
                 }
             }
             if let Some(needle) = search_lc.as_deref() {
-                let hay_id = e.id.to_ascii_lowercase();
-                let hay_name = e.display_name.to_ascii_lowercase();
-                let hay_prov = e.provider.to_ascii_lowercase();
-                if !hay_id.contains(needle)
-                    && !hay_name.contains(needle)
-                    && !hay_prov.contains(needle)
-                {
+                // Short-circuit: lower-casing each haystack allocates, so
+                // stop as soon as any field matches. In the common case
+                // (id matches), the display_name and provider lowercasings
+                // never happen. Catalog is ≈500 entries today so this is
+                // cosmetic, but it's the kind of inner-loop alloc that
+                // Gemini's perf bot rightly flags.
+                let id_match = e.id.to_ascii_lowercase().contains(needle);
+                let matched = id_match
+                    || e.display_name.to_ascii_lowercase().contains(needle)
+                    || e.provider.to_ascii_lowercase().contains(needle);
+                if !matched {
                     return false;
                 }
             }

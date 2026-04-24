@@ -107,6 +107,17 @@ export function ModelCatalogPicker({
   const [searchRaw,      setSearchRaw]      = useState("");
   const [providerFilter, setProviderFilter] = useState<string>(lockProvider ?? "");
   const [tierFilter,     setTierFilter]     = useState<ModelTier | "">("");
+
+  // Keep providerFilter in sync with the lockProvider prop so the parent
+  // can switch kinds (e.g. flipping the add-provider wizard between
+  // OpenAI and Anthropic) and see the picker re-target immediately.
+  // Without this, the first render wins forever. Unlocking (lockProvider
+  // going back to undefined) leaves whatever the user last picked —
+  // that's the right behavior for the inline-edit flow where we don't
+  // want to erase the operator's filter on every re-render.
+  useEffect(() => {
+    if (lockProvider !== undefined) setProviderFilter(lockProvider);
+  }, [lockProvider]);
   const [needsTools,     setNeedsTools]     = useState(false);
   const [needsReasoning, setNeedsReasoning] = useState(false);
   const [freeOnly,       setFreeOnly]       = useState(false);
