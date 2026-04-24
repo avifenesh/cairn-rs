@@ -550,13 +550,85 @@ pub trait EmbeddingProvider: Send + Sync {
 }
 
 /// Errors from provider adapter calls.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum ProviderAdapterError {
     TransportFailure(String),
     TimedOut,
     RateLimited,
     ProviderError(String),
     StructuredOutputInvalid(String),
+    /// Authentication/authorization failed (bad API key, expired credential).
+    /// NOT fallback-eligible — the operator must fix credentials.
+    Auth(String),
+    /// Provider rejected the request (400, bad parameters, etc.).
+    /// NOT fallback-eligible — our request is malformed; fallback won't help.
+    InvalidRequest(String),
+    /// HTTP 5xx upstream error — the provider or an upstream of the provider
+    /// (OpenRouter → "OpenInference" 503) returned a server error. Retryable
+    /// with a different model.
+    ServerError { status: u16, message: String },
+    /// Model returned a successful HTTP response but the completion body was
+    /// empty (zero tokens or whitespace-only text with no tool_calls).
+    /// Distinct from `StructuredOutputInvalid` which carries a non-JSON
+    /// payload; here there is nothing to parse. Fallback-eligible.
+    EmptyResponse {
+        model_id: String,
+        prompt_tokens: Option<u32>,
+        completion_tokens: Option<u32>,
+    },
+}
+
+impl ProviderAdapterError {
+    /// Returns `true` when the error is a retryable condition that justifies
+    /// trying a different model in the fallback chain.
+    ///
+    /// The orchestrator DECIDE fallback loop uses this to decide whether to
+    /// advance to the next model or escalate to the operator immediately.
+    ///
+    /// Fallback-eligible:
+    /// - `RateLimited` — model-specific quota; next model may be fine.
+    /// - `ServerError` — upstream 5xx; transient.
+    /// - `TransportFailure` — network hiccup; retrying on a different model
+    ///   (possibly a different provider) may route around a dead connection.
+    /// - `TimedOut` — same as transport failure.
+    /// - `EmptyResponse` / `StructuredOutputInvalid` — this particular model
+    ///   is broken for our prompt; another model may succeed.
+    /// - `ProviderError` — opaque provider error; err on the side of trying
+    ///   the next model rather than failing hard.
+    ///
+    /// NOT fallback-eligible (operator must intervene):
+    /// - `Auth` — credentials are broken; retrying with another model on the
+    ///   same connection will fail the same way. Surface immediately.
+    /// - `InvalidRequest` — our request is malformed; every model will
+    ///   reject it. Bug, not a fallback case.
+    pub fn is_fallback_eligible(&self) -> bool {
+        match self {
+            ProviderAdapterError::Auth(_) | ProviderAdapterError::InvalidRequest(_) => false,
+            ProviderAdapterError::TransportFailure(_)
+            | ProviderAdapterError::TimedOut
+            | ProviderAdapterError::RateLimited
+            | ProviderAdapterError::ProviderError(_)
+            | ProviderAdapterError::StructuredOutputInvalid(_)
+            | ProviderAdapterError::ServerError { .. }
+            | ProviderAdapterError::EmptyResponse { .. } => true,
+        }
+    }
+
+    /// Short machine-readable reason code used in `RouteDecisionRecord`
+    /// attempt tagging and operator-facing summaries.
+    pub fn reason_code(&self) -> &'static str {
+        match self {
+            ProviderAdapterError::TransportFailure(_) => "transport_failure",
+            ProviderAdapterError::TimedOut => "timed_out",
+            ProviderAdapterError::RateLimited => "rate_limited",
+            ProviderAdapterError::ProviderError(_) => "provider_error",
+            ProviderAdapterError::StructuredOutputInvalid(_) => "response_format",
+            ProviderAdapterError::Auth(_) => "auth_error",
+            ProviderAdapterError::InvalidRequest(_) => "invalid_request",
+            ProviderAdapterError::ServerError { .. } => "upstream_5xx",
+            ProviderAdapterError::EmptyResponse { .. } => "empty_response",
+        }
+    }
 }
 
 impl std::fmt::Display for ProviderAdapterError {
@@ -569,6 +641,19 @@ impl std::fmt::Display for ProviderAdapterError {
             ProviderAdapterError::StructuredOutputInvalid(msg) => {
                 write!(f, "structured output invalid: {msg}")
             }
+            ProviderAdapterError::Auth(msg) => write!(f, "auth error: {msg}"),
+            ProviderAdapterError::InvalidRequest(msg) => write!(f, "invalid request: {msg}"),
+            ProviderAdapterError::ServerError { status, message } => {
+                write!(f, "upstream {status}: {message}")
+            }
+            ProviderAdapterError::EmptyResponse {
+                model_id,
+                prompt_tokens,
+                completion_tokens,
+            } => write!(
+                f,
+                "empty response from {model_id} (prompt_tokens={prompt_tokens:?}, completion_tokens={completion_tokens:?})"
+            ),
         }
     }
 }

@@ -39,6 +39,13 @@ pub use decide::DecidePhase;
 pub use decide_impl::{estimate_tokens, LlmDecidePhase, TokenBudget};
 pub use emitter::{ChannelEmitter, NoOpEmitter, OrchestratorEvent, OrchestratorEventEmitter};
 pub use error::OrchestratorError;
+// Re-export the runtime's chain/routing types so existing call sites
+// (handlers, tests) keep their import paths stable.
+pub use cairn_runtime::{
+    format_attempt_summary, single_model_service, CooldownMap, FallbackAttempt, FallbackOutcome,
+    ModelChain, RoutedBinding, RoutedGenerationError, RoutedGenerationService,
+    RoutedGenerationSuccess, DEFAULT_RATE_LIMIT_COOLDOWN,
+};
 pub use execute::ExecutePhase;
 pub use gather::GatherPhase;
 pub use loop_runner::{

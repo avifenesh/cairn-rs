@@ -64,6 +64,16 @@ pub enum ProviderError {
     #[error("rate limited")]
     RateLimited,
 
+    #[error("upstream {status}: {message}")]
+    ServerError { status: u16, message: String },
+
+    #[error("empty completion from {model_id} (prompt_tokens={prompt_tokens:?}, completion_tokens={completion_tokens:?})")]
+    EmptyResponse {
+        model_id: String,
+        prompt_tokens: Option<u32>,
+        completion_tokens: Option<u32>,
+    },
+
     #[error("response parse error: {message} (raw: {raw_response})")]
     ResponseFormat {
         message: String,

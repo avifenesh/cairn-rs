@@ -161,6 +161,10 @@ impl ProviderRouter {
     /// 3. Sort each partition by cost (cheaper first, weighted by `cost_weight`).
     /// 4. Concatenate: healthy first, then unhealthy (if `allow_unhealthy_fallback`).
     /// 5. Dispatch in order; on failure, try next.
+    ///
+    /// `tools` is forwarded to every provider call so the model can see
+    /// the native tool catalogue. Pass `&[]` only when no tools are
+    /// required (text-only fallback).
     pub async fn route(
         &self,
         project: &ProjectKey,
@@ -170,6 +174,7 @@ impl ProviderRouter {
         model_id: &str,
         messages: Vec<serde_json::Value>,
         settings: &ProviderBindingSettings,
+        tools: &[serde_json::Value],
     ) -> RoutingOutcome {
         let ts = now_ms();
         let decision_id = RouteDecisionId::new(format!("rd_{ts}"));
@@ -238,8 +243,11 @@ impl ProviderRouter {
             };
 
             let start = Instant::now();
+            // Forward the caller-supplied tool catalogue — not `&[]` —
+            // so the LLM can emit native tool_calls. Previous versions
+            // dropped this parameter silently.
             let result = provider
-                .generate(model_id, messages.clone(), settings, &[])
+                .generate(model_id, messages.clone(), settings, tools)
                 .await;
             let latency_ms = start.elapsed().as_millis() as u64;
 
@@ -553,6 +561,7 @@ mod tests {
                 "model-1",
                 vec![],
                 &ProviderBindingSettings::default(),
+                &[],
             )
             .await;
 
@@ -586,6 +595,7 @@ mod tests {
                 "model-1",
                 vec![],
                 &ProviderBindingSettings::default(),
+                &[],
             )
             .await;
 
@@ -630,6 +640,7 @@ mod tests {
                 "model-1",
                 vec![],
                 &ProviderBindingSettings::default(),
+                &[],
             )
             .await;
 
@@ -668,6 +679,7 @@ mod tests {
                 "model-1",
                 vec![],
                 &ProviderBindingSettings::default(),
+                &[],
             )
             .await;
 
@@ -713,6 +725,7 @@ mod tests {
                 "model-1",
                 vec![],
                 &ProviderBindingSettings::default(),
+                &[],
             )
             .await;
 
@@ -751,6 +764,7 @@ mod tests {
                 "model-1",
                 vec![],
                 &ProviderBindingSettings::default(),
+                &[],
             )
             .await;
 
@@ -780,6 +794,7 @@ mod tests {
                 "model-1",
                 vec![],
                 &ProviderBindingSettings::default(),
+                &[],
             )
             .await;
 
@@ -802,6 +817,7 @@ mod tests {
                 "model-1",
                 vec![],
                 &ProviderBindingSettings::default(),
+                &[],
             )
             .await;
 

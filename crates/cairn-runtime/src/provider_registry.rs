@@ -751,38 +751,67 @@ impl GenerationProvider for ChatProviderGenerationAdapter {
             }
         };
 
+        // Route the call to the exact model the orchestrator asked for.
+        // The DECIDE-phase fallback chain (see `cairn_orchestrator::ModelFallbackChain`)
+        // relies on this: attempt N sends `model_id = <chain[N]>`, and each
+        // attempt must actually hit the requested upstream model rather than
+        // falling back to whichever model happened to be the connection's
+        // default. Before F17 this adapter silently ignored `model_id` and
+        // every attempt hit the same upstream — which meant a single 429 on
+        // the preferred model produced N consecutive 429s across the chain
+        // and the fallback did nothing.
+        let effective_model = if model_id.is_empty() {
+            None
+        } else {
+            Some(model_id)
+        };
         let response = self
             .chat
-            .chat_with_tools(&chat_messages, native_tools.as_deref(), None)
+            .chat_with_tools_for_model(effective_model, &chat_messages, native_tools.as_deref(), None)
             .await
             .map_err(map_provider_error)?;
 
         let usage = response.usage();
         let finish_reason = response.finish_reason();
+        let text = response.text().unwrap_or_default();
+        let tool_calls_vec: Vec<serde_json::Value> = response
+            .tool_calls()
+            .unwrap_or_default()
+            .into_iter()
+            .map(|tool_call| {
+                serde_json::json!({
+                    "id": tool_call.id,
+                    "type": tool_call.call_type,
+                    "function": {
+                        "name": tool_call.function.name,
+                        "arguments": tool_call.function.arguments,
+                    }
+                })
+            })
+            .collect();
+
+        // Detect empty completions (successful HTTP, zero usable output).
+        // MiniMax-minimax-m2.5:free dogfood failure mode — surfaces as
+        // a distinct error so the fallback chain can retry on another model.
+        let resolved_model_id = if model_id.is_empty() {
+            self.default_model.clone()
+        } else {
+            model_id.to_owned()
+        };
+        if text.trim().is_empty() && tool_calls_vec.is_empty() {
+            return Err(ProviderAdapterError::EmptyResponse {
+                model_id: resolved_model_id,
+                prompt_tokens: usage.as_ref().map(|u| u.prompt_tokens),
+                completion_tokens: usage.as_ref().map(|u| u.completion_tokens),
+            });
+        }
+
         Ok(GenerationResponse {
-            text: response.text().unwrap_or_default(),
+            text,
             input_tokens: usage.as_ref().map(|usage| usage.prompt_tokens),
             output_tokens: usage.as_ref().map(|usage| usage.completion_tokens),
-            model_id: if model_id.is_empty() {
-                self.default_model.clone()
-            } else {
-                model_id.to_owned()
-            },
-            tool_calls: response
-                .tool_calls()
-                .unwrap_or_default()
-                .into_iter()
-                .map(|tool_call| {
-                    serde_json::json!({
-                        "id": tool_call.id,
-                        "type": tool_call.call_type,
-                        "function": {
-                            "name": tool_call.function.name,
-                            "arguments": tool_call.function.arguments,
-                        }
-                    })
-                })
-                .collect(),
+            model_id: resolved_model_id,
+            tool_calls: tool_calls_vec,
             finish_reason,
         })
     }
@@ -810,14 +839,49 @@ pub fn json_messages_to_chat_messages(messages: &[serde_json::Value]) -> Vec<Cha
         .collect()
 }
 
+/// Map a cairn-providers `ProviderError` to a domain-level
+/// `ProviderAdapterError`, preserving enough classification info for the
+/// DECIDE-phase fallback chain (see
+/// `cairn_orchestrator::ModelFallbackChain::run`) to decide between
+/// advancing and escalating.
+///
+/// Pre-F17 this collapsed `Auth` into `TransportFailure`, which meant the
+/// fallback loop would (incorrectly) try the next model on a bad-credential
+/// error — every model on the same connection uses the same credential, so
+/// the next attempt would fail the same way. Now Auth surfaces as
+/// `ProviderAdapterError::Auth`, which
+/// [`ProviderAdapterError::is_fallback_eligible`] returns `false` for, so
+/// the chain escalates to the operator immediately.
 fn map_provider_error(error: cairn_providers::error::ProviderError) -> ProviderAdapterError {
+    use cairn_providers::error::ProviderError;
     match error {
-        cairn_providers::error::ProviderError::RateLimited => ProviderAdapterError::RateLimited,
-        cairn_providers::error::ProviderError::Http(message)
-        | cairn_providers::error::ProviderError::Auth(message) => {
-            ProviderAdapterError::TransportFailure(message)
+        ProviderError::RateLimited => ProviderAdapterError::RateLimited,
+        ProviderError::Auth(message) => ProviderAdapterError::Auth(message),
+        ProviderError::InvalidRequest(message) => ProviderAdapterError::InvalidRequest(message),
+        ProviderError::ServerError { status, message } => {
+            ProviderAdapterError::ServerError { status, message }
         }
-        other => ProviderAdapterError::ProviderError(other.to_string()),
+        ProviderError::EmptyResponse {
+            model_id,
+            prompt_tokens,
+            completion_tokens,
+        } => ProviderAdapterError::EmptyResponse {
+            model_id,
+            prompt_tokens,
+            completion_tokens,
+        },
+        ProviderError::ResponseFormat {
+            message,
+            raw_response,
+        } => ProviderAdapterError::StructuredOutputInvalid(format!(
+            "{message} (raw: {raw_response})"
+        )),
+        ProviderError::Http(message) => ProviderAdapterError::TransportFailure(message),
+        ProviderError::Provider(message) => ProviderAdapterError::ProviderError(message),
+        ProviderError::Json(message) => ProviderAdapterError::StructuredOutputInvalid(message),
+        ProviderError::ToolConfig(message) | ProviderError::Unsupported(message) => {
+            ProviderAdapterError::InvalidRequest(message)
+        }
     }
 }
 

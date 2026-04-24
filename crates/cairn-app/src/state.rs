@@ -355,6 +355,13 @@ pub struct AppState {
     /// export is not wired.
     #[cfg(feature = "metrics-otel")]
     pub otlp_batch: Option<Arc<crate::metrics_otel::BatchingSink>>,
+    /// Process-wide cooldown map for the DECIDE-phase provider fallback
+    /// chain. Populated when `provider.generate()` returns
+    /// `ProviderAdapterError::RateLimited` so subsequent orchestrate calls
+    /// skip the cooled-down model for `DEFAULT_RATE_LIMIT_COOLDOWN` (5 min).
+    /// Cleared on process restart by design (in-memory; event-sourced
+    /// cooldown is a follow-up).
+    pub provider_fallback_cooldown: cairn_orchestrator::CooldownMap,
 }
 
 // ── GitHubIntegration ────────────────────────────────────────────────────────
@@ -1053,6 +1060,7 @@ impl AppState {
             model_catalog_providers_cache: Arc::new(std::sync::OnceLock::new()),
             #[cfg(any(feature = "metrics-core", feature = "metrics-providers"))]
             metrics_tap: None,
+            provider_fallback_cooldown: cairn_orchestrator::CooldownMap::new(),
         };
         state.runtime.store.reset_usage_counters();
 

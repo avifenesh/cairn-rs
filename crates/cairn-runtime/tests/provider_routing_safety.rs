@@ -158,6 +158,7 @@ async fn primary_provider_selected_not_fallback() {
             "model-default",
             vec![],
             &ProviderBindingSettings::default(),
+                &[],
         )
         .await;
 
@@ -207,6 +208,7 @@ async fn fallback_dispatches_to_correct_next_provider() {
             "model-default",
             vec![],
             &ProviderBindingSettings::default(),
+                &[],
         )
         .await;
 
@@ -274,6 +276,7 @@ async fn single_candidate_routes_directly_no_chain() {
             "model-default",
             vec![],
             &ProviderBindingSettings::default(),
+                &[],
         )
         .await;
 
@@ -327,6 +330,7 @@ async fn operation_kind_isolation_prevents_cross_routing() {
             "model-default",
             vec![],
             &ProviderBindingSettings::default(),
+                &[],
         )
         .await;
 
@@ -346,6 +350,7 @@ async fn operation_kind_isolation_prevents_cross_routing() {
             "model-default",
             vec![],
             &ProviderBindingSettings::default(),
+                &[],
         )
         .await;
 
@@ -389,6 +394,7 @@ async fn candidate_order_respected_not_silently_reordered() {
             "model-default",
             vec![],
             &ProviderBindingSettings::default(),
+                &[],
         )
         .await;
 

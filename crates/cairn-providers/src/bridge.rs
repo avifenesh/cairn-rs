@@ -167,16 +167,7 @@ impl GenerationProvider for OpenAiCompat {
                 None,
             )
             .await
-            .map_err(|e| match e {
-                crate::error::ProviderError::RateLimited => ProviderAdapterError::RateLimited,
-                crate::error::ProviderError::Http(msg) => {
-                    ProviderAdapterError::TransportFailure(msg)
-                }
-                crate::error::ProviderError::Auth(msg) => {
-                    ProviderAdapterError::TransportFailure(msg)
-                }
-                other => ProviderAdapterError::ProviderError(other.to_string()),
-            })?;
+            .map_err(provider_error_to_adapter_error)?;
 
         let text = response.text().unwrap_or_default();
         let usage = response.usage();
@@ -197,18 +188,71 @@ impl GenerationProvider for OpenAiCompat {
             })
             .collect();
 
+        let resolved_model = if effective_model.is_empty() {
+            self.model.clone()
+        } else {
+            effective_model.to_owned()
+        };
+
+        // Detect empty-completion case: successful HTTP, but the model
+        // returned zero usable output (no text after trim, no tool_calls).
+        // This is the MiniMax-minimax-m2.5:free failure pattern observed in
+        // dogfood run 2 — 17 tokens of whitespace, no tool_calls. Surface
+        // as a distinct error so the orchestrator fallback loop can retry
+        // on a different model.
+        if text.trim().is_empty() && tool_calls.is_empty() {
+            return Err(ProviderAdapterError::EmptyResponse {
+                model_id: resolved_model,
+                prompt_tokens: usage.as_ref().map(|u| u.prompt_tokens),
+                completion_tokens: usage.as_ref().map(|u| u.completion_tokens),
+            });
+        }
+
         Ok(GenerationResponse {
             text,
             input_tokens: usage.as_ref().map(|u| u.prompt_tokens),
             output_tokens: usage.as_ref().map(|u| u.completion_tokens),
-            model_id: if effective_model.is_empty() {
-                self.model.clone()
-            } else {
-                effective_model.to_owned()
-            },
+            model_id: resolved_model,
             tool_calls,
             finish_reason,
         })
+    }
+}
+
+/// Map the richer cairn-providers `ProviderError` into the `ProviderAdapterError`
+/// the `GenerationProvider` trait exposes.
+///
+/// Each `ProviderError` variant maps to the closest `ProviderAdapterError` so
+/// the orchestrator fallback loop can classify attempts correctly (rate-limit
+/// vs 5xx vs auth vs bad-request vs response-format).
+fn provider_error_to_adapter_error(e: crate::error::ProviderError) -> ProviderAdapterError {
+    use crate::error::ProviderError;
+    match e {
+        ProviderError::RateLimited => ProviderAdapterError::RateLimited,
+        ProviderError::Auth(msg) => ProviderAdapterError::Auth(msg),
+        ProviderError::InvalidRequest(msg) => ProviderAdapterError::InvalidRequest(msg),
+        ProviderError::ServerError { status, message } => {
+            ProviderAdapterError::ServerError { status, message }
+        }
+        ProviderError::EmptyResponse {
+            model_id,
+            prompt_tokens,
+            completion_tokens,
+        } => ProviderAdapterError::EmptyResponse {
+            model_id,
+            prompt_tokens,
+            completion_tokens,
+        },
+        ProviderError::ResponseFormat {
+            message,
+            raw_response,
+        } => ProviderAdapterError::StructuredOutputInvalid(format!("{message} (raw: {raw_response})")),
+        ProviderError::Http(msg) => ProviderAdapterError::TransportFailure(msg),
+        ProviderError::Provider(msg) => ProviderAdapterError::ProviderError(msg),
+        ProviderError::Json(msg) => ProviderAdapterError::StructuredOutputInvalid(msg),
+        ProviderError::ToolConfig(msg) | ProviderError::Unsupported(msg) => {
+            ProviderAdapterError::InvalidRequest(msg)
+        }
     }
 }
 
@@ -240,13 +284,7 @@ impl GenerationProvider for Bedrock {
                 None,
             )
             .await
-            .map_err(|e| match e {
-                crate::error::ProviderError::RateLimited => ProviderAdapterError::RateLimited,
-                crate::error::ProviderError::Http(msg) => {
-                    ProviderAdapterError::TransportFailure(msg)
-                }
-                other => ProviderAdapterError::ProviderError(other.to_string()),
-            })?;
+            .map_err(provider_error_to_adapter_error)?;
 
         let text = response.text().unwrap_or_default();
         let usage = response.usage();
@@ -266,6 +304,14 @@ impl GenerationProvider for Bedrock {
                 })
             })
             .collect();
+
+        if text.trim().is_empty() && tool_calls.is_empty() {
+            return Err(ProviderAdapterError::EmptyResponse {
+                model_id: effective_model.to_owned(),
+                prompt_tokens: usage.as_ref().map(|u| u.prompt_tokens),
+                completion_tokens: usage.as_ref().map(|u| u.completion_tokens),
+            });
+        }
 
         Ok(GenerationResponse {
             text,

@@ -708,10 +708,15 @@ export function createApiClient(config: ApiClientConfig) {
     listChildRuns: (runId: string, limit = 50): Promise<RunRecord[]> =>
       getList(`/v1/runs/${encodeURIComponent(runId)}/children?limit=${limit}`),
 
-    /** POST /v1/runs/:id/orchestrate — drive the GATHER/DECIDE/EXECUTE loop. */
+    /** POST /v1/runs/:id/orchestrate — drive the GATHER/DECIDE/EXECUTE loop.
+     *
+     * Cairn picks the model from the tenant's configured provider bindings;
+     * the caller describes the task. Any `model_id` field sent by older
+     * callers is ignored by the server.
+     */
     orchestrateRun: (
       runId: string,
-      body?: { goal?: string; model_id?: string; max_iterations?: number; timeout_ms?: number },
+      body?: { goal?: string; max_iterations?: number; timeout_ms?: number; approval_timeout_ms?: number },
     ): Promise<import("./types").OrchestrateResult> =>
       post(`/v1/runs/${encodeURIComponent(runId)}/orchestrate`, body ?? {}),
 

@@ -38,6 +38,29 @@ pub enum OrchestratorError {
     Memory(String),
     /// Graph query failed.
     Graph(String),
+    /// Every model on every binding in the DECIDE-phase routed chain
+    /// failed. The attempt list captures per-model reasons so the app
+    /// layer can surface a single `ToolCallApprovalService` proposal
+    /// with actionable context.
+    AllProvidersExhausted {
+        attempts: Vec<cairn_runtime::FallbackAttempt>,
+    },
+    /// Provider credentials rejected the request (401/403 or equivalent).
+    /// Retrying on another model won't help — the operator must rotate
+    /// the credential. Short-circuits the fallback chain.
+    ProviderAuthFailed {
+        binding_id: String,
+        model_id: String,
+        detail: String,
+    },
+    /// Provider rejected the request (400-class other than 401/403/429).
+    /// Retrying on another model won't help — cairn constructed a bad
+    /// request. Short-circuits the fallback chain.
+    ProviderInvalidRequest {
+        binding_id: String,
+        model_id: String,
+        detail: String,
+    },
 }
 
 impl std::fmt::Display for OrchestratorError {
@@ -61,6 +84,29 @@ impl std::fmt::Display for OrchestratorError {
             }
             OrchestratorError::Memory(msg) => write!(f, "memory error: {msg}"),
             OrchestratorError::Graph(msg) => write!(f, "graph error: {msg}"),
+            OrchestratorError::AllProvidersExhausted { attempts } => {
+                write!(
+                    f,
+                    "{}",
+                    cairn_runtime::format_attempt_summary(attempts)
+                )
+            }
+            OrchestratorError::ProviderAuthFailed {
+                binding_id,
+                model_id,
+                detail,
+            } => write!(
+                f,
+                "provider auth failed on binding={binding_id} model={model_id}: {detail}"
+            ),
+            OrchestratorError::ProviderInvalidRequest {
+                binding_id,
+                model_id,
+                detail,
+            } => write!(
+                f,
+                "provider rejected request on binding={binding_id} model={model_id}: {detail}"
+            ),
         }
     }
 }

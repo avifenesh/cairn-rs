@@ -423,10 +423,31 @@ impl OpenAiCompat {
         let resp = req.send().await?;
         if !resp.status().is_success() {
             let status = resp.status();
-            if status.as_u16() == 429 {
+            let code = status.as_u16();
+            let body = safe_raw_response(&resp.text().await.unwrap_or_default());
+            if code == 429 {
                 return Err(ProviderError::RateLimited);
             }
-            let body = safe_raw_response(&resp.text().await.unwrap_or_default());
+            if code == 401 || code == 403 {
+                return Err(ProviderError::Auth(format!(
+                    "{} returned HTTP {status}: {body}",
+                    self.config.name
+                )));
+            }
+            if (400..500).contains(&code) {
+                // 4xx other than 401/403/429 — our request is malformed.
+                return Err(ProviderError::InvalidRequest(format!(
+                    "{} returned HTTP {status}: {body}",
+                    self.config.name
+                )));
+            }
+            if (500..600).contains(&code) {
+                // 5xx — upstream problem. Fallback-eligible.
+                return Err(ProviderError::ServerError {
+                    status: code,
+                    message: format!("{} returned HTTP {status}: {body}", self.config.name),
+                });
+            }
             return Err(ProviderError::ResponseFormat {
                 message: format!("{} returned HTTP {status}", self.config.name),
                 raw_response: body,
@@ -448,6 +469,25 @@ impl ChatProvider for OpenAiCompat {
     ) -> Result<Box<dyn ChatResponse>, ProviderError> {
         self.chat_with_tools_for_model(None, messages, tools, schema)
             .await
+    }
+
+    /// Override the trait's default per-call model routing so DECIDE-phase
+    /// fallback chains (see `cairn_orchestrator::ModelChain`) route each
+    /// attempt to the requested upstream model rather than silently reusing
+    /// the connection's configured default. Without this override the
+    /// fallback loop sends every chain attempt to the same upstream — which
+    /// makes a single 429 on the preferred model produce N consecutive 429s
+    /// across the chain (reproduced in `test_http_dogfood_fallback`).
+    async fn chat_with_tools_for_model(
+        &self,
+        model: Option<&str>,
+        messages: &[ChatMessage],
+        tools: Option<&[Tool]>,
+        schema: Option<StructuredOutput>,
+    ) -> Result<Box<dyn ChatResponse>, ProviderError> {
+        // Inherent method on `OpenAiCompat` takes the model through to the
+        // wire body; delegate here.
+        OpenAiCompat::chat_with_tools_for_model(self, model, messages, tools, schema).await
     }
 
     async fn chat_stream(
