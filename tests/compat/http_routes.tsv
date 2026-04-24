@@ -1,6 +1,7 @@
 method	route	classification	query_or_body_detail	minimum_contract
 DELETE	/v1/admin/models/:id	preserve	-	-
 DELETE	/v1/admin/tenants/:tenant_id/credentials/:id	preserve	-	-
+DELETE	/v1/admin/tenants/:tenant_id/sessions/:session_id	preserve	-	-
 DELETE	/v1/admin/tenants/:tenant_id/workspaces/:workspace_id	preserve	-	-
 DELETE	/v1/admin/workspaces/:id/shares/:share_id	preserve	-	-
 DELETE	/v1/admin/workspaces/:workspace_id/members/:id	preserve	-	-
@@ -361,6 +362,7 @@ POST	/v1/providers/budget	preserve	-	-
 POST	/v1/providers/connections	preserve	-	-
 POST	/v1/providers/connections/:id/health-schedule	preserve	-	-
 POST	/v1/providers/connections/:id/models	preserve	-	-
+POST	/v1/providers/connections/discover-preview	preserve	-	-
 POST	/v1/providers/ollama/delete	preserve	-	-
 POST	/v1/providers/ollama/generate	preserve	-	-
 POST	/v1/providers/ollama/pull	preserve	-	-
