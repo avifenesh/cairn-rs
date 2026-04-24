@@ -37,7 +37,8 @@ use super::event_helpers::make_envelope;
 use crate::error::RuntimeError;
 use crate::tool_call_approvals::{
     proposal_matches_rule, AllowRule, ApprovalDecision, ApprovedProposal, OperatorDecision,
-    ToolCallApprovalReader, ToolCallApprovalService, ToolCallProposal,
+    StoredProposal, StoredProposalState, ToolCallApprovalReader, ToolCallApprovalService,
+    ToolCallProposal,
 };
 
 /// Current lifecycle state of a proposal held in the cache.
@@ -692,20 +693,65 @@ where
 {
     /// Load a proposal from cache, falling back to a store re-hydration
     /// from the projection. Used by approve/reject/amend.
+    ///
+    /// On cache miss we ask the [`ToolCallApprovalReader`] for the full
+    /// projection row and, if present, materialise a `ProposalEntry`
+    /// reflecting whatever state the projection recorded. The entry is
+    /// inserted into the cache so subsequent calls are cheap.
+    ///
+    /// Oneshot senders deliberately do **not** survive rehydration: any
+    /// orchestrator task that was awaiting this proposal died with the
+    /// previous process. The persisted decision event remains the source
+    /// of truth — a follow-up `retrieve_approved_proposal` after the
+    /// operator resolves will still hit the approved-state fast-path.
     async fn load_or_fetch(&self, call_id: &ToolCallId) -> Result<ProposalEntry, RuntimeError> {
         if let Some(entry) = self.cached_entry(call_id) {
             return Ok(entry);
         }
-        // Cache miss — best-effort re-hydration from projection. Without
-        // the projection we cannot reconstruct the ProjectKey / SessionId
-        // required to emit the decision event, so a miss is fatal.
-        //
-        // PR-2 extends `ToolCallApprovalReader` so miss-path callers can
-        // rebuild a `ProposalEntry`. For now, surface a clean NotFound.
-        let _approved = self.reader.get_tool_call_approval(call_id).await?;
-        Err(RuntimeError::NotFound {
-            entity: "tool_call_approval",
-            id: call_id.to_string(),
-        })
+        let stored = self
+            .reader
+            .get_tool_call_proposal(call_id)
+            .await?
+            .ok_or_else(|| RuntimeError::NotFound {
+                entity: "tool_call_approval",
+                id: call_id.to_string(),
+            })?;
+
+        let entry = stored_to_entry(stored);
+
+        // Insert, but don't clobber a cache entry that appeared between
+        // the miss and the store fetch (concurrent `submit_proposal` or a
+        // parallel decision call). The first writer wins: returning the
+        // live cache value keeps decision flows consistent with what any
+        // other in-flight path already observed.
+        let mut guard = lock(&self.inner);
+        let inserted = guard
+            .proposals
+            .entry(call_id.clone())
+            .or_insert(entry)
+            .clone();
+        Ok(inserted)
+    }
+}
+
+/// Translate a [`StoredProposal`] (projection-facing shape) into the
+/// private [`ProposalEntry`] the service caches.
+fn stored_to_entry(stored: StoredProposal) -> ProposalEntry {
+    let state = match (stored.state, stored.amended_args.is_some()) {
+        (StoredProposalState::Pending, true) => ProposalState::Amended,
+        (StoredProposalState::Pending, false) => ProposalState::Pending,
+        (StoredProposalState::Approved, _) => ProposalState::Approved,
+        // `Timeout` is a projection-level distinction; internally a
+        // timeout is a rejection (with `reason = "operator_timeout"`).
+        (StoredProposalState::Rejected | StoredProposalState::Timeout, _) => {
+            ProposalState::Rejected
+        }
+    };
+    ProposalEntry {
+        proposal: stored.proposal,
+        state,
+        amended_args: stored.amended_args,
+        approved_args: stored.approved_args,
+        rejection_reason: stored.rejection_reason,
     }
 }

@@ -103,6 +103,38 @@ pub struct ApprovedProposal {
     pub tool_args: Value,
 }
 
+/// Resolution state of a proposal as observed from the store projection.
+///
+/// Mirrors the public projection states so callers rebuilding a runtime
+/// cache entry can decide whether to accept the proposal for
+/// approve/reject/amend (only `Pending` is accepted; the others already
+/// have terminal decisions and must surface as `InvalidTransition`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum StoredProposalState {
+    Pending,
+    Approved,
+    Rejected,
+    Timeout,
+}
+
+/// Full proposal record re-hydrated from the store projection.
+///
+/// Used by [`ToolCallApprovalService::approve`] / `reject` / `amend` to
+/// recover from in-memory cache misses (e.g. process restart, eviction).
+/// Carries everything needed to rebuild a private `ProposalEntry` and
+/// proceed with the decision flow.
+#[derive(Clone, Debug)]
+pub struct StoredProposal {
+    pub proposal: ToolCallProposal,
+    pub state: StoredProposalState,
+    /// Most recent `ToolCallAmended.new_tool_args`, if any.
+    pub amended_args: Option<Value>,
+    /// `ToolCallApproved.approved_tool_args`, if any.
+    pub approved_args: Option<Value>,
+    /// `ToolCallRejected.reason`, if any.
+    pub rejection_reason: Option<String>,
+}
+
 /// Minimal read interface for reconstituting proposals from the store
 /// projection (e.g. after process restart or when the in-memory cache
 /// has been evicted).
@@ -118,6 +150,22 @@ pub trait ToolCallApprovalReader: Send + Sync {
         &self,
         call_id: &ToolCallId,
     ) -> Result<Option<ApprovedProposal>, RuntimeError>;
+
+    /// Load the full proposal (any state) for re-hydrating the in-memory
+    /// cache on approve/reject/amend after restart or eviction.
+    ///
+    /// Default implementation returns `Ok(None)` so older readers that
+    /// only wired `get_tool_call_approval` still compile; production
+    /// readers (Postgres/SQLite/InMemory adapters) override this to
+    /// return the full projection row. Returning `None` from this hook
+    /// causes the service to surface a genuine `NotFound` from the
+    /// decision endpoints — matching the pre-fix behaviour.
+    async fn get_tool_call_proposal(
+        &self,
+        _call_id: &ToolCallId,
+    ) -> Result<Option<StoredProposal>, RuntimeError> {
+        Ok(None)
+    }
 }
 
 /// Bridge every store that implements
@@ -146,6 +194,47 @@ where
                 .or_else(|| r.amended_tool_args.clone())
                 .unwrap_or_else(|| r.original_tool_args.clone()),
         }))
+    }
+
+    async fn get_tool_call_proposal(
+        &self,
+        call_id: &ToolCallId,
+    ) -> Result<Option<StoredProposal>, RuntimeError> {
+        let record = cairn_store::projections::ToolCallApprovalReadModel::get(self, call_id)
+            .await
+            .map_err(RuntimeError::Store)?;
+        Ok(record.map(store_record_to_stored_proposal))
+    }
+}
+
+/// Map a projection row into the runtime-facing [`StoredProposal`]. The
+/// mapping intentionally preserves the three argument slots separately
+/// (original / amended / approved) so the runtime can re-apply the
+/// domain precedence invariant without re-reading the projection.
+fn store_record_to_stored_proposal(
+    r: cairn_store::projections::ToolCallApprovalRecord,
+) -> StoredProposal {
+    let state = match r.state {
+        cairn_store::projections::ToolCallApprovalState::Pending => StoredProposalState::Pending,
+        cairn_store::projections::ToolCallApprovalState::Approved => StoredProposalState::Approved,
+        cairn_store::projections::ToolCallApprovalState::Rejected => StoredProposalState::Rejected,
+        cairn_store::projections::ToolCallApprovalState::Timeout => StoredProposalState::Timeout,
+    };
+    StoredProposal {
+        proposal: ToolCallProposal {
+            call_id: r.call_id,
+            session_id: r.session_id,
+            run_id: r.run_id,
+            project: r.project,
+            tool_name: r.tool_name,
+            tool_args: r.original_tool_args,
+            display_summary: r.display_summary,
+            match_policy: r.match_policy,
+        },
+        state,
+        amended_args: r.amended_tool_args,
+        approved_args: r.approved_tool_args,
+        rejection_reason: r.reason,
     }
 }
 
