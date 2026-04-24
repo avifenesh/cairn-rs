@@ -99,6 +99,7 @@ impl Bedrock {
                 prompt_tokens: i,
                 completion_tokens: o,
                 total_tokens: i + o,
+                cached_tokens: None,
             }),
             _ => None,
         };

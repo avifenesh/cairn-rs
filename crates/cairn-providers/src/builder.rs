@@ -7,6 +7,7 @@
 use crate::chat::ChatProvider;
 use crate::error::ProviderError;
 use crate::wire::openai_compat::{OpenAiCompat, ProviderConfig};
+use crate::wire::zai::{ZaiConfig, ZaiProvider};
 
 /// Supported LLM backend families.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -28,6 +29,13 @@ pub enum Backend {
     BedrockCompat,
     /// Any OpenAI-compatible endpoint — operator supplies URL + key.
     OpenAiCompatible,
+    /// Native Z.ai adapter (coding plan + general paas).  OpenAI-shaped but
+    /// lives in its own wire module to isolate GLM-specific quirks
+    /// (thinking mode, `prompt_tokens_details.cached_tokens`, 1305 error
+    /// envelope).  See `wire::zai`.
+    Zai,
+    /// Same as [`Backend::Zai`] but defaulting to the GLM Coding Plan tier.
+    ZaiCoding,
 }
 
 impl std::str::FromStr for Backend {
@@ -48,6 +56,10 @@ impl std::str::FromStr for Backend {
             "bedrock-compat" | "bedrock-openai" | "bedrock_compat" => Ok(Self::BedrockCompat),
             "openai-compatible" | "openai_compatible" | "generic" | "custom" => {
                 Ok(Self::OpenAiCompatible)
+            }
+            "zai" | "z_ai" | "z-ai" | "z.ai" => Ok(Self::Zai),
+            "zai-coding" | "z_ai_coding" | "z-ai-coding" | "zai_coding" | "glm-coding" => {
+                Ok(Self::ZaiCoding)
             }
             _ => Err(ProviderError::InvalidRequest(format!(
                 "unknown backend: {s}"
@@ -72,6 +84,8 @@ impl std::fmt::Display for Backend {
             Self::Bedrock => "bedrock",
             Self::BedrockCompat => "bedrock-compat",
             Self::OpenAiCompatible => "openai-compatible",
+            Self::Zai => "zai",
+            Self::ZaiCoding => "zai-coding",
         })
     }
 }
@@ -91,7 +105,12 @@ impl Backend {
             Self::OpenRouter => ProviderConfig::OPENROUTER,
             Self::MiniMax => ProviderConfig::MINIMAX,
             Self::BedrockCompat => ProviderConfig::BEDROCK_COMPAT,
-            Self::Bedrock | Self::OpenAiCompatible => ProviderConfig::default(),
+            // Zai/ZaiCoding have their own wire module; the returned config
+            // here is a harmless placeholder since build_chat() short-circuits
+            // before using it.
+            Self::Bedrock | Self::OpenAiCompatible | Self::Zai | Self::ZaiCoding => {
+                ProviderConfig::default()
+            }
         }
     }
 }
@@ -159,6 +178,25 @@ impl ProviderBuilder {
             ));
         }
         let key = self.api_key.unwrap_or_default();
+
+        // Z.ai has its own wire module — separate struct, separate file, so
+        // GLM quirks can evolve without touching OpenAI/DeepSeek/Groq.
+        if matches!(self.backend, Backend::Zai | Backend::ZaiCoding) {
+            let config = match self.backend {
+                Backend::ZaiCoding => ZaiConfig::CODING,
+                Backend::Zai => ZaiConfig::GENERAL,
+                _ => unreachable!(),
+            };
+            return Ok(Box::new(ZaiProvider::new(
+                config,
+                key,
+                self.base_url,
+                self.model,
+                self.max_tokens,
+                self.temperature,
+                self.timeout_secs,
+            )?));
+        }
 
         // Bedrock has its own wire format.
         if self.backend == Backend::Bedrock {

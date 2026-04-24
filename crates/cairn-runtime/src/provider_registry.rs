@@ -946,7 +946,24 @@ fn build_embedding_provider(
     connection: &ProviderConnectionRecord,
     requested_model: &str,
 ) -> Result<Option<Arc<dyn DomainEmbeddingProvider>>, cairn_providers::error::ProviderError> {
-    if matches!(backend, Backend::Bedrock) {
+    // Bedrock has its own SDK path and no OpenAI-shape embeddings endpoint.
+    //
+    // For Z.ai: the *native* adapter (wire::zai::ZaiProvider) implements the
+    // chat surface only — no embeddings. We return None for both Backend::Zai
+    // and Backend::ZaiCoding on purpose:
+    //   * The coding endpoint (ZaiCoding) does not expose /embeddings.
+    //   * The general paas endpoint (Zai) DOES have an /embeddings route, but
+    //     this adapter has not been wired to call it. Until we add a native
+    //     embeddings implementation under `wire::zai`, operators that want
+    //     Z.ai embeddings should register a second connection with
+    //     adapter_type="openai_compat" pointed at
+    //     `https://api.z.ai/api/paas/v4/`, which routes through
+    //     OpenAiCompat's well-tested embeddings path.
+    // Copilot review on #280.
+    if matches!(
+        backend,
+        Backend::Bedrock | Backend::Zai | Backend::ZaiCoding
+    ) {
         return Ok(None);
     }
 

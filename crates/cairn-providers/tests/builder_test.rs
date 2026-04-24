@@ -144,6 +144,16 @@ async fn provider_builder_uses_backend_defaults_for_openai_style_backends() {
             path: "/chat/completions",
             model: "default",
         },
+        BackendCase {
+            backend: Backend::Zai,
+            path: "/chat/completions",
+            model: "glm-4.7",
+        },
+        BackendCase {
+            backend: Backend::ZaiCoding,
+            path: "/chat/completions",
+            model: "glm-4.7",
+        },
     ];
 
     for case in cases {

@@ -33,7 +33,7 @@ interface TestConnectionResult {
 type ProviderKind =
   | "openai" | "anthropic" | "ollama" | "deepseek" | "xai" | "google"
   | "groq" | "azure-openai" | "openrouter" | "minimax" | "bedrock" | "bedrock-compat"
-  | "openai-compatible";
+  | "openai-compatible" | "zai" | "zai-coding";
 
 interface ProviderKindMeta {
   label: string;
@@ -163,6 +163,28 @@ const PROVIDER_KINDS: Record<ProviderKind, ProviderKindMeta> = {
     defaultUrl: "",
     defaultModel: "",
   },
+  "zai-coding": {
+    label: "Z.ai (GLM Coding Plan)",
+    description: "GLM 4.7 / 5 / 5.1 via the coding-plan endpoint. Native adapter with thinking-mode + cached-token accounting.",
+    icon: <Zap size={16} />,
+    defaultFamily: "zai",
+    // Coding-plan connections must register with adapter_type="zai-coding"
+    // so the backend resolves Backend::ZaiCoding (→ ZaiConfig::CODING).
+    // Previously this used "zai", which silently routed to the general
+    // tier and broke the coding-tier defaults. Copilot review on #280.
+    defaultAdapter: "zai-coding",
+    defaultUrl: "https://api.z.ai/api/coding/paas/v4",
+    defaultModel: "glm-4.7",
+  },
+  zai: {
+    label: "Z.ai (General)",
+    description: "Pay-as-you-go GLM models via api.z.ai. Native adapter.",
+    icon: <Zap size={16} />,
+    defaultFamily: "zai",
+    defaultAdapter: "zai",
+    defaultUrl: "https://api.z.ai/api/paas/v4",
+    defaultModel: "glm-4.7",
+  },
 };
 
 // Map a provider-wizard "kind" to the LiteLLM catalog's `provider` tag so
@@ -181,6 +203,8 @@ const KIND_TO_PROVIDER_FILTER: Partial<Record<ProviderKind, string>> = {
   openrouter: "openrouter",
   bedrock:    "bedrock",
   minimax:    "minimax",
+  zai:          "zai",
+  "zai-coding": "zai",
 };
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
