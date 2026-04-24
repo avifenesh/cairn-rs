@@ -292,6 +292,19 @@ impl CheckpointHook for NoOpCheckpointHook {
 /// on this exact string — use the const to avoid typo-driven breakage.
 pub const LEASE_UNHEALTHY_REASON: &str = "lease unhealthy";
 
+/// Minimum wall-clock budget remaining (ms) required to start a DECIDE.
+///
+/// When less than this is left on the run deadline we terminate cleanly as
+/// `LoopTermination::TimedOut` instead of firing an LLM call that is
+/// guaranteed to miss the deadline mid-flight. 5s is a conservative heuristic:
+/// smaller than any provider's default timeout so it only fires near the
+/// actual deadline, but large enough that a successful DECIDE could realistically
+/// finish in the remaining window on fast paths. Chosen over the per-provider
+/// timeout because different bindings in a routing chain have different
+/// defaults — 5s is the largest common lower bound that doesn't leak those
+/// internals up to the loop.
+pub const MIN_DECIDE_BUDGET_MS: u64 = 5_000;
+
 // ── OrchestratorLoop ──────────────────────────────────────────────────────────
 
 /// Drives the GATHER → DECIDE → EXECUTE loop for a single run.
@@ -703,6 +716,32 @@ where
                         compaction.after_tokens_est,
                     )
                     .await;
+            }
+
+            // ── (2c) Pre-DECIDE budget check ─────────────────────────────────
+            // GATHER just finished; if the remaining budget is too small
+            // to reasonably complete a DECIDE round-trip, bail now rather
+            // than firing the LLM call only to have the wall-clock
+            // deadline trip in the middle and leave a stranded provider
+            // request. The threshold is heuristic: smaller than the
+            // smallest per-provider default would guarantee a provider
+            // timeout fires before the loop deadline — wasteful. Larger
+            // than DECIDE's typical latency avoids false positives.
+            //
+            // Uses `now_millis()` fresh: GATHER may itself have taken
+            // meaningful time (retrieval + chunk scoring), so the
+            // `remaining_ms` computed at iteration start is stale.
+            let pre_decide_now_ms = now_millis();
+            let remaining_before_decide_ms = deadline_ms.saturating_sub(pre_decide_now_ms);
+            if remaining_before_decide_ms < MIN_DECIDE_BUDGET_MS {
+                tracing::warn!(
+                    run_id        = %ctx.run_id,
+                    iteration     = ctx.iteration,
+                    remaining_ms  = remaining_before_decide_ms,
+                    min_budget_ms = MIN_DECIDE_BUDGET_MS,
+                    "orchestrator loop budget too low to start DECIDE — timing out cleanly"
+                );
+                return Ok(LoopTermination::TimedOut);
             }
 
             // ── (3) DECIDE ────────────────────────────────────────────────────
@@ -1659,6 +1698,93 @@ mod tests {
 
         let result = lp.run(past_ctx).await.unwrap();
         assert!(matches!(result, LoopTermination::TimedOut));
+    }
+
+    // ── (2c) Pre-DECIDE budget check ──────────────────────────────────────────
+    //
+    // F27 guard: GATHER can consume meaningful wall-clock time (retrieval,
+    // chunk scoring). If the remaining budget drops below
+    // `MIN_DECIDE_BUDGET_MS` between iteration start and post-GATHER, the
+    // loop MUST bail cleanly as `TimedOut` rather than firing an LLM call
+    // that is guaranteed to miss the deadline. This test pins that gate by
+    // putting the context ~3s past "now" on a 5s loop budget — GATHER
+    // finishes instantly but the remaining budget is 2s, below the 5s
+    // threshold, so the loop must terminate before DECIDE runs.
+
+    struct CountingDecide {
+        count: std::sync::atomic::AtomicUsize,
+    }
+
+    #[async_trait]
+    impl DecidePhase for CountingDecide {
+        async fn decide(
+            &self,
+            _: &OrchestrationContext,
+            _: &GatherOutput,
+        ) -> Result<DecideOutput, OrchestratorError> {
+            self.count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Ok(decide_done())
+        }
+    }
+
+    #[tokio::test]
+    async fn budget_below_threshold_short_circuits_before_decide() {
+        let mut tight_ctx = ctx();
+        // Started 3s ago on a 5s total budget → only 2s remaining,
+        // strictly below MIN_DECIDE_BUDGET_MS (5s).
+        tight_ctx.run_started_at_ms = now_millis().saturating_sub(3_000);
+
+        let decide = CountingDecide {
+            count: std::sync::atomic::AtomicUsize::new(0),
+        };
+        let decide_handle = std::sync::Arc::new(decide);
+        let decide_for_loop = decide_handle.clone();
+
+        // `OrchestratorLoop::new` takes the phase by value, so we wrap
+        // the shared counter in `Arc` and keep one handle here for
+        // post-run inspection. `ArcDecide` is a thin trait adapter that
+        // forwards to the inner `CountingDecide` — two `Arc` handles to
+        // the same counter, no leaks, no raw pointers.
+        struct ArcDecide(std::sync::Arc<CountingDecide>);
+        #[async_trait]
+        impl DecidePhase for ArcDecide {
+            async fn decide(
+                &self,
+                ctx: &OrchestrationContext,
+                g: &GatherOutput,
+            ) -> Result<DecideOutput, OrchestratorError> {
+                self.0.decide(ctx, g).await
+            }
+        }
+
+        let config = LoopConfig {
+            timeout_ms: 5_000,
+            ..Default::default()
+        };
+        let lp = OrchestratorLoop::new(
+            FixedGather,
+            ArcDecide(decide_for_loop),
+            ScriptedExecute {
+                signal: LoopSignal::Done,
+            },
+            config,
+        );
+
+        let result = lp.run(tight_ctx).await.unwrap();
+        assert!(
+            matches!(result, LoopTermination::TimedOut),
+            "expected TimedOut from pre-DECIDE budget check, got {result:?}"
+        );
+        // Critical: DECIDE must NOT have been invoked. Otherwise we are
+        // firing LLM calls we know will miss the deadline — the very
+        // behaviour F27 adds this guard to prevent.
+        assert_eq!(
+            decide_handle
+                .count
+                .load(std::sync::atomic::Ordering::SeqCst),
+            0,
+            "decide fired despite budget below MIN_DECIDE_BUDGET_MS"
+        );
     }
 
     // ── (1b) Lease health gate ────────────────────────────────────────────────

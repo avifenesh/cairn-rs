@@ -73,11 +73,55 @@ pub struct RoutedBinding {
 #[derive(Clone)]
 pub struct RoutedGenerationService {
     bindings: Vec<RoutedBinding>,
+    /// Hard ceiling per `provider.generate` call. The adapter's reqwest
+    /// client should already enforce its own timeout (see F27 dogfood fix
+    /// in `cairn-providers`), but this layer is belt-and-suspenders: if a
+    /// broken tokio select or an in-process deadlock somehow defeats the
+    /// reqwest deadline, `tokio::time::timeout` will still force the chain
+    /// to advance. Default 360s (see [`DEFAULT_PER_CALL_TIMEOUT`]) is
+    /// strictly larger than every per-provider default (Ollama is the
+    /// floor-setter at 300s for CPU inference) so it only fires when
+    /// the adapter genuinely misbehaves, never on a legitimate slow
+    /// backend.
+    per_call_timeout: std::time::Duration,
 }
+
+/// Default per-call timeout ceiling for `RoutedGenerationService::generate`.
+///
+/// See `RoutedGenerationService::per_call_timeout` — strictly larger than
+/// every per-provider default so it only kicks in on adapter bugs, not in
+/// normal operation.
+///
+/// Set to 360s: Ollama's OpenAI-compat preset ships a 300s default (local
+/// CPU inference on slow hardware can genuinely take minutes), so the
+/// ceiling has to clear 300s. 360s gives a 60s safety margin.
+///
+/// Relationship to the loop-level deadline: the orchestrator's default
+/// `LoopConfig::timeout_ms` is also 5 minutes (300s). In the default
+/// configuration the loop wall-clock deadline fires before this ceiling
+/// on a healthy chain — this ceiling is the last-resort bound that only
+/// matters when (a) the operator set a longer loop `timeout_ms`, or
+/// (b) an adapter is genuinely misbehaving. If a future backend needs a
+/// longer ceiling, bump both this constant AND that backend's
+/// `default_timeout_secs` together, and consider raising the loop
+/// default in lockstep so the routing-layer bound can actually protect
+/// the operator's configured deadline.
+pub const DEFAULT_PER_CALL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(360);
 
 impl RoutedGenerationService {
     pub fn new(bindings: Vec<RoutedBinding>) -> Self {
-        Self { bindings }
+        Self {
+            bindings,
+            per_call_timeout: DEFAULT_PER_CALL_TIMEOUT,
+        }
+    }
+
+    /// Override the per-call timeout ceiling. Tests and unusual operator
+    /// setups may want a shorter bound; production should stick with
+    /// [`DEFAULT_PER_CALL_TIMEOUT`].
+    pub fn with_per_call_timeout(mut self, timeout: std::time::Duration) -> Self {
+        self.per_call_timeout = timeout;
+        self
     }
 
     /// True when the service has no routable model attempts available —
@@ -124,6 +168,7 @@ impl RoutedGenerationService {
         let messages = Arc::new(messages);
         let tools: Arc<Vec<serde_json::Value>> = Arc::new(tools.to_vec());
         let settings = Arc::new(settings.clone());
+        let per_call_timeout = self.per_call_timeout;
         // Monotonically-incrementing attempt counter across ALL bindings
         // so logs/metrics accurately reflect attempt order. `AtomicUsize`
         // gives us `Send`-safe interior mutability without needing to
@@ -157,9 +202,32 @@ impl RoutedGenerationService {
                             "routed_generation: dispatch attempt"
                         );
                         // Unavoidable clones into the trait signature.
-                        let result = provider
-                            .generate(&model_id, (*messages).clone(), &settings, &tools)
-                            .await;
+                        //
+                        // Wrap the dispatch in `tokio::time::timeout` so a
+                        // misbehaving adapter (reqwest timeout bypass, a
+                        // hung futures-runtime select, etc.) can never
+                        // stall the whole fallback chain. The adapter
+                        // layer SHOULD also enforce its own timeout — this
+                        // is redundant on purpose. See `per_call_timeout`
+                        // on `RoutedGenerationService`.
+                        let dispatch = provider.generate(
+                            &model_id,
+                            (*messages).clone(),
+                            &settings,
+                            &tools,
+                        );
+                        let result = match tokio::time::timeout(per_call_timeout, dispatch).await {
+                            Ok(r) => r,
+                            Err(_elapsed) => {
+                                tracing::warn!(
+                                    binding_id = %binding_id,
+                                    model_id = %model_id,
+                                    timeout_ms = per_call_timeout.as_millis() as u64,
+                                    "routed_generation: per-call timeout fired (adapter did not honour its own deadline)"
+                                );
+                                Err(ProviderAdapterError::TimedOut)
+                            }
+                        };
                         match &result {
                             Ok(resp) => {
                                 tracing::info!(

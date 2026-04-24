@@ -64,6 +64,20 @@ pub enum ProviderError {
     #[error("rate limited")]
     RateLimited,
 
+    /// Upstream HTTP client / request timed out (reqwest `Error::is_timeout`).
+    ///
+    /// Separate variant so the domain layer can map directly to
+    /// `ProviderAdapterError::TimedOut` and the orchestrator fallback chain
+    /// can tell a slow-upstream from a connect refused or DNS failure
+    /// (`Http`). Without this split, reqwest timeouts were flattened into
+    /// `Http` and logged as "transport failure" — technically true, but it
+    /// hid the F27 dogfood blocker where Z.ai hung forever because no
+    /// client-side timeout was set. Now the adapter installs a sensible
+    /// per-backend default and a hit surfaces as `TimedOut` so operators see
+    /// "timed out" in the attempt log instead of a cryptic hyper error.
+    #[error("provider request timed out")]
+    TimedOut,
+
     #[error("upstream {status}: {message}")]
     ServerError { status: u16, message: String },
 
@@ -96,6 +110,17 @@ impl From<reqwest::Error> for ProviderError {
     fn from(err: reqwest::Error) -> Self {
         // reqwest::Error::to_string() embeds the request URL on connect
         // errors, which may carry an `?api_key=...` query param. Redact.
+        //
+        // Detect client-side request timeouts (both the builder-level
+        // `Client::timeout` and per-request `.timeout()`) so the domain
+        // layer can map to `ProviderAdapterError::TimedOut` and fall back
+        // to the next model. `is_timeout()` also fires on reqwest's
+        // internal connect timeout, which is exactly what we want — a
+        // hung TCP connect is the live symptom we hit in the F27 dogfood
+        // repro before defaults landed.
+        if err.is_timeout() {
+            return Self::TimedOut;
+        }
         Self::Http(redact_secrets(&err.to_string()))
     }
 }

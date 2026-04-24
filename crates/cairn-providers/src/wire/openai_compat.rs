@@ -36,7 +36,23 @@ pub struct ProviderConfig {
     pub supports_parallel_tool_calls: bool,
     pub supports_stream_options: bool,
     pub custom_headers: Vec<(String, String)>,
+    /// Default HTTP client timeout in seconds when the caller does NOT
+    /// supply an explicit `timeout_secs`. Applied both to the reqwest
+    /// `Client::builder` and as a per-request override, so a hung upstream
+    /// can never stall the orchestrator indefinitely (F27 dogfood blocker).
+    ///
+    /// Sensible per-backend defaults: cloud APIs 90s, reasoning-heavy
+    /// backends 120s, Ollama 300s (local, can be slow). Operators can still
+    /// override per-connection via `ProviderBuilder::timeout_secs`.
+    pub default_timeout_secs: u64,
 }
+
+/// Default client timeout for OpenAI-compatible cloud backends (seconds).
+///
+/// Used by most `/chat/completions`-speaking providers. Reasoning-heavy
+/// backends override with a higher value; Ollama overrides lower-frequency
+/// because local inference is slower but connection-bound.
+pub const DEFAULT_TIMEOUT_SECS: u64 = 90;
 
 impl Default for ProviderConfig {
     fn default() -> Self {
@@ -50,6 +66,7 @@ impl Default for ProviderConfig {
             supports_parallel_tool_calls: false,
             supports_stream_options: false,
             custom_headers: Vec::new(),
+            default_timeout_secs: DEFAULT_TIMEOUT_SECS,
         }
     }
 }
@@ -67,6 +84,7 @@ impl ProviderConfig {
         supports_parallel_tool_calls: false,
         supports_stream_options: true,
         custom_headers: Vec::new(),
+        default_timeout_secs: 90,
     };
 
     pub const ANTHROPIC: Self = Self {
@@ -79,6 +97,8 @@ impl ProviderConfig {
         supports_parallel_tool_calls: false,
         supports_stream_options: false,
         custom_headers: Vec::new(),
+        // Claude thinking mode and extended responses can run long.
+        default_timeout_secs: 120,
     };
 
     pub const OLLAMA: Self = Self {
@@ -91,6 +111,8 @@ impl ProviderConfig {
         supports_parallel_tool_calls: false,
         supports_stream_options: false,
         custom_headers: Vec::new(),
+        // Local inference on CPU can easily exceed cloud defaults.
+        default_timeout_secs: 300,
     };
 
     pub const OPENROUTER: Self = Self {
@@ -103,6 +125,7 @@ impl ProviderConfig {
         supports_parallel_tool_calls: false,
         supports_stream_options: true,
         custom_headers: Vec::new(),
+        default_timeout_secs: 120,
     };
 
     pub const GROQ: Self = Self {
@@ -115,6 +138,7 @@ impl ProviderConfig {
         supports_parallel_tool_calls: false,
         supports_stream_options: true,
         custom_headers: Vec::new(),
+        default_timeout_secs: 90,
     };
 
     pub const DEEPSEEK: Self = Self {
@@ -127,6 +151,7 @@ impl ProviderConfig {
         supports_parallel_tool_calls: false,
         supports_stream_options: true,
         custom_headers: Vec::new(),
+        default_timeout_secs: 90,
     };
 
     pub const XAI: Self = Self {
@@ -139,6 +164,7 @@ impl ProviderConfig {
         supports_parallel_tool_calls: false,
         supports_stream_options: true,
         custom_headers: Vec::new(),
+        default_timeout_secs: 90,
     };
 
     pub const GOOGLE: Self = Self {
@@ -151,6 +177,7 @@ impl ProviderConfig {
         supports_parallel_tool_calls: false,
         supports_stream_options: false,
         custom_headers: Vec::new(),
+        default_timeout_secs: 90,
     };
 
     pub const AZURE_OPENAI: Self = Self {
@@ -163,6 +190,7 @@ impl ProviderConfig {
         supports_parallel_tool_calls: false,
         supports_stream_options: true,
         custom_headers: Vec::new(),
+        default_timeout_secs: 90,
     };
 
     pub const MINIMAX: Self = Self {
@@ -175,6 +203,7 @@ impl ProviderConfig {
         supports_parallel_tool_calls: false,
         supports_stream_options: true,
         custom_headers: Vec::new(),
+        default_timeout_secs: 120,
     };
 
     /// Bedrock OpenAI-compatible gateway.  Simpler than Converse but fewer
@@ -190,6 +219,7 @@ impl ProviderConfig {
         supports_parallel_tool_calls: false,
         supports_stream_options: false,
         custom_headers: Vec::new(),
+        default_timeout_secs: 120,
     };
 
     /// Resolve a config from backend name.  Returns the generic default for
@@ -249,10 +279,15 @@ impl OpenAiCompat {
         temperature: Option<f32>,
         timeout_secs: Option<u64>,
     ) -> Result<Self, ProviderError> {
-        let mut builder = Client::builder();
-        if let Some(sec) = timeout_secs {
-            builder = builder.timeout(std::time::Duration::from_secs(sec));
-        }
+        // ALWAYS install a client-level timeout. `None` resolves to the
+        // backend-specific default (see `ProviderConfig::default_timeout_secs`).
+        // Previously `None` produced a reqwest client with no request
+        // timeout, meaning a hung TCP connect or stalled upstream would
+        // stall the orchestrator forever — this was F27 on the Z.ai path
+        // and the same code path exists here for every OpenAI-compat
+        // backend. Never accept an unbounded default.
+        let effective_timeout = timeout_secs.unwrap_or(config.default_timeout_secs);
+        let builder = Client::builder().timeout(std::time::Duration::from_secs(effective_timeout));
         let raw_url = base_url.unwrap_or_else(|| config.default_base_url.to_owned());
         let normalized = format!("{}/", raw_url.trim_end_matches('/'));
         let base_url = Url::parse(&normalized).map_err(|err| {
@@ -417,9 +452,14 @@ impl OpenAiCompat {
         for (k, v) in &self.config.custom_headers {
             req = req.header(k, v);
         }
-        if let Some(timeout) = self.timeout_secs {
-            req = req.timeout(std::time::Duration::from_secs(timeout));
-        }
+        // Per-request timeout: explicit override wins, otherwise fall
+        // back to the backend-specific default. Belt-and-suspenders with
+        // the client-level timeout — reqwest picks the stricter of the
+        // two. Never unbounded.
+        let per_request_timeout = self
+            .timeout_secs
+            .unwrap_or(self.config.default_timeout_secs);
+        req = req.timeout(std::time::Duration::from_secs(per_request_timeout));
         let resp = req.send().await?;
         if !resp.status().is_success() {
             let status = resp.status();

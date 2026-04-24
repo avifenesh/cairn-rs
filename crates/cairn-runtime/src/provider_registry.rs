@@ -888,6 +888,7 @@ fn map_provider_error(error: cairn_providers::error::ProviderError) -> ProviderA
     use cairn_providers::error::ProviderError;
     match error {
         ProviderError::RateLimited => ProviderAdapterError::RateLimited,
+        ProviderError::TimedOut => ProviderAdapterError::TimedOut,
         ProviderError::Auth(message) => ProviderAdapterError::Auth(message),
         ProviderError::InvalidRequest(message) => ProviderAdapterError::InvalidRequest(message),
         ProviderError::ServerError { status, message } => {
