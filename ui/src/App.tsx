@@ -3,6 +3,8 @@ import { Loader2 } from 'lucide-react';
 import { Layout } from './components/Layout';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { RequestLogProvider } from './components/RequestLogContext';
+import { StarterSetup } from './components/StarterSetup';
+import { useBootstrapScope, SCOPE_NEEDS_PICK_EVENT } from './hooks/useScope';
 import { LoginPage } from './pages/LoginPage';
 // ── Eagerly-loaded pages (always needed on first paint) ───────────────────────
 import { DashboardPage } from './pages/DashboardPage';
@@ -261,7 +263,51 @@ export default function App() {
 
   return (
     <RequestLogProvider>
-      <Layout routeRenderer={renderRoute} onLogout={handleLogout} />
+      <ScopeBootstrapGate>
+        <Layout routeRenderer={renderRoute} onLogout={handleLogout} />
+      </ScopeBootstrapGate>
     </RequestLogProvider>
   );
 }
+
+// ── Scope bootstrap gate ──────────────────────────────────────────────────────
+//
+// Before the operator sees the dashboard, resolve initial scope:
+//   - zero tenants     → <StarterSetup/>
+//   - one tenant/ws/p  → auto-select silently, render the app
+//   - multi-tenant     → render the app with the scope-picker forced open
+//   - cached scope     → validate still exists, else re-resolve
+//
+// Fixes the "empty pages everywhere on first login" UX bug (PR: scope
+// discovery dropdowns).
+
+function ScopeBootstrapGate({ children }: { children: React.ReactNode }) {
+  const bootstrap = useBootstrapScope();
+  const [forceSetup, setForceSetup] = useState(false);
+
+  // Prompt setup if backend is empty and user didn't just finish it.
+  const showSetup = bootstrap.status === 'empty' || forceSetup;
+
+  // When multiple tenants exist but nothing is cached, fire an event so the
+  // TenantSelector in the TopBar opens itself on first paint.
+  useEffect(() => {
+    if (bootstrap.status === 'needs-pick') {
+      // Defer one tick so the TopBar has mounted its listener.
+      const t = setTimeout(() => {
+        window.dispatchEvent(new CustomEvent(SCOPE_NEEDS_PICK_EVENT));
+      }, 0);
+      return () => clearTimeout(t);
+    }
+  }, [bootstrap.status]);
+
+  if (bootstrap.status === 'loading') {
+    return <ValidatingScreen />;
+  }
+
+  if (showSetup) {
+    return <StarterSetup onComplete={() => setForceSetup(false)} />;
+  }
+
+  return <>{children}</>;
+}
+

@@ -21,6 +21,7 @@ import { useAutoRefresh, REFRESH_OPTIONS } from "../hooks/useAutoRefresh";
 import { useScope } from "../hooks/useScope";
 import { StatCard } from "../components/StatCard";
 import { Drawer } from "../components/Drawer";
+import { EmptyScopeHint } from "../components/EmptyScopeHint";
 import { ds } from "../lib/design-system";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -540,6 +541,8 @@ export function TracesPage() {
           </table>
         </div>
       )}
+
+      <EmptyScopeHint empty={!isLoading && traces.length === 0} />
 
       <TraceDetailDrawer trace={selected} onClose={() => setSelected(null)} />
     </div>

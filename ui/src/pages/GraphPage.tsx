@@ -16,6 +16,7 @@ import { StatCard } from "../components/StatCard";
 import { defaultApi } from "../lib/api";
 import { useScope } from "../hooks/useScope";
 import { FeatureEmptyState } from "../components/FeatureEmptyState";
+import { EmptyScopeHint } from "../components/EmptyScopeHint";
 import type { GraphNodeKind, GraphNodeRecord, GraphTraceResponse } from "../lib/types";
 
 // ── Node/edge schema — mirrors cairn_graph::projections exactly ───────────────
@@ -1033,6 +1034,7 @@ function QueriesPanel() {
         <div className="rounded-lg border border-gray-200 dark:border-zinc-800 bg-gray-50/60 dark:bg-zinc-900/60 px-4 py-6 text-center text-[12px] text-gray-400 dark:text-zinc-600">
           Query returned no nodes. The seed ID may not exist in the current project scope,
           or the graph has no matching edges yet.
+          <EmptyScopeHint empty className="mt-3 text-left" />
         </div>
       ) : (
         <ForceGraph graph={resultGraph} />

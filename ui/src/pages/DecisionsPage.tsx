@@ -10,6 +10,7 @@ import { useToast } from "../components/Toast";
 import { clsx } from "clsx";
 import { sectionLabel } from "../lib/design-system";
 import { ApiError } from "../lib/api";
+import { EmptyScopeHint } from "../components/EmptyScopeHint";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -282,6 +283,7 @@ export function DecisionsPage() {
           emptyText="No cached decisions yet. Cached rules skip repeat operator prompts for the same action."
         />
       )}
+      <EmptyScopeHint empty={decisions.length === 0 && cacheEntries.length === 0} />
     </div>
   );
 }

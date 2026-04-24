@@ -43,6 +43,7 @@ import type {
   ToolCallApprovalRecord,
 } from "../lib/types";
 import { useAutoRefresh, REFRESH_OPTIONS } from "../hooks/useAutoRefresh";
+import { EmptyScopeHint } from "../components/EmptyScopeHint";
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -812,6 +813,7 @@ export function ApprovalsPage() {
               No approvals match this filter. Approvals appear here when a run hits a
               human-in-the-loop gate or a tool call needs operator sign-off.
             </p>
+            <EmptyScopeHint empty className="max-w-lg" />
           </div>
         ) : (
           <div className="divide-y divide-gray-100 dark:divide-zinc-800/40">
