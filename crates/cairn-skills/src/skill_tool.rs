@@ -18,9 +18,10 @@
 //! key in `cairn-harness-tools::tools::write::LEDGERS`.
 //!
 //! When both `session_id` and `run_id` are absent (e.g. unit-test call
-//! sites building `ToolContext::default()`), all such invocations within
-//! the same project share one set. That is intentional for tests; real
-//! execution always supplies both fields via `ToolContext::for_run`.
+//! sites building `ToolContext::default()`), each invocation gets a
+//! per-call unique cache key — no accidental shared dedupe state.
+//! Real execution always supplies at least one field via
+//! `ToolContext::for_run`.
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -44,14 +45,16 @@ use serde_json::{json, Value};
 use cairn_harness_tools::default_sensitive_patterns;
 
 /// Maximum number of distinct (tenant, workspace, project, session, run)
-/// keys retained in `ACTIVATED_SETS`. When the cache exceeds this, the
-/// least-recently-inserted half is evicted in one pass.
+/// keys retained in `ACTIVATED_SETS`. When the cache exceeds this, an
+/// arbitrary half is evicted in one pass — `HashMap` iteration order
+/// makes this neither LRU nor LRI; it is a pressure-relief valve that
+/// caps memory without tracking an ordering structure. Precise
+/// per-session/run cleanup is the operator's responsibility via
+/// `evict_session`, which the orchestrator should call on run finalize.
 ///
 /// 1024 fits several hundred concurrent multi-run sessions at typical
 /// cairn-app workloads while keeping worst-case memory bounded (each
 /// entry holds a small `HashSet<String>` behind an `Arc<Mutex<_>>`).
-/// Operators with higher session churn should call `evict_session`
-/// from the run-finalize path (follow-up: wire that hook explicitly).
 const MAX_CACHED_SESSIONS: usize = 1024;
 
 /// Process-wide cache of per-session activated sets.
@@ -103,9 +106,10 @@ fn activated_set_for(ctx: &ToolContext, project: &ProjectKey) -> ActivatedSet {
     let key = session_key(ctx, project);
     let mut guard = ACTIVATED_SETS.lock().unwrap_or_else(|e| e.into_inner());
     if guard.len() >= MAX_CACHED_SESSIONS && !guard.contains_key(&key) {
-        // Pressure relief: drop half the keys. Cheaper than tracking an
-        // LRU linked list and acceptable for a cache that only affects
-        // dedupe (worst case: a skill re-injects its body once).
+        // Pressure relief: drop an arbitrary half of the keys (HashMap
+        // iteration order — neither LRU nor LRI). Cheaper than tracking
+        // an ordering structure and acceptable for a cache that only
+        // affects dedupe (worst case: a skill re-injects its body once).
         let victims: Vec<String> = guard
             .keys()
             .take(MAX_CACHED_SESSIONS / 2)

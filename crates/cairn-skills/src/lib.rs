@@ -14,12 +14,15 @@
 //! HarnessSkill         — empty type implementing `cairn_harness_tools::HarnessTool`.
 //!                        Registered in cairn-app as `HarnessBuiltin::<HarnessSkill>::new()`.
 //! activated_set_for()  — per-session `ActivatedSet` cache, keyed by
-//!                        `(tenant, workspace, project, session_id)` so dedupe
-//!                        state is isolated between sessions + tenants.
+//!                        `(tenant, workspace, project, session_id, run_id)`
+//!                        so dedupe state is isolated across sessions, runs,
+//!                        and tenants.
 //! skill_roots_for()    — resolves skill discovery roots from the tool
 //!                        context's working directory:
 //!                          `<cwd>/.cairn/skills` (project-level)
 //!                          `<cwd>/skills`        (workspace-level fallback)
+//! evict_session()      — orchestrator-facing API: drop a session's cached
+//!                        `ActivatedSet` on run finalize.
 //! ```
 //!
 //! ## Scope (BP-8 v1)

@@ -2,7 +2,7 @@
 
 **Generated**: 2026-04-23
 **Sources**: 40+ primary sources analyzed
-**Scope**: Research-only. No cairn-rs code was written or changed.
+**Scope**: Research-only document. This write-up does not itself modify cairn-rs code; it is the design reference consumed by the BP-8 adapter crate in the same PR.
 **Purpose**: Feeds cairn-rs PR BP-8 (harness-skill adoption design).
 
 ---
