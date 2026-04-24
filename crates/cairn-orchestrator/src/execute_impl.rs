@@ -1324,7 +1324,7 @@ impl RuntimeExecutePhase {
         //    on `PendingOperator`. (F26 dogfood blocker.)
         //
         // Previous behaviour blocked inside `await_decision` for the full
-        // `approval_timeout_ms` (default 45s). With a real operator who
+        // `approval_timeout_ms` (default 24h; 45s in the live repro). With a real operator who
         // resolves via the UI, the `POST /v1/runs/:id/orchestrate` HTTP
         // call stayed open until the approval came through — but the UI
         // approval hits a DIFFERENT process path and (per the design
@@ -1750,8 +1750,8 @@ mod signal_aggregation_tests {
 //
 // Covers the dogfood blocker where an `InvokeTool` proposal with
 // `requires_approval=true` blocked the entire `POST /v1/runs/:id/orchestrate`
-// request for the full `approval_timeout_default` (default 24h, capped at
-// 45s by the test fixture). The fix in `run_with_approval_gate`: on
+// request for the full `approval_timeout_default` (default 24h; 45s in
+// the live repro). The fix in `run_with_approval_gate`: on
 // `PendingOperator`, return `AwaitingApproval` immediately so the outer
 // loop yields `LoopTermination::WaitingApproval` and the HTTP handler
 // returns 202. The operator then resolves the proposal asynchronously;
@@ -1759,12 +1759,17 @@ mod signal_aggregation_tests {
 // invocation.
 //
 // These tests pin the contract at the `ToolCallApprovalService`
-// interaction boundary. A full end-to-end test that drives
-// `RuntimeExecutePhase::dispatch_one` requires in-memory impls of
-// `RunService`, `TaskService`, etc. which live in `cairn-app` (as
-// `FabricRunServiceAdapter`/etc.) and are not available from this
-// crate's unit-test context. The E2E coverage lives in
-// `crates/cairn-app/tests/`.
+// interaction boundary (the gate MUST NOT call `await_decision` on
+// `PendingOperator`). Production-code coverage of
+// `RuntimeExecutePhase::run_with_approval_gate` itself — wiring a real
+// `RuntimeExecutePhase` with real `RunService` / `TaskService`
+// adapters — lives in `crates/cairn-app/tests/test_approval_propose_then_await.rs::pending_approval_suspends_loop_without_blocking`,
+// which constructs a full `RuntimeExecutePhase` via `build_phase(...)`
+// and asserts the same invariants against the actual production code
+// path. That E2E test uses the fake-fabric `RunService`/`TaskService`
+// helpers that exist only in `cairn-app` (they depend on
+// `FabricRunServiceAdapter` et al. which are crate-private to
+// cairn-app), hence the split.
 #[cfg(test)]
 mod f26_pending_operator_no_block_tests {
     use async_trait::async_trait;
@@ -1851,12 +1856,18 @@ mod f26_pending_operator_no_block_tests {
         }
     }
 
-    /// Mimics the post-F26 gate logic: submit the proposal, and on
-    /// PendingOperator return the pending state directly WITHOUT
-    /// calling `await_decision`. This mirrors `run_with_approval_gate`'s
-    /// behaviour in `execute_impl.rs` and pins the contract so a future
-    /// refactor that re-introduces an in-process `await_decision` call
-    /// fails loud (the fake panics).
+    /// Service-contract harness: submit the proposal, and on
+    /// `PendingOperator` return without calling `await_decision`. Used
+    /// by the contract-level tests below to assert the fake never sees
+    /// an `await_decision` call on the pending branch.
+    ///
+    /// This is NOT a substitute for the E2E regression test in
+    /// `crates/cairn-app/tests/test_approval_propose_then_await.rs`
+    /// which exercises the real `RuntimeExecutePhase::run_with_approval_gate`
+    /// via `phase.execute(...)`. It's a belt-and-suspenders pin on the
+    /// `ToolCallApprovalService` boundary so any future gate
+    /// implementation that tries to re-introduce in-process blocking
+    /// fails loud (the fake panics on `await_decision`).
     ///
     /// Returns `true` iff the gate correctly identified the pending
     /// state and did NOT block.

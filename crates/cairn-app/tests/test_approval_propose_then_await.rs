@@ -8,17 +8,22 @@
 //! `ToolInvocationServiceImpl`). Every test drives the full dispatch
 //! path — no mocks on the hot path.
 //!
-//! Covers the six BP-v2 acceptance cases called out in the sprint brief:
+//! Covers the six BP-v2 acceptance cases, updated for the F26 non-
+//! blocking contract (see PR #285):
 //!
-//! * auto-approved tool executes without operator
-//! * pending approval waits for operator → approve → tool runs
-//! * rejection surfaces tool_result error
-//! * timeout auto-rejects
-//! * parallel batch executes auto-approved siblings while one waits
-//! * amend-then-approve uses amended args
+//! * auto-approved tool executes without operator (unchanged)
+//! * pending approval suspends loop without blocking (F26)
+//! * pending approval returns before operator can reject (F26)
+//! * pending approval does not block on approval_timeout (F26)
+//! * parallel batch: auto-approved siblings run; pending ones
+//!   return `AwaitingApproval` (F26)
+//! * amend after pending does not retroactively run tool in first
+//!   execute (F26 — amend/approve/drain flow exercised by
+//!   `test_drain_approved_executes_bash.rs`)
 //!
 //! Each test uses a recording tool that captures the exact args it saw
-//! so we can assert the approved / amended args flowed through.
+//! so we can assert the approved / amended args flowed through when
+//! the tool eventually runs.
 
 mod support;
 
@@ -264,9 +269,13 @@ async fn auto_approved_tool_executes_without_operator() {
     assert_eq!(seen.lock().unwrap().len(), 1, "tool ran exactly once");
 }
 
-/// Pending approval: execute blocks on `await_decision`; a background
-/// task approves after a short delay; execute returns with the tool
-/// result. THIS IS THE DOGFOOD-UNBLOCKING CASE.
+/// Pending approval: execute returns `AwaitingApproval` IMMEDIATELY
+/// so the outer loop yields `LoopTermination::WaitingApproval` and
+/// the HTTP handler returns 202. The operator resolves the proposal
+/// out-of-band via `/v1/tool-call-approvals/:id/approve`; the tool
+/// actually runs on a LATER orchestrate call via the F25 drain path
+/// (covered by `test_drain_approved_executes_bash.rs`). THIS IS THE
+/// F26 DOGFOOD-UNBLOCKING CASE.
 #[tokio::test(flavor = "multi_thread")]
 async fn pending_approval_suspends_loop_without_blocking() {
     // F26 dogfood-blocker fix (2026-04-23). The previous behaviour was
@@ -445,16 +454,23 @@ async fn pending_approval_does_not_block_on_approval_timeout() {
     // `await_decision` to fire and return Failed. Post-F26 the field
     // is still accepted for backward-compat but the hot path ignores
     // it — execute returns AwaitingApproval near-instantly.
+    //
+    // The property under test is "execute does NOT honour the
+    // approval timeout" — enforced by wrapping the call in a
+    // `tokio::time::timeout` well below the configured 100ms value.
+    // If the code regresses to calling `await_decision`, the timer
+    // fires before execute can return (or the sync path returns
+    // `Failed { reason: "timeout" }` after 100ms) and the assertion
+    // below catches the failure. No post-hoc wall-clock bound is
+    // needed, which keeps the test robust on slow CI.
     let cx = ctx_with_timeout("run-to", "sess-to", Duration::from_millis(100));
     let decide = decide_with(vec![invoke_proposal("recorder", json!({"k": "v"}), true)]);
-    let start = std::time::Instant::now();
-    let outcome = phase.execute(&cx, &decide).await.expect("execute");
-    let elapsed = start.elapsed();
-
-    assert!(
-        elapsed < Duration::from_millis(80),
-        "F26 regression: execute blocked for {elapsed:?} — must not honour approval_timeout in-process"
-    );
+    let outcome = tokio::time::timeout(Duration::from_millis(50), phase.execute(&cx, &decide))
+        .await
+        .expect(
+            "F26 regression: execute blocked past 50ms — must return immediately on PendingOperator",
+        )
+        .expect("execute");
     assert!(
         matches!(
             outcome.results[0].status,
