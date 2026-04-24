@@ -522,6 +522,7 @@ dependencies = [
  "cairn-orchestrator",
  "cairn-providers",
  "cairn-runtime",
+ "cairn-skills",
  "cairn-store",
  "cairn-tools",
  "cairn-workspace",

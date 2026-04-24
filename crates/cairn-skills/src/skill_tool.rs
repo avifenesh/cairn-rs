@@ -61,7 +61,7 @@ fn session_key(ctx: &ToolContext, project: &ProjectKey) -> String {
 fn activated_set_for(ctx: &ToolContext, project: &ProjectKey) -> ActivatedSet {
     let key = session_key(ctx, project);
     let mut guard = ACTIVATED_SETS.lock().unwrap_or_else(|e| e.into_inner());
-    guard.entry(key).or_insert_with(ActivatedSet::new).clone()
+    guard.entry(key).or_default().clone()
 }
 
 /// Test-only: clear the cache between test cases so dedupe state does not
