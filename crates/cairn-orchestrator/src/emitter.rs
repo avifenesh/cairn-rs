@@ -190,9 +190,16 @@ pub trait OrchestratorEventEmitter: Send + Sync {
     async fn on_finished(&self, _ctx: &OrchestrationContext, _termination: &LoopTermination) {}
 
     /// Drain a pending fatal error stashed by the emitter since the last
-    /// call. The loop runner consults this after each phase-boundary
-    /// callback and — if `Some` — aborts the loop with a `Store` error
-    /// carrying the message.
+    /// call. The loop runner currently consults this after the DECIDE
+    /// phase callback (the only phase boundary where the production
+    /// emitter commits telemetry events to the durable secondary) and
+    /// — if `Some` — aborts the loop with a `Store` error carrying the
+    /// message.
+    ///
+    /// Additional consult sites may be added as other callbacks gain
+    /// side-effectful durable writes; each addition should keep the
+    /// "take once" semantics consistent with the existing DECIDE-phase
+    /// check.
     ///
     /// The contract is "take": the emitter MUST return the error exactly
     /// once. Subsequent calls return `None` until another fatal error is
@@ -200,6 +207,15 @@ pub trait OrchestratorEventEmitter: Send + Sync {
     /// (e.g. dual-write divergence against the durable secondary) that
     /// the trait methods can't express through their `()` return type,
     /// without silently continuing the loop on top of a diverged store.
+    ///
+    /// **Security (SEC-007): error strings returned here are surfaced
+    /// via `OrchestratorError::Store` and may reach public-facing API
+    /// responses.** Implementors MUST NOT include raw driver messages,
+    /// connection strings, schema fragments, or other internals. Keep
+    /// the message to a short operator-facing class label (e.g.
+    /// `"dual-write divergence"`) plus an identifier the operator
+    /// already owns (e.g. the run_id), and log the detailed cause
+    /// separately via `tracing::error!`.
     ///
     /// Default is `None` — emitters that never record fatal errors
     /// don't need to override this.

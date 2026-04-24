@@ -24,14 +24,11 @@
 //! identical schema mirrored in `crates/cairn-store/src/sqlite/schema.rs`).
 //! A separate static-SQL check covers the Postgres migration.
 
-use cairn_domain::providers::{
-    OperationKind, ProviderCallStatus, RouteDecisionStatus,
-};
+use cairn_domain::providers::{OperationKind, ProviderCallStatus, RouteDecisionStatus};
 use cairn_domain::{
     EventEnvelope, EventId, EventSource, ProjectId, ProjectKey, ProviderBindingId,
-    ProviderCallCompleted, ProviderCallId, ProviderConnectionId, ProviderModelId,
-    RouteAttemptId, RouteDecisionId, RouteDecisionMade, RuntimeEvent, TenantId,
-    WorkspaceId,
+    ProviderCallCompleted, ProviderCallId, ProviderConnectionId, ProviderModelId, RouteAttemptId,
+    RouteDecisionId, RouteDecisionMade, RuntimeEvent, TenantId, WorkspaceId,
 };
 
 fn project() -> ProjectKey {
@@ -149,13 +146,7 @@ mod sqlite {
             .append(&[
                 envelope(
                     "e1_call",
-                    provider_call(
-                        "call_bad",
-                        "rd_bad",
-                        "ra_bad",
-                        "binding_brain",
-                        now + 100,
-                    ),
+                    provider_call("call_bad", "rd_bad", "ra_bad", "binding_brain", now + 100),
                 ),
                 envelope("e2_route", route_made("rd_bad", "binding_brain", now)),
             ])

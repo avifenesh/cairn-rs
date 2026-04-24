@@ -1495,9 +1495,9 @@ mod tests {
                     "expected divergence detail in error, got: {s}"
                 );
             }
-            other => panic!(
-                "expected OrchestratorError::Store(dual-write divergence), got {other:?}"
-            ),
+            other => {
+                panic!("expected OrchestratorError::Store(dual-write divergence), got {other:?}")
+            }
         }
     }
 

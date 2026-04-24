@@ -2289,10 +2289,8 @@ pub(crate) async fn orchestrate_run_handler(
                 .unwrap_or_default()
                 .as_millis() as u64;
             let call_id = format!("orch_{}_{}", ctx.run_id.as_str(), now);
-            let route_decision_id =
-                cairn_domain::RouteDecisionId::new(format!("rd_{call_id}"));
-            let route_attempt_id =
-                cairn_domain::RouteAttemptId::new(format!("ra_{call_id}"));
+            let route_decision_id = cairn_domain::RouteDecisionId::new(format!("rd_{call_id}"));
+            let route_attempt_id = cairn_domain::RouteAttemptId::new(format!("ra_{call_id}"));
             let provider_binding_id = cairn_domain::ProviderBindingId::new("brain");
 
             let route_event = cairn_domain::EventEnvelope::for_runtime_event(
@@ -2304,8 +2302,7 @@ pub(crate) async fn orchestrate_run_handler(
                         route_decision_id: route_decision_id.clone(),
                         operation_kind: cairn_domain::providers::OperationKind::Generate,
                         selected_provider_binding_id: Some(provider_binding_id.clone()),
-                        final_status:
-                            cairn_domain::providers::RouteDecisionStatus::Selected,
+                        final_status: cairn_domain::providers::RouteDecisionStatus::Selected,
                         attempt_count: 1,
                         fallback_used: false,
                         decided_at: now,
@@ -2353,11 +2350,7 @@ pub(crate) async fn orchestrate_run_handler(
                 ),
             );
             let provider_payload = provider_event.payload.clone();
-            if let Err(e) = self
-                .store
-                .append(&[route_event, provider_event])
-                .await
-            {
+            if let Err(e) = self.store.append(&[route_event, provider_event]).await {
                 // Fail LOUD: a dual-write failure against the durable
                 // secondary (Postgres in team mode) means the in-memory
                 // and durable event logs have diverged. Continuing the
@@ -2372,9 +2365,15 @@ pub(crate) async fn orchestrate_run_handler(
                     error     = %e,
                     "event store append failed — in-memory/secondary logs have diverged, aborting run"
                 );
+                // SEC-007: keep the latched public message class-level
+                // only. The `{e}` detail (raw driver text / constraint
+                // names / schema fragments) is already logged at ERROR
+                // above for operators; it must NOT be folded into the
+                // `OrchestratorError::Store` message that the API
+                // renders to clients.
                 let mut slot = self.fatal_error.lock().unwrap_or_else(|p| p.into_inner());
                 *slot = Some(format!(
-                    "dual-write divergence on run={}: {e}",
+                    "dual-write divergence on run={}",
                     ctx.run_id.as_str()
                 ));
             }

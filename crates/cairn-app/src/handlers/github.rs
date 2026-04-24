@@ -494,10 +494,8 @@ pub(crate) fn build_orchestrator_emitter(
                 .unwrap_or_default()
                 .as_millis() as u64;
             let call_id = format!("orch_{}_{}", ctx.run_id.as_str(), now);
-            let route_decision_id =
-                cairn_domain::RouteDecisionId::new(format!("rd_{call_id}"));
-            let route_attempt_id =
-                cairn_domain::RouteAttemptId::new(format!("ra_{call_id}"));
+            let route_decision_id = cairn_domain::RouteDecisionId::new(format!("rd_{call_id}"));
+            let route_attempt_id = cairn_domain::RouteAttemptId::new(format!("ra_{call_id}"));
             let provider_binding_id = cairn_domain::ProviderBindingId::new("brain");
 
             let route_event = cairn_domain::EventEnvelope::for_runtime_event(
@@ -509,8 +507,7 @@ pub(crate) fn build_orchestrator_emitter(
                         route_decision_id: route_decision_id.clone(),
                         operation_kind: cairn_domain::providers::OperationKind::Generate,
                         selected_provider_binding_id: Some(provider_binding_id.clone()),
-                        final_status:
-                            cairn_domain::providers::RouteDecisionStatus::Selected,
+                        final_status: cairn_domain::providers::RouteDecisionStatus::Selected,
                         attempt_count: 1,
                         fallback_used: false,
                         decided_at: now,
@@ -558,19 +555,17 @@ pub(crate) fn build_orchestrator_emitter(
                 ),
             );
             let provider_payload = provider_event.payload.clone();
-            if let Err(e) = self
-                .store
-                .append(&[route_event, provider_event])
-                .await
-            {
+            if let Err(e) = self.store.append(&[route_event, provider_event]).await {
                 tracing::error!(
                     run_id = %ctx.run_id,
                     error = %e,
                     "event store append failed — in-memory/secondary logs have diverged, aborting run"
                 );
+                // SEC-007: keep the latched public message class-level
+                // only — raw `{e}` is logged above, not folded here.
                 let mut slot = self.fatal_error.lock().unwrap_or_else(|p| p.into_inner());
                 *slot = Some(format!(
-                    "dual-write divergence on run={}: {e}",
+                    "dual-write divergence on run={}",
                     ctx.run_id.as_str()
                 ));
             }
