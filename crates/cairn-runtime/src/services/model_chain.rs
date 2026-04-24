@@ -18,10 +18,12 @@
 //! [`ModelChain`] is the **per-binding** axis of fallback: an ordered list of
 //! model IDs served by a single provider binding, walked in order on
 //! fallback-eligible errors. It composes with the **cross-binding** axis
-//! handled by [`crate::services::ProviderRouter`]: the routing service
-//! tries each binding's `ModelChain`; if the chain exhausts, the router
-//! moves to the next binding. Axes are orthogonal and handled by separate
-//! components.
+//! handled by
+//! [`crate::services::routed_generation::RoutedGenerationService`]:
+//! that service iterates bindings and invokes each binding's `ModelChain`;
+//! if the chain exhausts, it advances to the next binding. The two axes
+//! remain orthogonal even though they are composed at the
+//! `RoutedGenerationService` layer.
 //!
 //! | Error class                               | Action                                 |
 //! |-------------------------------------------|----------------------------------------|

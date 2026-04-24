@@ -2048,8 +2048,10 @@ pub(crate) async fn orchestrate_run_handler(
     // becomes a `RoutedBinding`, with the binding that supports `model_id`
     // taking preference. Per-binding axis: each binding's ModelChain is
     // that connection's `supported_models` list (preferred model first on
-    // the preferred binding). Cooldowns are shared across all bindings so
-    // a rate-limited model is skipped everywhere for the cooldown window.
+    // the preferred binding). Cooldowns are scoped per
+    // `(tenant_id, binding_id)` so a rate-limited model is only skipped
+    // within that tenant's binding — other tenants or sibling connections
+    // with independent credentials are unaffected.
     //
     // Dogfood run 2 motivated this: MiniMax empty → Qwen 503 → Llama 429.
     // A single-model hard-fail is a budget DoS on the operator's day.
@@ -2075,6 +2077,28 @@ pub(crate) async fn orchestrate_run_handler(
         let preferred_idx = summaries
             .iter()
             .position(|(_, sup)| sup.iter().any(|m| m.trim() == model_id));
+
+        // If the configured system-default model isn't advertised by any
+        // active connection, fail loudly instead of silently degrading to
+        // "first model on first connection". Operators get an actionable
+        // error with the full list of tenant connections + their models
+        // so they can fix the mismatch (update the default, update the
+        // connection's supported_models, or add a new connection).
+        if preferred_idx.is_none() && !summaries.is_empty() {
+            let inventory = summaries
+                .iter()
+                .map(|(conn, models)| format!("{conn}=[{}]", models.join(",")))
+                .collect::<Vec<_>>()
+                .join("; ");
+            return AppApiError::new(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "preferred_model_not_supported",
+                format!(
+                    "System-default model '{model_id}' is not advertised by any active provider connection. Active connections + supported_models: {inventory}. Fix by updating `brain_model`/`generate_model` defaults, adding the model to a connection's `supported_models`, or creating a new connection via POST /v1/providers/connections.",
+                ),
+            )
+            .into_response();
+        }
 
         let order: Vec<usize> = match preferred_idx {
             Some(pref) => {
@@ -2608,8 +2632,9 @@ async fn submit_all_providers_exhausted_proposal(
                 "error": a.error_message,
             })).collect::<Vec<_>>(),
             "suggested_actions": [
-                "Change model_id to a provider you have credits for",
-                "Top up free-tier credits on OpenRouter",
+                "Update system defaults `brain_model` / `generate_model` to a model you have credits for",
+                "Edit a provider connection's `supported_models` list to include a working model",
+                "Top up free-tier credits on your configured provider (OpenRouter, etc.)",
                 "Add a new provider connection via POST /v1/providers/connections",
                 "Abort the run",
             ],

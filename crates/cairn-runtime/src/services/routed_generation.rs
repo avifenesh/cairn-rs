@@ -80,8 +80,10 @@ impl RoutedGenerationService {
         Self { bindings }
     }
 
-    /// True when the service has no bindings at all — callers should surface
-    /// a 503 "no provider configured" instead of attempting routing.
+    /// True when the service has no routable model attempts available —
+    /// either because there are no bindings at all, or because every
+    /// binding's model chain is empty. Callers should surface a 503
+    /// "no provider configured" instead of attempting routing.
     pub fn is_empty(&self) -> bool {
         self.bindings.iter().all(|b| b.chain.is_empty())
     }
