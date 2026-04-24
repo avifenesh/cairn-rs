@@ -284,7 +284,11 @@ impl std::fmt::Display for RoutedGenerationError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             RoutedGenerationError::AllProvidersExhausted { attempts } => {
-                write!(f, "{}", super::model_chain::format_attempt_summary(attempts))
+                write!(
+                    f,
+                    "{}",
+                    super::model_chain::format_attempt_summary(attempts)
+                )
             }
             RoutedGenerationError::Auth {
                 binding_id,
@@ -387,11 +391,11 @@ mod tests {
                 .push((model_id.to_owned(), tools.len()));
             let step = {
                 let mut guard = self.script.lock().unwrap();
-                let steps = guard
-                    .get_mut(model_id)
-                    .ok_or_else(|| ProviderAdapterError::InvalidRequest(
-                        format!("scripted: no steps for {model_id}"),
-                    ))?;
+                let steps = guard.get_mut(model_id).ok_or_else(|| {
+                    ProviderAdapterError::InvalidRequest(format!(
+                        "scripted: no steps for {model_id}"
+                    ))
+                })?;
                 if steps.is_empty() {
                     return Err(ProviderAdapterError::InvalidRequest(format!(
                         "scripted: exhausted steps for {model_id}"
@@ -444,7 +448,10 @@ mod tests {
     #[tokio::test]
     async fn test_first_model_rate_limited_second_model_success() {
         let p = ScriptedProvider::new(vec![
-            ("m1", vec![ScriptStep::Err(ProviderAdapterError::RateLimited)]),
+            (
+                "m1",
+                vec![ScriptStep::Err(ProviderAdapterError::RateLimited)],
+            ),
             ("m2", vec![ScriptStep::Ok("hi".into())]),
         ]);
         let svc = RoutedGenerationService::new(vec![RoutedBinding {
@@ -462,7 +469,10 @@ mod tests {
     #[tokio::test]
     async fn test_first_binding_all_models_exhausted_second_binding_succeeds() {
         let p1 = ScriptedProvider::new(vec![
-            ("a1", vec![ScriptStep::Err(ProviderAdapterError::RateLimited)]),
+            (
+                "a1",
+                vec![ScriptStep::Err(ProviderAdapterError::RateLimited)],
+            ),
             (
                 "a2",
                 vec![ScriptStep::Err(ProviderAdapterError::ServerError {
@@ -495,7 +505,9 @@ mod tests {
     async fn test_auth_error_returns_immediately_no_fallback() {
         let p = ScriptedProvider::new(vec![(
             "m1",
-            vec![ScriptStep::Err(ProviderAdapterError::Auth("bad key".into()))],
+            vec![ScriptStep::Err(ProviderAdapterError::Auth(
+                "bad key".into(),
+            ))],
         )]);
         let svc = RoutedGenerationService::new(vec![
             RoutedBinding {
@@ -509,7 +521,10 @@ mod tests {
                 chain: ModelChain::single("z"),
             },
         ]);
-        let err = svc.generate(vec![], &settings(), &tools()).await.unwrap_err();
+        let err = svc
+            .generate(vec![], &settings(), &tools())
+            .await
+            .unwrap_err();
         assert_eq!(err.code(), "provider_auth_failed");
         // Only m1 was called; m2 and b2/z never got a request.
         assert_eq!(p.calls().len(), 1);
@@ -528,7 +543,10 @@ mod tests {
             provider: p.clone(),
             chain: ModelChain::new(vec!["m1".to_owned(), "m2".to_owned()]),
         }]);
-        let err = svc.generate(vec![], &settings(), &tools()).await.unwrap_err();
+        let err = svc
+            .generate(vec![], &settings(), &tools())
+            .await
+            .unwrap_err();
         assert_eq!(err.code(), "provider_invalid_request");
         assert_eq!(p.calls().len(), 1);
     }
@@ -557,7 +575,10 @@ mod tests {
             provider: p,
             chain: ModelChain::new(vec!["m1".to_owned(), "m2".to_owned()]),
         }]);
-        let err = svc.generate(vec![], &settings(), &tools()).await.unwrap_err();
+        let err = svc
+            .generate(vec![], &settings(), &tools())
+            .await
+            .unwrap_err();
         match err {
             RoutedGenerationError::AllProvidersExhausted { attempts } => {
                 assert_eq!(attempts.len(), 2);
@@ -574,8 +595,14 @@ mod tests {
         let cooldown = CooldownMap::new();
         let p = ScriptedProvider::new(vec![
             // First call to m1 returns rate-limited, then m2 succeeds.
-            ("m1", vec![ScriptStep::Err(ProviderAdapterError::RateLimited)]),
-            ("m2", vec![ScriptStep::Ok("a".into()), ScriptStep::Ok("b".into())]),
+            (
+                "m1",
+                vec![ScriptStep::Err(ProviderAdapterError::RateLimited)],
+            ),
+            (
+                "m2",
+                vec![ScriptStep::Ok("a".into()), ScriptStep::Ok("b".into())],
+            ),
         ]);
         let svc = RoutedGenerationService::new(vec![RoutedBinding {
             binding_id: "b1".into(),
@@ -615,10 +642,7 @@ mod tests {
             serde_json::json!({ "type": "function", "function": { "name": "read" } }),
             serde_json::json!({ "type": "function", "function": { "name": "write" } }),
         ];
-        let _ = svc
-            .generate(vec![], &settings(), &tool_defs)
-            .await
-            .unwrap();
+        let _ = svc.generate(vec![], &settings(), &tool_defs).await.unwrap();
         assert_eq!(
             p.calls(),
             vec![("m1".to_owned(), 2)],

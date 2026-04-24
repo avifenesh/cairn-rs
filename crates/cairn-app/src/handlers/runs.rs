@@ -2442,27 +2442,53 @@ pub(crate) async fn orchestrate_run_handler(
                     // single ToolCallApprovalService proposal with the
                     // full summary so the operator can rotate credentials,
                     // add a provider, or abort.
-                    let summary =
-                        cairn_orchestrator::format_attempt_summary(attempts);
-                    let _ = submit_all_providers_exhausted_proposal(
+                    let summary = cairn_orchestrator::format_attempt_summary(attempts);
+                    // Best-effort: if the approval submission itself fails
+                    // (store-append error, cache issue) we still return 502
+                    // with the inline summary, but we MUST log the drop so
+                    // operators have a trace that no card appeared in the
+                    // tool-call-approvals UI. Never silently discard a
+                    // `store.append`-backed Result.
+                    if let Err(err) = submit_all_providers_exhausted_proposal(
                         state.as_ref(),
                         &run,
                         &model_id,
                         attempts,
                         &summary,
                     )
-                    .await;
+                    .await
+                    {
+                        tracing::error!(
+                            run_id = %run.run_id,
+                            error = %err,
+                            "failed to submit providers-exhausted tool-call approval; operator will not see the card in the UI (HTTP 502 body still carries the summary)"
+                        );
+                    }
+                    // SEC-007: `summary` + `a.error_message` are built from
+                    // `ProviderAdapterError::to_string()` which for
+                    // `ServerError` / `StructuredOutputInvalid` carries the
+                    // upstream response body (truncated + redacted, but
+                    // still provider-internal). Log the full detail and
+                    // return only classification to the caller. The
+                    // operator can correlate via `run_id` in the logs or
+                    // view the full summary in the tool-call-approval
+                    // card submitted above.
+                    tracing::warn!(
+                        run_id = %run_id,
+                        attempt_count = attempts.len(),
+                        full_summary = %summary,
+                        "all providers exhausted during orchestration"
+                    );
                     return (
                         StatusCode::BAD_GATEWAY,
                         Json(serde_json::json!({
                             "termination": "providers_exhausted",
                             "error_code": "all_providers_exhausted",
-                            "summary": summary,
                             "attempts": attempts.iter().map(|a| serde_json::json!({
                                 "model_id": a.model_id,
                                 "reason_code": a.reason_code,
-                                "error": a.error_message,
                             })).collect::<Vec<_>>(),
+                            "remediation": "One or more of: rotate credentials, top up provider credits, add a provider connection via POST /v1/providers/connections, or change the configured model. Full per-model failure summary is available in the tool-call-approvals UI.",
                         })),
                     )
                         .into_response();
@@ -2471,24 +2497,44 @@ pub(crate) async fn orchestrate_run_handler(
                     binding_id,
                     model_id: m,
                     detail,
-                } => (
-                    StatusCode::SERVICE_UNAVAILABLE,
-                    "provider_auth_failed",
-                    format!(
-                        "Provider authentication failed on binding={binding_id} model={m}: {detail}. Rotate the credential via POST /v1/admin/credentials/rotate or update the provider connection."
-                    ),
-                ),
+                } => {
+                    // SEC-007: `detail` is built by openai_compat from the
+                    // upstream response body + the provider's internal
+                    // config name. Never forward that to the API caller —
+                    // it can carry credential-adjacent fragments or
+                    // proprietary internals. Log the full detail
+                    // server-side; return a stable opaque body.
+                    tracing::warn!(
+                        run_id = %run_id,
+                        binding_id = %binding_id,
+                        model_id = %m,
+                        detail = %detail,
+                        "provider auth failed during orchestration"
+                    );
+                    (
+                        StatusCode::SERVICE_UNAVAILABLE,
+                        "provider_auth_failed",
+                        "Provider authentication failed. Rotate the credential via POST /v1/admin/credentials/rotate or update the provider connection.".to_owned(),
+                    )
+                }
                 cairn_orchestrator::OrchestratorError::ProviderInvalidRequest {
                     binding_id,
                     model_id: m,
                     detail,
-                } => (
-                    StatusCode::BAD_GATEWAY,
-                    "provider_invalid_request",
-                    format!(
-                        "Provider rejected request on binding={binding_id} model={m}: {detail}. This indicates a bug in cairn's prompt construction — please file an issue."
-                    ),
-                ),
+                } => {
+                    tracing::warn!(
+                        run_id = %run_id,
+                        binding_id = %binding_id,
+                        model_id = %m,
+                        detail = %detail,
+                        "provider rejected request during orchestration"
+                    );
+                    (
+                        StatusCode::BAD_GATEWAY,
+                        "provider_invalid_request",
+                        "Provider rejected the request. This indicates a bug in cairn's prompt construction — please file an issue.".to_owned(),
+                    )
+                }
                 _ => (
                     StatusCode::INTERNAL_SERVER_ERROR,
                     "orchestration_error",
@@ -2557,13 +2603,10 @@ async fn submit_all_providers_exhausted_proposal(
         match_policy: cairn_domain::approvals::ApprovalMatchPolicy::Exact,
     };
 
-    svc.submit_proposal(tcp)
-        .await
-        .map(|_| ())
-        .map_err(|e| {
-            tracing::warn!(error = %e, "failed to submit providers-exhausted tool-call approval");
-            e.to_string()
-        })
+    svc.submit_proposal(tcp).await.map(|_| ()).map_err(|e| {
+        tracing::warn!(error = %e, "failed to submit providers-exhausted tool-call approval");
+        e.to_string()
+    })
 }
 
 /// Deprecated stub. Manual recovery used to drive cairn-side

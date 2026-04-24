@@ -323,9 +323,7 @@ mod tests {
         assert!(err_rate_limited().is_fallback_eligible());
         assert!(err_5xx().is_fallback_eligible());
         assert!(err_empty().is_fallback_eligible());
-        assert!(
-            ProviderAdapterError::StructuredOutputInvalid("x".into()).is_fallback_eligible()
-        );
+        assert!(ProviderAdapterError::StructuredOutputInvalid("x".into()).is_fallback_eligible());
         assert!(!err_auth().is_fallback_eligible());
         assert!(!err_invalid().is_fallback_eligible());
     }
@@ -379,11 +377,7 @@ mod tests {
 
     #[tokio::test]
     async fn chain_advances_on_rate_limit_then_succeeds() {
-        let chain = ModelChain::new(vec![
-            "m1".to_owned(),
-            "m2".to_owned(),
-            "m3".to_owned(),
-        ]);
+        let chain = ModelChain::new(vec!["m1".to_owned(), "m2".to_owned(), "m3".to_owned()]);
         let mut first = true;
         let outcome = chain
             .run(|m| {
@@ -497,14 +491,8 @@ mod tests {
 
     #[tokio::test]
     async fn chain_exhausts_when_all_fail_retryably() {
-        let chain = ModelChain::new(vec![
-            "m1".to_owned(),
-            "m2".to_owned(),
-            "m3".to_owned(),
-        ]);
-        let outcome: FallbackOutcome<()> = chain
-            .run(|_m| async move { Err(err_5xx()) })
-            .await;
+        let chain = ModelChain::new(vec!["m1".to_owned(), "m2".to_owned(), "m3".to_owned()]);
+        let outcome: FallbackOutcome<()> = chain.run(|_m| async move { Err(err_5xx()) }).await;
         match outcome {
             FallbackOutcome::Exhausted { attempts } => {
                 assert_eq!(attempts.len(), 3);
@@ -564,9 +552,7 @@ mod tests {
     async fn cooldown_entry_expires() {
         let chain = ModelChain::new(vec!["m1".to_owned(), "m2".to_owned()])
             .with_rate_limit_cooldown(Duration::from_millis(20));
-        let _: FallbackOutcome<()> = chain
-            .run(|_m| async move { Err(err_rate_limited()) })
-            .await;
+        let _: FallbackOutcome<()> = chain.run(|_m| async move { Err(err_rate_limited()) }).await;
         assert!(chain.cooldown.is_cooling_down("m1"));
         tokio::time::sleep(Duration::from_millis(40)).await;
         assert!(!chain.cooldown.is_cooling_down("m1"));

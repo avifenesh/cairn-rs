@@ -85,11 +85,7 @@ impl std::fmt::Display for OrchestratorError {
             OrchestratorError::Memory(msg) => write!(f, "memory error: {msg}"),
             OrchestratorError::Graph(msg) => write!(f, "graph error: {msg}"),
             OrchestratorError::AllProvidersExhausted { attempts } => {
-                write!(
-                    f,
-                    "{}",
-                    cairn_runtime::format_attempt_summary(attempts)
-                )
+                write!(f, "{}", cairn_runtime::format_attempt_summary(attempts))
             }
             OrchestratorError::ProviderAuthFailed {
                 binding_id,

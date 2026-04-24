@@ -767,7 +767,12 @@ impl GenerationProvider for ChatProviderGenerationAdapter {
         };
         let response = self
             .chat
-            .chat_with_tools_for_model(effective_model, &chat_messages, native_tools.as_deref(), None)
+            .chat_with_tools_for_model(
+                effective_model,
+                &chat_messages,
+                native_tools.as_deref(),
+                None,
+            )
             .await
             .map_err(map_provider_error)?;
 

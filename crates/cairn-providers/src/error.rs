@@ -67,7 +67,9 @@ pub enum ProviderError {
     #[error("upstream {status}: {message}")]
     ServerError { status: u16, message: String },
 
-    #[error("empty completion from {model_id} (prompt_tokens={prompt_tokens:?}, completion_tokens={completion_tokens:?})")]
+    #[error(
+        "empty completion from {model_id} (prompt_tokens={prompt_tokens:?}, completion_tokens={completion_tokens:?})"
+    )]
     EmptyResponse {
         model_id: String,
         prompt_tokens: Option<u32>,

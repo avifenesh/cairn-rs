@@ -246,7 +246,9 @@ fn provider_error_to_adapter_error(e: crate::error::ProviderError) -> ProviderAd
         ProviderError::ResponseFormat {
             message,
             raw_response,
-        } => ProviderAdapterError::StructuredOutputInvalid(format!("{message} (raw: {raw_response})")),
+        } => ProviderAdapterError::StructuredOutputInvalid(format!(
+            "{message} (raw: {raw_response})"
+        )),
         ProviderError::Http(msg) => ProviderAdapterError::TransportFailure(msg),
         ProviderError::Provider(msg) => ProviderAdapterError::ProviderError(msg),
         ProviderError::Json(msg) => ProviderAdapterError::StructuredOutputInvalid(msg),

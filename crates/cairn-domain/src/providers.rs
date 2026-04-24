@@ -566,7 +566,10 @@ pub enum ProviderAdapterError {
     /// HTTP 5xx upstream error — the provider or an upstream of the provider
     /// (OpenRouter → "OpenInference" 503) returned a server error. Retryable
     /// with a different model.
-    ServerError { status: u16, message: String },
+    ServerError {
+        status: u16,
+        message: String,
+    },
     /// Model returned a successful HTTP response but the completion body was
     /// empty (zero tokens or whitespace-only text with no tool_calls).
     /// Distinct from `StructuredOutputInvalid` which carries a non-JSON

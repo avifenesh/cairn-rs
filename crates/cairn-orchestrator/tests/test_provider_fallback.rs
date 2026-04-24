@@ -177,10 +177,8 @@ async fn test_fallback_on_rate_limited() {
         ("m1", vec![err_rate_limited()]),
         ("m2", vec![ok_response()]),
     ]);
-    let phase = LlmDecidePhase::from_routed(routed_single_binding(
-        provider.clone(),
-        vec!["m1", "m2"],
-    ));
+    let phase =
+        LlmDecidePhase::from_routed(routed_single_binding(provider.clone(), vec!["m1", "m2"]));
     let out = phase.decide(&ctx(), &empty_gather()).await.unwrap();
     assert_eq!(out.model_id, "m2", "must report the successful model");
     assert_eq!(provider.calls(), vec!["m1", "m2"]);
@@ -188,14 +186,10 @@ async fn test_fallback_on_rate_limited() {
 
 #[tokio::test]
 async fn test_fallback_on_5xx() {
-    let provider = SequencedProvider::new(vec![
-        ("m1", vec![err_5xx()]),
-        ("m2", vec![ok_response()]),
-    ]);
-    let phase = LlmDecidePhase::from_routed(routed_single_binding(
-        provider.clone(),
-        vec!["m1", "m2"],
-    ));
+    let provider =
+        SequencedProvider::new(vec![("m1", vec![err_5xx()]), ("m2", vec![ok_response()])]);
+    let phase =
+        LlmDecidePhase::from_routed(routed_single_binding(provider.clone(), vec!["m1", "m2"]));
     let out = phase.decide(&ctx(), &empty_gather()).await.unwrap();
     assert_eq!(out.model_id, "m2");
     assert_eq!(provider.calls(), vec!["m1", "m2"]);
@@ -203,14 +197,10 @@ async fn test_fallback_on_5xx() {
 
 #[tokio::test]
 async fn test_fallback_on_empty_response() {
-    let provider = SequencedProvider::new(vec![
-        ("m1", vec![err_empty()]),
-        ("m2", vec![ok_response()]),
-    ]);
-    let phase = LlmDecidePhase::from_routed(routed_single_binding(
-        provider.clone(),
-        vec!["m1", "m2"],
-    ));
+    let provider =
+        SequencedProvider::new(vec![("m1", vec![err_empty()]), ("m2", vec![ok_response()])]);
+    let phase =
+        LlmDecidePhase::from_routed(routed_single_binding(provider.clone(), vec!["m1", "m2"]));
     let out = phase.decide(&ctx(), &empty_gather()).await.unwrap();
     assert_eq!(out.model_id, "m2");
 }
@@ -221,10 +211,8 @@ async fn test_fallback_on_response_format() {
         ("m1", vec![err_structured_invalid()]),
         ("m2", vec![ok_response()]),
     ]);
-    let phase = LlmDecidePhase::from_routed(routed_single_binding(
-        provider.clone(),
-        vec!["m1", "m2"],
-    ));
+    let phase =
+        LlmDecidePhase::from_routed(routed_single_binding(provider.clone(), vec!["m1", "m2"]));
     let out = phase.decide(&ctx(), &empty_gather()).await.unwrap();
     assert_eq!(out.model_id, "m2");
 }
@@ -235,10 +223,8 @@ async fn test_no_fallback_on_auth_error() {
         ("m1", vec![err_auth()]),
         ("m2", vec![]), // programmed empty → would panic if reached
     ]);
-    let phase = LlmDecidePhase::from_routed(routed_single_binding(
-        provider.clone(),
-        vec!["m1", "m2"],
-    ));
+    let phase =
+        LlmDecidePhase::from_routed(routed_single_binding(provider.clone(), vec!["m1", "m2"]));
     let err = phase.decide(&ctx(), &empty_gather()).await.unwrap_err();
     match err {
         OrchestratorError::ProviderAuthFailed { model_id, .. } => {
@@ -251,14 +237,9 @@ async fn test_no_fallback_on_auth_error() {
 
 #[tokio::test]
 async fn test_no_fallback_on_invalid_request() {
-    let provider = SequencedProvider::new(vec![
-        ("m1", vec![err_invalid()]),
-        ("m2", vec![]),
-    ]);
-    let phase = LlmDecidePhase::from_routed(routed_single_binding(
-        provider.clone(),
-        vec!["m1", "m2"],
-    ));
+    let provider = SequencedProvider::new(vec![("m1", vec![err_invalid()]), ("m2", vec![])]);
+    let phase =
+        LlmDecidePhase::from_routed(routed_single_binding(provider.clone(), vec!["m1", "m2"]));
     let err = phase.decide(&ctx(), &empty_gather()).await.unwrap_err();
     match err {
         OrchestratorError::ProviderInvalidRequest { model_id, .. } => {
