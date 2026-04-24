@@ -122,7 +122,12 @@ async fn accepts_model_id_from_connected_provider_supported_models() {
         .send()
         .await
         .expect("credential create");
-    assert_eq!(r.status().as_u16(), 201, "credential: {}", r.text().await.unwrap_or_default());
+    assert_eq!(
+        r.status().as_u16(),
+        201,
+        "credential: {}",
+        r.text().await.unwrap_or_default()
+    );
     let credential_id = r
         .json::<serde_json::Value>()
         .await
@@ -148,7 +153,12 @@ async fn accepts_model_id_from_connected_provider_supported_models() {
         .send()
         .await
         .expect("connection create");
-    assert_eq!(r.status().as_u16(), 201, "connection: {}", r.text().await.unwrap_or_default());
+    assert_eq!(
+        r.status().as_u16(),
+        201,
+        "connection: {}",
+        r.text().await.unwrap_or_default()
+    );
 
     // PUT the operator-namespaced model as the system-wide brain default.
     // Before the fix this returned 422 unknown_model; now must 200.
@@ -172,7 +182,11 @@ async fn accepts_model_id_from_connected_provider_supported_models() {
     // Sanity check the rejection path is still live: a model NOT in the
     // catalog and NOT on any connection still 422s.
     let r = put_default(&h, "brain_model", json!("qwen/not-a-real-route:free")).await;
-    assert_eq!(r.status().as_u16(), 422, "uncontested unknown model must still 422");
+    assert_eq!(
+        r.status().as_u16(),
+        422,
+        "uncontested unknown model must still 422"
+    );
 }
 
 #[tokio::test]
