@@ -139,6 +139,11 @@ function TaskRing({ tasks }: { tasks: TaskRecord[] }) {
 
 // ── Scope selector ────────────────────────────────────────────────────────────
 
+/**
+ * ScopeSelector — dropdown-based tenant/workspace override for this
+ * project dashboard. Matches the global TenantSelector UX (PR #279) —
+ * operators pick from discovered options instead of typing IDs.
+ */
 function ScopeSelector({
   tenantId, workspaceId,
   onTenantChange, onWorkspaceChange,
@@ -147,20 +152,51 @@ function ScopeSelector({
   onTenantChange: (v: string) => void;
   onWorkspaceChange: (v: string) => void;
 }) {
+  const tenantsQ = useQuery({
+    queryKey: ['proj-dashboard-tenants'],
+    queryFn:  () => defaultApi.listTenants(),
+    staleTime: 60_000,
+  });
+  const wsQ = useQuery({
+    queryKey: ['proj-dashboard-workspaces', tenantId],
+    queryFn:  () => defaultApi.getWorkspaces(tenantId),
+    enabled:  !!tenantId,
+    staleTime: 60_000,
+  });
+
+  const cls =
+    'h-6 w-32 bg-gray-100 dark:bg-zinc-800 border border-gray-200 dark:border-zinc-700 ' +
+    'rounded px-2 font-mono text-gray-700 dark:text-zinc-300 ' +
+    'focus:outline-none focus:border-indigo-500 transition-colors text-[11px] appearance-none';
+
   return (
     <div className="flex items-center gap-2 text-[11px]">
       <span className="text-gray-400 dark:text-zinc-600">Tenant:</span>
-      <input
+      <select
         value={tenantId}
-        onChange={e => onTenantChange(e.target.value || "default")}
-        className="h-6 w-24 bg-gray-100 dark:bg-zinc-800 border border-gray-200 dark:border-zinc-700 rounded px-2 font-mono text-gray-700 dark:text-zinc-300 focus:outline-none focus:border-indigo-500 transition-colors text-[11px]"
-      />
+        onChange={(e) => onTenantChange(e.target.value)}
+        className={cls}
+      >
+        {!(tenantsQ.data ?? []).some((t) => t.tenant_id === tenantId) && (
+          <option value={tenantId}>{tenantId}</option>
+        )}
+        {(tenantsQ.data ?? []).map((t) => (
+          <option key={t.tenant_id} value={t.tenant_id}>{t.tenant_id}</option>
+        ))}
+      </select>
       <span className="text-gray-400 dark:text-zinc-600">Workspace:</span>
-      <input
+      <select
         value={workspaceId}
-        onChange={e => onWorkspaceChange(e.target.value || "default")}
-        className="h-6 w-24 bg-gray-100 dark:bg-zinc-800 border border-gray-200 dark:border-zinc-700 rounded px-2 font-mono text-gray-700 dark:text-zinc-300 focus:outline-none focus:border-indigo-500 transition-colors text-[11px]"
-      />
+        onChange={(e) => onWorkspaceChange(e.target.value)}
+        className={cls}
+      >
+        {!(wsQ.data ?? []).some((w) => w.workspace_id === workspaceId) && (
+          <option value={workspaceId}>{workspaceId}</option>
+        )}
+        {(wsQ.data ?? []).map((w) => (
+          <option key={w.workspace_id} value={w.workspace_id}>{w.workspace_id}</option>
+        ))}
+      </select>
     </div>
   );
 }

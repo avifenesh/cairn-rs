@@ -16,6 +16,7 @@ import { defaultApi } from "../lib/api";
 import { card as cardPreset } from "../lib/design-system";
 import type { TaskRecord, TaskState } from "../lib/types";
 import { useAutoRefresh, REFRESH_OPTIONS } from "../hooks/useAutoRefresh";
+import { EmptyScopeHint } from "../components/EmptyScopeHint";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -452,6 +453,7 @@ function BoardView({ tasks }: { tasks: TaskRecord[] }) {
             Tasks are created automatically when a run starts executing work.
             Start a run in the <a href="#runs" onClick={() => { window.location.hash = "runs"; }} className="text-indigo-500 hover:text-indigo-400">Runs</a> page to see tasks appear here.
           </p>
+          <EmptyScopeHint empty className="max-w-lg" />
         </div>
       ) : (
         <div className="flex gap-2.5 h-full">

@@ -13,6 +13,7 @@ import type { RunRecord, RunState } from "../lib/types";
 import { TimelineView, ZoomSelector } from "../components/TimelineView";
 import type { ZoomLevel } from "../components/TimelineView";
 import { useAutoRefresh, REFRESH_OPTIONS } from "../hooks/useAutoRefresh";
+import { EmptyScopeHint } from "../components/EmptyScopeHint";
 
 function fmtTime(ms: number) {
   return new Date(ms).toLocaleString(undefined, {
@@ -364,6 +365,7 @@ export function RunsPage() {
             emptyText="No runs match this filter — try 'All states' or create a session first"
           />
         )}
+        <EmptyScopeHint empty={!isLoading && runs.length === 0} />
         </div>
       </div>
       )}

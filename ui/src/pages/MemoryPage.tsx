@@ -8,6 +8,7 @@ import { defaultApi, ApiError } from '../lib/api';
 import { useScope } from '../hooks/useScope';
 import { useToast } from '../components/Toast';
 import type { MemoryChunkResult, SourceRecord } from '../lib/types';
+import { EmptyScopeHint } from '../components/EmptyScopeHint';
 
 // ── source_type enum ──────────────────────────────────────────────────────────
 //
@@ -479,6 +480,7 @@ export function MemoryPage() {
         ) : !sources || sources.length === 0 ? (
           <div className="px-4 py-8 text-center text-xs text-gray-400 dark:text-zinc-600">
             No sources registered — use the ingest form above to add documents
+            <EmptyScopeHint empty className="mt-3 text-left" />
           </div>
         ) : (
           <div>

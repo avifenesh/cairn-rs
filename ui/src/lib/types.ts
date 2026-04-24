@@ -269,6 +269,26 @@ export interface ProjectKey {
   project_id: string;
 }
 
+// ── Tenants / Projects ────────────────────────────────────────────────────────
+
+/** GET /v1/admin/tenants — persisted tenant record. */
+export interface TenantRecord {
+  tenant_id: string;
+  name: string;
+  created_at: number; // unix ms
+  updated_at: number; // unix ms
+}
+
+/** GET /v1/admin/workspaces/:workspace_id/projects — persisted project record. */
+export interface ProjectRecord {
+  project_id: string;
+  workspace_id: string;
+  tenant_id: string;
+  name: string;
+  created_at: number; // unix ms
+  updated_at: number; // unix ms
+}
+
 // ── Workspaces ────────────────────────────────────────────────────────────────
 
 /** GET /v1/admin/tenants/:tenant_id/workspaces — persisted workspace record. */

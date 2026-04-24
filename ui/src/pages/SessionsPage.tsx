@@ -4,6 +4,7 @@ import { ChevronRight, RefreshCw, Plus, Upload } from 'lucide-react';
 import { DataTable } from '../components/DataTable';
 import { StatCard } from '../components/StatCard';
 import { ErrorFallback } from '../components/ErrorFallback';
+import { EmptyScopeHint } from '../components/EmptyScopeHint';
 import { useToast } from '../components/Toast';
 import { clsx } from 'clsx';
 import { defaultApi } from '../lib/api';
@@ -188,6 +189,8 @@ export function SessionsPage() {
           emptyText="No sessions yet — click New Session above to create one."
         />
       )}
+
+      <EmptyScopeHint empty={list.length === 0} />
     </div>
   );
 }

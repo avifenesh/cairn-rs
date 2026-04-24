@@ -27,6 +27,7 @@ import {
   TERMINAL_RUN_STATES,
 } from "../lib/runStateErrors";
 import { useEventStream, MAX_EVENTS as STREAM_BUFFER_MAX } from "../hooks/useEventStream";
+import { EmptyScopeHint } from "../components/EmptyScopeHint";
 import type {
   SessionRecord, RunRecord, TaskRecord, InterventionAction, InterveneRequest,
 } from "../lib/types";
@@ -894,6 +895,7 @@ export function OrchestrationPage() {
                 <p className="text-[12px] text-gray-400 dark:text-zinc-600 max-w-xs">
                   Create a session from the Sessions page to start orchestrating.
                 </p>
+                <EmptyScopeHint empty className="max-w-lg" />
               </div>
             ) : (
               <div className="space-y-2">
