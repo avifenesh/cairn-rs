@@ -468,7 +468,14 @@ impl<P: GraphProjection> EventProjector<P> {
             | RuntimeEvent::DecisionRecorded(_)
             | RuntimeEvent::DecisionCacheWarmup(_)
             // RFC 020 Track 4: boot-level recovery audit event.
-            | RuntimeEvent::RecoverySummaryEmitted(_) => {}
+            | RuntimeEvent::RecoverySummaryEmitted(_)
+            // PR BP-1: tool-call approval foundation events — not yet
+            // projected into the graph; a later PR in the wave wires in
+            // the projection state.
+            | RuntimeEvent::ToolCallProposed(_)
+            | RuntimeEvent::ToolCallApproved(_)
+            | RuntimeEvent::ToolCallRejected(_)
+            | RuntimeEvent::ToolCallAmended(_) => {}
 
             RuntimeEvent::EvalRunStarted(e) => {
                 self.add_node(

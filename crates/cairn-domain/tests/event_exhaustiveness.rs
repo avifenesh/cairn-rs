@@ -147,6 +147,24 @@ fn assert_all_variants_covered(event: &RuntimeEvent) {
         RuntimeEvent::ApprovalResolved(_) => {
             assert!(matches!(eref, Some(RuntimeEntityRef::Approval { .. })));
         }
+        // PR BP-1: tool-call approval foundation events — project-scoped,
+        // entity_ref = None (ToolCallId is not yet in RuntimeEntityRef).
+        RuntimeEvent::ToolCallProposed(_) => {
+            assert_ne!(proj.tenant_id.as_str(), "_system");
+            assert!(eref.is_none());
+        }
+        RuntimeEvent::ToolCallApproved(_) => {
+            assert_ne!(proj.tenant_id.as_str(), "_system");
+            assert!(eref.is_none());
+        }
+        RuntimeEvent::ToolCallRejected(_) => {
+            assert_ne!(proj.tenant_id.as_str(), "_system");
+            assert!(eref.is_none());
+        }
+        RuntimeEvent::ToolCallAmended(_) => {
+            assert_ne!(proj.tenant_id.as_str(), "_system");
+            assert!(eref.is_none());
+        }
         RuntimeEvent::CheckpointRecorded(_) => {
             assert!(matches!(eref, Some(RuntimeEntityRef::Checkpoint { .. })));
         }
@@ -666,6 +684,42 @@ fn all_variants() -> Vec<RuntimeEvent> {
             project: p(),
             approval_id: ApprovalId::new("a1"),
             decision: cairn_domain::policy::ApprovalDecision::Approved,
+        }),
+        // PR BP-1: tool-call approval foundation events.
+        RuntimeEvent::ToolCallProposed(cairn_domain::ToolCallProposed {
+            project: p(),
+            call_id: cairn_domain::ToolCallId::new("tc_exh_1"),
+            session_id: sess(),
+            run_id: run(),
+            tool_name: "read_file".to_owned(),
+            tool_args: serde_json::json!({"path": "/tmp/x"}),
+            display_summary: "Read /tmp/x".to_owned(),
+            match_policy: cairn_domain::ApprovalMatchPolicy::Exact,
+            proposed_at_ms: ts,
+        }),
+        RuntimeEvent::ToolCallApproved(cairn_domain::ToolCallApproved {
+            project: p(),
+            call_id: cairn_domain::ToolCallId::new("tc_exh_1"),
+            session_id: sess(),
+            operator_id: OperatorId::new("op1"),
+            scope: cairn_domain::ApprovalScope::Once,
+            approved_tool_args: None,
+            approved_at_ms: ts,
+        }),
+        RuntimeEvent::ToolCallRejected(cairn_domain::ToolCallRejected {
+            project: p(),
+            call_id: cairn_domain::ToolCallId::new("tc_exh_2"),
+            session_id: sess(),
+            operator_id: OperatorId::new("op1"),
+            reason: Some("unsafe path".to_owned()),
+            rejected_at_ms: ts,
+        }),
+        RuntimeEvent::ToolCallAmended(cairn_domain::ToolCallAmended {
+            project: p(),
+            call_id: cairn_domain::ToolCallId::new("tc_exh_3"),
+            operator_id: OperatorId::new("op1"),
+            new_tool_args: serde_json::json!({"path": "/tmp/y"}),
+            amended_at_ms: ts,
         }),
         RuntimeEvent::CheckpointRecorded(CheckpointRecorded {
             project: p(),
@@ -1664,14 +1718,16 @@ fn all_variants() -> Vec<RuntimeEvent> {
 #[test]
 fn all_runtime_event_variants_covered_count() {
     let variants = all_variants();
-    // 136 variants in the RuntimeEvent enum (130 baseline + RFC 020 Track 3:
+    // 140 variants in the RuntimeEvent enum (130 baseline + RFC 020 Track 3:
     // ToolInvocationCacheHit, ToolRecoveryPaused + RFC 020 decision-cache
     // survival pair from PR #85: DecisionRecorded, DecisionCacheWarmup +
-    // RFC 020 Track 4: RecoverySummaryEmitted + issue #218: WorkspaceArchived).
+    // RFC 020 Track 4: RecoverySummaryEmitted + issue #218: WorkspaceArchived +
+    // PR BP-1 tool-call approval foundation: ToolCallProposed,
+    // ToolCallApproved, ToolCallRejected, ToolCallAmended).
     assert_eq!(
         variants.len(),
-        136,
-        "all_variants() must construct exactly 136 RuntimeEvent instances"
+        140,
+        "all_variants() must construct exactly 140 RuntimeEvent instances"
     );
 }
 

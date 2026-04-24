@@ -1,10 +1,11 @@
 use crate::errors::RuntimeEntityRef;
+use crate::approvals::{ApprovalMatchPolicy, ApprovalScope};
 use crate::ids::{
     ApprovalId, CheckpointId, DecisionId, EvalRunId, EventId, IngestJobId, MailboxMessageId,
     OperatorId, OutcomeId, PromptAssetId, PromptReleaseId, PromptVersionId, ProviderBindingId,
     ProviderCallId, ProviderConnectionId, ProviderModelId, RouteAttemptId, RouteDecisionId, RunId,
-    RunTemplateId, ScheduledTaskId, SessionId, SignalId, TaskId, TenantId, ToolInvocationId,
-    TriggerId, WorkspaceId,
+    RunTemplateId, ScheduledTaskId, SessionId, SignalId, TaskId, TenantId, ToolCallId,
+    ToolInvocationId, TriggerId, WorkspaceId,
 };
 use crate::lifecycle::{
     CheckpointDisposition, FailureClass, PauseReason, ResumeTrigger, RunState, SessionState,
@@ -99,6 +100,17 @@ pub enum RuntimeEvent {
     TaskStateChanged(TaskStateChanged),
     ApprovalRequested(ApprovalRequested),
     ApprovalResolved(ApprovalResolved),
+    /// PR BP-1: tool-call approval proposed (foundation — not yet
+    /// emitted; legacy `ApprovalRequested` is still the live tool-call
+    /// approval event).
+    ToolCallProposed(ToolCallProposed),
+    /// PR BP-1: tool-call approval granted (foundation — not yet emitted).
+    ToolCallApproved(ToolCallApproved),
+    /// PR BP-1: tool-call approval denied (foundation — not yet emitted).
+    ToolCallRejected(ToolCallRejected),
+    /// PR BP-1: operator amended proposed tool-call arguments before
+    /// resolving (foundation — not yet emitted).
+    ToolCallAmended(ToolCallAmended),
     CheckpointRecorded(CheckpointRecorded),
     CheckpointRestored(CheckpointRestored),
     MailboxMessageAppended(MailboxMessageAppended),
@@ -265,6 +277,10 @@ impl RuntimeEvent {
             RuntimeEvent::TaskStateChanged(event) => &event.project,
             RuntimeEvent::ApprovalRequested(event) => &event.project,
             RuntimeEvent::ApprovalResolved(event) => &event.project,
+            RuntimeEvent::ToolCallProposed(event) => &event.project,
+            RuntimeEvent::ToolCallApproved(event) => &event.project,
+            RuntimeEvent::ToolCallRejected(event) => &event.project,
+            RuntimeEvent::ToolCallAmended(event) => &event.project,
             RuntimeEvent::CheckpointRecorded(event) => &event.project,
             RuntimeEvent::CheckpointRestored(event) => &event.project,
             RuntimeEvent::MailboxMessageAppended(event) => &event.project,
@@ -438,6 +454,14 @@ impl RuntimeEvent {
             RuntimeEvent::ApprovalResolved(event) => Some(RuntimeEntityRef::Approval {
                 approval_id: event.approval_id.clone(),
             }),
+            // PR BP-1: ToolCallId is not (yet) a `RuntimeEntityRef`
+            // variant — returning `None` here keeps the foundation
+            // additive. A follow-up PR that introduces projection state
+            // will extend `RuntimeEntityRef` and update these arms.
+            RuntimeEvent::ToolCallProposed(_) => None,
+            RuntimeEvent::ToolCallApproved(_) => None,
+            RuntimeEvent::ToolCallRejected(_) => None,
+            RuntimeEvent::ToolCallAmended(_) => None,
             RuntimeEvent::CheckpointRecorded(event) => Some(RuntimeEntityRef::Checkpoint {
                 checkpoint_id: event.checkpoint_id.clone(),
             }),
@@ -747,6 +771,95 @@ pub struct ApprovalResolved {
     pub project: ProjectKey,
     pub approval_id: ApprovalId,
     pub decision: ApprovalDecision,
+}
+
+// ── Tool-call approval events (PR BP-1 foundation) ────────────────────────────
+//
+// These four events form the type-level foundation for tool-call approval
+// workflows. They are strictly additive — the legacy
+// `ApprovalRequested` / `ApprovalResolved` pair above remains in use for
+// plan review (RFC 018), RFC 022 trigger approvals, prompt-release
+// governance, and the current tool-call approval emission in
+// `execute_impl.rs`. A later PR in the wave migrates the tool-call
+// emission site from `ApprovalRequested` to [`ToolCallProposed`].
+//
+// All four events carry `project: ProjectKey` so the event log can own
+// them; `primary_entity_ref()` returns `None` because `ToolCallId` is not
+// (yet) a member of `RuntimeEntityRef` — adding it is deferred to a
+// follow-up PR that introduces projection state.
+
+/// The orchestrator has proposed a tool call that requires operator
+/// approval before execution.
+///
+/// The operator surface consumes `display_summary` to render a
+/// human-friendly prompt and uses `match_policy` to seed the default
+/// "remember this decision for the session" UX.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ToolCallProposed {
+    pub project: ProjectKey,
+    pub call_id: ToolCallId,
+    pub session_id: SessionId,
+    pub run_id: RunId,
+    pub tool_name: String,
+    pub tool_args: serde_json::Value,
+    /// Short human-readable summary of what the tool call would do
+    /// (e.g. `"Read /workspaces/cairn/Cargo.toml"`). Rendered in the
+    /// approval UI; may be empty if the caller has nothing useful to
+    /// offer.
+    pub display_summary: String,
+    /// How the operator's decision should match future calls if they
+    /// pick `ApprovalScope::Session`.
+    pub match_policy: ApprovalMatchPolicy,
+    pub proposed_at_ms: u64,
+}
+
+/// An operator approved a proposed tool call.
+///
+/// If the operator edited the arguments before approving (the "approve
+/// with amendment" flow), `approved_tool_args` holds the edited payload
+/// and the execute phase uses those instead of the original
+/// `ToolCallProposed.tool_args`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ToolCallApproved {
+    pub project: ProjectKey,
+    pub call_id: ToolCallId,
+    pub session_id: SessionId,
+    pub operator_id: OperatorId,
+    pub scope: ApprovalScope,
+    /// Operator-edited arguments, if any. `None` means "approve
+    /// original args as proposed".
+    pub approved_tool_args: Option<serde_json::Value>,
+    pub approved_at_ms: u64,
+}
+
+/// An operator rejected a proposed tool call.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ToolCallRejected {
+    pub project: ProjectKey,
+    pub call_id: ToolCallId,
+    pub session_id: SessionId,
+    pub operator_id: OperatorId,
+    /// Optional operator-supplied reason; surfaced in audit log and to
+    /// the agent as a rejection message.
+    pub reason: Option<String>,
+    pub rejected_at_ms: u64,
+}
+
+/// An operator amended a proposed tool call's arguments without yet
+/// resolving it. Enables the "edit before approval" flow where an
+/// operator tweaks arguments, reviews the updated display, and then
+/// emits a separate [`ToolCallApproved`] / [`ToolCallRejected`].
+///
+/// This event is intentionally separate from `ToolCallApproved` so that
+/// the audit log preserves the full chain of edits an operator made
+/// before committing to a final decision.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ToolCallAmended {
+    pub project: ProjectKey,
+    pub call_id: ToolCallId,
+    pub operator_id: OperatorId,
+    pub new_tool_args: serde_json::Value,
+    pub amended_at_ms: u64,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -2530,5 +2643,111 @@ mod tests {
             event.primary_entity_ref(),
             Some(crate::errors::RuntimeEntityRef::Run { ref run_id }) if run_id.as_str() == "run_10"
         ));
+    }
+
+    // ── PR BP-1: tool-call approval foundation events ─────────────────────
+    //
+    // Strictly additive: these tests pin the JSON wire shape for the 4 new
+    // variants + assert `project()` returns the carried `ProjectKey` and
+    // `primary_entity_ref()` returns `None` (ToolCallId is not yet a
+    // `RuntimeEntityRef` variant; that is PR BP-2+ scope).
+
+    #[test]
+    fn tool_call_proposed_roundtrips_and_reports_project() {
+        let project = ProjectKey::new("t", "w", "p");
+        let event = RuntimeEvent::ToolCallProposed(super::ToolCallProposed {
+            project: project.clone(),
+            call_id: crate::ids::ToolCallId::new("tc_1"),
+            session_id: "sess_1".into(),
+            run_id: RunId::new("run_1"),
+            tool_name: "read_file".to_owned(),
+            tool_args: serde_json::json!({"path": "/tmp/x"}),
+            display_summary: "Read /tmp/x".to_owned(),
+            match_policy: crate::approvals::ApprovalMatchPolicy::Exact,
+            proposed_at_ms: 42,
+        });
+        assert_eq!(event.project(), &project);
+        assert!(event.primary_entity_ref().is_none());
+        let json = serde_json::to_string(&event).expect("serialize");
+        let back: RuntimeEvent = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(event, back);
+    }
+
+    #[test]
+    fn tool_call_approved_roundtrips_and_reports_project() {
+        let project = ProjectKey::new("t", "w", "p");
+        let event = RuntimeEvent::ToolCallApproved(super::ToolCallApproved {
+            project: project.clone(),
+            call_id: crate::ids::ToolCallId::new("tc_2"),
+            session_id: "sess_2".into(),
+            operator_id: crate::ids::OperatorId::new("op_1"),
+            scope: crate::approvals::ApprovalScope::Session {
+                match_policy: crate::approvals::ApprovalMatchPolicy::ProjectScopedPath {
+                    project_root: "/w/p".to_owned(),
+                },
+            },
+            approved_tool_args: Some(serde_json::json!({"path": "/w/p/file.rs"})),
+            approved_at_ms: 1_000,
+        });
+        assert_eq!(event.project(), &project);
+        assert!(event.primary_entity_ref().is_none());
+        let json = serde_json::to_string(&event).expect("serialize");
+        let back: RuntimeEvent = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(event, back);
+    }
+
+    #[test]
+    fn tool_call_rejected_roundtrips_and_reports_project() {
+        let project = ProjectKey::new("t", "w", "p");
+        let event = RuntimeEvent::ToolCallRejected(super::ToolCallRejected {
+            project: project.clone(),
+            call_id: crate::ids::ToolCallId::new("tc_3"),
+            session_id: "sess_3".into(),
+            operator_id: crate::ids::OperatorId::new("op_1"),
+            reason: Some("unsafe".to_owned()),
+            rejected_at_ms: 2_000,
+        });
+        assert_eq!(event.project(), &project);
+        assert!(event.primary_entity_ref().is_none());
+        let json = serde_json::to_string(&event).expect("serialize");
+        let back: RuntimeEvent = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(event, back);
+    }
+
+    #[test]
+    fn tool_call_amended_roundtrips_and_reports_project() {
+        let project = ProjectKey::new("t", "w", "p");
+        let event = RuntimeEvent::ToolCallAmended(super::ToolCallAmended {
+            project: project.clone(),
+            call_id: crate::ids::ToolCallId::new("tc_4"),
+            operator_id: crate::ids::OperatorId::new("op_1"),
+            new_tool_args: serde_json::json!({"path": "/tmp/y"}),
+            amended_at_ms: 3_000,
+        });
+        assert_eq!(event.project(), &project);
+        assert!(event.primary_entity_ref().is_none());
+        let json = serde_json::to_string(&event).expect("serialize");
+        let back: RuntimeEvent = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(event, back);
+    }
+
+    #[test]
+    fn tool_call_events_use_snake_case_discriminator() {
+        let event = RuntimeEvent::ToolCallProposed(super::ToolCallProposed {
+            project: ProjectKey::new("t", "w", "p"),
+            call_id: crate::ids::ToolCallId::new("tc_x"),
+            session_id: "s".into(),
+            run_id: RunId::new("r"),
+            tool_name: "read_file".to_owned(),
+            tool_args: serde_json::json!({}),
+            display_summary: String::new(),
+            match_policy: crate::approvals::ApprovalMatchPolicy::Exact,
+            proposed_at_ms: 0,
+        });
+        let json = serde_json::to_string(&event).expect("serialize");
+        assert!(
+            json.contains("\"event\":\"tool_call_proposed\""),
+            "expected snake_case event discriminator, got {json}"
+        );
     }
 }
