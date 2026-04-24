@@ -773,7 +773,11 @@ function AddProviderModal({ onClose, onCreated }: AddProviderModalProps) {
         for (const id of ids) if (!merged.includes(id)) merged.push(id);
         return merged;
       });
-      setModelInput(ids.join(", "));
+      // Clear the manual input — models are already added as chips.
+      // (Previously we dumped a comma-separated list into the input, but
+      // Enter on that field calls addModel() which treats the whole
+      // string as one model_id.)
+      setModelInput("");
       toast.success(`Discovered ${ids.length} model${ids.length === 1 ? "" : "s"}.`);
     },
     onError: (e) =>

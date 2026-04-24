@@ -58,14 +58,14 @@ async fn discover_preview_returns_models_without_registering_connection() {
         .await
         .expect("discover-preview reaches server");
 
-    assert_eq!(
-        r.status().as_u16(),
-        200,
-        "discover-preview: {}",
-        r.text().await.unwrap_or_default(),
-    );
+    // Read the body once up-front so we can both assert on status and
+    // parse JSON from the same buffer — reqwest consumes `r` on either
+    // `.text()` or `.json()`, so we can't call both on the same response.
+    let status = r.status().as_u16();
+    let raw = r.text().await.expect("discover-preview body");
+    assert_eq!(status, 200, "discover-preview: {raw}");
 
-    let body: Value = r.json().await.expect("discover-preview json");
+    let body: Value = serde_json::from_str(&raw).expect("discover-preview json");
     let models = body
         .get("models")
         .and_then(|v| v.as_array())
@@ -150,6 +150,39 @@ async fn discover_preview_rejects_unknown_api_key_ref_with_404() {
     assert_eq!(
         body.get("error").and_then(|v| v.as_str()),
         Some("credential_not_found"),
+    );
+}
+
+#[tokio::test]
+async fn discover_preview_rejects_dollar_prefixed_inline_api_key() {
+    // Defends against the server-env-var exfiltration vector Copilot
+    // flagged: a `$FOO` inline api_key combined with a caller-controlled
+    // endpoint would otherwise leak `$FOO`'s value via the outbound
+    // Authorization header.
+    let h = LiveHarness::setup().await;
+    let mock_url = spawn_openai_compat_mock().await;
+
+    let r = h
+        .client()
+        .post(format!(
+            "{}/v1/providers/connections/discover-preview",
+            h.base_url,
+        ))
+        .bearer_auth(&h.admin_token)
+        .json(&json!({
+            "adapter_type": "openai_compat",
+            "endpoint_url": mock_url,
+            "api_key": "$CAIRN_ADMIN_TOKEN",
+        }))
+        .send()
+        .await
+        .expect("discover-preview reaches server");
+
+    assert_eq!(r.status().as_u16(), 400);
+    let body: Value = r.json().await.expect("json");
+    assert_eq!(
+        body.get("error").and_then(|v| v.as_str()),
+        Some("inline_api_key_env_expansion_forbidden"),
     );
 }
 

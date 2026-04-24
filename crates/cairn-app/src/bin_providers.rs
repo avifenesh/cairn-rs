@@ -352,12 +352,26 @@ pub(crate) async fn discover_models_preview_handler(
         .filter(|s| !s.is_empty())
     {
         Some(inline) => {
-            // Honour the same $ENV_VAR convention the wizard advertises.
-            if let Some(var_name) = inline.strip_prefix('$') {
-                Some(std::env::var(var_name).unwrap_or_else(|_| inline.to_owned()))
-            } else {
-                Some(inline.to_owned())
+            // SECURITY: inline values from the request body are treated
+            // literally. We deliberately do NOT expand `$ENV_VAR` here,
+            // because the caller also controls `endpoint_url` and could
+            // otherwise exfiltrate server-side environment secrets via
+            // the outbound Authorization header. Values starting with `$`
+            // are rejected outright rather than either literally-sent
+            // (which leaks the var name) or expanded (which leaks the
+            // value). `$ENV_VAR` expansion remains valid for server-side
+            // stored credentials via `resolve_connection_probe_material`.
+            if inline.starts_with('$') {
+                return (
+                    StatusCode::BAD_REQUEST,
+                    axum::Json(serde_json::json!({
+                        "error": "inline_api_key_env_expansion_forbidden",
+                        "detail": "inline api_key must not start with '$'; store the credential and pass api_key_ref instead",
+                    })),
+                )
+                    .into_response();
             }
+            Some(inline.to_owned())
         }
         None => match body
             .api_key_ref
