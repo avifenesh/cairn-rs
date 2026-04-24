@@ -334,28 +334,18 @@ impl ExecutePhase for RuntimeExecutePhase {
             }
         }
 
-        // Fill any still-None slots with a synthesized Failed so downstream
-        // consumers never encounter a gap — this only happens when a
-        // terminal non-InvokeTool short-circuited before later non-InvokeTool
-        // proposals ran. The gap is expected; mark as skipped.
-        let results: Vec<ActionResult> = results
-            .into_iter()
-            .enumerate()
-            .filter_map(|(i, r)| {
-                r.or_else(|| {
-                    // Proposal was skipped by a terminal short-circuit.
-                    Some(ActionResult {
-                        proposal: decide.proposals[i].clone(),
-                        status: ActionStatus::Failed {
-                            reason: "skipped: earlier proposal terminated the batch".to_owned(),
-                        },
-                        tool_output: None,
-                        invocation_id: None,
-                        duration_ms: 0,
-                    })
-                })
-            })
-            .collect();
+        // Drop `None` slots — these are non-InvokeTool proposals that a
+        // terminal short-circuit prevented from running. Emitting them
+        // as synthesized `Failed` would inflate the loop runner's
+        // `failed_count` telemetry and mislead any downstream consumer
+        // that treats `Failed` as "dispatch was attempted and it
+        // errored." A skipped proposal never got that far.
+        //
+        // The loop runner iterates `execute_outcome.results` without
+        // zipping to `decide.proposals`, so a shorter results vector
+        // is safe. This matches the pre-PR behaviour where the
+        // sequential `break` also stopped adding results to the vec.
+        let results: Vec<ActionResult> = results.into_iter().flatten().collect();
 
         // Re-check loop signal against parallel results: an InvokeTool
         // failure shouldn't carry a terminal signal, but any Failed status
@@ -1145,6 +1135,14 @@ impl RuntimeExecutePhase {
                 // Recurse. The revised proposal goes through the regular
                 // dispatch path (cache consultation, decision service,
                 // registry dispatch, completion event, etc.).
+                //
+                // `Box::pin` is required here because this is indirect
+                // async recursion: `dispatch_one` can call back into
+                // `run_with_approval_gate` (though with
+                // `requires_approval=false` on the revised proposal it
+                // does not in practice). Without the pin the compiler
+                // errors with "recursion in an async fn requires
+                // boxing" — the future size is undecidable.
                 Box::pin(self.dispatch_one(ctx, &revised, call_index)).await
             }
             OperatorDecision::Rejected { reason } => Ok(ActionResult {

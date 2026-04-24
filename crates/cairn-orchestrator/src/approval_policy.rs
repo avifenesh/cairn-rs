@@ -104,7 +104,16 @@ pub fn derive_match_policy(
 
     if let Some(root) = project_root {
         let canon_root = canonicalise(&root.display().to_string());
-        if is_under(&canon_candidate, &canon_root) {
+        // The domain invariant on `ApprovalMatchPolicy::ProjectScopedPath`
+        // is that `project_root` is a canonical absolute path. A
+        // relative or empty root (e.g. working_dir = ".") would canonicalise
+        // to an empty `PathBuf`; feeding that to `is_under` lets any
+        // candidate match (both iterators yield nothing on the root side),
+        // widening session approvals to the entire filesystem. Fall
+        // through to the narrower `ExactPath` policy in that case
+        // instead of silently broadening the scope. (Copilot review
+        // feedback on PR #270.)
+        if canon_root.is_absolute() && is_under(&canon_candidate, &canon_root) {
             return ApprovalMatchPolicy::ProjectScopedPath {
                 project_root: canon_root.display().to_string(),
             };
@@ -175,6 +184,39 @@ mod tests {
         match policy {
             ApprovalMatchPolicy::ExactPath { path } => assert_eq!(path, "/x/y"),
             other => panic!("expected exact path, got {other:?}"),
+        }
+    }
+
+    /// Regression for a Copilot review finding on PR #270.
+    ///
+    /// A relative project_root (e.g. working_dir = ".") canonicalises to
+    /// an empty PathBuf. If the widen path accepted that, it would
+    /// match every candidate and silently broaden session approvals to
+    /// the whole filesystem. Verify the code falls through to
+    /// `ExactPath` instead.
+    #[test]
+    fn relative_project_root_does_not_widen() {
+        let policy = derive_match_policy(
+            ToolEffect::Observational,
+            &json!({"path": "/a/b"}),
+            Some(Path::new(".")),
+        );
+        match policy {
+            ApprovalMatchPolicy::ExactPath { path } => assert_eq!(path, "/a/b"),
+            other => panic!("relative root must not widen, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn empty_project_root_does_not_widen() {
+        let policy = derive_match_policy(
+            ToolEffect::Observational,
+            &json!({"path": "/a/b"}),
+            Some(Path::new("")),
+        );
+        match policy {
+            ApprovalMatchPolicy::ExactPath { path } => assert_eq!(path, "/a/b"),
+            other => panic!("empty root must not widen, got {other:?}"),
         }
     }
 

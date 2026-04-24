@@ -8,7 +8,7 @@
 //! `ToolInvocationServiceImpl`). Every test drives the full dispatch
 //! path — no mocks on the hot path.
 //!
-//! Covers the eight BP-v2 acceptance cases called out in the sprint brief:
+//! Covers the six BP-v2 acceptance cases called out in the sprint brief:
 //!
 //! * auto-approved tool executes without operator
 //! * pending approval waits for operator → approve → tool runs
@@ -187,8 +187,12 @@ fn derive_expected_call_id(
     tool: &str,
     args: &Value,
 ) -> ToolCallId {
-    // Mirrors `ToolCallId::derive` normalisation used by the execute phase.
-    let normalized = args.to_string();
+    // Use the SAME normaliser the execute phase uses via
+    // `ToolHandler::normalize_for_cache` — the default impl delegates
+    // to `default_normalize_for_cache`. Recomputing `args.to_string()`
+    // here would drift silently if a tool overrides `normalize_for_cache`
+    // (Copilot review feedback on PR #270).
+    let normalized = cairn_tools::builtins::default_normalize_for_cache(args);
     ToolCallId::new(
         cairn_runtime::startup::ToolCallId::derive(
             run_id,
