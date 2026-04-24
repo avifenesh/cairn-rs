@@ -347,8 +347,8 @@ async fn pending_approval_suspends_loop_without_blocking() {
         .await
         .expect("reader")
         .expect("proposal persisted");
-    use cairn_runtime::tool_call_approvals::ToolCallApprovalReader as _;
     use cairn_runtime::tool_call_approvals::StoredProposalState;
+    use cairn_runtime::tool_call_approvals::ToolCallApprovalReader as _;
     assert!(
         matches!(stored.state, StoredProposalState::Pending),
         "proposal must be Pending after suspend, not {:?}",
@@ -404,7 +404,11 @@ async fn pending_approval_returns_before_operator_can_reject() {
         "F26: expected AwaitingApproval, got {:?}",
         outcome.results[0].status
     );
-    assert_eq!(seen.lock().unwrap().len(), 0, "tool must not run pre-approval");
+    assert_eq!(
+        seen.lock().unwrap().len(),
+        0,
+        "tool must not run pre-approval"
+    );
 
     // Now the operator rejects. That decision is durable in the
     // projection; a future orchestrate call would surface a
@@ -607,7 +611,11 @@ async fn amend_after_pending_does_not_retroactively_run_tool_in_first_execute() 
         "F26: expected AwaitingApproval, got {:?}",
         outcome.results[0].status
     );
-    assert_eq!(seen.lock().unwrap().len(), 0, "tool must not run pre-approval");
+    assert_eq!(
+        seen.lock().unwrap().len(),
+        0,
+        "tool must not run pre-approval"
+    );
 
     // Operator amends + approves after the fact. Writes go to the
     // projection; drain path picks them up on the next orchestrate.

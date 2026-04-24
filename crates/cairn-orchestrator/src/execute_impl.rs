@@ -1767,14 +1767,14 @@ mod signal_aggregation_tests {
 // `crates/cairn-app/tests/`.
 #[cfg(test)]
 mod f26_pending_operator_no_block_tests {
-    use cairn_domain::{OperatorId, ProjectKey, RunId, SessionId, ToolCallId};
+    use async_trait::async_trait;
     use cairn_domain::approvals::{ApprovalMatchPolicy, ApprovalScope};
+    use cairn_domain::{OperatorId, ProjectKey, RunId, SessionId, ToolCallId};
     use cairn_runtime::error::RuntimeError;
     use cairn_runtime::tool_call_approvals::{
         ApprovalDecision, ApprovedProposal, OperatorDecision, ToolCallApprovalService,
         ToolCallProposal,
     };
-    use async_trait::async_trait;
     use serde_json::json;
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::Arc;
