@@ -20,7 +20,12 @@ import { clsx } from "clsx";
 import { Drawer } from "../components/Drawer";
 import { useToast } from "../components/Toast";
 import { defaultApi } from "../lib/api";
-import { mapRunActionError, stateGateTooltip } from "../lib/runStateErrors";
+import {
+  mapRunActionError,
+  stateGateTooltip,
+  PAUSABLE_RUN_STATES,
+  TERMINAL_RUN_STATES,
+} from "../lib/runStateErrors";
 import { useEventStream, MAX_EVENTS as STREAM_BUFFER_MAX } from "../hooks/useEventStream";
 import type {
   SessionRecord, RunRecord, TaskRecord, InterventionAction, InterveneRequest,
@@ -179,12 +184,10 @@ function TaskRow({ task, fresh }: { task: TaskRecord; fresh: boolean }) {
 
 // ── Run quick actions (issues #166/#173) ──────────────────────────────────────
 
-// States from which backend pause (`ff_suspend_execution`) can succeed.
-// `pending` has no lease yet, so the backend rejects pause with
-// `fence_required` / `partial_fence_triple`; we exclude it to avoid
-// offering a button that cannot succeed.
-const RUNNING_STATES = new Set(["running", "waiting_approval", "waiting_dependency"]);
-const TERMINAL_STATES = new Set(["completed", "failed", "canceled"]);
+// Canonical pause / terminal sets live in `lib/runStateErrors.ts` so all
+// pages agree on what's pausable and what's terminal.
+const RUNNING_STATES = PAUSABLE_RUN_STATES;
+const TERMINAL_STATES = TERMINAL_RUN_STATES;
 
 /**
  * Page-level intervention drawer. Single instance per page keyed by the

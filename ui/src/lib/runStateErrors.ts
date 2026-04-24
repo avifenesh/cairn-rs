@@ -117,6 +117,48 @@ function friendlyTransitionMessage(raw: string, action?: RunAction): string {
   }
 }
 
+// ── Shared run-state sets ─────────────────────────────────────────────────────
+//
+// Centralized so OrchestrationPage, RunDetailPage, and TestHarnessPage all
+// agree on which states allow which operator action, avoiding drift as the
+// backend state machine evolves.
+
+/**
+ * States from which backend pause (`ff_suspend_execution`) can succeed.
+ *
+ * `pending` is intentionally excluded: a pending run has no lease yet,
+ * so pause is rejected with `fence_required` / `partial_fence_triple`
+ * → HTTP 409 `invalid run transition: partial_fence_triple -> suspended`.
+ * See `crates/cairn-app/src/fabric_adapter.rs::is_suspend_state_conflict`
+ * for the canonical list of reject codes.
+ */
+export const PAUSABLE_RUN_STATES: ReadonlySet<string> = new Set([
+  "running",
+  "waiting_approval",
+  "waiting_dependency",
+]);
+
+/**
+ * Terminal run states per `cairn-domain::RunState::is_terminal()`.
+ * `dead_lettered` belongs to `TaskState`, not `RunState`, so it is NOT
+ * included here.
+ */
+export const TERMINAL_RUN_STATES: ReadonlySet<string> = new Set([
+  "completed",
+  "failed",
+  "canceled",
+]);
+
+/** Returns true if a pause call from `state` can plausibly succeed. */
+export function isPausableState(state: string | undefined): boolean {
+  return state !== undefined && PAUSABLE_RUN_STATES.has(state);
+}
+
+/** Returns true if `state` is terminal (no further transitions possible). */
+export function isTerminalState(state: string | undefined): boolean {
+  return state !== undefined && TERMINAL_RUN_STATES.has(state);
+}
+
 /**
  * Hover-tooltip string for a state-gated button.
  * Use when the button is disabled because of run state.

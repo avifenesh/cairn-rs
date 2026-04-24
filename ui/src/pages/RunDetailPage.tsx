@@ -15,7 +15,12 @@ import { CopyButton } from "../components/CopyButton";
 import { Drawer } from "../components/Drawer";
 import { useToast } from "../components/Toast";
 import { defaultApi } from "../lib/api";
-import { mapRunActionError, stateGateTooltip } from "../lib/runStateErrors";
+import {
+  mapRunActionError,
+  stateGateTooltip,
+  PAUSABLE_RUN_STATES,
+  TERMINAL_RUN_STATES,
+} from "../lib/runStateErrors";
 import { useEventStream } from "../hooks/useEventStream";
 import { table as tablePreset } from "../lib/design-system";
 import type {
@@ -502,27 +507,11 @@ function PlanArtifactPanel({ runId, run }: { runId: string; run?: import("../lib
 
 // ── Operator actions (issues #166/#173) ──────────────────────────────────────
 
-// States from which `ff_suspend_execution` (backend pause) can succeed.
-// `pending` is deliberately excluded: a pending run has no lease yet, so
-// the backend rejects pause with `fence_required` / `partial_fence_triple`
-// (surfaced as HTTP 409 `invalid run transition: partial_fence_triple ->
-// suspended`). We gate the Pause button on states that imply an active
-// lease.
-const RUNNING_STATES = new Set([
-  "running", "waiting_approval", "waiting_dependency",
-]);
-// Mirrors `cairn_domain::RunState::is_terminal()` (completed|failed|canceled)
-// and defensively includes `dead_lettered` — the backend never emits it for a
-// Run today, but if a DLQ'd task bubbles up as a run-level state string we
-// must treat it as terminal, not "still running". `retryable_failed` is
-// intentionally excluded: it is semantically pending-retry, not terminal,
-// matching `TaskState::is_terminal()` in crates/cairn-domain/src/lifecycle.rs.
-const TERMINAL_STATES = new Set([
-  "completed",
-  "failed",
-  "canceled",
-  "dead_lettered",
-]);
+// Canonical pause / terminal sets live in `lib/runStateErrors.ts` so all
+// pages agree on what's pausable and what's terminal. We re-alias here to
+// keep existing call-site names (`RUNNING_STATES`, `TERMINAL_STATES`).
+const RUNNING_STATES = PAUSABLE_RUN_STATES;
+const TERMINAL_STATES = TERMINAL_RUN_STATES;
 
 function confirmAction(label: string, runId: string): boolean {
   // Match the existing "confirm" pattern used by cancelRun above — keep it
