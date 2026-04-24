@@ -216,7 +216,14 @@ impl DecidePhase for LlmDecidePhase {
         let tool_defs: Vec<serde_json::Value> =
             tool_descs.iter().map(descriptor_to_tool_def).collect();
 
-        let system = build_system_prompt(&ctx.agent_type, &tool_descs);
+        // When we pass native tool definitions to the provider (OpenAI-style
+        // `tools` array), the model emits structured `tool_calls` on its own.
+        // In that mode we must NOT tell the model to wrap calls in an
+        // `invoke_tool` envelope — that causes small/mid models (Qwen 3.6,
+        // Gemma 4 A2B) to emit `tool_calls[name = "invoke_tool"]` literally.
+        // See `build_system_prompt` for the two emitted shapes.
+        let native_tools_enabled = !tool_defs.is_empty();
+        let system = build_system_prompt(&ctx.agent_type, &tool_descs, native_tools_enabled);
         let user = build_user_message(ctx, gather, self.token_budget.as_ref());
         let messages = vec![
             serde_json::json!({ "role": "system", "content": system }),
@@ -319,7 +326,11 @@ impl DecidePhase for LlmDecidePhase {
 /// Uses `default_roles()` to look up the canonical system-prompt fragment for
 /// the matching role.  Falls back to a generic orchestrator prompt if the role
 /// is not registered.
-fn build_system_prompt(agent_type: &str, tools: &[BuiltinToolDescriptor]) -> String {
+fn build_system_prompt(
+    agent_type: &str,
+    tools: &[BuiltinToolDescriptor],
+    native_tools_enabled: bool,
+) -> String {
     // Role identity — use registered role prompt or a sensible default.
     let role_prompt = default_roles()
         .into_iter()
@@ -332,8 +343,42 @@ fn build_system_prompt(agent_type: &str, tools: &[BuiltinToolDescriptor]) -> Str
                 .to_owned()
         });
 
-    // Build the tool list section (shown only when tools are registered).
-    let tools_section = if !tools.is_empty() {
+    // Build the tool list section. The phrasing differs between the two
+    // model interfaces (native OpenAI `tool_calls` vs. JSON-array text).
+    // Reference: the avifenesh/tools harness-e2e suite — proven against
+    // Qwen3/3.5 and Gemma-family open models — uses a plain "call the tool
+    // by name" framing and never introduces an `invoke_tool` wrapper name.
+    let tools_section = if tools.is_empty() {
+        String::new()
+    } else if native_tools_enabled {
+        // Native-tool-calling mode: the model sees tool schemas via the
+        // provider's `tools` parameter and must emit a real tool name
+        // (e.g. `bash`, `read`) as `tool_calls[].function.name`. Listing
+        // the tools again here is redundant with the schema but helps
+        // smaller models anchor selection; CRITICALLY we must not mention
+        // any `invoke_tool` / `tool_name` envelope.
+        let lines = tools
+            .iter()
+            .map(|t| format!("  - {}", t.prompt_line()))
+            .collect::<Vec<_>>()
+            .join("\n");
+        format!(
+            "\n\n\
+             ## Available tools\n\
+             Call any of the following tools directly, by its exact name, \
+             using the provider's native tool-call mechanism. Do not wrap \
+             calls in any envelope — emit one tool call per action with the \
+             tool's JSON arguments.\n\
+             \n\
+             {lines}\n\
+             \n\
+             Only call tools listed above. Do not invent tool names. Use \
+             tool_search to discover additional tools if the ones above \
+             are insufficient."
+        )
+    } else {
+        // Legacy JSON-array text mode: the model emits an
+        // `{action_type: "invoke_tool", tool_name: "...", ...}` envelope.
         let lines = tools
             .iter()
             .map(|t| format!("  - {}", t.prompt_line()))
@@ -348,8 +393,54 @@ fn build_system_prompt(agent_type: &str, tools: &[BuiltinToolDescriptor]) -> Str
              Only call tools listed above. Do not invent tool names.\n\
              Use tool_search to discover additional tools if the ones above are insufficient."
         )
+    };
+
+    // Response-format section also diverges between modes.
+    let response_format = if native_tools_enabled {
+        // With native tools, the model emits tool_calls for invocations
+        // and plain text for terminal meta-actions. We still accept the
+        // JSON-array fallback when the model chooses not to call a tool.
+        r#"## Response format
+When you need to call a tool, emit a native tool call — the provider's
+`tool_calls` mechanism will deliver it; do not re-emit it as text.
+When no tool call is needed (completing, escalating, recording memory,
+spawning a sub-agent, notifying), respond with ONLY a JSON array of
+action objects — no prose, no markdown fences — with fields:
+- "action_type": one of "invoke_tool"|"complete_run"|"create_memory"|"spawn_subagent"|"send_notification"|"escalate_to_operator"
+- "description": concise explanation (for complete_run: a summary of what was accomplished)
+- "confidence": float 0.0-1.0
+- "requires_approval": boolean
+- "tool_name" (for invoke_tool/spawn_subagent): tool ID or sub-agent role
+- "tool_args" (for invoke_tool/spawn_subagent/create_memory): JSON arguments
+
+Field conventions:
+- invoke_tool:    ONLY as a text-channel fallback when native tool
+                  calling is unavailable or failed; tool_name = tool ID,
+                  tool_args = {...}. Prefer native tool calls.
+- complete_run:   description = summary of what was accomplished
+- spawn_subagent: tool_name = role,  tool_args = {"goal": "..."}
+- create_memory:  tool_args = {"content": "..."}"#
+            .to_owned()
     } else {
-        String::new()
+        format!(
+            "## Response format\n\
+             Respond ONLY with a JSON array of action objects. Each object MUST have:\n\
+             - \"action_type\": one of {action_types}\n\
+             - \"description\": concise explanation\n\
+             - \"confidence\": float 0.0–1.0\n\
+             - \"requires_approval\": boolean\n\
+             - \"tool_name\" (for invoke_tool/spawn_subagent): tool ID or sub-agent role\n\
+             - \"tool_args\" (for invoke_tool/spawn_subagent/create_memory): JSON arguments\n\
+             \n\
+             Field conventions:\n\
+             - invoke_tool:    tool_name = tool ID,  tool_args = {{...}}\n\
+             - complete_run:   description = summary of what was accomplished\n\
+             - spawn_subagent: tool_name = role,  tool_args = {{\"goal\": \"...\"}}\n\
+             - create_memory:  tool_args = {{\"content\": \"...\"}}\n\
+             \n\
+             Return ONLY the JSON array — no markdown fences, no explanation text.",
+            action_types = r#""invoke_tool"|"complete_run"|"create_memory"|"spawn_subagent"|"send_notification"|"escalate_to_operator""#,
+        )
     };
 
     format!(
@@ -378,9 +469,12 @@ fn build_system_prompt(agent_type: &str, tools: &[BuiltinToolDescriptor]) -> Str
          complete_run with a summary of what you accomplished.\n\
          \n\
          ## Tool usage\n\
-         - Set requires_approval=false for read/search/fetch actions.\n\
-         - Set requires_approval=true for writes, code execution, \
-           sending messages, or destructive actions.\n\
+         - Prefer read/search/fetch tools before writes.\n\
+         - For JSON-fallback actions you emit as text, set \
+           requires_approval=false for read/search/fetch-only operations.\n\
+         - Set requires_approval=true for writes, code execution, sending \
+           messages, or any destructive action. If unsure whether an \
+           action is sensitive, set requires_approval=true.\n\
          - Store key findings with create_memory so they persist.\n\
          - Use spawn_subagent only when the task is genuinely multi-part \
            and benefits from parallel execution.\n\
@@ -400,23 +494,7 @@ fn build_system_prompt(agent_type: &str, tools: &[BuiltinToolDescriptor]) -> Str
          - If stuck, search for similar patterns or ask for help via \
            escalate_to_operator.\n\
          \n\
-         ## Response format\n\
-         Respond ONLY with a JSON array of action objects. Each object MUST have:\n\
-         - \"action_type\": one of {action_types}\n\
-         - \"description\": concise explanation\n\
-         - \"confidence\": float 0.0–1.0\n\
-         - \"requires_approval\": boolean\n\
-         - \"tool_name\" (for invoke_tool/spawn_subagent): tool ID or sub-agent role\n\
-         - \"tool_args\" (for invoke_tool/spawn_subagent/create_memory): JSON arguments\n\
-         \n\
-         Field conventions:\n\
-         - invoke_tool:    tool_name = tool ID,  tool_args = {{...}}\n\
-         - complete_run:   description = summary of what was accomplished\n\
-         - spawn_subagent: tool_name = role,  tool_args = {{\"goal\": \"...\"}}\n\
-         - create_memory:  tool_args = {{\"content\": \"...\"}}\n\
-         \n\
-         Return ONLY the JSON array — no markdown fences, no explanation text.",
-        action_types = r#""invoke_tool"|"complete_run"|"create_memory"|"spawn_subagent"|"send_notification"|"escalate_to_operator""#,
+         {response_format}",
     )
 }
 
@@ -668,15 +746,40 @@ fn tool_calls_to_proposals(
         .iter()
         .filter_map(|tc| {
             let func = tc.get("function")?;
-            let name = func.get("name")?.as_str()?.to_owned();
+            let raw_name = func.get("name")?.as_str()?.to_owned();
             // Arguments can be a JSON string (OpenAI) or a parsed object (Anthropic/Bedrock).
-            let args = match func.get("arguments") {
+            let raw_args = match func.get("arguments") {
                 Some(serde_json::Value::String(s)) => {
                     serde_json::from_str(s).unwrap_or(serde_json::Value::Null)
                 }
                 Some(v) => v.clone(),
                 None => serde_json::json!({}),
             };
+
+            // Defensive unwrap: small/mid models (Qwen 3.6, Gemma 4 A2B)
+            // sometimes confuse the legacy JSON-action protocol's
+            // `invoke_tool` / `spawn_subagent` meta-verbs with a real tool
+            // name and emit e.g. `{"name":"invoke_tool","arguments":
+            // {"tool_name":"bash","tool_args":{...}}}`. Unwrap that shape
+            // into a normal tool call so the registry lookup succeeds.
+            //
+            // `spawn_subagent` is NOT a real tool — agent roles are not
+            // registered in the tool catalogue. When we see that envelope
+            // we produce a `SpawnSubagent` proposal directly so the loop
+            // dispatches it correctly.
+            let is_spawn_envelope = raw_name == "spawn_subagent";
+            let (name, args) = unwrap_meta_envelope(&raw_name, raw_args);
+
+            if is_spawn_envelope {
+                return Some(ActionProposal {
+                    action_type: ActionType::SpawnSubagent,
+                    description: format!("spawn {name}"),
+                    confidence: 0.9,
+                    tool_name: Some(name),
+                    tool_args: Some(args),
+                    requires_approval: false,
+                });
+            }
 
             // Check if this tool is a safe read-only action.
             let requires_approval = tool_descs
@@ -710,6 +813,32 @@ fn tool_calls_to_proposals(
     } else {
         proposals
     }
+}
+
+/// Unwrap a meta-envelope tool call into a direct tool call.
+///
+/// When a model emits a tool call whose `name` is one of cairn's legacy
+/// JSON-action meta-verbs (`invoke_tool`, `spawn_subagent`), this helper
+/// peels the envelope: it extracts `tool_name` + `tool_args` from the
+/// arguments and returns `(tool_name, tool_args)`. If the shape does not
+/// match (missing `tool_name`, non-object args, etc.), the original
+/// `(name, args)` tuple is returned unchanged so downstream error
+/// handling can surface a clear "unknown tool" diagnostic.
+fn unwrap_meta_envelope(name: &str, args: serde_json::Value) -> (String, serde_json::Value) {
+    if name != "invoke_tool" && name != "spawn_subagent" {
+        return (name.to_owned(), args);
+    }
+    let Some(obj) = args.as_object() else {
+        return (name.to_owned(), args);
+    };
+    let Some(inner_name) = obj.get("tool_name").and_then(|v| v.as_str()) else {
+        return (name.to_owned(), serde_json::Value::Object(obj.clone()));
+    };
+    let inner_args = obj
+        .get("tool_args")
+        .cloned()
+        .unwrap_or_else(|| serde_json::json!({}));
+    (inner_name.to_owned(), inner_args)
 }
 
 fn strip_markdown_fence(s: &str) -> &str {
@@ -1022,7 +1151,8 @@ mod tests {
 
     #[test]
     fn system_prompt_references_orchestrator_role() {
-        let sys = build_system_prompt("orchestrator", &[]);
+        // Legacy text-mode (no native tool calling): mentions invoke_tool envelope.
+        let sys = build_system_prompt("orchestrator", &[], false);
         assert!(
             sys.contains("technical lead"),
             "should use orchestrator role identity"
@@ -1037,7 +1167,7 @@ mod tests {
 
     #[test]
     fn system_prompt_fallback_for_unknown_role() {
-        let sys = build_system_prompt("wizard", &[]);
+        let sys = build_system_prompt("wizard", &[], false);
         assert!(
             sys.contains("JSON array"),
             "fallback must still instruct JSON return"
@@ -1046,6 +1176,109 @@ mod tests {
             sys.contains("autonomous agent"),
             "fallback should use generic autonomous identity"
         );
+    }
+
+    #[test]
+    fn system_prompt_native_tool_mode_omits_invoke_tool_envelope() {
+        // When native tool calling is enabled, the system prompt must not
+        // instruct the model to wrap calls in `invoke_tool` — doing so is
+        // what causes Qwen 3.6 / Gemma 4 A2B to emit
+        // `tool_calls[].name == "invoke_tool"` (F12b).
+        let desc = BuiltinToolDescriptor {
+            name: "bash".to_owned(),
+            tier: ToolTier::Registered,
+            description: "Run a shell command.".to_owned(),
+            parameters_schema: serde_json::json!({
+                "type": "object",
+                "properties": { "command": { "type": "string" } },
+                "required": ["command"],
+                "additionalProperties": false,
+            }),
+            execution_class: cairn_domain::policy::ExecutionClass::Sensitive,
+            permission_level: cairn_tools::builtins::PermissionLevel::ReadOnly,
+            category: cairn_tools::builtins::ToolCategory::FileSystem,
+            tool_effect: ToolEffect::External,
+            retry_safety: cairn_tools::builtins::RetrySafety::DangerousPause,
+        };
+        let sys = build_system_prompt("orchestrator", std::slice::from_ref(&desc), true);
+        assert!(
+            !sys.contains("Use invoke_tool with"),
+            "native-tool prompt must not instruct invoke_tool envelope. Got: {sys}"
+        );
+        assert!(
+            sys.contains("Call any of the following tools directly"),
+            "native-tool prompt must instruct direct tool call. Got: {sys}"
+        );
+        assert!(
+            sys.contains("bash("),
+            "native-tool prompt must list registered tools by name"
+        );
+    }
+
+    #[test]
+    fn tool_calls_unwrap_invoke_tool_envelope() {
+        // Small/mid models (Qwen 3.6, Gemma 4 A2B) sometimes emit the
+        // legacy JSON-action envelope via the native tool_calls channel:
+        //   name="invoke_tool", arguments={"tool_name":"bash","tool_args":{...}}
+        // We must unwrap that into a proper `bash` call.
+        let tool_calls = vec![serde_json::json!({
+            "type": "function",
+            "function": {
+                "name": "invoke_tool",
+                "arguments": {
+                    "tool_name": "bash",
+                    "tool_args": { "command": "echo hi" }
+                }
+            }
+        })];
+        let proposals = tool_calls_to_proposals(&tool_calls, &[]);
+        assert_eq!(proposals.len(), 1);
+        assert_eq!(proposals[0].tool_name.as_deref(), Some("bash"));
+        assert_eq!(
+            proposals[0]
+                .tool_args
+                .as_ref()
+                .and_then(|a| a.get("command")),
+            Some(&serde_json::Value::String("echo hi".to_owned())),
+        );
+    }
+
+    #[test]
+    fn tool_calls_unwrap_spawn_subagent_envelope() {
+        let tool_calls = vec![serde_json::json!({
+            "type": "function",
+            "function": {
+                "name": "spawn_subagent",
+                "arguments": {
+                    "tool_name": "researcher",
+                    "tool_args": { "goal": "summarise RFCs" }
+                }
+            }
+        })];
+        let proposals = tool_calls_to_proposals(&tool_calls, &[]);
+        assert_eq!(proposals.len(), 1);
+        assert_eq!(proposals[0].action_type, ActionType::SpawnSubagent);
+        assert_eq!(proposals[0].tool_name.as_deref(), Some("researcher"));
+        assert_eq!(
+            proposals[0].tool_args.as_ref().and_then(|a| a.get("goal")),
+            Some(&serde_json::Value::String("summarise RFCs".to_owned())),
+        );
+    }
+
+    #[test]
+    fn tool_calls_unwrap_handles_stringified_arguments() {
+        // OpenAI-compatible providers serialize arguments as a JSON string.
+        let tool_calls = vec![serde_json::json!({
+            "type": "function",
+            "function": {
+                "name": "invoke_tool",
+                "arguments":
+                    r#"{"tool_name":"read","tool_args":{"path":"/tmp/x"}}"#
+            }
+        })];
+        let proposals = tool_calls_to_proposals(&tool_calls, &[]);
+        assert_eq!(proposals.len(), 1);
+        assert_eq!(proposals[0].tool_name.as_deref(), Some("read"));
     }
 
     #[test]
