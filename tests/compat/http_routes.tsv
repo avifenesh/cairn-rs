@@ -236,6 +236,8 @@ GET	/v1/tasks/expired	preserve	-	{ items }
 GET	/v1/telemetry/usage	preserve	-	-
 GET	/v1/templates	preserve	-	-
 GET	/v1/templates/:id	preserve	-	-
+GET	/v1/tool-call-approvals	preserve	-	-
+GET	/v1/tool-call-approvals/:call_id	preserve	-	-
 GET	/v1/tool-invocations	preserve	query: run_id?, limit?	{ items }
 GET	/v1/tool-invocations/:id	preserve	-	-
 GET	/v1/tool-invocations/:id/progress	preserve	-	-
@@ -249,6 +251,7 @@ GET	/v1/workers	preserve	-	-
 GET	/v1/workers/:id	preserve	-	-
 GET	/v1/ws	preserve	-	-
 GET	/version	preserve	-	-
+PATCH	/v1/tool-call-approvals/:call_id/amend	preserve	-	-
 POST	/v1/a2a/tasks	preserve	body: A2A task shape	A2A task submission
 POST	/v1/admin/backup	preserve	-	-
 POST	/v1/admin/license/activate	preserve	body: { license_key }	{ ok }
@@ -417,6 +420,8 @@ POST	/v1/tasks/batch/cancel	preserve	-	-
 POST	/v1/tasks/expire-leases	preserve	-	-
 POST	/v1/templates/:id/apply	preserve	-	-
 POST	/v1/test/webhook	preserve	-	-
+POST	/v1/tool-call-approvals/:call_id/approve	preserve	-	-
+POST	/v1/tool-call-approvals/:call_id/reject	preserve	-	-
 POST	/v1/tool-invocations	preserve	-	-
 POST	/v1/tool-invocations/:id/cancel	preserve	-	-
 POST	/v1/tool-invocations/:id/complete	preserve	-	-
