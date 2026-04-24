@@ -6,6 +6,7 @@ members = [
     "crates/cairn-tools",
     "crates/cairn-tools-derive",
     "crates/cairn-harness-tools",
+    "crates/cairn-skills",
     "crates/cairn-memory",
     "crates/cairn-graph",
     "crates/cairn-agent",

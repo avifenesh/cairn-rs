@@ -459,6 +459,7 @@ pub fn build_full_tool_registry(
         HarnessBash, HarnessBashKill, HarnessBashOutput, HarnessBuiltin, HarnessEdit, HarnessGlob,
         HarnessGrep, HarnessLsp, HarnessMultiEdit, HarnessRead, HarnessWebFetch, HarnessWrite,
     };
+    use cairn_skills::HarnessSkill;
     use cairn_tools::builtins::{ScratchPadTool, ToolSearchTool};
     let _ = working_dir; // harness tools use ToolContext.working_dir at exec time.
 
@@ -480,6 +481,8 @@ pub fn build_full_tool_registry(
             .register(Arc::new(HarnessBuiltin::<HarnessBashKill>::new()))
             // Utilities.
             .register(Arc::new(HarnessBuiltin::<HarnessWebFetch>::new()))
+            // Skills — agentskills.io activation via published harness-skill.
+            .register(Arc::new(HarnessBuiltin::<HarnessSkill>::new()))
             .register(Arc::new(ScratchPadTool::new())),
     );
 

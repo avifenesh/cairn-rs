@@ -522,6 +522,7 @@ dependencies = [
  "cairn-orchestrator",
  "cairn-providers",
  "cairn-runtime",
+ "cairn-skills",
  "cairn-store",
  "cairn-tools",
  "cairn-workspace",
@@ -802,6 +803,25 @@ dependencies = [
  "cairn-domain",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "cairn-skills"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "cairn-domain",
+ "cairn-harness-tools",
+ "cairn-skills",
+ "cairn-tools",
+ "harness-core",
+ "harness-skill",
+ "once_cell",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]
@@ -2013,6 +2033,22 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
+ "thiserror 2.0.18",
+ "tokio",
+]
+
+[[package]]
+name = "harness-skill"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "eebdccd92a7fda593594629d0f1b9ea59dc7cbe330cf46ddc7fc64e45cd723ca"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "globset",
+ "harness-core",
+ "serde",
+ "serde_json",
  "thiserror 2.0.18",
  "tokio",
 ]
