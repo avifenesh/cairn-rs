@@ -15,6 +15,12 @@ import { CopyButton } from "../components/CopyButton";
 import { Drawer } from "../components/Drawer";
 import { useToast } from "../components/Toast";
 import { defaultApi } from "../lib/api";
+import {
+  mapRunActionError,
+  stateGateTooltip,
+  PAUSABLE_RUN_STATES,
+  TERMINAL_RUN_STATES,
+} from "../lib/runStateErrors";
 import { useEventStream } from "../hooks/useEventStream";
 import { table as tablePreset } from "../lib/design-system";
 import type {
@@ -501,21 +507,11 @@ function PlanArtifactPanel({ runId, run }: { runId: string; run?: import("../lib
 
 // ── Operator actions (issues #166/#173) ──────────────────────────────────────
 
-const RUNNING_STATES = new Set([
-  "pending", "running", "waiting_approval", "waiting_dependency",
-]);
-// Mirrors `cairn_domain::RunState::is_terminal()` (completed|failed|canceled)
-// and defensively includes `dead_lettered` — the backend never emits it for a
-// Run today, but if a DLQ'd task bubbles up as a run-level state string we
-// must treat it as terminal, not "still running". `retryable_failed` is
-// intentionally excluded: it is semantically pending-retry, not terminal,
-// matching `TaskState::is_terminal()` in crates/cairn-domain/src/lifecycle.rs.
-const TERMINAL_STATES = new Set([
-  "completed",
-  "failed",
-  "canceled",
-  "dead_lettered",
-]);
+// Canonical pause / terminal sets live in `lib/runStateErrors.ts` so all
+// pages agree on what's pausable and what's terminal. We re-alias here to
+// keep existing call-site names (`RUNNING_STATES`, `TERMINAL_STATES`).
+const RUNNING_STATES = PAUSABLE_RUN_STATES;
+const TERMINAL_STATES = TERMINAL_RUN_STATES;
 
 function confirmAction(label: string, runId: string): boolean {
   // Match the existing "confirm" pattern used by cancelRun above — keep it
@@ -679,7 +675,7 @@ function InterveneModal({
       onSuccess();
       onClose();
     },
-    onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Intervene failed."),
+    onError: (e: unknown) => toast.error(mapRunActionError(e, "Intervene failed.", "intervene")),
   });
 
   const ACTIONS: { id: InterventionAction; label: string; hint: string }[] = [
@@ -767,12 +763,12 @@ function OperatorActions({ runId, run }: { runId: string; run?: RunRecord }) {
   const pauseMut = useMutation({
     mutationFn: () => defaultApi.pauseRun(runId, { reason_kind: "operator_pause", actor: "operator" }),
     onSuccess: () => { toast.success("Run paused."); invalidateRun(); },
-    onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Pause failed."),
+    onError: (e: unknown) => toast.error(mapRunActionError(e, "Pause failed.", "pause")),
   });
   const resumeMut = useMutation({
     mutationFn: () => defaultApi.resumeRun(runId, { trigger: "operator_resume", target: "running" }),
     onSuccess: () => { toast.success("Run resumed."); invalidateRun(); },
-    onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Resume failed."),
+    onError: (e: unknown) => toast.error(mapRunActionError(e, "Resume failed.", "resume")),
   });
   const recoverMut = useMutation({
     mutationFn: () => defaultApi.recoverRun(runId),
@@ -780,22 +776,22 @@ function OperatorActions({ runId, run }: { runId: string; run?: RunRecord }) {
       toast.success(r.deprecated ? "Recover acknowledged (handled by background scanners)." : "Recovery requested.");
       invalidateRun();
     },
-    onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Recover failed."),
+    onError: (e: unknown) => toast.error(mapRunActionError(e, "Recover failed.", "recover")),
   });
   const claimMut = useMutation({
     mutationFn: () => defaultApi.claimRun(runId),
     onSuccess: () => { toast.success("Run claimed for inspection."); invalidateRun(); },
-    onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Claim failed."),
+    onError: (e: unknown) => toast.error(mapRunActionError(e, "Claim failed.", "claim")),
   });
   const orchestrateMut = useMutation({
     mutationFn: () => defaultApi.orchestrateRun(runId, {}),
     onSuccess: () => { toast.success("Orchestration step triggered."); invalidateRun(); },
-    onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Orchestrate failed."),
+    onError: (e: unknown) => toast.error(mapRunActionError(e, "Orchestrate failed.", "orchestrate")),
   });
   const diagnoseMut = useMutation({
     mutationFn: () => defaultApi.diagnoseRun(runId),
     onSuccess: (data) => { setDiagnoseDrawer({ open: true, data }); },
-    onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Diagnose failed."),
+    onError: (e: unknown) => toast.error(mapRunActionError(e, "Diagnose failed.", "diagnose")),
   });
 
   const { data: interventions } = useQuery({
@@ -830,7 +826,7 @@ function OperatorActions({ runId, run }: { runId: string; run?: RunRecord }) {
           onClick={() => pauseMut.mutate()}
           disabled={!canPause}
           pending={pauseMut.isPending}
-          title={canPause ? "Pause this run" : "Run is not in a pausable state"}
+          title={canPause ? "Pause this run" : stateGateTooltip("pause", state)}
         />
         <ActionBtn
           icon={<Play size={12} />}
@@ -839,7 +835,7 @@ function OperatorActions({ runId, run }: { runId: string; run?: RunRecord }) {
           onClick={() => resumeMut.mutate()}
           disabled={!canResume}
           pending={resumeMut.isPending}
-          title={canResume ? "Resume paused run" : "Run is not paused"}
+          title={canResume ? "Resume paused run" : stateGateTooltip("resume", state)}
         />
         <ActionBtn
           icon={<Sparkles size={12} />}
@@ -847,7 +843,7 @@ function OperatorActions({ runId, run }: { runId: string; run?: RunRecord }) {
           onClick={() => orchestrateMut.mutate()}
           disabled={isTerminal}
           pending={orchestrateMut.isPending}
-          title="Drive the orchestration loop one step"
+          title={isTerminal ? stateGateTooltip("orchestrate", state) : "Drive the orchestration loop one step"}
         />
         <ActionBtn
           icon={<Stethoscope size={12} />}
@@ -862,7 +858,7 @@ function OperatorActions({ runId, run }: { runId: string; run?: RunRecord }) {
           variant="primary"
           onClick={() => setInterveneOpen(true)}
           disabled={isTerminal}
-          title="Operator intervention (force complete/fail/restart or inject message)"
+          title={isTerminal ? stateGateTooltip("intervene", state) : "Operator intervention (force complete/fail/restart or inject message)"}
         />
         <ActionBtn
           icon={<GitBranch size={12} />}

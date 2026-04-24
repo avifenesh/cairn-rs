@@ -14,7 +14,7 @@ import {
 } from "lucide-react";
 import { clsx } from "clsx";
 import { BarChart } from "../components/BarChart";
-import { defaultApi } from "../lib/api";
+import { defaultApi, getStoredToken } from "../lib/api";
 import { PageHeader } from "../components/PageHeader";
 import { StatCard as SharedStatCard } from "../components/StatCard";
 import { Card } from "../components/Card";
@@ -345,6 +345,16 @@ export function MetricsPage() {
     ? new Date(dataUpdatedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })
     : null;
 
+  // Browser navigation (anchor click, new-tab) does not attach the
+  // `Authorization: Bearer` header, so the auth middleware rejects plain
+  // `/v1/metrics/prometheus` navigations as 401. The middleware falls back
+  // to the `?token=` query param (already used by SSE + WebSocket) — build
+  // the href dynamically from the stored token. See issue #256.
+  const storedToken = getStoredToken();
+  const prometheusHref = storedToken
+    ? `/v1/metrics/prometheus?token=${encodeURIComponent(storedToken)}`
+    : "/v1/metrics/prometheus";
+
   return (
     <div className={clsx("h-full overflow-y-auto", ds.surface.page)}>
       <div className={ds.spacing.pageWide}>
@@ -368,16 +378,27 @@ export function MetricsPage() {
                 <RefreshCw size={11} className={isFetching ? "animate-spin" : ""} />
                 Refresh
               </button>
-              <a
-                href="/v1/metrics/prometheus"
-                target="_blank"
-                rel="noopener noreferrer"
-                className={ds.btn.secondary}
-                title="Open Prometheus exposition format"
-              >
-                <ExternalLink size={11} />
-                Prometheus
-              </a>
+              {storedToken ? (
+                <a
+                  href={prometheusHref}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className={ds.btn.secondary}
+                  title="Open Prometheus exposition format"
+                >
+                  <ExternalLink size={11} />
+                  Prometheus
+                </a>
+              ) : (
+                <button
+                  disabled
+                  className={ds.btn.secondary}
+                  title="Sign in to open the Prometheus endpoint"
+                >
+                  <ExternalLink size={11} />
+                  Prometheus
+                </button>
+              )}
             </div>
           }
         />
