@@ -67,6 +67,7 @@ pub mod skill_catalog;
 pub mod soul_guard;
 pub mod startup;
 pub mod tasks;
+pub mod tool_call_approvals;
 pub mod telemetry;
 pub mod tenants;
 pub mod voice;
@@ -116,13 +117,17 @@ pub use services::{
     IngestJobServiceImpl, LlmObservabilityServiceImpl, MailboxServiceImpl, ProjectServiceImpl,
     PromptAssetServiceImpl, PromptReleaseServiceImpl, PromptVersionServiceImpl, RecoveryService,
     RecoveryServiceImpl, SandboxLostRun, SandboxReattachedRun, SignalServiceImpl,
-    SimpleRouteResolver, TenantServiceImpl, ToolInvocationService, ToolInvocationServiceImpl,
-    WorkspaceServiceImpl,
+    SimpleRouteResolver, TenantServiceImpl, ToolCallApprovalServiceImpl, ToolInvocationService,
+    ToolInvocationServiceImpl, WorkspaceServiceImpl,
 };
 pub use sessions::SessionService;
 pub use signals::SignalService;
 pub use soul_guard::SoulGuard;
 pub use tasks::TaskService;
+pub use tool_call_approvals::{
+    AllowRule, ApprovalDecision as ToolCallApprovalDecision, ApprovedProposal, OperatorDecision,
+    ToolCallApprovalReader, ToolCallApprovalService, ToolCallProposal,
+};
 pub use tenants::TenantService;
 pub use workspaces::WorkspaceService;
 // Service trait exports
