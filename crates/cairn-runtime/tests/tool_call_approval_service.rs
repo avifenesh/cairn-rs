@@ -797,3 +797,52 @@ async fn approve_rehydrates_terminal_state_as_invalid_transition() {
         .unwrap_err();
     assert!(matches!(err, RuntimeError::InvalidTransition { .. }));
 }
+
+#[tokio::test(flavor = "current_thread")]
+async fn await_decision_falls_back_to_projection_after_restart() {
+    // A resumed orchestrator after restart calls await_decision with
+    // an empty cache. Before this fix it would register a oneshot and
+    // time out even though the projection carried an approval. The
+    // fast path now re-hydrates from the projection and returns the
+    // persisted decision immediately.
+    let (svc, reader) = svc_with_seeded_reader();
+    reader.insert_proposal(
+        ToolCallId::new("tc_resume"),
+        StoredProposal {
+            proposal: proposal("tc_resume", "read", json!({ "path": "/a" })),
+            state: StoredProposalState::Approved,
+            amended_args: None,
+            approved_args: Some(json!({ "path": "/a" })),
+            rejection_reason: None,
+        },
+    );
+
+    let decision = svc
+        .await_decision(&ToolCallId::new("tc_resume"), Duration::from_millis(50))
+        .await
+        .expect("await_decision must surface the persisted approval, not time out");
+    match decision {
+        OperatorDecision::Approved { approved_args } => {
+            assert_eq!(approved_args, json!({ "path": "/a" }));
+        }
+        other => panic!("expected Approved, got {other:?}"),
+    }
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn await_decision_on_unknown_call_surfaces_not_found() {
+    // Historical behaviour was to register a oneshot and time out on
+    // an unknown call_id — operators then saw a "timeout" that was
+    // actually a typo. The new fast path lifts the projection lookup
+    // before the oneshot, so a genuinely-missing row is surfaced as
+    // NotFound immediately.
+    let (svc, _reader) = svc_with_seeded_reader();
+    let err = svc
+        .await_decision(&ToolCallId::new("tc_nope"), Duration::from_millis(50))
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(err, RuntimeError::NotFound { entity, .. } if entity == "tool_call_approval"),
+        "expected NotFound, got {err:?}"
+    );
+}

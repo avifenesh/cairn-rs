@@ -211,7 +211,7 @@ where
 /// mapping intentionally preserves the three argument slots separately
 /// (original / amended / approved) so the runtime can re-apply the
 /// domain precedence invariant without re-reading the projection.
-fn store_record_to_stored_proposal(
+pub(crate) fn store_record_to_stored_proposal(
     r: cairn_store::projections::ToolCallApprovalRecord,
 ) -> StoredProposal {
     let state = match r.state {

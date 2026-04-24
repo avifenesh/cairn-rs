@@ -553,27 +553,40 @@ where
         timeout: Duration,
     ) -> Result<OperatorDecision, RuntimeError> {
         // Fast path: if approve/reject already landed (race between
-        // submit_proposal and the await), return immediately based on
-        // the cached state without opening a oneshot channel. Rejection
-        // reason is preserved so callers see the actual reason (incl.
-        // the `"operator_timeout"` sentinel), not an ambiguous `None`.
-        {
-            let guard = lock(&self.inner);
-            if let Some(entry) = guard.proposals.get(call_id) {
-                match entry.state {
-                    ProposalState::Approved => {
-                        return Ok(OperatorDecision::Approved {
-                            approved_args: entry.effective_args(),
-                        });
-                    }
-                    ProposalState::Rejected => {
-                        return Ok(OperatorDecision::Rejected {
-                            reason: entry.rejection_reason.clone(),
-                        });
-                    }
-                    _ => {}
+        // submit_proposal and the await, or a process restart where the
+        // decision is on disk but not in cache), return immediately
+        // based on the durable state without opening a oneshot channel.
+        // Rejection reason is preserved so callers see the actual
+        // reason (incl. the `"operator_timeout"` sentinel), not an
+        // ambiguous `None`.
+        //
+        // `load_or_fetch` consults the cache first, then falls back to
+        // the projection, so resumed orchestrators after restart hit
+        // the persisted decision instead of registering a oneshot that
+        // will only ever time out. A genuine NotFound (no cache, no
+        // projection row) is surfaced now rather than masked as a
+        // silent timeout.
+        match self.load_or_fetch(call_id).await {
+            Ok(entry) => match entry.state {
+                ProposalState::Approved => {
+                    return Ok(OperatorDecision::Approved {
+                        approved_args: entry.effective_args(),
+                    });
                 }
+                ProposalState::Rejected => {
+                    return Ok(OperatorDecision::Rejected {
+                        reason: entry.rejection_reason.clone(),
+                    });
+                }
+                _ => {}
+            },
+            Err(RuntimeError::NotFound { .. }) => {
+                return Err(RuntimeError::NotFound {
+                    entity: "tool_call_approval",
+                    id: call_id.to_string(),
+                });
             }
+            Err(e) => return Err(e),
         }
 
         let (tx, rx) = oneshot::channel();
