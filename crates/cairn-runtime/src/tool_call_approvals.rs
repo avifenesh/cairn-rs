@@ -58,12 +58,16 @@ pub struct ToolCallProposal {
 }
 
 /// Result of submitting a proposal to the service.
+///
+/// There is no `AutoRejected` variant yet: a deny-registry is out of scope
+/// for PR-3 (the service evaluates a session **allow** registry only).
+/// When a deny registry lands in a later PR, a new variant can be added
+/// without breaking callers thanks to `#[non_exhaustive]` on the match
+/// sites added alongside.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ApprovalDecision {
     /// Matched an existing session allow-rule — execute with original args.
     AutoApproved,
-    /// Matched a deny path — do not execute, surface `reason` to the agent.
-    AutoRejected { reason: String },
     /// No auto-match. Caller must `await_decision` for the operator.
     PendingOperator,
 }
@@ -198,6 +202,12 @@ pub(crate) fn extract_path_arg(tool_args: &Value) -> Option<&str> {
 /// the allow registry is a boundary check, and a symlink-aware check
 /// belongs in the tool-execution fence (mirroring the harness-core
 /// `PermissionPolicy.roots` model).
+///
+/// A `..` component is only folded when the accumulated path has a
+/// non-root tail to pop. `/../a` canonicalises to `/a`, not `a`; a
+/// naive `out.pop()` would eat the leading `RootDir` and produce a
+/// relative path that silently changes `ExactPath` equality and
+/// `ProjectScopedPath` containment.
 fn canonicalise(p: &str) -> PathBuf {
     let path = Path::new(p);
     let mut out = PathBuf::new();
@@ -205,7 +215,15 @@ fn canonicalise(p: &str) -> PathBuf {
         match c {
             Component::CurDir => {}
             Component::ParentDir => {
-                out.pop();
+                // Only pop an already-pushed non-anchor component. If
+                // the tail is `RootDir`/`Prefix` (or empty), ignore.
+                let can_pop = matches!(
+                    out.components().next_back(),
+                    Some(Component::Normal(_)) | Some(Component::CurDir)
+                );
+                if can_pop {
+                    out.pop();
+                }
             }
             other => out.push(other.as_os_str()),
         }
@@ -378,6 +396,20 @@ mod tests {
             },
         };
         assert!(!proposal_matches_rule(&p, &r));
+    }
+
+    #[test]
+    fn canonicalise_keeps_root_when_parent_dir_would_escape() {
+        // `/../a` must canonicalise to `/a`, not `a`. If `..` could pop
+        // the `RootDir`, `ExactPath` equality and `ProjectScopedPath`
+        // containment would silently change meaning.
+        let p = proposal("read", serde_json::json!({ "path": "/../a" }));
+        let r = AllowRule {
+            tool_name: "read".into(),
+            tool_args: Value::Null,
+            policy: ApprovalMatchPolicy::ExactPath { path: "/a".into() },
+        };
+        assert!(proposal_matches_rule(&p, &r));
     }
 
     #[test]

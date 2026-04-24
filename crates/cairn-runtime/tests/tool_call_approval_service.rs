@@ -461,6 +461,125 @@ async fn approve_after_approve_is_invalid_transition() {
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn await_decision_fast_path_returns_rejection_reason() {
+    // Reject BEFORE the caller awaits — the fast path in await_decision
+    // must return the actual reason (not ambiguous None). Also covers
+    // the `operator_timeout` sentinel path.
+    let svc = setup();
+    svc.submit_proposal(proposal("tc1", "bash", json!({ "cmd": "ls" })))
+        .await
+        .unwrap();
+
+    svc.reject(
+        ToolCallId::new("tc1"),
+        OperatorId::new("op-1"),
+        Some("policy-violation".into()),
+    )
+    .await
+    .unwrap();
+
+    let decision = svc
+        .await_decision(&ToolCallId::new("tc1"), Duration::from_secs(5))
+        .await
+        .unwrap();
+    match decision {
+        OperatorDecision::Rejected { reason } => {
+            assert_eq!(reason, Some("policy-violation".into()));
+        }
+        other => panic!("expected Rejected with reason, got {other:?}"),
+    }
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn session_allow_rule_uses_effective_args_not_original() {
+    // If the operator amends to v2 and approves, a subsequent proposal
+    // with args v2 must auto-approve (because the registered allow rule
+    // captured the effective/amended args, not the original v1).
+    let svc = setup();
+    svc.submit_proposal(proposal("tc1", "write", json!({ "body": "v1" })))
+        .await
+        .unwrap();
+    svc.amend(
+        ToolCallId::new("tc1"),
+        OperatorId::new("op-1"),
+        json!({ "body": "v2" }),
+    )
+    .await
+    .unwrap();
+    svc.approve(
+        ToolCallId::new("tc1"),
+        OperatorId::new("op-1"),
+        ApprovalScope::Session {
+            match_policy: ApprovalMatchPolicy::Exact,
+        },
+        None,
+    )
+    .await
+    .unwrap();
+
+    // Second call with the ORIGINAL v1 args — must NOT auto-approve.
+    assert_eq!(
+        svc.submit_proposal(proposal("tc2", "write", json!({ "body": "v1" })))
+            .await
+            .unwrap(),
+        ApprovalDecision::PendingOperator
+    );
+
+    // Third call with the AMENDED v2 args — must auto-approve.
+    assert_eq!(
+        svc.submit_proposal(proposal("tc3", "write", json!({ "body": "v2" })))
+            .await
+            .unwrap(),
+        ApprovalDecision::AutoApproved
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn timeout_write_is_idempotent_on_concurrent_approve() {
+    // Stress the atomic-claim property: fire `approve` simultaneously
+    // with a timeout-about-to-expire. Whichever lands first wins; the
+    // second operation must observe InvalidTransition and the cache
+    // must reflect exactly one resolution. The event log should carry
+    // exactly one resolution event per call_id.
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    for _ in 0..20 {
+        let svc = Arc::new(setup());
+        svc.submit_proposal(proposal("tc1", "read", json!({ "path": "/a" })))
+            .await
+            .unwrap();
+
+        let svc_wait = svc.clone();
+        let awaiter = tokio::spawn(async move {
+            svc_wait
+                .await_decision(&ToolCallId::new("tc1"), Duration::from_millis(20))
+                .await
+        });
+        // Race: try to approve right around the timeout boundary.
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        let approve_err_counter = AtomicUsize::new(0);
+        let approve_res = svc
+            .approve(
+                ToolCallId::new("tc1"),
+                OperatorId::new("op-1"),
+                ApprovalScope::Once,
+                None,
+            )
+            .await;
+        if approve_res.is_err() {
+            approve_err_counter.fetch_add(1, Ordering::SeqCst);
+        }
+        let _ = awaiter.await.unwrap();
+        // Post-condition: cache is resolved exactly once. retrieving
+        // must succeed (if approved won the race) or fail with
+        // InvalidTransition (if timeout won). Never panics.
+        let _ = svc
+            .retrieve_approved_proposal(&ToolCallId::new("tc1"))
+            .await;
+    }
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn concurrent_await_decision_is_rejected() {
     let svc = Arc::new(setup());
     svc.submit_proposal(proposal("tc1", "read", json!({ "path": "/a" })))

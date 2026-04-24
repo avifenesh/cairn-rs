@@ -26,8 +26,8 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use async_trait::async_trait;
 use cairn_domain::{
-    ApprovalMatchPolicy, ApprovalScope, OperatorId, RuntimeEvent, SessionId, ToolCallAmended,
-    ToolCallApproved, ToolCallId, ToolCallProposed, ToolCallRejected,
+    ApprovalScope, OperatorId, RuntimeEvent, SessionId, ToolCallAmended, ToolCallApproved,
+    ToolCallId, ToolCallProposed, ToolCallRejected,
 };
 use cairn_store::EventLog;
 use serde_json::Value;
@@ -58,6 +58,11 @@ struct ProposalEntry {
     amended_args: Option<Value>,
     /// `ToolCallApproved.approved_tool_args`, if any.
     approved_args: Option<Value>,
+    /// `ToolCallRejected.reason`, retained so the `await_decision`
+    /// fast-path (fired when rejection landed before the caller parked)
+    /// can surface the actual rejection reason — including the
+    /// `"operator_timeout"` sentinel — rather than silently dropping it.
+    rejection_reason: Option<String>,
 }
 
 impl ProposalEntry {
@@ -149,11 +154,16 @@ where
     }
 }
 
-/// `std::sync::Mutex` poisoning should never happen here — every path
-/// holding the lock is infallible — but if it somehow does we surface
-/// it as a descriptive internal error rather than panicking.
+/// Acquire the shared-state mutex. Every path holding this lock is
+/// infallible (no panic-capable calls inside critical sections), so if
+/// the lock has somehow been poisoned we prefer pressing on with the
+/// inner state over propagating a poison panic up the async stack: the
+/// event log is the source of truth, not this cache, and refusing to
+/// serve an approve/reject because of a background panic elsewhere
+/// would strand runs waiting on operator decisions. This choice is
+/// intentional; it is not a "surface the error" policy.
 #[inline]
-fn lock<'a, T>(m: &'a Mutex<T>) -> std::sync::MutexGuard<'a, T> {
+fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     m.lock().unwrap_or_else(|poison| poison.into_inner())
 }
 
@@ -198,6 +208,7 @@ where
                     state: ProposalState::Pending,
                     amended_args: None,
                     approved_args: None,
+                    rejection_reason: None,
                 },
             );
         }
@@ -235,77 +246,128 @@ where
         scope: ApprovalScope,
         approved_args: Option<Value>,
     ) -> Result<(), RuntimeError> {
-        // Load proposal context (cache, falling back to store).
-        let entry = self.load_or_fetch(&call_id).await?;
-        if entry.state == ProposalState::Approved || entry.state == ProposalState::Rejected {
-            return Err(RuntimeError::InvalidTransition {
-                entity: "tool_call_approval",
-                from: format!("{:?}", entry.state).to_ascii_lowercase(),
-                to: "approved".into(),
-            });
+        // Ensure the cache is populated for this call_id.
+        let _ = self.load_or_fetch(&call_id).await?;
+
+        // ── Phase 1: atomically claim the Pending→Approved transition ───
+        //
+        // Capture everything needed to emit the event and fire the
+        // oneshot *while holding the mutex*, so no concurrent
+        // approve/reject/timeout can also observe `Pending` and
+        // produce a second resolution event.
+        struct ClaimedContext {
+            project_key: cairn_domain::ProjectKey,
+            session_id: SessionId,
+            previous_state: ProposalState,
+            effective_args: Value,
+            allow_rule: Option<AllowRule>,
+            sender: Option<oneshot::Sender<OperatorDecision>>,
         }
 
-        // Persist approval event.
-        self.append(RuntimeEvent::ToolCallApproved(ToolCallApproved {
-            project: entry.proposal.project.clone(),
-            call_id: call_id.clone(),
-            session_id: entry.proposal.session_id.clone(),
-            operator_id: operator_id.clone(),
-            scope: scope.clone(),
-            approved_tool_args: approved_args.clone(),
-            approved_at_ms: now_ms(),
-        }))
-        .await?;
-
-        // Update cache, session allow registry, and fire the oneshot.
-        let (sender, decision) = {
+        let ctx = {
             let mut guard = lock(&self.inner);
-
-            // Update cache entry.
-            if let Some(cached) = guard.proposals.get_mut(&call_id) {
-                if let Some(ref args) = approved_args {
-                    cached.approved_args = Some(args.clone());
-                }
-                cached.state = ProposalState::Approved;
-            }
-
-            // Extend the session allow registry if requested.
-            if let ApprovalScope::Session { match_policy } = &scope {
-                let rule = build_allow_rule(&entry.proposal, match_policy);
-                guard
-                    .allow_registry
-                    .entry(entry.proposal.session_id.clone())
-                    .or_default()
-                    .push(rule);
-            }
-
-            // Resolve effective args for the decision payload: prefer
-            // the newly-supplied override, else the cached
-            // approved/amended/original chain.
-            let effective = approved_args.clone().unwrap_or_else(|| {
+            let cached =
                 guard
                     .proposals
-                    .get(&call_id)
-                    .map(ProposalEntry::effective_args)
-                    .unwrap_or(entry.proposal.tool_args.clone())
-            });
+                    .get_mut(&call_id)
+                    .ok_or_else(|| RuntimeError::NotFound {
+                        entity: "tool_call_approval",
+                        id: call_id.to_string(),
+                    })?;
+            if cached.state == ProposalState::Approved || cached.state == ProposalState::Rejected {
+                return Err(RuntimeError::InvalidTransition {
+                    entity: "tool_call_approval",
+                    from: format!("{:?}", cached.state).to_ascii_lowercase(),
+                    to: "approved".into(),
+                });
+            }
 
+            // Fold the operator-supplied override into the cache *before*
+            // computing `effective_args` so the allow-rule below captures
+            // the actual post-approval args, not the pre-override ones.
+            if let Some(ref args) = approved_args {
+                cached.approved_args = Some(args.clone());
+            }
+            let effective_args = cached.effective_args();
+            let project_key = cached.proposal.project.clone();
+            let session_id = cached.proposal.session_id.clone();
+            let tool_name = cached.proposal.tool_name.clone();
+
+            // Build allow rule from *effective* args so that a later
+            // auto-approve matches what the operator actually sanctioned
+            // — not an unsafe pre-amendment payload. This addresses the
+            // Copilot review finding on line 280.
+            let allow_rule = if let ApprovalScope::Session { match_policy } = &scope {
+                Some(AllowRule {
+                    tool_name,
+                    tool_args: effective_args.clone(),
+                    policy: match_policy.clone(),
+                })
+            } else {
+                None
+            };
+
+            let previous_state = cached.state.clone();
+            cached.state = ProposalState::Approved;
             let sender = guard.pending.remove(&call_id);
-            (
+
+            ClaimedContext {
+                project_key,
+                session_id,
+                previous_state,
+                effective_args,
+                allow_rule,
                 sender,
-                OperatorDecision::Approved {
-                    approved_args: effective,
-                },
-            )
+            }
         };
 
-        if let Some(tx) = sender {
-            // Receiver may have already dropped (e.g. timeout fired just
-            // before the approval landed). Losing that signal is fine —
-            // the persisted event is the source of truth, and a
-            // follow-up `retrieve_approved_proposal` will still see the
-            // approved state.
-            let _ = tx.send(decision);
+        // ── Phase 2: persist the approval event ─────────────────────────
+        let append_result = self
+            .append(RuntimeEvent::ToolCallApproved(ToolCallApproved {
+                project: ctx.project_key.clone(),
+                call_id: call_id.clone(),
+                session_id: ctx.session_id.clone(),
+                operator_id,
+                scope: scope.clone(),
+                approved_tool_args: approved_args.clone(),
+                approved_at_ms: now_ms(),
+            }))
+            .await;
+
+        if let Err(err) = append_result {
+            // Revert the claimed transition so a retry from the caller
+            // or a concurrent decision path can re-enter cleanly.
+            let mut guard = lock(&self.inner);
+            if let Some(cached) = guard.proposals.get_mut(&call_id) {
+                if cached.state == ProposalState::Approved {
+                    cached.state = ctx.previous_state;
+                    if approved_args.is_some() {
+                        cached.approved_args = None;
+                    }
+                }
+            }
+            return Err(err);
+        }
+
+        // ── Phase 3: post-commit side effects ───────────────────────────
+        if let Some(rule) = ctx.allow_rule {
+            let mut guard = lock(&self.inner);
+            guard
+                .allow_registry
+                .entry(ctx.session_id.clone())
+                .or_default()
+                .push(rule);
+        }
+
+        if let Some(tx) = ctx.sender {
+            // Receiver may have already dropped (e.g. timeout fired
+            // between Phase 1 and Phase 2). Losing that signal is fine
+            // — the persisted event is the source of truth, and a
+            // follow-up `retrieve_approved_proposal` / `await_decision`
+            // fast-path will still see the approved state.
+            let _ = tx.send(OperatorDecision::Approved {
+                approved_args: ctx.effective_args,
+            });
         }
 
         Ok(())
@@ -317,34 +379,74 @@ where
         operator_id: OperatorId,
         reason: Option<String>,
     ) -> Result<(), RuntimeError> {
-        let entry = self.load_or_fetch(&call_id).await?;
-        if entry.state == ProposalState::Approved || entry.state == ProposalState::Rejected {
-            return Err(RuntimeError::InvalidTransition {
-                entity: "tool_call_approval",
-                from: format!("{:?}", entry.state).to_ascii_lowercase(),
-                to: "rejected".into(),
-            });
+        let _ = self.load_or_fetch(&call_id).await?;
+
+        struct RejectCtx {
+            project_key: cairn_domain::ProjectKey,
+            session_id: SessionId,
+            previous_state: ProposalState,
+            previous_reason: Option<String>,
+            sender: Option<oneshot::Sender<OperatorDecision>>,
         }
 
-        self.append(RuntimeEvent::ToolCallRejected(ToolCallRejected {
-            project: entry.proposal.project.clone(),
-            call_id: call_id.clone(),
-            session_id: entry.proposal.session_id.clone(),
-            operator_id,
-            reason: reason.clone(),
-            rejected_at_ms: now_ms(),
-        }))
-        .await?;
-
-        let sender = {
+        // ── Phase 1: atomically claim the transition. ──────────────────
+        let ctx = {
             let mut guard = lock(&self.inner);
-            if let Some(cached) = guard.proposals.get_mut(&call_id) {
-                cached.state = ProposalState::Rejected;
+            let cached =
+                guard
+                    .proposals
+                    .get_mut(&call_id)
+                    .ok_or_else(|| RuntimeError::NotFound {
+                        entity: "tool_call_approval",
+                        id: call_id.to_string(),
+                    })?;
+            if cached.state == ProposalState::Approved || cached.state == ProposalState::Rejected {
+                return Err(RuntimeError::InvalidTransition {
+                    entity: "tool_call_approval",
+                    from: format!("{:?}", cached.state).to_ascii_lowercase(),
+                    to: "rejected".into(),
+                });
             }
-            guard.pending.remove(&call_id)
+            let previous_state = cached.state.clone();
+            let previous_reason = cached.rejection_reason.clone();
+            cached.state = ProposalState::Rejected;
+            cached.rejection_reason = reason.clone();
+            let project_key = cached.proposal.project.clone();
+            let session_id = cached.proposal.session_id.clone();
+            let sender = guard.pending.remove(&call_id);
+            RejectCtx {
+                project_key,
+                session_id,
+                previous_state,
+                previous_reason,
+                sender,
+            }
         };
 
-        if let Some(tx) = sender {
+        // ── Phase 2: persist the rejection event. ──────────────────────
+        let append_result = self
+            .append(RuntimeEvent::ToolCallRejected(ToolCallRejected {
+                project: ctx.project_key,
+                call_id: call_id.clone(),
+                session_id: ctx.session_id,
+                operator_id,
+                reason: reason.clone(),
+                rejected_at_ms: now_ms(),
+            }))
+            .await;
+
+        if let Err(err) = append_result {
+            let mut guard = lock(&self.inner);
+            if let Some(cached) = guard.proposals.get_mut(&call_id) {
+                if cached.state == ProposalState::Rejected {
+                    cached.state = ctx.previous_state;
+                    cached.rejection_reason = ctx.previous_reason;
+                }
+            }
+            return Err(err);
+        }
+
+        if let Some(tx) = ctx.sender {
             let _ = tx.send(OperatorDecision::Rejected { reason });
         }
         Ok(())
@@ -356,33 +458,62 @@ where
         operator_id: OperatorId,
         new_args: Value,
     ) -> Result<(), RuntimeError> {
-        let entry = self.load_or_fetch(&call_id).await?;
-        if entry.state == ProposalState::Approved || entry.state == ProposalState::Rejected {
-            return Err(RuntimeError::InvalidTransition {
-                entity: "tool_call_approval",
-                from: format!("{:?}", entry.state).to_ascii_lowercase(),
-                to: "amended".into(),
-            });
-        }
+        let _ = self.load_or_fetch(&call_id).await?;
 
-        self.append(RuntimeEvent::ToolCallAmended(ToolCallAmended {
-            project: entry.proposal.project.clone(),
-            call_id: call_id.clone(),
-            session_id: entry.proposal.session_id.clone(),
-            operator_id,
-            new_tool_args: new_args.clone(),
-            amended_at_ms: now_ms(),
-        }))
-        .await?;
-
-        // Update the cache — but do NOT fire the oneshot. Operator
-        // still needs to resolve (approve/reject) after amending.
-        let mut guard = lock(&self.inner);
-        if let Some(cached) = guard.proposals.get_mut(&call_id) {
-            cached.amended_args = Some(new_args);
+        // Claim the state transition (Pending|Amended → Amended) under
+        // the mutex. Unlike approve/reject, Amended is not terminal —
+        // re-entry is fine — but we still want to refuse amendments
+        // over an already-resolved proposal.
+        let (project_key, session_id, previous_state, previous_amended) = {
+            let mut guard = lock(&self.inner);
+            let cached =
+                guard
+                    .proposals
+                    .get_mut(&call_id)
+                    .ok_or_else(|| RuntimeError::NotFound {
+                        entity: "tool_call_approval",
+                        id: call_id.to_string(),
+                    })?;
+            if cached.state == ProposalState::Approved || cached.state == ProposalState::Rejected {
+                return Err(RuntimeError::InvalidTransition {
+                    entity: "tool_call_approval",
+                    from: format!("{:?}", cached.state).to_ascii_lowercase(),
+                    to: "amended".into(),
+                });
+            }
+            let previous_state = cached.state.clone();
+            let previous_amended = cached.amended_args.clone();
+            cached.amended_args = Some(new_args.clone());
             cached.state = ProposalState::Amended;
+            (
+                cached.proposal.project.clone(),
+                cached.proposal.session_id.clone(),
+                previous_state,
+                previous_amended,
+            )
+        };
+
+        let append_result = self
+            .append(RuntimeEvent::ToolCallAmended(ToolCallAmended {
+                project: project_key,
+                call_id: call_id.clone(),
+                session_id,
+                operator_id,
+                new_tool_args: new_args,
+                amended_at_ms: now_ms(),
+            }))
+            .await;
+
+        if let Err(err) = append_result {
+            let mut guard = lock(&self.inner);
+            if let Some(cached) = guard.proposals.get_mut(&call_id) {
+                cached.state = previous_state;
+                cached.amended_args = previous_amended;
+            }
+            return Err(err);
         }
 
+        // No oneshot firing — operator still needs to resolve after amending.
         Ok(())
     }
 
@@ -422,7 +553,9 @@ where
     ) -> Result<OperatorDecision, RuntimeError> {
         // Fast path: if approve/reject already landed (race between
         // submit_proposal and the await), return immediately based on
-        // the cached state without opening a oneshot channel.
+        // the cached state without opening a oneshot channel. Rejection
+        // reason is preserved so callers see the actual reason (incl.
+        // the `"operator_timeout"` sentinel), not an ambiguous `None`.
         {
             let guard = lock(&self.inner);
             if let Some(entry) = guard.proposals.get(call_id) {
@@ -433,7 +566,9 @@ where
                         });
                     }
                     ProposalState::Rejected => {
-                        return Ok(OperatorDecision::Rejected { reason: None });
+                        return Ok(OperatorDecision::Rejected {
+                            reason: entry.rejection_reason.clone(),
+                        });
                     }
                     _ => {}
                 }
@@ -466,39 +601,87 @@ where
                     "approval oneshot dropped without a decision".into(),
                 ))
             }
-            Err(_elapsed) => {
-                // Timeout: remove the pending slot, auto-reject, and
-                // surface `Timeout` to the caller.
+            Err(_elapsed) => self.handle_timeout(call_id).await,
+        }
+    }
+}
+
+impl<S, R> ToolCallApprovalServiceImpl<S, R>
+where
+    S: EventLog + 'static,
+    R: ToolCallApprovalReader + 'static,
+{
+    /// Handle an `await_decision` timeout by atomically claiming the
+    /// Pending/Amended → Rejected transition, then appending the
+    /// `ToolCallRejected` event.
+    ///
+    /// Phases mirror `approve`/`reject` so a concurrent operator call
+    /// and a timeout cannot both emit resolution events: whichever
+    /// acquires the mutex first claims the transition, and the other
+    /// observes `Approved`/`Rejected` and bails out.
+    async fn handle_timeout(&self, call_id: &ToolCallId) -> Result<OperatorDecision, RuntimeError> {
+        let reason = "operator_timeout".to_owned();
+
+        // ── Phase 1: atomic claim. ──────────────────────────────────────
+        struct TimeoutCtx {
+            project_key: cairn_domain::ProjectKey,
+            session_id: SessionId,
+            previous_state: ProposalState,
+            previous_reason: Option<String>,
+        }
+
+        let claimed: Option<TimeoutCtx> = {
+            let mut guard = lock(&self.inner);
+            guard.pending.remove(call_id);
+            match guard.proposals.get_mut(call_id) {
+                Some(cached)
+                    if cached.state != ProposalState::Approved
+                        && cached.state != ProposalState::Rejected =>
                 {
-                    let mut guard = lock(&self.inner);
-                    guard.pending.remove(call_id);
+                    let previous_state = cached.state.clone();
+                    let previous_reason = cached.rejection_reason.clone();
+                    cached.state = ProposalState::Rejected;
+                    cached.rejection_reason = Some(reason.clone());
+                    Some(TimeoutCtx {
+                        project_key: cached.proposal.project.clone(),
+                        session_id: cached.proposal.session_id.clone(),
+                        previous_state,
+                        previous_reason,
+                    })
                 }
-                if let Some(entry) = self.cached_entry(call_id) {
-                    // Only write a rejection event if the proposal
-                    // hasn't already been resolved via a race between
-                    // `timeout` firing and the operator approve/reject
-                    // landing.
-                    if entry.state != ProposalState::Approved
-                        && entry.state != ProposalState::Rejected
-                    {
-                        self.append(RuntimeEvent::ToolCallRejected(ToolCallRejected {
-                            project: entry.proposal.project.clone(),
-                            call_id: call_id.clone(),
-                            session_id: entry.proposal.session_id.clone(),
-                            operator_id: OperatorId::new("operator_timeout"),
-                            reason: Some("operator_timeout".into()),
-                            rejected_at_ms: now_ms(),
-                        }))
-                        .await?;
-                        let mut guard = lock(&self.inner);
-                        if let Some(cached) = guard.proposals.get_mut(call_id) {
-                            cached.state = ProposalState::Rejected;
-                        }
+                // Already resolved by a concurrent approve/reject, or
+                // the cache entry vanished (evicted). Nothing more to do.
+                _ => None,
+            }
+        };
+
+        // ── Phase 2: persist the rejection event (only if we claimed). ─
+        if let Some(ctx) = claimed {
+            let append_result = self
+                .append(RuntimeEvent::ToolCallRejected(ToolCallRejected {
+                    project: ctx.project_key,
+                    call_id: call_id.clone(),
+                    session_id: ctx.session_id,
+                    operator_id: OperatorId::new("operator_timeout"),
+                    reason: Some(reason),
+                    rejected_at_ms: now_ms(),
+                }))
+                .await;
+            if let Err(err) = append_result {
+                // Revert so a caller who retries doesn't see a
+                // ghost-rejected state with no persisted event.
+                let mut guard = lock(&self.inner);
+                if let Some(cached) = guard.proposals.get_mut(call_id) {
+                    if cached.state == ProposalState::Rejected {
+                        cached.state = ctx.previous_state;
+                        cached.rejection_reason = ctx.previous_reason;
                     }
                 }
-                Ok(OperatorDecision::Timeout)
+                return Err(err);
             }
         }
+
+        Ok(OperatorDecision::Timeout)
     }
 }
 
@@ -524,13 +707,5 @@ where
             entity: "tool_call_approval",
             id: call_id.to_string(),
         })
-    }
-}
-
-fn build_allow_rule(proposal: &ToolCallProposal, policy: &ApprovalMatchPolicy) -> AllowRule {
-    AllowRule {
-        tool_name: proposal.tool_name.clone(),
-        tool_args: proposal.tool_args.clone(),
-        policy: policy.clone(),
     }
 }
