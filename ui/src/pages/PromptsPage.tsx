@@ -11,6 +11,7 @@ import { defaultApi } from "../lib/api";
 import { sectionLabel } from "../lib/design-system";
 import { useToast } from "../components/Toast";
 import { useScope } from "../hooks/useScope";
+import { EmptyScopeHint } from "../components/EmptyScopeHint";
 import type {
   PromptAssetRecord, PromptVersionRecord, PromptReleaseRecord, PromptVersionDiff,
   PromptKind, PromptReleaseState,
@@ -914,6 +915,7 @@ export function PromptsPage() {
                 ? "No prompt assets yet — create one to get started."
                 : `No prompts match the "${filter}" filter.`}
             </p>
+            <EmptyScopeHint empty={assets.length === 0} className="max-w-lg" />
           </div>
         ) : (
           filtered.map((asset) => (

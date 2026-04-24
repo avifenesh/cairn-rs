@@ -24,3 +24,17 @@ export const DEFAULT_SCOPE: ProjectScope = {
   workspace_id: 'default_workspace',
   project_id:   'default_project',
 };
+
+/** True when every component equals the canonical DEFAULT_SCOPE. */
+export function scopeIsDefault(s: ProjectScope): boolean {
+  return (
+    s.tenant_id    === DEFAULT_SCOPE.tenant_id &&
+    s.workspace_id === DEFAULT_SCOPE.workspace_id &&
+    s.project_id   === DEFAULT_SCOPE.project_id
+  );
+}
+
+/** Compact display string: `tenant / workspace / project`. */
+export function scopeLabel(s: ProjectScope): string {
+  return `${s.tenant_id} / ${s.workspace_id} / ${s.project_id}`;
+}

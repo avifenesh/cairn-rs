@@ -519,6 +519,47 @@ export function createApiClient(config: ApiClientConfig) {
       return unwrapRun(raw);
     },
 
+    // ── Tenants (scope discovery) ────────────────────────────────────────────
+
+    /** GET /v1/admin/tenants — list all tenants visible to the admin token.
+     *
+     *  Used by the scope picker and the first-login starter flow to discover
+     *  what tenants exist before forcing the operator to type an ID. */
+    listTenants: (
+      params?: { limit?: number; offset?: number },
+    ): Promise<import("./types").TenantRecord[]> => {
+      const qs = new URLSearchParams();
+      if (params?.limit  !== undefined) qs.set("limit",  String(params.limit));
+      if (params?.offset !== undefined) qs.set("offset", String(params.offset));
+      const q = qs.toString() ? `?${qs}` : "";
+      return getList(`/v1/admin/tenants${q}`);
+    },
+
+    /** POST /v1/admin/tenants — create a tenant from the scope picker / starter. */
+    createTenant: (body: { tenant_id: string; name: string }): Promise<import("./types").TenantRecord> =>
+      post("/v1/admin/tenants", body),
+
+    // ── Projects (scope discovery) ───────────────────────────────────────────
+
+    /** GET /v1/admin/workspaces/:workspace_id/projects — list projects for a workspace. */
+    listProjects: (
+      workspaceId: string,
+      params?: { limit?: number; offset?: number },
+    ): Promise<import("./types").ProjectRecord[]> => {
+      const qs = new URLSearchParams();
+      if (params?.limit  !== undefined) qs.set("limit",  String(params.limit));
+      if (params?.offset !== undefined) qs.set("offset", String(params.offset));
+      const q = qs.toString() ? `?${qs}` : "";
+      return getList(`/v1/admin/workspaces/${encodeURIComponent(workspaceId)}/projects${q}`);
+    },
+
+    /** POST /v1/admin/workspaces/:workspace_id/projects — create a project. */
+    createProject: (
+      workspaceId: string,
+      body: { project_id: string; name: string },
+    ): Promise<import("./types").ProjectRecord> =>
+      post(`/v1/admin/workspaces/${encodeURIComponent(workspaceId)}/projects`, body),
+
     // ── Workspaces ────────────────────────────────────────────────────────────
 
     /** GET /v1/admin/tenants/:tenant_id/workspaces — list persisted workspaces for one tenant. */

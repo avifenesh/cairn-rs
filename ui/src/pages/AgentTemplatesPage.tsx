@@ -8,6 +8,7 @@ import { clsx } from "clsx";
 import { defaultApi } from "../lib/api";
 import { useToast } from "../components/Toast";
 import type { AgentTemplate } from "../lib/types";
+import { EmptyScopeHint } from "../components/EmptyScopeHint";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -286,6 +287,8 @@ export function AgentTemplatesPage() {
                 />
               ))}
             </div>
+
+            <EmptyScopeHint empty={(templates ?? []).length === 0} />
 
             {/* Custom agent hint */}
             <div className="rounded-lg border border-gray-200/60 dark:border-zinc-800/60 bg-gray-50/40 dark:bg-zinc-900/40 px-5 py-4 flex items-start gap-3">

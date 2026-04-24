@@ -15,6 +15,7 @@ import { sectionLabel } from "../lib/design-system";
 import { useScope } from "../hooks/useScope";
 import type { ProviderConnectionRecord, ProviderHealthEntry } from "../lib/types";
 import { ModelCatalogPicker } from "../components/ModelCatalogPicker";
+import { EmptyScopeHint } from "../components/EmptyScopeHint";
 
 // ── Test-connection result ────────────────────────────────────────────────────
 
@@ -1444,6 +1445,7 @@ function ConnectionsSection({
             >
               <Plus size={11} /> Add your first provider
             </button>
+            <EmptyScopeHint empty className="max-w-lg mx-auto text-left" />
           </div>
         ) : (
           <table className="w-full">
