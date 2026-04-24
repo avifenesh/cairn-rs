@@ -4,12 +4,13 @@ Integration plugin CRUD, per-integration overrides, webhook receivers (generic a
 
 Source of truth: [`tests/compat/http_routes.tsv`](../../tests/compat/http_routes.tsv). Drift from this table against the live router is enforced by `cargo test -p cairn-api --test compat_catalog_sync`.
 
-**Routes: 19**
+**Routes: 20**
 
 | Method | Path | Classification | Notes |
 |---|---|---|---|
 | `GET` | `/v1/integrations` | Preserve |  |
-| `POST` | `/v1/integrations` | Preserve |  |
+| `POST` | `/v1/integrations` | Preserve | `type=local_fs` accepts an absolute directory path as a pseudo-repo. |
+| `POST` | `/v1/integrations/github/verify-installation` | Preserve | Verify a GitHub App install without mutating state. Body `{app_id, private_key, installation_id}`; returns `{verified, owner, repo_count, expires_at}` or 502 `github_api_error`. |
 | `DELETE` | `/v1/integrations/:integration_id` | Preserve |  |
 | `GET` | `/v1/integrations/:integration_id` | Preserve |  |
 | `DELETE` | `/v1/integrations/:integration_id/overrides` | Preserve |  |
