@@ -67,8 +67,11 @@ function mono(s: string, max = 18): string {
 
 interface Decision {
   decision_id: string;
-  kind: Record<string, unknown> | string;
-  outcome: { outcome: string; deny_reason?: string };
+  // Optional — not every decision row carries a `kind` field (cache-hit
+  // rows emit `decision_key` instead). Treat as optional so the render
+  // path doesn't turn `undefined` into the literal string "undefined".
+  kind?: Record<string, unknown> | string;
+  outcome?: { outcome?: string; deny_reason?: string };
   created_at: number;
 }
 
@@ -84,8 +87,11 @@ interface CacheEntry {
   // Backend emits a nested `{outcome, deny_reason?}` struct (same shape as
   // `Decision.outcome`), not a bare string — rendering the object directly
   // crashed OutcomePill with "Objects are not valid as a React child".
-  outcome: { outcome: string; deny_reason?: string };
-  kind_tag: string;
+  // Fields marked optional because backend occasionally emits empty/missing
+  // values; render paths must handle absent gracefully (em-dash fallback)
+  // instead of leaking "undefined" / blank cells onto the operator UI.
+  outcome?: { outcome?: string; deny_reason?: string };
+  kind_tag?: string;
   // Backend emits a `ProjectScope` object, not a string — rendering the
   // object directly would crash React with "Objects are not valid as a
   // React child".
@@ -103,20 +109,28 @@ function scopeLabel(s: CacheScope): string {
 const OUTCOME_PILL: Record<string, string> = {
   allowed: "bg-emerald-500/10 text-emerald-400 border-emerald-500/20",
   denied:  "bg-red-500/10 text-red-400 border-red-500/20",
+  pending: "bg-gray-500/10 text-gray-400 border-gray-500/20 dark:bg-zinc-500/10 dark:text-zinc-400 dark:border-zinc-500/20",
 };
 const OUTCOME_DOT: Record<string, string> = {
   allowed: "bg-emerald-400",
   denied:  "bg-red-400",
+  pending: "bg-gray-400 dark:bg-zinc-400",
 };
 
-function OutcomePill({ outcome }: { outcome: string }) {
+/** Renders the decision outcome as a colored pill. Handles missing/empty
+ *  outcome gracefully — the backend occasionally emits rows with an empty
+ *  `outcome` string (e.g. cache-hit rows mid-materialization) and the
+ *  earlier impl leaked the literal "undefined" onto the operator UI. */
+function OutcomePill({ outcome }: { outcome?: string | null }) {
+  const key = outcome && outcome.length > 0 ? outcome : "pending";
+  const label = outcome && outcome.length > 0 ? outcome : "pending";
   return (
     <span className={clsx(
       "inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium border whitespace-nowrap",
-      OUTCOME_PILL[outcome] ?? OUTCOME_PILL.denied,
+      OUTCOME_PILL[key] ?? OUTCOME_PILL.pending,
     )}>
-      <span className={clsx("w-1 h-1 rounded-full shrink-0", OUTCOME_DOT[outcome] ?? OUTCOME_DOT.denied)} />
-      {outcome}
+      <span className={clsx("w-1 h-1 rounded-full shrink-0", OUTCOME_DOT[key] ?? OUTCOME_DOT.pending)} />
+      {label}
     </span>
   );
 }
@@ -170,8 +184,8 @@ export function DecisionsPage() {
 
   const decisions = decisionsQ.data ?? [];
   const cacheEntries = cacheQ.data ?? [];
-  const allowed = decisions.filter(d => d.outcome.outcome === "allowed").length;
-  const denied = decisions.filter(d => d.outcome.outcome === "denied").length;
+  const allowed = decisions.filter(d => d.outcome?.outcome === "allowed").length;
+  const denied = decisions.filter(d => d.outcome?.outcome === "denied").length;
 
   if (decisionsQ.isError) return <ErrorFallback error={decisionsQ.error} resource="decisions" onRetry={() => void decisionsQ.refetch()} />;
 
@@ -182,9 +196,9 @@ export function DecisionsPage() {
         <div className="space-y-1">
           <div className="flex items-center gap-2">
             <p className={clsx(sectionLabel, "mb-0")}>Decisions</p>
-            <HelpTooltip text="Unified decision layer (RFC 019). Every tool invocation, trigger fire, and plugin enablement goes through policy evaluation before proceeding." placement="right" />
+            <HelpTooltip text="Every tool call, trigger, and plugin action is policy-checked before running. Audit the allow/deny decisions below." placement="right" />
           </div>
-          <p className="text-[11px] text-gray-500 dark:text-zinc-400">Implements RFC 019 — Unified Decision Layer.</p>
+          <p className="text-[11px] text-gray-500 dark:text-zinc-400">Audit tool, trigger, and plugin policy decisions across your workspace.</p>
         </div>
         <div className="flex items-center gap-2">
           {tab === "cache" && cacheEntries.length > 0 && (
@@ -227,15 +241,24 @@ export function DecisionsPage() {
           getRowId={d => d.decision_id}
           columns={[
             { key: "id", header: "ID", render: r => <span className="flex items-center gap-1 font-mono text-[11px] text-gray-500 dark:text-zinc-400 whitespace-nowrap group/id">{mono(r.decision_id)}<CopyButton text={r.decision_id} label="Copy decision ID" size={10} className="opacity-0 group-hover/id:opacity-100" /></span>, sortValue: r => r.decision_id },
-            { key: "kind", header: "Kind", render: r => { const k = typeof r.kind === "object" && r.kind !== null ? String((r.kind as Record<string, unknown>).type ?? "unknown") : String(r.kind); return <code className="text-[11px] bg-gray-100 dark:bg-zinc-800 px-1.5 py-0.5 rounded font-mono">{k}</code>; } },
-            { key: "outcome", header: "Outcome", render: r => <OutcomePill outcome={r.outcome.outcome} />, sortValue: r => r.outcome.outcome },
+            { key: "kind", header: "Kind", render: r => {
+              // Some rows (e.g. cache-hit rows) omit `kind` entirely —
+              // render an em-dash instead of the literal "undefined".
+              const k = typeof r.kind === "object" && r.kind !== null
+                ? String((r.kind as Record<string, unknown>).type ?? "unknown")
+                : typeof r.kind === "string" && r.kind.length > 0
+                  ? r.kind
+                  : "—";
+              return <code className="text-[11px] bg-gray-100 dark:bg-zinc-800 px-1.5 py-0.5 rounded font-mono">{k}</code>;
+            } },
+            { key: "outcome", header: "Outcome", render: r => <OutcomePill outcome={r.outcome?.outcome} />, sortValue: r => r.outcome?.outcome ?? "" },
             { key: "created", header: "Created", render: r => <span className="text-[11px] text-gray-400 dark:text-zinc-500 tabular-nums">{fmtRelative(r.created_at)}</span>, sortValue: r => r.created_at },
           ]}
-          filterFn={(r, q) => r.decision_id.includes(q) || String(r.kind).includes(q) || r.outcome.outcome.includes(q)}
-          csvRow={r => [r.decision_id, String(r.kind), r.outcome.outcome, r.created_at]}
+          filterFn={(r, q) => r.decision_id.includes(q) || (r.kind !== undefined && String(r.kind).includes(q)) || (r.outcome?.outcome ?? "").includes(q)}
+          csvRow={r => [r.decision_id, r.kind !== undefined ? String(r.kind) : "", r.outcome?.outcome ?? "", r.created_at]}
           csvHeaders={["ID", "Kind", "Outcome", "Created"]}
           filename="decisions"
-          emptyText="No decisions yet — decisions appear when the unified decision layer evaluates tool invocations, trigger fires, or plugin enablements."
+          emptyText="No decisions yet. Decisions appear here when a tool call, trigger, or plugin action is policy-checked."
         />
       ) : (
         <DataTable<CacheEntry>
@@ -243,8 +266,8 @@ export function DecisionsPage() {
           getRowId={e => e.decision_id}
           rowClassName="group"
           columns={[
-            { key: "kind", header: "Kind", render: r => <code className="text-[11px] bg-gray-100 dark:bg-zinc-800 px-1.5 py-0.5 rounded font-mono">{r.kind_tag}</code> },
-            { key: "outcome", header: "Outcome", render: r => <OutcomePill outcome={r.outcome.outcome} />, sortValue: r => r.outcome.outcome },
+            { key: "kind", header: "Kind", render: r => <code className="text-[11px] bg-gray-100 dark:bg-zinc-800 px-1.5 py-0.5 rounded font-mono">{r.kind_tag && r.kind_tag.length > 0 ? r.kind_tag : "—"}</code> },
+            { key: "outcome", header: "Outcome", render: r => <OutcomePill outcome={r.outcome?.outcome} />, sortValue: r => r.outcome?.outcome ?? "" },
             { key: "scope", header: "Scope", render: r => <span className="text-[11px] text-gray-400 dark:text-zinc-500">{scopeLabel(r.scope)}</span>, sortValue: r => scopeLabel(r.scope) },
             { key: "hits", header: "Hits", render: r => <span className="text-[11px] text-gray-400 dark:text-zinc-500 tabular-nums">{r.hit_count}</span>, sortValue: r => r.hit_count },
             { key: "expires", header: "Expires", render: r => <span className="text-[11px] text-gray-400 dark:text-zinc-500 tabular-nums">{fmtRelative(r.expires_at)}</span>, sortValue: r => r.expires_at },
@@ -252,11 +275,11 @@ export function DecisionsPage() {
               <button onClick={() => invalidateMut.mutate(r.decision_id)} title="Invalidate" className="p-1 rounded hover:bg-gray-100 dark:hover:bg-zinc-800 text-red-400 opacity-0 group-hover:opacity-100 transition-all"><Trash2 size={12} /></button>
             )},
           ]}
-          filterFn={(r, q) => r.kind_tag.includes(q) || r.outcome.outcome.includes(q) || scopeLabel(r.scope).includes(q)}
-          csvRow={r => [r.decision_id, r.kind_tag, r.outcome.outcome, scopeLabel(r.scope), r.hit_count, r.expires_at]}
+          filterFn={(r, q) => (r.kind_tag ?? "").includes(q) || (r.outcome?.outcome ?? "").includes(q) || scopeLabel(r.scope).includes(q)}
+          csvRow={r => [r.decision_id, r.kind_tag ?? "", r.outcome?.outcome ?? "", scopeLabel(r.scope), r.hit_count, r.expires_at]}
           csvHeaders={["Decision ID", "Kind", "Outcome", "Scope", "Hits", "Expires"]}
           filename="decision-cache"
-          emptyText="Cache is empty — no learned rules yet. Cached decisions reduce operator re-prompts."
+          emptyText="No cached decisions yet. Cached rules skip repeat operator prompts for the same action."
         />
       )}
     </div>
