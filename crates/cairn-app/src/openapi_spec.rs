@@ -680,8 +680,8 @@ pub const OPENAPI_JSON: &str = r##"{
           "content": { "application/json": { "schema": { "type": "object", "properties": {
             "operator_id": { "type": "string" },
             "scope": { "type": "object", "oneOf": [
-              { "type": "object", "properties": { "type": { "const": "once" } }, "required": ["type"] },
-              { "type": "object", "properties": { "type": { "const": "session" }, "match_policy": { "type": "object" } }, "required": ["type"] }
+              { "type": "object", "properties": { "type": { "type": "string", "enum": ["once"] } }, "required": ["type"] },
+              { "type": "object", "properties": { "type": { "type": "string", "enum": ["session"] }, "match_policy": { "type": "object" } }, "required": ["type"] }
             ] },
             "approved_tool_args": {}
           }, "required": ["scope"] } } }

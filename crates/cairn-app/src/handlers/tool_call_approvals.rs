@@ -195,14 +195,26 @@ async fn load_record_visible_to_tenant(
 
 // ── Handlers ───────────────────────────────────────────────────────────────
 
+/// Upper bound on the candidate set pulled from the projection before
+/// the handler applies tenant + state filters and slices down to
+/// `limit`/`offset`. Prevents an operator from exfiltrating an
+/// unbounded inbox via a single request while still leaving enough
+/// headroom that filter-heavy pages aren't silently truncated. Pick
+/// is 10x the max page size served out (`limit().min(500)`).
+const MAX_LIST_FETCH: usize = 5_000;
+
 /// List tool-call approvals.
 ///
 /// Selection precedence (first match wins):
 /// 1. `run_id` → `list_for_run`
 /// 2. `session_id` → `list_for_session`
-/// 3. project triple → `list_pending_for_project` (operator inbox)
+/// 3. project triple → `list_pending_for_project` (operator inbox — only
+///    returns records in `pending`, so a `state=approved|rejected` filter
+///    here is an empty-set noise request).
 ///
-/// Tenant scope is enforced by filtering the returned records.
+/// Tenant scope is enforced by filtering the candidate set, then the
+/// `state` filter, *then* the `limit`/`offset` slice is applied — so
+/// pages are never short or silently truncated by post-fetch retain()s.
 pub(crate) async fn list_tool_call_approvals_handler(
     State(state): State<Arc<AppState>>,
     tenant_scope: TenantScope,
@@ -213,29 +225,48 @@ pub(crate) async fn list_tool_call_approvals_handler(
         Err(err) => return err.into_response(),
     };
     let reader: &dyn ToolCallApprovalReadModel = state.runtime.store.as_ref();
+    let limit = query.limit();
+    let offset = query.offset();
 
+    // Resolve the fallback project triple from the caller's tenant scope
+    // (never the process-wide default). A non-admin caller sending a
+    // `tenant_id` that disagrees with their principal is rejected up
+    // front so the filter can never yield a silently-empty result
+    // because the query hit a foreign tenant and the retain() dropped
+    // everything.
+    let project = ProjectKey::new(
+        query
+            .tenant_id
+            .as_deref()
+            .unwrap_or_else(|| tenant_scope.tenant_id().as_str()),
+        query
+            .workspace_id
+            .as_deref()
+            .unwrap_or(crate::state::DEFAULT_WORKSPACE_ID),
+        query
+            .project_id
+            .as_deref()
+            .unwrap_or(crate::state::DEFAULT_PROJECT_ID),
+    );
+    if !tenant_scope.is_admin && project.tenant_id != *tenant_scope.tenant_id() {
+        return crate::errors::tenant_scope_mismatch_error().into_response();
+    }
+
+    // Pull an unpaginated candidate window (capped at `MAX_LIST_FETCH`).
+    // For run/session we read the whole list (lightweight — a single
+    // run's approval count is bounded in practice). For the inbox we
+    // ask the projection to give us up to `MAX_LIST_FETCH` entries,
+    // which is large enough that a short page after filtering is a
+    // signal the operator needs to refine their query, not a pagination
+    // artefact.
     let records: Result<Vec<ToolCallApprovalRecord>, _> = if let Some(rid) = query.run_id.as_deref()
     {
         reader.list_for_run(&RunId::new(rid)).await
     } else if let Some(sid) = query.session_id.as_deref() {
         reader.list_for_session(&SessionId::new(sid)).await
     } else {
-        let project = ProjectKey::new(
-            query
-                .tenant_id
-                .as_deref()
-                .unwrap_or(crate::state::DEFAULT_TENANT_ID),
-            query
-                .workspace_id
-                .as_deref()
-                .unwrap_or(crate::state::DEFAULT_WORKSPACE_ID),
-            query
-                .project_id
-                .as_deref()
-                .unwrap_or(crate::state::DEFAULT_PROJECT_ID),
-        );
         reader
-            .list_pending_for_project(&project, query.limit(), query.offset())
+            .list_pending_for_project(&project, MAX_LIST_FETCH, 0)
             .await
     };
 
@@ -248,11 +279,19 @@ pub(crate) async fn list_tool_call_approvals_handler(
             if let Some(st) = state_filter {
                 items.retain(|r| r.state == st);
             }
+            // Apply `limit`/`offset` uniformly across every selection
+            // branch (fixes Copilot #L220). `has_more` reports whether
+            // any filtered record remains beyond the returned window.
+            let total_after_filter = items.len();
+            let end = offset.saturating_add(limit).min(total_after_filter);
+            let start = offset.min(total_after_filter);
+            let page: Vec<_> = items.drain(start..end).collect();
+            let has_more = end < total_after_filter;
             (
                 StatusCode::OK,
                 Json(ListResponse {
-                    items,
-                    has_more: false,
+                    items: page,
+                    has_more,
                 }),
             )
                 .into_response()

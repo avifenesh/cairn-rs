@@ -259,6 +259,54 @@ async fn operator_id_mismatch_is_rejected() {
 }
 
 #[tokio::test]
+async fn list_pagination_applies_after_state_filter() {
+    let (app, state) = support::build_test_router_fake_fabric(BootstrapConfig::default()).await;
+    seed_principal_for(&state, ACTOR, "default_tenant");
+    // Seed 5 proposals on the same run, approve 2.
+    for i in 0..5 {
+        seed_proposal(&state, &format!("tc_page_{i}")).await;
+    }
+    for i in 0..2 {
+        state
+            .runtime
+            .tool_call_approvals
+            .approve(
+                ToolCallId::new(format!("tc_page_{i}")),
+                OperatorId::new(ACTOR),
+                cairn_domain::ApprovalScope::Once,
+                None,
+            )
+            .await
+            .expect("approve");
+    }
+
+    // Filter by pending + limit 2 → 2 items, has_more=true.
+    let (status, body) = get_json(
+        app.clone(),
+        "GET",
+        "/v1/tool-call-approvals?run_id=run_1&state=pending&limit=2&offset=0",
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "page 0: {body}");
+    let items = body["items"].as_array().unwrap();
+    assert_eq!(items.len(), 2, "page 0 returns limit items");
+    assert_eq!(body["hasMore"], true, "more items beyond page 0");
+
+    // Next page → 1 remaining pending item (5 total - 2 approved - 2 first page = 1).
+    let (status, body) = get_json(
+        app,
+        "GET",
+        "/v1/tool-call-approvals?run_id=run_1&state=pending&limit=2&offset=2",
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "page 1: {body}");
+    assert_eq!(body["items"].as_array().unwrap().len(), 1);
+    assert_eq!(body["hasMore"], false);
+}
+
+#[tokio::test]
 async fn cross_tenant_request_returns_404() {
     let (app, state) = support::build_test_router_fake_fabric(BootstrapConfig::default()).await;
     // Seed principal under tenant A.
