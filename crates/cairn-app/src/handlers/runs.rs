@@ -2090,11 +2090,16 @@ pub(crate) async fn orchestrate_run_handler(
                 .map(|(conn, models)| format!("{conn}=[{}]", models.join(",")))
                 .collect::<Vec<_>>()
                 .join("; ");
+            // Return 503 (not 422) because the tenant's configured system
+            // default is genuinely unserviceable right now — the operator
+            // needs to know immediately that routing is gone, not discover
+            // it later via a delayed approval card. 503 also tells well-
+            // behaved callers to back off + retry after operator fix.
             return AppApiError::new(
-                StatusCode::UNPROCESSABLE_ENTITY,
-                "preferred_model_not_supported",
+                StatusCode::SERVICE_UNAVAILABLE,
+                "preferred_model_unavailable",
                 format!(
-                    "System-default model '{model_id}' is not advertised by any active provider connection. Active connections + supported_models: {inventory}. Fix by updating `brain_model`/`generate_model` defaults, adding the model to a connection's `supported_models`, or creating a new connection via POST /v1/providers/connections.",
+                    "System-default model '{model_id}' is not advertised by any active provider connection for this tenant. Active connections + supported_models: {inventory}. Fix by updating `brain_model`/`generate_model` at PUT /v1/settings/defaults/system/<key>, adding the model to a connection's `supported_models`, or creating a new connection via POST /v1/providers/connections.",
                 ),
             )
             .into_response();
@@ -2481,7 +2486,16 @@ pub(crate) async fn orchestrate_run_handler(
                     // single ToolCallApprovalService proposal with the
                     // full summary so the operator can rotate credentials,
                     // add a provider, or abort.
-                    let summary = cairn_orchestrator::format_attempt_summary(attempts);
+                    // SEC-007: redact summary before handing it to logs or
+                    // to the operator-facing approval card. `summary` is
+                    // built from `ProviderAdapterError::to_string()` which
+                    // may embed upstream response bodies; those can echo
+                    // bearer tokens if a misconfigured provider rejected
+                    // the request with the auth header included.
+                    let summary =
+                        cairn_providers::redact_secrets(&cairn_orchestrator::format_attempt_summary(
+                            attempts,
+                        ));
                     // Best-effort: if the approval submission itself fails
                     // (store-append error, cache issue) we still return 502
                     // with the inline summary, but we MUST log the drop so
@@ -2527,7 +2541,7 @@ pub(crate) async fn orchestrate_run_handler(
                                 "model_id": a.model_id,
                                 "reason_code": a.reason_code,
                             })).collect::<Vec<_>>(),
-                            "remediation": "One or more of: rotate credentials, top up provider credits, add a provider connection via POST /v1/providers/connections, or change the configured model. Full per-model failure summary is available in the tool-call-approvals UI.",
+                            "remediation": "One or more of: rotate credentials, top up provider credits, add a provider connection via POST /v1/providers/connections, update system defaults via PUT /v1/settings/defaults/system/brain_model (or generate_model), or edit a connection's `supported_models`. Full per-model failure summary is available in the tool-call-approvals UI.",
                         })),
                     )
                         .into_response();
@@ -2541,13 +2555,17 @@ pub(crate) async fn orchestrate_run_handler(
                     // upstream response body + the provider's internal
                     // config name. Never forward that to the API caller —
                     // it can carry credential-adjacent fragments or
-                    // proprietary internals. Log the full detail
-                    // server-side; return a stable opaque body.
+                    // proprietary internals. Run through `redact_secrets`
+                    // even in server-side logs so any bearer tokens / keys
+                    // that happened to echo back in the upstream body get
+                    // scrubbed before hitting log aggregators. Response
+                    // body carries only a stable opaque classification.
+                    let detail_safe = cairn_providers::redact_secrets(detail);
                     tracing::warn!(
                         run_id = %run_id,
                         binding_id = %binding_id,
                         model_id = %m,
-                        detail = %detail,
+                        detail = %detail_safe,
                         "provider auth failed during orchestration"
                     );
                     (
@@ -2561,11 +2579,13 @@ pub(crate) async fn orchestrate_run_handler(
                     model_id: m,
                     detail,
                 } => {
+                    // Same SEC-007 redaction rationale as ProviderAuthFailed.
+                    let detail_safe = cairn_providers::redact_secrets(detail);
                     tracing::warn!(
                         run_id = %run_id,
                         binding_id = %binding_id,
                         model_id = %m,
-                        detail = %detail,
+                        detail = %detail_safe,
                         "provider rejected request during orchestration"
                     );
                     (
