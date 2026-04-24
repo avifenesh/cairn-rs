@@ -425,21 +425,28 @@ where
     }
 
     /// F25 drain: execute any operator-approved tool calls for this run
-    /// whose `ToolCallId` is NOT already present in the shared
-    /// `ToolCallResultCache`. Returns one `ActionResult` per drained
+    /// whose `ToolCallId` the caller has not already drained this
+    /// `run_inner` invocation. Returns one `ActionResult` per drained
     /// proposal in oldest-first order.
     ///
-    /// The cache-presence check is the "has-already-executed" oracle:
-    /// `dispatch_approved` populates the cache on success, and the
-    /// startup replay rebuilds it from `ToolInvocationCompleted` events
-    /// after a restart. An approval whose call_id is missing from the
-    /// cache has never executed on this process AND has no persisted
-    /// completion — dispatch is safe.
+    /// `already_drained` is a per-invocation ledger of `ToolCallId`
+    /// strings the loop has already processed. Without it, every
+    /// iteration would re-fetch the same Approved rows and re-emit
+    /// tool_called / tool_result / StepSummary for each one — even if
+    /// `dispatch_approved` silently served a cache hit, the bloat in
+    /// `step_history` would poison the next DECIDE's context. This
+    /// caller-owned set caps the work at once per call_id per invocation.
+    ///
+    /// `dispatch_approved` still performs its own
+    /// `ToolCallResultCache`-presence check as a second line of defence:
+    /// a long-running loop that outlives a restart (theoretical; current
+    /// runner does not) would hit the cache on the post-restart rebuild.
     ///
     /// When no approval reader is wired (default), the drain is a no-op.
     async fn drain_approved_pending(
         &self,
         ctx: &OrchestrationContext,
+        already_drained: &mut std::collections::HashSet<String>,
     ) -> Result<Vec<ActionResult>, OrchestratorError> {
         let Some(reader) = &self.approval_reader else {
             return Ok(Vec::new());
@@ -453,19 +460,22 @@ where
             return Ok(Vec::new());
         }
 
-        let mut results = Vec::with_capacity(approved.len());
+        let mut results = Vec::new();
         for ap in approved {
+            let call_id_str = ap.call_id.as_str().to_owned();
+            if !already_drained.insert(call_id_str.clone()) {
+                // Already handled this call_id earlier in the same
+                // `run_inner` invocation — skip to avoid duplicate
+                // emissions and step_history entries.
+                continue;
+            }
+
             let started_at = std::time::Instant::now();
             let dispatch = ApprovedDispatch {
                 call_id: ap.call_id,
                 tool_name: ap.tool_name,
                 tool_args: ap.tool_args,
             };
-            // NOTE: `dispatch_approved` performs its own cache-presence
-            // check and returns Succeeded-with-cached-output when the
-            // approval has already executed. We don't need to pre-filter
-            // here — doing so would require leaking the runtime cache
-            // Arc into this layer. The inner check is authoritative.
             let mut result = self.execute.dispatch_approved(ctx, &dispatch).await?;
             result.duration_ms = started_at.elapsed().as_millis() as u64;
             tracing::info!(
@@ -490,6 +500,12 @@ where
         // store; this vec accumulates steps taken during the *current* invocation.
         let mut step_history: Vec<StepSummary> = Vec::new();
         let mut last_compaction_iteration: Option<u32> = None;
+        // F25 drain dedup ledger: every approved `ToolCallId` the drain
+        // has processed in THIS `run_inner` invocation. Prevents
+        // duplicate tool_called/tool_result/StepSummary emissions when
+        // subsequent iterations re-list the same projection row.
+        let mut drained_call_ids: std::collections::HashSet<String> =
+            std::collections::HashSet::new();
 
         tracing::info!(
             run_id    = %ctx.run_id,
@@ -515,14 +531,23 @@ where
             // Failures inside the drain surface as synthesized
             // StepSummary entries + tool_result events so the next
             // DECIDE sees what went wrong and the LLM can self-correct.
-            let drained = self.drain_approved_pending(ctx).await?;
+            let drained = self
+                .drain_approved_pending(ctx, &mut drained_call_ids)
+                .await?;
             if !drained.is_empty() {
                 for result in &drained {
                     let Some(tool_name) = result.proposal.tool_name.as_deref() else {
                         continue;
                     };
+                    let args = result
+                        .proposal
+                        .tool_args
+                        .clone()
+                        .unwrap_or(serde_json::Value::Null);
+
+                    // SSE: tool_called + tool_result (mirrors main path).
                     self.emitter
-                        .on_tool_called(ctx, tool_name, result.proposal.tool_args.as_ref())
+                        .on_tool_called(ctx, tool_name, Some(&args))
                         .await;
                     let (succeeded, error) = match &result.status {
                         ActionStatus::Succeeded => (true, None),
@@ -539,6 +564,38 @@ where
                             result.duration_ms,
                         )
                         .await;
+
+                    // FF attempt-stream: tool_call + tool_result frames.
+                    // `restore_frames()` on resume expects these pair
+                    // with every tool dispatch, including drain. Best-
+                    // effort (warn+continue) per the sink contract.
+                    if let Err(e) = self.task_sink.log_tool_call(tool_name, &args).await {
+                        tracing::warn!(
+                            run_id = %ctx.run_id,
+                            tool = %tool_name,
+                            error = %e,
+                            "drain: task_sink.log_tool_call failed — frame lost"
+                        );
+                    }
+                    let output = match &result.tool_output {
+                        Some(v) => v.clone(),
+                        None => match error {
+                            Some(reason) => serde_json::json!({"error": reason}),
+                            None => serde_json::Value::Null,
+                        },
+                    };
+                    if let Err(e) = self
+                        .task_sink
+                        .log_tool_result(tool_name, &output, succeeded, result.duration_ms)
+                        .await
+                    {
+                        tracing::warn!(
+                            run_id = %ctx.run_id,
+                            tool = %tool_name,
+                            error = %e,
+                            "drain: task_sink.log_tool_result failed — frame lost"
+                        );
+                    }
 
                     // Append StepSummary so DECIDE's next gather sees
                     // the drained action as part of the run's history.
@@ -823,13 +880,27 @@ where
                 // the logic below; Done/Failed/etc. terminate via the
                 // same match arms the non-approval path uses.
                 //
-                // Emit per-result tool_called/tool_result so SSE mirrors
-                // what the non-approval path emits. (The approval-gate
-                // pre-execute log_tool_call already fired above.)
+                // Emit per-result tool_called/tool_result AND FF
+                // tool_result frames so SSE + FF attempt-stream
+                // telemetry stay consistent with the non-approval
+                // path. The approval-gate pre-execute log_tool_call
+                // already fired above; we emit on_tool_called here
+                // too so SSE timelines render a matching begin/end
+                // pair (the dashboard treats on_tool_called as the
+                // "started" event — without it the dispatch would
+                // show only a "result" with no corresponding call).
                 for result in &execute_outcome.results {
                     let Some(tool_name) = result.proposal.tool_name.as_deref() else {
                         continue;
                     };
+                    let args = result
+                        .proposal
+                        .tool_args
+                        .clone()
+                        .unwrap_or(serde_json::Value::Null);
+                    self.emitter
+                        .on_tool_called(ctx, tool_name, Some(&args))
+                        .await;
                     let (succeeded, error) = match &result.status {
                         ActionStatus::Succeeded => (true, None),
                         ActionStatus::Failed { reason } => (false, Some(reason.as_str())),
@@ -845,6 +916,29 @@ where
                             result.duration_ms,
                         )
                         .await;
+                    // FF attempt-stream: tool_result frame mirrors
+                    // the main-path log_tool_result at loop-runner
+                    // line ~820. `restore_frames()` expects this on
+                    // every dispatched call.
+                    let output = match &result.tool_output {
+                        Some(v) => v.clone(),
+                        None => match error {
+                            Some(reason) => serde_json::json!({"error": reason}),
+                            None => serde_json::Value::Null,
+                        },
+                    };
+                    if let Err(e) = self
+                        .task_sink
+                        .log_tool_result(tool_name, &output, succeeded, result.duration_ms)
+                        .await
+                    {
+                        tracing::warn!(
+                            run_id = %ctx.run_id,
+                            tool = %tool_name,
+                            error = %e,
+                            "BP-v2 inline: task_sink.log_tool_result failed — frame lost"
+                        );
+                    }
                 }
 
                 match execute_outcome.loop_signal.clone() {

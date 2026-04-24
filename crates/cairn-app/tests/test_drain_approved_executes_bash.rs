@@ -24,11 +24,27 @@
 //!      * turn 2+ → emits `complete_run` so the loop terminates.
 //! 3. Bind the mock as the tenant's provider connection, set system
 //!    defaults, create session + run.
-//! 4. Orchestrate. Expect a waiting-approval terminal.
-//! 5. Look up the pending tool-call approval's `call_id`, approve it.
-//! 6. Orchestrate again. The drain must execute the approved bash BEFORE
-//!    DECIDE fires, and the loop must reach `complete_run`.
-//! 7. Assert the temp file exists with the expected content.
+//! 4. Start a single `/orchestrate` request in a background task. The
+//!    BP-v2 execute phase parks synchronously on `await_decision`
+//!    until the operator resolves the proposal — the HTTP call does
+//!    NOT return while the approval is pending.
+//! 5. From the test body, poll `/v1/tool-call-approvals?state=pending`
+//!    until the proposal lands, then `POST /approve`. This fires the
+//!    oneshot the parked execute phase is waiting on.
+//! 6. Join the background orchestrate future. Under the fix, the tool
+//!    must have dispatched inline on approval, then the loop continues
+//!    (turn 2 → `complete_run`).
+//! 7. Assert the temp file exists with the expected content. This is
+//!    the one assertion event-log plumbing cannot fake: if the drain
+//!    (or the inline dispatch it backs up) did not actually call
+//!    `bash`, the file will not be on disk.
+//!
+//! The test exercises both the inline BP-v2 dispatch AND the loop's
+//! post-execute plumbing. The drain path itself is exercised by
+//! orchestrator unit tests in `loop_runner::tests::drain_*`; a full
+//! re-orchestrate-triggers-drain HTTP scenario would need an LLM that
+//! re-emits a structurally different proposal after approval, which
+//! the mock here intentionally does not simulate.
 //!
 //! The temp file lives under `$TMPDIR` with a uuid suffix so parallel
 //! test runs do not collide. Cleanup happens in a guard at the end.
