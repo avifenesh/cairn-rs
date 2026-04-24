@@ -419,10 +419,9 @@ impl AppBootstrap {
                         HttpMethod::Delete,
                         "/v1/admin/tenants/:tenant_id/workspaces/:workspace_id",
                     ) => router.route(&path, delete(delete_workspace_handler)),
-                    (
-                        HttpMethod::Delete,
-                        "/v1/admin/tenants/:tenant_id/sessions/:session_id",
-                    ) => router.route(&path, delete(delete_session_admin_handler)),
+                    (HttpMethod::Delete, "/v1/admin/tenants/:tenant_id/sessions/:session_id") => {
+                        router.route(&path, delete(delete_session_admin_handler))
+                    }
                     (HttpMethod::Get, "/v1/admin/tenants/:tenant_id/operator-profiles") => {
                         router.route(&path, get(list_operator_profiles_handler))
                     }
@@ -1586,6 +1585,10 @@ impl AppBootstrap {
                     .delete(repo_routes::delete_project_repo_handler),
             )
             .route(
+                "/v1/projects/:project/local-paths",
+                axum::routing::delete(repo_routes::delete_project_local_path_handler),
+            )
+            .route(
                 "/v1/plugins/:id/uninstall",
                 delete(marketplace_routes::uninstall_plugin_handler),
             )
@@ -1659,6 +1662,10 @@ impl AppBootstrap {
                 put(set_queue_concurrency_handler),
             )
             // ── Integration Plugin Registry (runtime CRUD) ─────────────────────
+            .route(
+                "/v1/integrations/github/verify-installation",
+                post(verify_github_installation_handler),
+            )
             .route(
                 "/v1/integrations",
                 get(list_integrations_handler).post(register_integration_handler),

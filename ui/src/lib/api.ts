@@ -1840,15 +1840,55 @@ export function createApiClient(config: ApiClientConfig) {
       return raw.repos ?? [];
     },
 
-    /** POST /v1/projects/:project/repos — attach a repo to a project. */
+    /** POST /v1/projects/:project/repos — attach a repo to a project.
+     *  `host` defaults to "github" backend-side; pass "local_fs" with
+     *  `repo_id` set to an absolute path to attach a local directory.
+     *  "gitlab"/"gitea"/"confluence" return 501 (recognised but not
+     *  implemented). */
     attachProjectRepo: (
-      body: { repo_id: string },
+      body: { repo_id: string; host?: string },
       scope?: import("./scope").ProjectScope,
     ): Promise<import("./types").ProjectRepoMutation> => {
       const s = scope ?? config.scope ?? DEFAULT_SCOPE;
       const path = encodeURIComponent(`${s.tenant_id}/${s.workspace_id}/${s.project_id}`);
       return post(`/v1/projects/${path}/repos`, body);
     },
+
+    /** DELETE /v1/projects/:project/local-paths — detach a local_fs path.
+     *  Separate from `detachProjectRepo` because local_fs paths can't
+     *  be path-segmented into `:owner/:repo`. */
+    detachProjectLocalPath: (
+      path: string,
+      scope?: import("./scope").ProjectScope,
+    ): Promise<void> => {
+      const s = scope ?? config.scope ?? DEFAULT_SCOPE;
+      const projectPath = encodeURIComponent(
+        `${s.tenant_id}/${s.workspace_id}/${s.project_id}`,
+      );
+      // DELETE-with-body — the `del` helper above doesn't take one, so
+      // call apiFetch directly. Shape mirrors `DeleteLocalPathRequest`
+      // in `crates/cairn-app/src/repo_routes.rs`.
+      return apiFetch(config, `/v1/projects/${projectPath}/local-paths`, {
+        method: "DELETE",
+        body: JSON.stringify({ path }),
+      });
+    },
+
+    /** POST /v1/integrations/github/verify-installation — verify a
+     *  GitHub App install without mutating server state. Returns
+     *  `{verified, owner, repo_count, expires_at}` on success; throws
+     *  `ApiError` with `github_api_error` / `invalid_private_key` /
+     *  `invalid_request` codes on failure. */
+    verifyGitHubInstallation: (body: {
+      app_id: number;
+      private_key: string;
+      installation_id: number;
+    }): Promise<{
+      verified: boolean;
+      owner: string;
+      repo_count: number;
+      expires_at: string;
+    }> => post(`/v1/integrations/github/verify-installation`, body),
 
     /** GET /v1/projects/:project/repos/:owner/:repo — repo detail. */
     getProjectRepo: (

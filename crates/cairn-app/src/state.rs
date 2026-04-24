@@ -251,6 +251,12 @@ pub struct AppState {
     pub triggers: Arc<Mutex<TriggerService>>,
     pub repo_clone_cache: Arc<cairn_workspace::RepoCloneCache>,
     pub project_repo_access: Arc<cairn_workspace::ProjectRepoAccessService>,
+    /// Per-project set of local-filesystem paths attached via
+    /// `host=local_fs` on `POST /v1/projects/:project/repos`. Parallel to
+    /// `project_repo_access` (which enforces the RFC 016 `owner/repo`
+    /// shape); this map stores arbitrary directory paths so operators
+    /// can point cairn at a local checkout as a pseudo-repo.
+    pub project_local_paths: Arc<crate::repo_routes::ProjectLocalPaths>,
     pub sandbox_service: Arc<cairn_workspace::SandboxService>,
     pub(crate) sqeq_sessions: Arc<Mutex<HashMap<String, SqEqSessionBinding>>>,
     pub(crate) a2a_tasks: Arc<Mutex<HashMap<String, A2aTaskBinding>>>,
@@ -859,6 +865,7 @@ impl AppState {
         let plugin_host = Arc::new(Mutex::new(StdioPluginHost::new()));
         let repo_clone_cache = Arc::new(cairn_workspace::RepoCloneCache::default());
         let project_repo_access = Arc::new(cairn_workspace::ProjectRepoAccessService::new());
+        let project_local_paths = Arc::new(crate::repo_routes::ProjectLocalPaths::default());
         let sqeq_sessions = Arc::new(Mutex::new(HashMap::new()));
         let a2a_tasks = Arc::new(Mutex::new(HashMap::new()));
         let sandbox_repo_source = Arc::new(cairn_workspace::providers::RepoCloneCacheSource::new(
@@ -994,6 +1001,7 @@ impl AppState {
             triggers: Arc::new(Mutex::new(TriggerService::new())),
             repo_clone_cache,
             project_repo_access,
+            project_local_paths,
             sandbox_service,
             sqeq_sessions,
             a2a_tasks,

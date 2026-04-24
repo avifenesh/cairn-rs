@@ -1419,3 +1419,241 @@ pub(crate) async fn github_queue_handler(State(state): State<Arc<AppState>>) -> 
     }))
     .into_response()
 }
+
+// ── POST /v1/integrations/github/verify-installation ───────────────────────
+//
+// Lets an operator prove a GitHub App installation works without mutating
+// server-side state: they paste `app_id`, PEM private key, and
+// `installation_id`, and cairn mints a JWT → exchanges it for an
+// installation access token → fetches the installation's repo count.
+// Success returns `{verified: true, owner, repo_count, expires_at}`.
+// Any GitHub-side failure surfaces as 502 `github_api_error` so the UI
+// can show the operator exactly why the paste didn't land.
+
+#[derive(serde::Deserialize)]
+pub(crate) struct VerifyInstallationRequest {
+    pub app_id: u64,
+    /// PEM-encoded RSA private key downloaded from the GitHub App page.
+    pub private_key: String,
+    pub installation_id: u64,
+}
+
+#[derive(serde::Serialize)]
+struct VerifyInstallationResponse {
+    verified: bool,
+    owner: String,
+    repo_count: u64,
+    expires_at: String,
+}
+
+#[derive(serde::Deserialize)]
+struct InstallationRepositoriesResponse {
+    total_count: u64,
+}
+
+#[derive(serde::Deserialize)]
+struct InstallationAccessTokenResponse {
+    #[allow(dead_code)]
+    token: String,
+    expires_at: String,
+}
+
+#[derive(serde::Deserialize)]
+struct InstallationLookupResponse {
+    #[serde(default)]
+    account: Option<InstallationLookupAccount>,
+}
+
+#[derive(serde::Deserialize)]
+struct InstallationLookupAccount {
+    login: String,
+}
+
+pub(crate) async fn verify_github_installation_handler(
+    State(_state): State<Arc<AppState>>,
+    Json(body): Json<VerifyInstallationRequest>,
+) -> impl IntoResponse {
+    // Build a short-lived HTTP client per verify. The endpoint is
+    // operator-triggered (not hot-path) and the GitHub calls only take
+    // a few hundred ms, so a dedicated client keeps this path self-
+    // contained without depending on AppState plumbing.
+    let http = reqwest::Client::new();
+    if body.private_key.trim().is_empty() {
+        return AppApiError::new(
+            StatusCode::BAD_REQUEST,
+            "invalid_request",
+            "private_key must not be empty",
+        )
+        .into_response();
+    }
+
+    // 1. Build credentials from the pasted PEM (validates RSA key shape).
+    let credentials =
+        match cairn_github::AppCredentials::new(body.app_id, body.private_key.as_bytes()) {
+            Ok(c) => c,
+            Err(e) => {
+                return AppApiError::new(
+                    StatusCode::BAD_REQUEST,
+                    "invalid_private_key",
+                    format!("could not parse RSA private key: {e}"),
+                )
+                .into_response();
+            }
+        };
+
+    // 2. Mint an installation access token.
+    let token_manager = cairn_github::InstallationToken::new(
+        credentials.clone(),
+        body.installation_id,
+        http.clone(),
+    );
+    let access_token = match token_manager.refresh().await {
+        Ok(t) => t,
+        Err(e) => {
+            return AppApiError::new(
+                StatusCode::BAD_GATEWAY,
+                "github_api_error",
+                format!("token exchange failed: {e}"),
+            )
+            .into_response();
+        }
+    };
+
+    // 3. Fetch installation metadata (owner login) with the App JWT.
+    let jwt = match credentials.generate_jwt() {
+        Ok(j) => j,
+        Err(e) => {
+            return AppApiError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "jwt_signing_failed",
+                format!("could not sign JWT: {e}"),
+            )
+            .into_response();
+        }
+    };
+    let installation_url = format!(
+        "https://api.github.com/app/installations/{}",
+        body.installation_id
+    );
+    let owner = match http
+        .get(&installation_url)
+        .header("Authorization", format!("Bearer {jwt}"))
+        .header("Accept", "application/vnd.github+json")
+        .header("User-Agent", "cairn-app/verify-installation")
+        .header("X-GitHub-Api-Version", "2022-11-28")
+        .send()
+        .await
+    {
+        Ok(resp) if resp.status().is_success() => {
+            match resp.json::<InstallationLookupResponse>().await {
+                Ok(parsed) => parsed
+                    .account
+                    .map(|a| a.login)
+                    .unwrap_or_else(|| "unknown".into()),
+                Err(e) => {
+                    return AppApiError::new(
+                        StatusCode::BAD_GATEWAY,
+                        "github_api_error",
+                        format!("could not parse installation lookup: {e}"),
+                    )
+                    .into_response();
+                }
+            }
+        }
+        Ok(resp) => {
+            let status = resp.status();
+            let body_text = resp.text().await.unwrap_or_default();
+            return AppApiError::new(
+                StatusCode::BAD_GATEWAY,
+                "github_api_error",
+                format!("installation lookup returned {status}: {body_text}"),
+            )
+            .into_response();
+        }
+        Err(e) => {
+            return AppApiError::new(
+                StatusCode::BAD_GATEWAY,
+                "github_api_error",
+                format!("installation lookup request failed: {e}"),
+            )
+            .into_response();
+        }
+    };
+
+    // 4. Fetch accessible repository count using the installation token.
+    let repo_count = match http
+        .get("https://api.github.com/installation/repositories?per_page=1")
+        .header("Authorization", format!("token {access_token}"))
+        .header("Accept", "application/vnd.github+json")
+        .header("User-Agent", "cairn-app/verify-installation")
+        .header("X-GitHub-Api-Version", "2022-11-28")
+        .send()
+        .await
+    {
+        Ok(resp) if resp.status().is_success() => {
+            match resp.json::<InstallationRepositoriesResponse>().await {
+                Ok(parsed) => parsed.total_count,
+                Err(e) => {
+                    return AppApiError::new(
+                        StatusCode::BAD_GATEWAY,
+                        "github_api_error",
+                        format!("could not parse repo list: {e}"),
+                    )
+                    .into_response();
+                }
+            }
+        }
+        Ok(resp) => {
+            let status = resp.status();
+            let body_text = resp.text().await.unwrap_or_default();
+            return AppApiError::new(
+                StatusCode::BAD_GATEWAY,
+                "github_api_error",
+                format!("repositories lookup returned {status}: {body_text}"),
+            )
+            .into_response();
+        }
+        Err(e) => {
+            return AppApiError::new(
+                StatusCode::BAD_GATEWAY,
+                "github_api_error",
+                format!("repositories lookup request failed: {e}"),
+            )
+            .into_response();
+        }
+    };
+
+    // The access-token refresh above already fetched the expiry, but we
+    // discarded it. Do a minimal POST to the same endpoint here ONLY
+    // when we need the timestamp for the UI; since the token manager
+    // doesn't expose `expires_at`, we refetch using the JWT directly.
+    let expires_at = match http
+        .post(format!(
+            "https://api.github.com/app/installations/{}/access_tokens",
+            body.installation_id
+        ))
+        .header("Authorization", format!("Bearer {jwt}"))
+        .header("Accept", "application/vnd.github+json")
+        .header("User-Agent", "cairn-app/verify-installation")
+        .header("X-GitHub-Api-Version", "2022-11-28")
+        .send()
+        .await
+    {
+        Ok(resp) if resp.status().is_success() => {
+            match resp.json::<InstallationAccessTokenResponse>().await {
+                Ok(t) => t.expires_at,
+                Err(_) => String::new(),
+            }
+        }
+        // Non-fatal — we already verified the installation works.
+        _ => String::new(),
+    };
+
+    Json(VerifyInstallationResponse {
+        verified: true,
+        owner,
+        repo_count,
+        expires_at,
+    })
+    .into_response()
+}

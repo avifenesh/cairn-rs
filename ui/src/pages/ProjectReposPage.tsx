@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { RefreshCw, Trash2, FolderGit2, Plus, X } from "lucide-react";
+import { RefreshCw, Trash2, FolderGit2, Plus, X, ExternalLink, Folder } from "lucide-react";
 import { clsx } from "clsx";
 import { DataTable } from "../components/DataTable";
 import { StatCard } from "../components/StatCard";
@@ -44,11 +44,33 @@ function errorMessage(e: unknown, fallback: string): string {
 const STATUS_PILL: Record<string, string> = {
   present: "bg-emerald-500/10 text-emerald-400 border-emerald-500/20",
   missing: "bg-amber-500/10 text-amber-400 border-amber-500/20",
+  local:   "bg-sky-500/10 text-sky-400 border-sky-500/20",
 };
 const STATUS_DOT: Record<string, string> = {
   present: "bg-emerald-400",
   missing: "bg-amber-400",
+  local:   "bg-sky-400",
 };
+
+// ── Host selector ────────────────────────────────────────────────────────────
+//
+// Host options presented on the Attach form. Active hosts route
+// through the normal `POST /v1/projects/:project/repos` endpoint;
+// disabled ones are surfaced so operators know the UX is on the way
+// without letting them hit a 501.
+type Host = "github" | "local_fs" | "gitlab" | "gitea" | "confluence";
+interface HostOption {
+  id: Host;
+  label: string;
+  active: boolean;
+}
+const HOST_OPTIONS: HostOption[] = [
+  { id: "github",     label: "GitHub (owner/repo)",       active: true },
+  { id: "local_fs",   label: "Local filesystem path",     active: true },
+  { id: "gitlab",     label: "GitLab (coming soon)",      active: false },
+  { id: "gitea",      label: "Gitea (coming soon)",       active: false },
+  { id: "confluence", label: "Confluence (coming soon)",  active: false },
+];
 
 function StatusPill({ status }: { status: string }) {
   const cls = STATUS_PILL[status] ?? "bg-gray-100 dark:bg-zinc-800 text-gray-400 dark:text-zinc-500 border-gray-200 dark:border-zinc-700";
@@ -68,23 +90,37 @@ function StatusPill({ status }: { status: string }) {
 
 interface AttachFormProps {
   onCancel: () => void;
-  onSubmit: (repoId: string) => void;
+  onSubmit: (repoId: string, host: Host) => void;
   submitting: boolean;
 }
 
 function AttachForm({ onCancel, onSubmit, submitting }: AttachFormProps) {
+  const [host, setHost] = useState<Host>("github");
   const [owner, setOwner] = useState("");
   const [repo, setRepo] = useState("");
+  const [path, setPath] = useState("");
+
+  const hostOption = HOST_OPTIONS.find(h => h.id === host)!;
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    const o = owner.trim();
-    const r = repo.trim();
-    if (!o || !r) return;
-    onSubmit(`${o}/${r}`);
+    if (!hostOption.active) return;
+    if (host === "github") {
+      const o = owner.trim();
+      const r = repo.trim();
+      if (!o || !r) return;
+      onSubmit(`${o}/${r}`, host);
+    } else if (host === "local_fs") {
+      const p = path.trim();
+      if (!p) return;
+      onSubmit(p, host);
+    }
   }
 
-  const disabled = submitting || owner.trim() === "" || repo.trim() === "";
+  const githubInvalid = host === "github" && (owner.trim() === "" || repo.trim() === "");
+  const localFsInvalid = host === "local_fs" && path.trim() === "";
+  const disabled =
+    submitting || !hostOption.active || githubInvalid || localFsInvalid;
 
   return (
     <form
@@ -92,7 +128,7 @@ function AttachForm({ onCancel, onSubmit, submitting }: AttachFormProps) {
       className="rounded-md border border-gray-200 dark:border-zinc-800 bg-gray-50 dark:bg-zinc-900 p-4 space-y-3"
     >
       <div className="flex items-center justify-between">
-        <p className="text-[12px] font-medium text-gray-800 dark:text-zinc-200">Attach a GitHub repo</p>
+        <p className="text-[12px] font-medium text-gray-800 dark:text-zinc-200">Attach a repo</p>
         <button
           type="button"
           onClick={onCancel}
@@ -102,30 +138,71 @@ function AttachForm({ onCancel, onSubmit, submitting }: AttachFormProps) {
           <X size={12} />
         </button>
       </div>
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+
+      {/* Host selector — GitLab/Gitea/Confluence are listed but
+          disabled so operators know they're on the roadmap. */}
+      <label className="block">
+        <span className="text-[11px] text-gray-500 dark:text-zinc-500">Host</span>
+        <select
+          aria-label="Host"
+          value={host}
+          onChange={e => setHost(e.target.value as Host)}
+          className="mt-1 w-full rounded border border-gray-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 px-2 py-1.5 text-[12px] text-gray-800 dark:text-zinc-200 focus:outline-none focus:border-indigo-500"
+        >
+          {HOST_OPTIONS.map(opt => (
+            <option key={opt.id} value={opt.id} disabled={!opt.active}>
+              {opt.label}
+            </option>
+          ))}
+        </select>
+      </label>
+
+      {host === "github" && (
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <label className="block">
+            <span className="text-[11px] text-gray-500 dark:text-zinc-500">Owner</span>
+            <input
+              value={owner}
+              onChange={e => setOwner(e.target.value)}
+              placeholder="avifenesh"
+              autoComplete="off"
+              spellCheck={false}
+              className="mt-1 w-full rounded border border-gray-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 px-2 py-1.5 text-[12px] font-mono text-gray-800 dark:text-zinc-200 focus:outline-none focus:border-indigo-500"
+            />
+          </label>
+          <label className="block">
+            <span className="text-[11px] text-gray-500 dark:text-zinc-500">Repo</span>
+            <input
+              value={repo}
+              onChange={e => setRepo(e.target.value)}
+              placeholder="cairn-rs"
+              autoComplete="off"
+              spellCheck={false}
+              className="mt-1 w-full rounded border border-gray-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 px-2 py-1.5 text-[12px] font-mono text-gray-800 dark:text-zinc-200 focus:outline-none focus:border-indigo-500"
+            />
+          </label>
+        </div>
+      )}
+
+      {host === "local_fs" && (
         <label className="block">
-          <span className="text-[11px] text-gray-500 dark:text-zinc-500">Owner</span>
+          <span className="text-[11px] text-gray-500 dark:text-zinc-500">
+            Absolute path
+          </span>
           <input
-            value={owner}
-            onChange={e => setOwner(e.target.value)}
-            placeholder="avifenesh"
+            value={path}
+            onChange={e => setPath(e.target.value)}
+            placeholder="/home/you/projects/my-repo"
             autoComplete="off"
             spellCheck={false}
             className="mt-1 w-full rounded border border-gray-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 px-2 py-1.5 text-[12px] font-mono text-gray-800 dark:text-zinc-200 focus:outline-none focus:border-indigo-500"
           />
+          <span className="text-[10px] text-gray-400 dark:text-zinc-500 mt-1 block">
+            Must be an absolute directory path that already exists on the server.
+          </span>
         </label>
-        <label className="block">
-          <span className="text-[11px] text-gray-500 dark:text-zinc-500">Repo</span>
-          <input
-            value={repo}
-            onChange={e => setRepo(e.target.value)}
-            placeholder="cairn-rs"
-            autoComplete="off"
-            spellCheck={false}
-            className="mt-1 w-full rounded border border-gray-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 px-2 py-1.5 text-[12px] font-mono text-gray-800 dark:text-zinc-200 focus:outline-none focus:border-indigo-500"
-          />
-        </label>
-      </div>
+      )}
+
       <div className="flex items-center justify-end gap-2">
         <button
           type="button"
@@ -172,7 +249,8 @@ export function ProjectReposPage() {
   });
 
   const attachMut = useMutation({
-    mutationFn: (repoId: string) => defaultApi.attachProjectRepo({ repo_id: repoId }, scope),
+    mutationFn: ({ repoId, host }: { repoId: string; host: Host }) =>
+      defaultApi.attachProjectRepo({ repo_id: repoId, host }, scope),
     onSuccess: (res) => {
       toast.success(
         res.clone_created
@@ -193,6 +271,15 @@ export function ProjectReposPage() {
       void qc.invalidateQueries({ queryKey: ["project-repos", projectPath] });
     },
     onError: (e) => toast.error(errorMessage(e, "Failed to detach repo.")),
+  });
+
+  const detachLocalMut = useMutation({
+    mutationFn: (path: string) => defaultApi.detachProjectLocalPath(path, scope),
+    onSuccess: (_, path) => {
+      toast.success(`Detached ${path}.`);
+      void qc.invalidateQueries({ queryKey: ["project-repos", projectPath] });
+    },
+    onError: (e) => toast.error(errorMessage(e, "Failed to detach path.")),
   });
 
   if (reposQ.isError) {
@@ -251,7 +338,7 @@ export function ProjectReposPage() {
       {showForm && (
         <AttachForm
           onCancel={() => setShowForm(false)}
-          onSubmit={repoId => attachMut.mutate(repoId)}
+          onSubmit={(repoId, host) => attachMut.mutate({ repoId, host })}
           submitting={attachMut.isPending}
         />
       )}
@@ -259,19 +346,56 @@ export function ProjectReposPage() {
       {/* Table */}
       <DataTable<ProjectRepoEntry>
         data={repos}
-        getRowId={r => r.repo_id}
+        getRowId={r => `${r.host ?? "github"}:${r.repo_id}`}
         columns={[
           {
             key: "repo",
             header: "Repo",
+            render: r => {
+              const host = r.host ?? "github";
+              if (host === "github") {
+                // GitHub repos link out to the canonical web UI — the
+                // whole point of this column being clickable per
+                // issue #251.
+                return (
+                  <span className="flex items-center gap-1 font-medium text-[12px] whitespace-nowrap group/id">
+                    <FolderGit2 size={11} className="text-violet-400 shrink-0" />
+                    <a
+                      href={`https://github.com/${r.repo_id}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="font-mono text-indigo-500 hover:text-indigo-400 hover:underline inline-flex items-center gap-1"
+                    >
+                      {r.repo_id}
+                      <ExternalLink size={10} className="opacity-60" />
+                    </a>
+                    <CopyButton text={r.repo_id} label="Copy repo id" size={10} className="opacity-0 group-hover/id:opacity-100" />
+                  </span>
+                );
+              }
+              // local_fs: not linkable — render as a path badge with
+              // copy button so operators can ls/cd the directory.
+              return (
+                <span className="flex items-center gap-1 text-[12px] whitespace-nowrap group/id">
+                  <Folder size={11} className="text-sky-400 shrink-0" />
+                  <span className="font-mono text-gray-800 dark:text-zinc-200" title={r.repo_id}>
+                    {r.repo_id}
+                  </span>
+                  <CopyButton text={r.repo_id} label="Copy path" size={10} className="opacity-0 group-hover/id:opacity-100" />
+                </span>
+              );
+            },
+            sortValue: r => r.repo_id,
+          },
+          {
+            key: "host",
+            header: "Host",
             render: r => (
-              <span className="flex items-center gap-1 font-medium text-gray-800 dark:text-zinc-200 text-[12px] whitespace-nowrap group/id">
-                <FolderGit2 size={11} className="text-violet-400 shrink-0" />
-                <span className="font-mono">{r.repo_id}</span>
-                <CopyButton text={r.repo_id} label="Copy repo id" size={10} className="opacity-0 group-hover/id:opacity-100" />
+              <span className="text-[11px] font-mono text-gray-500 dark:text-zinc-500">
+                {r.host ?? "github"}
               </span>
             ),
-            sortValue: r => r.repo_id,
+            sortValue: r => r.host ?? "github",
           },
           {
             key: "clone",
@@ -295,8 +419,16 @@ export function ProjectReposPage() {
             key: "actions",
             header: "",
             render: r => {
-              const parts = parseRepoId(r.repo_id);
-              if (!parts) return null;
+              const host = r.host ?? "github";
+              const onDetach = () => {
+                if (!window.confirm(`Detach ${r.repo_id} from this project?`)) return;
+                if (host === "local_fs") {
+                  detachLocalMut.mutate(r.repo_id);
+                } else {
+                  const parts = parseRepoId(r.repo_id);
+                  if (parts) detachMut.mutate(parts);
+                }
+              };
               // `DataTable` doesn't put a `group` class on the row, so
               // `group-hover:opacity-100` would hide this button forever.
               // Keep it always visible — this is a destructive action the
@@ -304,11 +436,7 @@ export function ProjectReposPage() {
               return (
                 <div className="flex items-center gap-1">
                   <button
-                    onClick={() => {
-                      if (window.confirm(`Detach ${r.repo_id} from this project?`)) {
-                        detachMut.mutate(parts);
-                      }
-                    }}
+                    onClick={onDetach}
                     title="Detach"
                     className="p-1 rounded hover:bg-gray-100 dark:hover:bg-zinc-800 text-red-400 transition-colors"
                   >
@@ -323,8 +451,8 @@ export function ProjectReposPage() {
         // so compare in lowercase too — otherwise mixed-case repo ids
         // (e.g. `Microsoft/TypeScript`) would never match.
         filterFn={(r, q) => r.repo_id.toLowerCase().includes(q)}
-        csvRow={r => [r.repo_id, r.clone_status, r.added_at ?? "", r.last_used_at ?? ""]}
-        csvHeaders={["Repo", "Clone", "Added", "Last Used"]}
+        csvRow={r => [r.repo_id, r.host ?? "github", r.clone_status, r.added_at ?? "", r.last_used_at ?? ""]}
+        csvHeaders={["Repo", "Host", "Clone", "Added", "Last Used"]}
         filename="project-repos"
         emptyText="No repos attached. Click 'Attach repo' to link a GitHub repo to this project."
       />

@@ -142,3 +142,4 @@ reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-feature
 # spaces, hashes, etc.) in path segments. Mirrors encodeURIComponent on
 # the UI side so tests stay honest against arbitrary operator input.
 percent-encoding = "2"
+tempfile = "3"

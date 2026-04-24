@@ -164,6 +164,17 @@ impl IntegrationRegistry {
                 self.store_config(&id, config).await;
                 Ok(())
             }
+            "local_fs" => {
+                let lfs_config: crate::local_fs::LocalFsConfig =
+                    serde_json::from_value(config.config.clone()).map_err(|e| {
+                        IntegrationError::ConfigInvalid(format!("invalid local_fs config: {e}"))
+                    })?;
+                let plugin = crate::local_fs::LocalFsPlugin::new(&config.id, lfs_config)?;
+                self.register(std::sync::Arc::new(plugin)).await;
+                let id = config.id.clone();
+                self.store_config(&id, config).await;
+                Ok(())
+            }
             "linear" => {
                 let lin_config: crate::linear::LinearConfig =
                     serde_json::from_value(config.config.clone()).map_err(|e| {
@@ -191,8 +202,13 @@ impl IntegrationRegistry {
                  Use type \"webhook\" for config-driven integrations."
                     .into(),
             )),
+            "gitlab" | "gitea" | "confluence" => Err(IntegrationError::ConfigInvalid(format!(
+                "integration type \"{}\" is recognised but not yet implemented",
+                config.provider_type
+            ))),
             other => Err(IntegrationError::ConfigInvalid(format!(
-                "unknown integration type: \"{other}\". Valid types: github, webhook, plugin"
+                "unknown integration type: \"{other}\". \
+                 Valid types: github, webhook, local_fs, notion, obsidian, linear, plugin"
             ))),
         }
     }

@@ -1388,6 +1388,50 @@ pub const OPENAPI_JSON: &str = r##"{
         "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
         "responses": { "200": { "description": "Task status" } }
       }
+    },
+    "/v1/integrations/github/verify-installation": {
+      "post": {
+        "tags": ["Integrations"],
+        "summary": "Verify a GitHub App installation",
+        "description": "Mints a JWT from the provided app_id + private_key, exchanges it for an installation access token, and reports the installation's owner and repo count. Does not mutate server state.",
+        "operationId": "verifyGithubInstallation",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["app_id", "private_key", "installation_id"],
+                "properties": {
+                  "app_id":          { "type": "integer" },
+                  "private_key":     { "type": "string", "description": "PEM-encoded RSA private key" },
+                  "installation_id": { "type": "integer" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Verification succeeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "verified":   { "type": "boolean" },
+                    "owner":      { "type": "string" },
+                    "repo_count": { "type": "integer" },
+                    "expires_at": { "type": "string" }
+                  }
+                }
+              }
+            }
+          },
+          "400": { "description": "Invalid request (bad PEM, empty key, etc.)" },
+          "502": { "description": "GitHub API error — credentials or installation ID rejected" }
+        }
+      }
     }
   }
 }"##;

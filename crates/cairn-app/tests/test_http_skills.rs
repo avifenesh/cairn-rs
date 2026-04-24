@@ -295,15 +295,11 @@ async fn get_skill_404_wins_over_spa_fallback() {
     async fn spa_fallback() -> impl axum::response::IntoResponse {
         (
             axum::http::StatusCode::OK,
-            [(
-                axum::http::header::CONTENT_TYPE,
-                "text/html; charset=utf-8",
-            )],
+            [(axum::http::header::CONTENT_TYPE, "text/html; charset=utf-8")],
             "<!doctype html><html><body>spa</body></html>",
         )
     }
-    let catalog_routes =
-        cairn_app::AppBootstrap::build_catalog_routes().with_state(state.clone());
+    let catalog_routes = cairn_app::AppBootstrap::build_catalog_routes().with_state(state.clone());
     let binary_routes: axum::Router = axum::Router::new().with_state(());
     let merged = catalog_routes
         .merge(binary_routes)
