@@ -10,10 +10,17 @@
 //! `ActivatedSet` carried in `SkillSessionConfig`. Cairn rebuilds the
 //! session config on every tool call (see `HarnessBuiltin::execute_with_context`),
 //! so we cache the `ActivatedSet` in a process-wide map keyed by
-//! `(tenant, workspace, project, session_id)`. Two sessions never share an
-//! activated set, and two projects within the same session never share
-//! one either. This matches the write-ledger cache pattern in
-//! `cairn-harness-tools::tools::write::LEDGERS`.
+//! `(tenant, workspace, project, session_id, run_id)`. Two sessions never
+//! share an activated set, two projects within the same session never
+//! share one either, and two runs within the same session get fresh sets
+//! — activating a skill in run A does not suppress re-injection of the
+//! body into run B's conversation. This matches the five-field ledger
+//! key in `cairn-harness-tools::tools::write::LEDGERS`.
+//!
+//! When both `session_id` and `run_id` are absent (e.g. unit-test call
+//! sites building `ToolContext::default()`), all such invocations within
+//! the same project share one set. That is intentional for tests; real
+//! execution always supplies both fields via `ToolContext::for_run`.
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -21,6 +28,7 @@ use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use cairn_domain::{policy::ExecutionClass, recovery::RetrySafety, ProjectKey};
+use cairn_harness_tools::error::map_harness;
 use cairn_harness_tools::HarnessTool;
 use cairn_tools::builtins::{
     PermissionLevel, ToolCategory, ToolContext, ToolEffect, ToolError, ToolResult,
@@ -45,11 +53,12 @@ static ACTIVATED_SETS: Lazy<Mutex<HashMap<String, ActivatedSet>>> =
 
 fn session_key(ctx: &ToolContext, project: &ProjectKey) -> String {
     format!(
-        "{}/{}/{}/{}",
+        "{}/{}/{}/{}/{}",
         project.tenant_id,
         project.workspace_id,
         project.project_id,
         ctx.session_id.as_deref().unwrap_or(""),
+        ctx.run_id.as_deref().unwrap_or(""),
     )
 }
 
@@ -66,6 +75,9 @@ fn activated_set_for(ctx: &ToolContext, project: &ProjectKey) -> ActivatedSet {
 
 /// Test-only: clear the cache between test cases so dedupe state does not
 /// leak across tests that reuse session IDs.
+///
+/// Only compiled when the `test-utils` cargo feature is enabled.
+#[cfg(feature = "test-utils")]
 #[doc(hidden)]
 pub fn __clear_activated_sets_for_tests() {
     let mut guard = ACTIVATED_SETS.lock().unwrap_or_else(|e| e.into_inner());
@@ -83,6 +95,9 @@ pub fn __clear_activated_sets_for_tests() {
 /// Roots that do not exist are silently skipped by
 /// `FilesystemSkillRegistry::discover` — no error if a project ships no
 /// skills.
+///
+/// Called internally by `build_session`; publicly re-exported from the
+/// crate root only under the `test-utils` feature for parity testing.
 #[doc(hidden)]
 pub fn skill_roots_for(ctx: &ToolContext) -> Vec<String> {
     let cwd: PathBuf = ctx.working_dir.clone();
@@ -233,21 +248,7 @@ impl HarnessTool for HarnessSkill {
                 "name": nf.name,
                 "siblings": nf.siblings,
             }))),
-            SkillResult::Error(e) => Err(cairn_harness_tools_map_harness(e.error)),
+            SkillResult::Error(e) => Err(map_harness(e.error)),
         }
-    }
-}
-
-/// Bridge `harness_core::ToolError` → cairn's `ToolError::HarnessError`.
-///
-/// `cairn_harness_tools::error::map_harness` is `pub(crate)` in that crate,
-/// so we re-implement the three-field pass-through here. This is a handful
-/// of lines; exposing it as public API in `cairn-harness-tools` would widen
-/// that crate's surface unnecessarily.
-fn cairn_harness_tools_map_harness(err: harness_core::ToolError) -> ToolError {
-    ToolError::HarnessError {
-        code: err.code,
-        message: err.message,
-        meta: err.meta,
     }
 }

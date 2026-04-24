@@ -8,6 +8,12 @@ publish = false
 [lib]
 path = "src/lib.rs"
 
+[features]
+# Exposes internal cache-reset helpers (e.g. `__clear_activated_sets_for_tests`)
+# to integration tests. Not intended for production consumers. Enable only
+# from `[dev-dependencies]` or test-harness crates.
+test-utils = []
+
 [dependencies]
 cairn-domain        = { path = "../cairn-domain" }
 cairn-tools         = { path = "../cairn-tools" }
@@ -25,5 +31,6 @@ tracing     = "0.1"
 once_cell   = "1"
 
 [dev-dependencies]
-tempfile = "3"
-tokio    = { version = "1", features = ["rt", "macros", "rt-multi-thread", "time"] }
+cairn-skills = { path = ".", features = ["test-utils"] }
+tempfile     = "3"
+tokio        = { version = "1", features = ["rt", "macros", "rt-multi-thread", "time"] }

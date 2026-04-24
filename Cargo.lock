@@ -812,6 +812,7 @@ dependencies = [
  "async-trait",
  "cairn-domain",
  "cairn-harness-tools",
+ "cairn-skills",
  "cairn-tools",
  "harness-core",
  "harness-skill",

@@ -41,6 +41,12 @@ pub mod skill_tool;
 
 pub use skill_tool::HarnessSkill;
 
-/// Internal visibility for tests.
+/// Internal helpers exposed only under the `test-utils` cargo feature.
+///
+/// `__clear_activated_sets_for_tests` lets integration tests reset the
+/// process-wide activation cache between cases; `skill_roots_for` exposes
+/// the root-resolution helper for parity testing. Neither is part of the
+/// stable public API and production consumers must not depend on them.
+#[cfg(feature = "test-utils")]
 #[doc(hidden)]
 pub use skill_tool::{__clear_activated_sets_for_tests, skill_roots_for};
