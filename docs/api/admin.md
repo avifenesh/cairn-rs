@@ -52,6 +52,7 @@ Source of truth: [`tests/compat/http_routes.tsv`](../../tests/compat/http_routes
 | `POST` | `/v1/admin/tenants/:tenant_id/quota` | Preserve |  |
 | `GET` | `/v1/admin/tenants/:tenant_id/retention-policy` | Preserve |  |
 | `POST` | `/v1/admin/tenants/:tenant_id/retention-policy` | Preserve |  |
+| `DELETE` | `/v1/admin/tenants/:tenant_id/sessions/:session_id` | Preserve | admin session hard-delete |
 | `GET` | `/v1/admin/tenants/:tenant_id/workspaces` | Preserve |  |
 | `POST` | `/v1/admin/tenants/:tenant_id/workspaces` | Preserve |  |
 | `DELETE` | `/v1/admin/tenants/:tenant_id/workspaces/:workspace_id` | Preserve | Soft-delete: archives workspace + cascades archival to children. |
