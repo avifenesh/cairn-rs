@@ -2,9 +2,9 @@ use async_trait::async_trait;
 use cairn_domain::tenancy::ProjectKey;
 use cairn_domain::tool_invocation::{ToolInvocationOutcomeKind, ToolInvocationRecord};
 use cairn_domain::{
-    ApprovalDecision, ApprovalId, ApprovalRequirement, CheckpointDisposition, CheckpointId,
-    FailureClass, MailboxMessageId, RunId, RunState, SessionId, SessionState, TaskId, TaskState,
-    ToolInvocationId,
+    ApprovalDecision, ApprovalId, ApprovalMatchPolicy, ApprovalRequirement, ApprovalScope,
+    CheckpointDisposition, CheckpointId, FailureClass, MailboxMessageId, OperatorId, RunId,
+    RunState, SessionId, SessionState, TaskId, TaskState, ToolCallId, ToolInvocationId,
 };
 use serde::de::DeserializeOwned;
 use sqlx::PgPool;
@@ -14,7 +14,8 @@ use crate::error::StoreError;
 use crate::projections::{
     ApprovalReadModel, ApprovalRecord, CheckpointReadModel, CheckpointRecord,
     CheckpointStrategyReadModel, MailboxReadModel, MailboxRecord, RunReadModel, RunRecord,
-    SessionReadModel, SessionRecord, TaskReadModel, TaskRecord, ToolInvocationReadModel,
+    SessionReadModel, SessionRecord, TaskReadModel, TaskRecord, ToolCallApprovalReadModel,
+    ToolCallApprovalRecord, ToolCallApprovalState, ToolInvocationReadModel,
 };
 
 /// Postgres-backed database adapter.
@@ -997,5 +998,148 @@ impl MailboxRow {
             version: self.version as u64,
             created_at: self.created_at as u64,
         })
+    }
+}
+
+// -- PR BP-2: ToolCallApprovalReadModel --
+
+#[derive(sqlx::FromRow)]
+struct ToolCallApprovalRow {
+    call_id: String,
+    session_id: String,
+    run_id: String,
+    tenant_id: String,
+    workspace_id: String,
+    project_id: String,
+    tool_name: String,
+    original_tool_args: serde_json::Value,
+    amended_tool_args: Option<serde_json::Value>,
+    approved_tool_args: Option<serde_json::Value>,
+    display_summary: Option<String>,
+    match_policy: serde_json::Value,
+    state: String,
+    operator_id: Option<String>,
+    scope: Option<serde_json::Value>,
+    reason: Option<String>,
+    proposed_at_ms: i64,
+    approved_at_ms: Option<i64>,
+    rejected_at_ms: Option<i64>,
+    last_amended_at_ms: Option<i64>,
+    version: i64,
+    created_at: i64,
+    updated_at: i64,
+}
+
+impl ToolCallApprovalRow {
+    fn into_record(self) -> Result<ToolCallApprovalRecord, StoreError> {
+        let match_policy: ApprovalMatchPolicy = serde_json::from_value(self.match_policy)
+            .map_err(|e| StoreError::Internal(format!("match_policy decode: {e}")))?;
+        let scope: Option<ApprovalScope> = self
+            .scope
+            .map(serde_json::from_value)
+            .transpose()
+            .map_err(|e| StoreError::Internal(format!("scope decode: {e}")))?;
+        Ok(ToolCallApprovalRecord {
+            call_id: ToolCallId::new(self.call_id),
+            session_id: SessionId::new(self.session_id),
+            run_id: RunId::new(self.run_id),
+            project: ProjectKey::new(self.tenant_id, self.workspace_id, self.project_id),
+            tool_name: self.tool_name,
+            original_tool_args: self.original_tool_args,
+            amended_tool_args: self.amended_tool_args,
+            approved_tool_args: self.approved_tool_args,
+            display_summary: self.display_summary,
+            match_policy,
+            state: ToolCallApprovalState::parse(&self.state)?,
+            operator_id: self.operator_id.map(OperatorId::new),
+            scope,
+            reason: self.reason,
+            proposed_at_ms: self.proposed_at_ms as u64,
+            approved_at_ms: self.approved_at_ms.map(|v| v as u64),
+            rejected_at_ms: self.rejected_at_ms.map(|v| v as u64),
+            last_amended_at_ms: self.last_amended_at_ms.map(|v| v as u64),
+            version: self.version as u64,
+            created_at: self.created_at as u64,
+            updated_at: self.updated_at as u64,
+        })
+    }
+}
+
+const TOOL_CALL_APPROVAL_SELECT: &str = "SELECT call_id, session_id, run_id, tenant_id, workspace_id, project_id, \
+     tool_name, original_tool_args, amended_tool_args, approved_tool_args, \
+     display_summary, match_policy, state, operator_id, scope, reason, \
+     proposed_at_ms, approved_at_ms, rejected_at_ms, last_amended_at_ms, \
+     version, created_at, updated_at FROM tool_call_approvals";
+
+#[async_trait]
+impl ToolCallApprovalReadModel for PgAdapter {
+    async fn get(
+        &self,
+        call_id: &ToolCallId,
+    ) -> Result<Option<ToolCallApprovalRecord>, StoreError> {
+        let sql = format!("{TOOL_CALL_APPROVAL_SELECT} WHERE call_id = $1");
+        let row = sqlx::query_as::<_, ToolCallApprovalRow>(&sql)
+            .bind(call_id.as_str())
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(|e| StoreError::Internal(e.to_string()))?;
+        row.map(ToolCallApprovalRow::into_record).transpose()
+    }
+
+    async fn list_for_run(
+        &self,
+        run_id: &RunId,
+    ) -> Result<Vec<ToolCallApprovalRecord>, StoreError> {
+        let sql = format!(
+            "{TOOL_CALL_APPROVAL_SELECT} WHERE run_id = $1 \
+             ORDER BY proposed_at_ms ASC, call_id ASC"
+        );
+        let rows = sqlx::query_as::<_, ToolCallApprovalRow>(&sql)
+            .bind(run_id.as_str())
+            .fetch_all(&self.pool)
+            .await
+            .map_err(|e| StoreError::Internal(e.to_string()))?;
+        rows.into_iter().map(ToolCallApprovalRow::into_record).collect()
+    }
+
+    async fn list_for_session(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<Vec<ToolCallApprovalRecord>, StoreError> {
+        let sql = format!(
+            "{TOOL_CALL_APPROVAL_SELECT} WHERE session_id = $1 \
+             ORDER BY proposed_at_ms ASC, call_id ASC"
+        );
+        let rows = sqlx::query_as::<_, ToolCallApprovalRow>(&sql)
+            .bind(session_id.as_str())
+            .fetch_all(&self.pool)
+            .await
+            .map_err(|e| StoreError::Internal(e.to_string()))?;
+        rows.into_iter().map(ToolCallApprovalRow::into_record).collect()
+    }
+
+    async fn list_pending_for_project(
+        &self,
+        project: &ProjectKey,
+        limit: usize,
+        offset: usize,
+    ) -> Result<Vec<ToolCallApprovalRecord>, StoreError> {
+        let sql = format!(
+            "{TOOL_CALL_APPROVAL_SELECT} \
+             WHERE tenant_id = $1 AND workspace_id = $2 AND project_id = $3 \
+               AND state = 'pending' \
+             ORDER BY proposed_at_ms ASC, call_id ASC \
+             LIMIT $4 OFFSET $5"
+        );
+        let rows = sqlx::query_as::<_, ToolCallApprovalRow>(&sql)
+            .bind(project.tenant_id.as_str())
+            .bind(project.workspace_id.as_str())
+            .bind(project.project_id.as_str())
+            .bind(limit as i64)
+            .bind(offset as i64)
+            .fetch_all(&self.pool)
+            .await
+            .map_err(|e| StoreError::Internal(e.to_string()))?;
+        rows.into_iter().map(ToolCallApprovalRow::into_record).collect()
     }
 }

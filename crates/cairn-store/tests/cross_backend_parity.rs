@@ -1389,4 +1389,204 @@ mod sqlite_parity {
         assert_eq!(parsed[0].priority, 5);
         assert_eq!(parsed[1].rule_id, "r2");
     }
+
+    // ── PR BP-2: tool-call approval projection parity ────────────────
+
+    /// Both backends must project the same `ToolCallApprovalRecord` for
+    /// the same `ToolCall*` event sequence. Exercises the full state
+    /// machine: proposed → amended → approved(override) and proposed →
+    /// rejected(reason).
+    #[tokio::test]
+    async fn tool_call_approval_projection_matches_across_backends() {
+        use cairn_store::projections::{ToolCallApprovalReadModel, ToolCallApprovalState};
+
+        let mem = InMemoryStore::new();
+        let sqlite_adapter = SqliteAdapter::in_memory().await.unwrap();
+        let sqlite_log = cairn_store::sqlite::SqliteEventLog::new(sqlite_adapter.pool().clone());
+
+        let proj = test_project();
+
+        // Sequence 1: proposed → amended → approved(with override).
+        let ev_proposed_a = make_envelope(RuntimeEvent::ToolCallProposed(ToolCallProposed {
+            project: proj.clone(),
+            call_id: ToolCallId::new("tc_a"),
+            session_id: SessionId::new("sess_1"),
+            run_id: RunId::new("run_1"),
+            tool_name: "read_file".to_owned(),
+            tool_args: serde_json::json!({ "path": "/orig.md" }),
+            display_summary: "Read orig.md".to_owned(),
+            match_policy: ApprovalMatchPolicy::ExactPath {
+                path: "/orig.md".to_owned(),
+            },
+            proposed_at_ms: 1_000,
+        }));
+        let ev_amended_a = make_envelope(RuntimeEvent::ToolCallAmended(ToolCallAmended {
+            project: proj.clone(),
+            call_id: ToolCallId::new("tc_a"),
+            session_id: SessionId::new("sess_1"),
+            operator_id: OperatorId::new("op_1"),
+            new_tool_args: serde_json::json!({ "path": "/amended.md" }),
+            amended_at_ms: 1_100,
+        }));
+        let ev_approved_a = make_envelope(RuntimeEvent::ToolCallApproved(ToolCallApproved {
+            project: proj.clone(),
+            call_id: ToolCallId::new("tc_a"),
+            session_id: SessionId::new("sess_1"),
+            operator_id: OperatorId::new("op_1"),
+            scope: ApprovalScope::Session {
+                match_policy: ApprovalMatchPolicy::ProjectScopedPath {
+                    project_root: "/workspaces/cairn".to_owned(),
+                },
+            },
+            approved_tool_args: Some(serde_json::json!({ "path": "/approved.md" })),
+            approved_at_ms: 1_200,
+        }));
+
+        // Sequence 2: proposed → rejected(with reason).
+        let ev_proposed_b = make_envelope(RuntimeEvent::ToolCallProposed(ToolCallProposed {
+            project: proj.clone(),
+            call_id: ToolCallId::new("tc_b"),
+            session_id: SessionId::new("sess_1"),
+            run_id: RunId::new("run_1"),
+            tool_name: "write_file".to_owned(),
+            tool_args: serde_json::json!({ "path": "/sketchy.sh" }),
+            display_summary: String::new(), // empty → stored as NULL / None.
+            match_policy: ApprovalMatchPolicy::Exact,
+            proposed_at_ms: 2_000,
+        }));
+        let ev_rejected_b = make_envelope(RuntimeEvent::ToolCallRejected(ToolCallRejected {
+            project: proj.clone(),
+            call_id: ToolCallId::new("tc_b"),
+            session_id: SessionId::new("sess_1"),
+            operator_id: OperatorId::new("op_2"),
+            reason: Some("untrusted path".to_owned()),
+            rejected_at_ms: 2_100,
+        }));
+
+        // Third pending call — exercises list_pending ordering.
+        let ev_proposed_c = make_envelope(RuntimeEvent::ToolCallProposed(ToolCallProposed {
+            project: proj.clone(),
+            call_id: ToolCallId::new("tc_c"),
+            session_id: SessionId::new("sess_1"),
+            run_id: RunId::new("run_1"),
+            tool_name: "grep".to_owned(),
+            tool_args: serde_json::json!({ "q": "foo" }),
+            display_summary: "Grep for foo".to_owned(),
+            match_policy: ApprovalMatchPolicy::Exact,
+            proposed_at_ms: 3_000,
+        }));
+
+        let events = vec![
+            ev_proposed_a,
+            ev_amended_a,
+            ev_approved_a,
+            ev_proposed_b,
+            ev_rejected_b,
+            ev_proposed_c,
+        ];
+
+        mem.append(&events).await.unwrap();
+        sqlite_log.append(&events).await.unwrap();
+
+        // get() parity for each call_id.
+        for call_id in ["tc_a", "tc_b", "tc_c"] {
+            let id = ToolCallId::new(call_id);
+            let mem_rec = ToolCallApprovalReadModel::get(&mem, &id).await.unwrap();
+            let sql_rec = ToolCallApprovalReadModel::get(&sqlite_adapter, &id)
+                .await
+                .unwrap();
+            assert_eq!(
+                mem_rec.is_some(),
+                sql_rec.is_some(),
+                "existence parity for {call_id}"
+            );
+            let (mem_rec, sql_rec) = (mem_rec.unwrap(), sql_rec.unwrap());
+            // `version` and `created_at/updated_at` are wall-clock / apply-order
+            // specific and are allowed to drift across backends — everything
+            // else must match byte-for-byte.
+            assert_eq!(mem_rec.call_id, sql_rec.call_id);
+            assert_eq!(mem_rec.session_id, sql_rec.session_id);
+            assert_eq!(mem_rec.run_id, sql_rec.run_id);
+            assert_eq!(mem_rec.project, sql_rec.project);
+            assert_eq!(mem_rec.tool_name, sql_rec.tool_name);
+            assert_eq!(mem_rec.original_tool_args, sql_rec.original_tool_args);
+            assert_eq!(mem_rec.amended_tool_args, sql_rec.amended_tool_args);
+            assert_eq!(mem_rec.approved_tool_args, sql_rec.approved_tool_args);
+            assert_eq!(mem_rec.display_summary, sql_rec.display_summary);
+            assert_eq!(mem_rec.match_policy, sql_rec.match_policy);
+            assert_eq!(mem_rec.state, sql_rec.state);
+            assert_eq!(mem_rec.operator_id, sql_rec.operator_id);
+            assert_eq!(mem_rec.scope, sql_rec.scope);
+            assert_eq!(mem_rec.reason, sql_rec.reason);
+            assert_eq!(mem_rec.proposed_at_ms, sql_rec.proposed_at_ms);
+            assert_eq!(mem_rec.approved_at_ms, sql_rec.approved_at_ms);
+            assert_eq!(mem_rec.rejected_at_ms, sql_rec.rejected_at_ms);
+            assert_eq!(mem_rec.last_amended_at_ms, sql_rec.last_amended_at_ms);
+        }
+
+        // list_for_run parity (oldest-first ordering).
+        let mem_for_run = mem
+            .list_for_run(&RunId::new("run_1"))
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|r| r.call_id.as_str().to_owned())
+            .collect::<Vec<_>>();
+        let sql_for_run = ToolCallApprovalReadModel::list_for_run(
+            &sqlite_adapter,
+            &RunId::new("run_1"),
+        )
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|r| r.call_id.as_str().to_owned())
+        .collect::<Vec<_>>();
+        assert_eq!(mem_for_run, sql_for_run);
+        assert_eq!(mem_for_run, vec!["tc_a", "tc_b", "tc_c"]);
+
+        // list_for_session parity.
+        let mem_for_session = mem
+            .list_for_session(&SessionId::new("sess_1"))
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|r| r.call_id.as_str().to_owned())
+            .collect::<Vec<_>>();
+        let sql_for_session = ToolCallApprovalReadModel::list_for_session(
+            &sqlite_adapter,
+            &SessionId::new("sess_1"),
+        )
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|r| r.call_id.as_str().to_owned())
+        .collect::<Vec<_>>();
+        assert_eq!(mem_for_session, sql_for_session);
+
+        // list_pending_for_project parity: only tc_c remains pending
+        // after tc_a approved and tc_b rejected.
+        let mem_pending = mem
+            .list_pending_for_project(&proj, 100, 0)
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|r| (r.call_id.as_str().to_owned(), r.state))
+            .collect::<Vec<_>>();
+        let sql_pending = ToolCallApprovalReadModel::list_pending_for_project(
+            &sqlite_adapter,
+            &proj,
+            100,
+            0,
+        )
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|r| (r.call_id.as_str().to_owned(), r.state))
+        .collect::<Vec<_>>();
+        assert_eq!(mem_pending, sql_pending);
+        assert_eq!(
+            mem_pending,
+            vec![("tc_c".to_owned(), ToolCallApprovalState::Pending)]
+        );
+    }
 }
