@@ -819,6 +819,27 @@ pub struct ToolCallProposed {
 /// with amendment" flow), `approved_tool_args` holds the edited payload
 /// and the execute phase uses those instead of the original
 /// `ToolCallProposed.tool_args`.
+///
+/// # Source-of-truth invariant for the executed arguments
+///
+/// On replay, the final arguments the execute phase runs are
+/// deterministically the **last** of the following to appear for a
+/// given `call_id`, in event-log order:
+///
+/// 1. `ToolCallApproved.approved_tool_args` if `Some`.
+/// 2. `ToolCallAmended.new_tool_args` if any amendments were emitted.
+/// 3. `ToolCallProposed.tool_args` otherwise.
+///
+/// Concretely: `ToolCallAmended` records *preview* edits an operator
+/// made before resolving. A subsequent `ToolCallApproved` either
+/// repeats the amended args in `approved_tool_args: Some(...)` (the
+/// normal path, so projections can ignore earlier `ToolCallAmended`
+/// events) or carries `approved_tool_args: None`, which means "approve
+/// whatever the most recent `ToolCallAmended` settled on, or the
+/// original `ToolCallProposed.tool_args` if none was emitted".
+///
+/// This invariant keeps projection state reconstructable from the
+/// event log alone without cross-referencing in-memory UI state.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ToolCallApproved {
     pub project: ProjectKey,
@@ -826,8 +847,12 @@ pub struct ToolCallApproved {
     pub session_id: SessionId,
     pub operator_id: OperatorId,
     pub scope: ApprovalScope,
-    /// Operator-edited arguments, if any. `None` means "approve
-    /// original args as proposed".
+    /// Operator-edited arguments attached to the approval itself.
+    /// `Some` overrides any earlier `ToolCallAmended` payload and the
+    /// original `ToolCallProposed.tool_args`. `None` means "approve
+    /// whatever arguments the most recent preceding `ToolCallAmended`
+    /// or `ToolCallProposed` carried" (see the struct-level invariant
+    /// for the full precedence order).
     pub approved_tool_args: Option<serde_json::Value>,
     pub approved_at_ms: u64,
 }

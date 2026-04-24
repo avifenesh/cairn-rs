@@ -58,8 +58,12 @@ pub enum ApprovalMatchPolicy {
     /// workspace" flows.
     ProjectScopedPath {
         /// Canonical absolute path of the project root. The matcher
-        /// compares `candidate_path.starts_with(project_root)` after
-        /// canonicalising both sides.
+        /// must compare canonicalised paths using path-component
+        /// boundaries, not raw string prefix matching: a candidate
+        /// matches only if it is exactly `project_root` or is
+        /// underneath it as `project_root + path_separator + rest`.
+        /// Raw `starts_with` would incorrectly match e.g.
+        /// `/workspaces/cairn2` against a `/workspaces/cairn` root.
         project_root: String,
     },
     /// Match any tool call whose path argument is exactly the given
