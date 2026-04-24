@@ -161,7 +161,11 @@ async fn submit_proposal_project_scoped_path_matches_sibling_file() {
     .await
     .unwrap();
 
-    let sibling = proposal("tc2", "read", json!({ "path": "/workspaces/proj/src/lib.rs" }));
+    let sibling = proposal(
+        "tc2",
+        "read",
+        json!({ "path": "/workspaces/proj/src/lib.rs" }),
+    );
     assert_eq!(
         svc.submit_proposal(sibling).await.unwrap(),
         ApprovalDecision::AutoApproved
@@ -268,9 +272,13 @@ async fn reject_fires_oneshot_with_reason() {
 #[tokio::test(flavor = "current_thread")]
 async fn amend_does_not_fire_oneshot() {
     let svc = Arc::new(setup());
-    svc.submit_proposal(proposal("tc1", "write", json!({ "path": "/a", "body": "v1" })))
-        .await
-        .unwrap();
+    svc.submit_proposal(proposal(
+        "tc1",
+        "write",
+        json!({ "path": "/a", "body": "v1" }),
+    ))
+    .await
+    .unwrap();
 
     let svc_bg = svc.clone();
     tokio::spawn(async move {

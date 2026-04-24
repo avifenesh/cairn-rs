@@ -334,7 +334,10 @@ mod tests {
 
     #[test]
     fn project_scoped_matches_nested_path() {
-        let p = proposal("read", serde_json::json!({ "path": "/workspaces/cairn/src/lib.rs" }));
+        let p = proposal(
+            "read",
+            serde_json::json!({ "path": "/workspaces/cairn/src/lib.rs" }),
+        );
         let r = AllowRule {
             tool_name: "read".into(),
             tool_args: Value::Null,
@@ -347,7 +350,10 @@ mod tests {
 
     #[test]
     fn project_scoped_rejects_sibling_root() {
-        let p = proposal("read", serde_json::json!({ "path": "/workspaces/cairn2/file" }));
+        let p = proposal(
+            "read",
+            serde_json::json!({ "path": "/workspaces/cairn2/file" }),
+        );
         let r = AllowRule {
             tool_name: "read".into(),
             tool_args: Value::Null,
@@ -380,9 +386,7 @@ mod tests {
         let r = AllowRule {
             tool_name: "bash".into(),
             tool_args: Value::Null,
-            policy: ApprovalMatchPolicy::ExactPath {
-                path: "/a".into(),
-            },
+            policy: ApprovalMatchPolicy::ExactPath { path: "/a".into() },
         };
         assert!(!proposal_matches_rule(&p, &r));
     }
