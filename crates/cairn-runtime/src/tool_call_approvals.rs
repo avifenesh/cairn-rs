@@ -107,10 +107,10 @@ pub struct ApprovedProposal {
 /// projection (e.g. after process restart or when the in-memory cache
 /// has been evicted).
 ///
-/// This trait is intentionally narrow: PR-2 of the wave lands a full
-/// projection on `cairn-store`. For now, PR-3 depends only on the
-/// contract — tests can supply their own stub, and PR-2 will impl this
-/// on the store with a `blanket`-style impl.
+/// A blanket impl (below) bridges every store backend's
+/// [`cairn_store::projections::ToolCallApprovalReadModel`] into this
+/// trait — so any `Arc<InMemoryStore | SqliteAdapter | PgAdapter>` is
+/// a valid reader without per-backend glue.
 #[async_trait]
 pub trait ToolCallApprovalReader: Send + Sync {
     /// Load the materialised approval for a single call.
@@ -118,6 +118,35 @@ pub trait ToolCallApprovalReader: Send + Sync {
         &self,
         call_id: &ToolCallId,
     ) -> Result<Option<ApprovedProposal>, RuntimeError>;
+}
+
+/// Bridge every store that implements
+/// [`cairn_store::projections::ToolCallApprovalReadModel`] into the
+/// runtime-level [`ToolCallApprovalReader`]. Enforces the effective-args
+/// precedence (approved → amended → original) here so orchestrator
+/// callers receive the payload the execute phase should actually run.
+#[async_trait]
+impl<T> ToolCallApprovalReader for T
+where
+    T: cairn_store::projections::ToolCallApprovalReadModel + Send + Sync + ?Sized,
+{
+    async fn get_tool_call_approval(
+        &self,
+        call_id: &ToolCallId,
+    ) -> Result<Option<ApprovedProposal>, RuntimeError> {
+        let record = cairn_store::projections::ToolCallApprovalReadModel::get(self, call_id)
+            .await
+            .map_err(RuntimeError::Store)?;
+        Ok(record.map(|r| ApprovedProposal {
+            call_id: r.call_id.clone(),
+            tool_name: r.tool_name.clone(),
+            tool_args: r
+                .approved_tool_args
+                .clone()
+                .or_else(|| r.amended_tool_args.clone())
+                .unwrap_or_else(|| r.original_tool_args.clone()),
+        }))
+    }
 }
 
 /// Service boundary for the tool-call approval flow.

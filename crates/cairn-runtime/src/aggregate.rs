@@ -11,7 +11,9 @@ use cairn_store::InMemoryStore;
 
 use crate::runs::RunService;
 use crate::services::resource_sharing_impl::ResourceSharingServiceImpl;
+use crate::services::tool_call_approval_impl::ToolCallApprovalServiceImpl;
 use crate::services::ToolInvocationServiceImpl;
+use crate::tool_call_approvals::ToolCallApprovalService;
 use crate::services::{
     ApprovalPolicyServiceImpl, ApprovalServiceImpl, AuditServiceImpl, BudgetServiceImpl,
     ChannelServiceImpl, CheckpointServiceImpl, CredentialServiceImpl, DefaultsServiceImpl,
@@ -56,6 +58,11 @@ pub struct InMemoryServices {
     pub approvals: ApprovalServiceImpl<InMemoryStore>,
     pub approval_policies: ApprovalPolicyServiceImpl<InMemoryStore>,
     pub checkpoints: CheckpointServiceImpl<InMemoryStore>,
+    /// Tool-call approval flow (BP-v2 wave). Owns proposal cache +
+    /// operator decision path for the `ToolCall*` events. Backed by the
+    /// shared `InMemoryStore` as both event log and projection reader
+    /// (blanket `ToolCallApprovalReader for T: ToolCallApprovalReadModel`).
+    pub tool_call_approvals: Arc<dyn ToolCallApprovalService>,
 
     // ── Prompts ────────────────────────────────────────────────────────────
     pub prompt_assets: PromptAssetServiceImpl<InMemoryStore>,
@@ -177,6 +184,10 @@ impl InMemoryServices {
             approvals: ApprovalServiceImpl::new(store.clone()),
             approval_policies: ApprovalPolicyServiceImpl::new(store.clone()),
             checkpoints: CheckpointServiceImpl::new(store.clone()),
+            tool_call_approvals: Arc::new(ToolCallApprovalServiceImpl::new(
+                store.clone(),
+                store.clone(),
+            )) as Arc<dyn ToolCallApprovalService>,
             prompt_assets: PromptAssetServiceImpl::new(store.clone()),
             prompt_releases: PromptReleaseServiceImpl::new(store.clone()),
             prompt_versions: PromptVersionServiceImpl::new(store.clone()),
