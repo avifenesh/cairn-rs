@@ -355,13 +355,49 @@ pub struct AppState {
     /// export is not wired.
     #[cfg(feature = "metrics-otel")]
     pub otlp_batch: Option<Arc<crate::metrics_otel::BatchingSink>>,
-    /// Process-wide cooldown map for the DECIDE-phase provider fallback
-    /// chain. Populated when `provider.generate()` returns
-    /// `ProviderAdapterError::RateLimited` so subsequent orchestrate calls
-    /// skip the cooled-down model for `DEFAULT_RATE_LIMIT_COOLDOWN` (5 min).
-    /// Cleared on process restart by design (in-memory; event-sourced
-    /// cooldown is a follow-up).
-    pub provider_fallback_cooldown: cairn_orchestrator::CooldownMap,
+    /// Provider-fallback cooldown storage partitioned by
+    /// `(tenant_id, binding_id)` so a rate-limit on one tenant/connection
+    /// does NOT cool down the same `model_id` for unrelated tenants or
+    /// sibling connections with different credentials. Keyed internally
+    /// by `model_id` inside each scoped `CooldownMap`. Populated when
+    /// `provider.generate()` returns `ProviderAdapterError::RateLimited`
+    /// so subsequent orchestrate calls skip the cooled-down model for
+    /// `DEFAULT_RATE_LIMIT_COOLDOWN` (5 min). Cleared on process
+    /// restart by design (in-memory; event-sourced cooldown is a
+    /// follow-up).
+    pub provider_fallback_cooldown: Arc<ScopedProviderFallbackCooldown>,
+}
+
+/// In-memory provider-fallback cooldown storage partitioned by
+/// `(tenant_id, binding_id)`. Each partition holds its own
+/// [`cairn_orchestrator::CooldownMap`] so rate-limit events are isolated.
+///
+/// See [`AppState::provider_fallback_cooldown`] for semantics.
+#[derive(Debug, Default)]
+pub struct ScopedProviderFallbackCooldown {
+    inner: std::sync::Mutex<
+        std::collections::HashMap<(String, String), cairn_orchestrator::CooldownMap>,
+    >,
+}
+
+impl ScopedProviderFallbackCooldown {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Fetch (or lazily create) the `CooldownMap` for the given
+    /// `(tenant_id, binding_id)` scope.
+    pub fn get_or_create(
+        &self,
+        tenant_id: &str,
+        binding_id: &str,
+    ) -> cairn_orchestrator::CooldownMap {
+        let mut guard = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        guard
+            .entry((tenant_id.to_owned(), binding_id.to_owned()))
+            .or_default()
+            .clone()
+    }
 }
 
 // ── GitHubIntegration ────────────────────────────────────────────────────────
@@ -1060,7 +1096,7 @@ impl AppState {
             model_catalog_providers_cache: Arc::new(std::sync::OnceLock::new()),
             #[cfg(any(feature = "metrics-core", feature = "metrics-providers"))]
             metrics_tap: None,
-            provider_fallback_cooldown: cairn_orchestrator::CooldownMap::new(),
+            provider_fallback_cooldown: Arc::new(ScopedProviderFallbackCooldown::new()),
         };
         state.runtime.store.reset_usage_counters();
 

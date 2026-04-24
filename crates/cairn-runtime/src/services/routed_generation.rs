@@ -112,6 +112,22 @@ impl RoutedGenerationService {
             });
         }
 
+        // Wrap messages + tools in Arc so every per-model attempt across
+        // every binding shares one allocation instead of cloning the full
+        // conversation history on each call. The `GenerationProvider`
+        // trait still takes `Vec<Value>` / `&[Value]` so we deep-clone
+        // once per attempt — which is unavoidable until the trait is
+        // updated — but the outer loop over bindings no longer adds a
+        // second round of copies.
+        let messages = Arc::new(messages);
+        let tools: Arc<Vec<serde_json::Value>> = Arc::new(tools.to_vec());
+        let settings = Arc::new(settings.clone());
+        // Monotonically-incrementing attempt counter across ALL bindings
+        // so logs/metrics accurately reflect attempt order. `AtomicUsize`
+        // gives us `Send`-safe interior mutability without needing to
+        // thread `FnMut` through the chain closure signature.
+        let attempt_counter = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+
         for (binding_idx, binding) in self.bindings.iter().enumerate() {
             if binding.chain.is_empty() {
                 continue;
@@ -119,19 +135,17 @@ impl RoutedGenerationService {
 
             let provider = binding.provider.clone();
             let binding_id = binding.binding_id.clone();
-            let settings_owned = settings.clone();
-            let messages_owned = messages.clone();
-            let tools_owned = tools.to_vec();
 
             let outcome: FallbackOutcome<GenerationResponse> = binding
                 .chain
                 .run(|model_id| {
                     let provider = provider.clone();
-                    let settings = settings_owned.clone();
-                    let msgs = messages_owned.clone();
-                    let tools = tools_owned.clone();
+                    let settings = settings.clone();
+                    let messages = messages.clone();
+                    let tools = tools.clone();
                     let binding_id = binding_id.clone();
-                    let attempt_idx = all_attempts.len();
+                    let attempt_idx = attempt_counter
+                        .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                     async move {
                         tracing::info!(
                             binding_id = %binding_id,
@@ -140,7 +154,10 @@ impl RoutedGenerationService {
                             tool_count = tools.len(),
                             "routed_generation: dispatch attempt"
                         );
-                        let result = provider.generate(&model_id, msgs, &settings, &tools).await;
+                        // Unavoidable clones into the trait signature.
+                        let result = provider
+                            .generate(&model_id, (*messages).clone(), &settings, &tools)
+                            .await;
                         match &result {
                             Ok(resp) => {
                                 tracing::info!(
@@ -153,13 +170,29 @@ impl RoutedGenerationService {
                                 );
                             }
                             Err(err) => {
-                                tracing::warn!(
-                                    binding_id = %binding_id,
-                                    model_id = %model_id,
-                                    reason = err.reason_code(),
-                                    error = %err,
-                                    "routed_generation: dispatch failed"
-                                );
+                                // Retryable errors get WARN (transient /
+                                // flaky upstream); non-retryable (Auth /
+                                // InvalidRequest) get ERROR because they
+                                // indicate a config bug the operator must
+                                // fix — hiding them in the WARN stream
+                                // makes outages harder to triage.
+                                if err.is_fallback_eligible() {
+                                    tracing::warn!(
+                                        binding_id = %binding_id,
+                                        model_id = %model_id,
+                                        reason = err.reason_code(),
+                                        error = %err,
+                                        "routed_generation: dispatch failed (retryable)"
+                                    );
+                                } else {
+                                    tracing::error!(
+                                        binding_id = %binding_id,
+                                        model_id = %model_id,
+                                        reason = err.reason_code(),
+                                        error = %err,
+                                        "routed_generation: dispatch failed (non-retryable, chain aborts)"
+                                    );
+                                }
                             }
                         }
                         result

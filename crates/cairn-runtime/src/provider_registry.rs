@@ -278,6 +278,33 @@ where
         Ok(cached.embedding.clone())
     }
 
+    /// Resolve the `GenerationProvider` adapter for an **exact** provider
+    /// connection by ID, rather than by "first connection that supports
+    /// `model_id`". Used by the orchestrator when composing a
+    /// `RoutedGenerationService` across multiple bindings — if two
+    /// connections share a model slug (common for proxy providers that
+    /// both expose `gpt-4o-mini`), `resolve_generation_for_model` would
+    /// return the same adapter for both bindings and silently conflate
+    /// them. This API is deterministic on connection ID.
+    pub async fn resolve_generation_for_connection(
+        &self,
+        tenant_id: &TenantId,
+        connection_id: &ProviderConnectionId,
+        model_id: &str,
+    ) -> Result<Option<Arc<dyn GenerationProvider>>, RuntimeError> {
+        let active_connections = self.active_connections(tenant_id).await?;
+        let Some(connection) = active_connections
+            .iter()
+            .find(|c| c.provider_connection_id == *connection_id)
+        else {
+            return Ok(None);
+        };
+        let cached = self
+            .cached_provider_for_connection(connection, model_id)
+            .await?;
+        Ok(Some(cached.generation.clone()))
+    }
+
     async fn active_connections(
         &self,
         tenant_id: &TenantId,

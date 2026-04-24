@@ -308,10 +308,11 @@ fn default_alert_pct() -> u8 {
 ///
 /// Cairn owns model selection: the caller describes the task (goal, mode,
 /// iteration/timeout/approval budgets) and the control plane picks the
-/// model from the tenant's configured provider bindings. Any `model_id`
-/// field sent by legacy clients is ignored by `#[serde(default)]` on the
-/// unknown keys — see the deserialisation behaviour governed by
-/// `serde(deny_unknown_fields)` elsewhere.
+/// model from the tenant's configured provider bindings. Legacy clients
+/// that still send a `model_id` field are tolerated because this struct
+/// does NOT use `serde(deny_unknown_fields)` — by default Serde ignores
+/// unknown fields on Deserialize, so the legacy payload is accepted
+/// without error and the field is discarded.
 #[derive(serde::Deserialize)]
 pub(crate) struct OrchestrateRequest {
     #[serde(default)]
@@ -2053,13 +2054,20 @@ pub(crate) async fn orchestrate_run_handler(
     // Dogfood run 2 motivated this: MiniMax empty → Qwen 503 → Llama 429.
     // A single-model hard-fail is a budget DoS on the operator's day.
     let routed = {
-        let shared_cooldown = state.provider_fallback_cooldown.clone();
-        let summaries = state
+        let scoped_cooldowns = state.provider_fallback_cooldown.clone();
+        let tenant_key = run.project.tenant_id.as_str().to_owned();
+        // Surface store/registry failures as an operator-facing 5xx rather
+        // than silently treating them as "no connections" — that would
+        // route requests to the startup fallback and hide an outage.
+        let summaries = match state
             .runtime
             .provider_registry
             .active_connection_summaries(&run.project.tenant_id)
             .await
-            .unwrap_or_default();
+        {
+            Ok(s) => s,
+            Err(err) => return runtime_error_response(err),
+        };
 
         let mut bindings: Vec<cairn_runtime::RoutedBinding> = Vec::new();
 
@@ -2079,9 +2087,12 @@ pub(crate) async fn orchestrate_run_handler(
 
         for idx in order {
             let (conn_id, supported) = &summaries[idx];
-            // All adapters exposed through provider_registry share the
-            // same `GenerationProvider` trait per connection; probing any
-            // supported model returns the adapter for that connection.
+            // Resolve the adapter by EXACT connection ID. Previously we
+            // probed by model ID, but when multiple connections share a
+            // model slug (e.g. two proxies both exposing `gpt-4o-mini`)
+            // `resolve_generation_for_model` returns the same adapter
+            // for both bindings — conflating their credentials, quotas,
+            // and route records.
             let probe_model = if Some(idx) == preferred_idx {
                 model_id.clone()
             } else {
@@ -2090,13 +2101,14 @@ pub(crate) async fn orchestrate_run_handler(
                     .cloned()
                     .unwrap_or_else(|| model_id.clone())
             };
+            let connection_id = cairn_domain::ProviderConnectionId::new(conn_id.as_str());
             let adapter = match state
                 .runtime
                 .provider_registry
-                .resolve_generation_for_model(
+                .resolve_generation_for_connection(
                     &run.project.tenant_id,
+                    &connection_id,
                     &probe_model,
-                    cairn_runtime::ProviderResolutionPurpose::Brain,
                 )
                 .await
             {
@@ -2119,11 +2131,14 @@ pub(crate) async fn orchestrate_run_handler(
                 continue;
             }
 
+            // Scope cooldown by (tenant, binding) so one tenant's 429 on
+            // model X does not suppress the same model X for another
+            // tenant or for a sibling connection that has its own quota.
+            let cooldown = scoped_cooldowns.get_or_create(&tenant_key, conn_id);
             bindings.push(cairn_runtime::RoutedBinding {
                 binding_id: conn_id.clone(),
                 provider: adapter,
-                chain: cairn_runtime::ModelChain::new(models)
-                    .with_cooldown(shared_cooldown.clone()),
+                chain: cairn_runtime::ModelChain::new(models).with_cooldown(cooldown),
             });
         }
 
@@ -2131,11 +2146,11 @@ pub(crate) async fn orchestrate_run_handler(
         // (CAIRN_BRAIN_URL / OPENROUTER_API_KEY env-only mode): wrap the
         // startup-resolved adapter as a single-binding chain.
         if bindings.is_empty() {
+            let cooldown = scoped_cooldowns.get_or_create(&tenant_key, "startup");
             bindings.push(cairn_runtime::RoutedBinding {
                 binding_id: "startup".to_owned(),
                 provider: brain.clone(),
-                chain: cairn_runtime::ModelChain::single(model_id.clone())
-                    .with_cooldown(shared_cooldown),
+                chain: cairn_runtime::ModelChain::single(model_id.clone()).with_cooldown(cooldown),
             });
         }
 
@@ -2599,7 +2614,16 @@ async fn submit_all_providers_exhausted_proposal(
                 "Abort the run",
             ],
         }),
-        display_summary: Some(summary.lines().next().unwrap_or(summary).to_owned()),
+        // Build a descriptive one-liner that distinguishes this card
+        // from other providers-exhausted events at a glance: include
+        // run_id + the first attempt's reason so the operator can see
+        // the dominant failure mode without expanding the card.
+        display_summary: Some(format!(
+            "providers exhausted on run {} ({} models tried; first failure: {})",
+            run.run_id.as_str(),
+            attempts.len(),
+            attempts.first().map(|a| a.reason_code).unwrap_or("unknown"),
+        )),
         match_policy: cairn_domain::approvals::ApprovalMatchPolicy::Exact,
     };
 

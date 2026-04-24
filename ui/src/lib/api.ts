@@ -716,7 +716,13 @@ export function createApiClient(config: ApiClientConfig) {
      */
     orchestrateRun: (
       runId: string,
-      body?: { goal?: string; max_iterations?: number; timeout_ms?: number; approval_timeout_ms?: number },
+      body?: {
+        goal?: string;
+        max_iterations?: number;
+        timeout_ms?: number;
+        approval_timeout_ms?: number;
+        mode?: RunModeRequest;
+      },
     ): Promise<import("./types").OrchestrateResult> =>
       post(`/v1/runs/${encodeURIComponent(runId)}/orchestrate`, body ?? {}),
 
