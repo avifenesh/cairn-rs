@@ -24,27 +24,26 @@
 //!      * turn 2+ → emits `complete_run` so the loop terminates.
 //! 3. Bind the mock as the tenant's provider connection, set system
 //!    defaults, create session + run.
-//! 4. Start a single `/orchestrate` request in a background task. The
-//!    BP-v2 execute phase parks synchronously on `await_decision`
-//!    until the operator resolves the proposal — the HTTP call does
-//!    NOT return while the approval is pending.
-//! 5. From the test body, poll `/v1/tool-call-approvals?state=pending`
-//!    until the proposal lands, then `POST /approve`. This fires the
-//!    oneshot the parked execute phase is waiting on.
-//! 6. Join the background orchestrate future. Under the fix, the tool
-//!    must have dispatched inline on approval, then the loop continues
-//!    (turn 2 → `complete_run`).
+//! 4. First `/orchestrate` call — F26 contract: returns 202
+//!    `waiting_approval` IMMEDIATELY once the proposal lands in the
+//!    projection. Pre-F26 this blocked the HTTP call until the
+//!    operator resolved; F26 fixes that dogfood-blocking hang by
+//!    suspending the loop at proposal-submit time.
+//! 5. Poll `/v1/tool-call-approvals?state=pending` until the proposal
+//!    lands, then `POST /approve` — routine operator UI flow, now
+//!    completely decoupled from the orchestrate HTTP lifecycle.
+//! 6. Second `/orchestrate` call — the F25 drain reads the
+//!    Approved-state projection row and dispatches the bash tool
+//!    BEFORE the next DECIDE, then the loop continues (turn 2 →
+//!    `complete_run`).
 //! 7. Assert the temp file exists with the expected content. This is
 //!    the one assertion event-log plumbing cannot fake: if the drain
-//!    (or the inline dispatch it backs up) did not actually call
-//!    `bash`, the file will not be on disk.
+//!    did not actually call `bash`, the file will not be on disk.
 //!
-//! The test exercises both the inline BP-v2 dispatch AND the loop's
-//! post-execute plumbing. The drain path itself is exercised by
-//! orchestrator unit tests in `loop_runner::tests::drain_*`; a full
-//! re-orchestrate-triggers-drain HTTP scenario would need an LLM that
-//! re-emits a structurally different proposal after approval, which
-//! the mock here intentionally does not simulate.
+//! F26 (2026-04-23) split the previous single-call flow into
+//! propose-and-suspend (call 1) + operator-approve (out-of-band) +
+//! drain-and-dispatch (call 2). The drain path itself is also
+//! exercised by orchestrator unit tests in `loop_runner::tests::drain_*`.
 //!
 //! The temp file lives under `$TMPDIR` with a uuid suffix so parallel
 //! test runs do not collide. Cleanup happens in a guard at the end.
@@ -288,38 +287,43 @@ async fn drain_approved_bash_actually_runs_and_writes_file() {
         .expect("run reaches server");
     assert_eq!(r.status().as_u16(), 201);
 
-    // ── 3. Kick off orchestrate in a background task. The execute-phase
-    //       BP-v2 approval gate will block synchronously on
-    //       `await_decision` until the operator approves, so the HTTP
-    //       call does NOT return until approval lands. The test drives
-    //       the approve flow concurrently, then joins on the orchestrate
-    //       future and asserts the filesystem side effect. This flow
-    //       covers the "LLM emits a proposal, operator approves while
-    //       the execute phase is parked" path that RFC 020 + BP-v2 are
-    //       designed around.
-    let base_url = h.base_url.clone();
-    let admin_token = h.admin_token.clone();
-    let run_id_clone = run_id.clone();
-    let client_orch = h.client().clone();
-    let orchestrate_task = tokio::spawn(async move {
-        client_orch
-            .post(format!("{}/v1/runs/{}/orchestrate", base_url, run_id_clone))
-            .bearer_auth(&admin_token)
-            .json(&json!({
-                "goal": "write the marker file via an approval-gated bash command",
-                "max_iterations": 3,
-                // 30s operator-decision timeout — the test must approve
-                // within this window. Above the ~10s we need for the
-                // mock to answer + the poll loop below to react.
-                "approval_timeout_ms": 30_000u64,
-            }))
-            .timeout(std::time::Duration::from_secs(90))
-            .send()
-            .await
-    });
+    // ── 3. First orchestrate call — F26 contract: returns 202
+    //       WaitingApproval IMMEDIATELY. The pre-F26 behaviour was to
+    //       block the HTTP call for the full approval timeout while
+    //       parked on `await_decision`; F26 fixes that blocker by
+    //       returning the pending status as soon as the proposal lands
+    //       in the projection.
+    let first_orch_res = h
+        .client()
+        .post(format!("{}/v1/runs/{}/orchestrate", h.base_url, run_id))
+        .bearer_auth(&h.admin_token)
+        .json(&json!({
+            "goal": "write the marker file via an approval-gated bash command",
+            "max_iterations": 3,
+            // Kept for wire compatibility — no longer honoured in-process
+            // (F26). The approval SLA now lives at the run-suspension
+            // layer, not in the orchestrator execute phase.
+            "approval_timeout_ms": 30_000u64,
+        }))
+        .timeout(std::time::Duration::from_secs(30))
+        .send()
+        .await
+        .expect("orchestrate request reaches server");
+    let first_status = first_orch_res.status().as_u16();
+    let first_body_text = first_orch_res.text().await.unwrap_or_default();
+    assert_eq!(
+        first_status, 202,
+        "F26: first orchestrate should return 202 WaitingApproval, got {first_status}: {first_body_text}"
+    );
+    let first_body: Value = serde_json::from_str(&first_body_text).unwrap_or(Value::Null);
+    assert_eq!(
+        first_body.get("termination").and_then(|v| v.as_str()),
+        Some("waiting_approval"),
+        "first orchestrate termination should be waiting_approval: {first_body_text}"
+    );
 
-    // ── 4. Poll for the pending tool-call approval, then approve ────────
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    // ── 4. Find the pending proposal + approve it ───────────────────────
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
     let mut call_id: Option<String> = None;
     while std::time::Instant::now() < deadline {
         let r = h
@@ -352,9 +356,9 @@ async fn drain_approved_bash_actually_runs_and_writes_file() {
                 }
             }
         }
-        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
     }
-    let call_id = call_id.expect("pending tool-call approval did not appear within 30s");
+    let call_id = call_id.expect("pending tool-call approval did not appear within 10s");
 
     assert!(
         !marker_path.exists(),
@@ -382,16 +386,27 @@ async fn drain_approved_bash_actually_runs_and_writes_file() {
         r.text().await.unwrap_or_default()
     );
 
-    // ── 5. Join orchestrate — must complete cleanly ─────────────────────
-    let orch_res = orchestrate_task
+    // ── 5. Second orchestrate call — F25 drain picks up the approved
+    //       tool call BEFORE the next DECIDE. The bash dispatch runs,
+    //       the marker file gets written, and the run terminates.
+    let orch_res = h
+        .client()
+        .post(format!("{}/v1/runs/{}/orchestrate", h.base_url, run_id))
+        .bearer_auth(&h.admin_token)
+        .json(&json!({
+            "goal": "write the marker file via an approval-gated bash command",
+            "max_iterations": 3,
+            "approval_timeout_ms": 30_000u64,
+        }))
+        .timeout(std::time::Duration::from_secs(90))
+        .send()
         .await
-        .expect("orchestrate task joins")
-        .expect("orchestrate request reaches server");
+        .expect("second orchestrate reaches server");
     let orch_status = orch_res.status().as_u16();
     let orch_body_text = orch_res.text().await.unwrap_or_default();
     assert_eq!(
         orch_status, 200,
-        "orchestrate should succeed once approval lands, got {orch_status}: {orch_body_text}"
+        "second orchestrate (post-approval) should succeed, got {orch_status}: {orch_body_text}"
     );
     let orch_body: Value = serde_json::from_str(&orch_body_text).unwrap_or(Value::Null);
     let term = orch_body

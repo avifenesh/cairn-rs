@@ -268,7 +268,24 @@ async fn auto_approved_tool_executes_without_operator() {
 /// task approves after a short delay; execute returns with the tool
 /// result. THIS IS THE DOGFOOD-UNBLOCKING CASE.
 #[tokio::test(flavor = "multi_thread")]
-async fn pending_approval_waits_for_operator_then_runs_tool() {
+async fn pending_approval_suspends_loop_without_blocking() {
+    // F26 dogfood-blocker fix (2026-04-23). The previous behaviour was
+    // "execute blocks in-process on `await_decision` until the operator
+    // resolves". That made a single `POST /v1/runs/:id/orchestrate`
+    // request hang for the full approval timeout (default 24h) because
+    // the operator's approve comes through a DIFFERENT HTTP path and
+    // cannot make progress until the orchestrate call returns.
+    //
+    // New contract: pending approvals return `AwaitingApproval`
+    // IMMEDIATELY. The orchestrator loop surfaces
+    // `LoopTermination::WaitingApproval`, the HTTP handler returns 202,
+    // and a subsequent orchestrate call dispatches the operator-
+    // approved tool via the F25 drain before the next DECIDE.
+    //
+    // This test pins the non-blocking contract. The tool MUST NOT run
+    // during this first execute (the operator hasn't even been asked
+    // yet from their point of view — the proposal just landed in the
+    // projection).
     let store = Arc::new(InMemoryStore::new());
     let svc = build_service(store.clone());
     let seen = Arc::new(Mutex::new(vec![]));
@@ -282,31 +299,85 @@ async fn pending_approval_waits_for_operator_then_runs_tool() {
     let args = json!({"path": "/a/b", "body": "hi"});
     let expected_id = derive_expected_call_id("run-wait", 0, 0, "recorder", &args);
 
-    // Background: approve after 100ms.
-    let svc_bg = svc.clone();
-    let id_bg = expected_id.clone();
-    tokio::spawn(async move {
-        tokio::time::sleep(Duration::from_millis(100)).await;
-        svc_bg
-            .approve(id_bg, OperatorId::new("op"), ApprovalScope::Once, None)
-            .await
-            .expect("bg approve");
-    });
-
     let decide = decide_with(vec![invoke_proposal("recorder", args.clone(), true)]);
+    let start = std::time::Instant::now();
     let outcome = phase.execute(&cx, &decide).await.expect("execute");
-    assert!(matches!(
-        outcome.results[0].status,
-        cairn_orchestrator::ActionStatus::Succeeded
-    ));
-    assert_eq!(seen.lock().unwrap().len(), 1);
-    assert_eq!(seen.lock().unwrap()[0], args);
+    let elapsed = start.elapsed();
+
+    // MUST return promptly — no in-process wait for operator.
+    assert!(
+        elapsed < Duration::from_millis(500),
+        "F26 regression: execute blocked for {elapsed:?} — should return immediately"
+    );
+
+    match &outcome.results[0].status {
+        cairn_orchestrator::ActionStatus::AwaitingApproval { approval_id } => {
+            // The approval_id must derive from the ToolCallId so the
+            // handler + UI can correlate it with the projection row.
+            assert_eq!(
+                approval_id.as_str(),
+                expected_id.as_str(),
+                "approval_id should carry the deterministic ToolCallId"
+            );
+        }
+        other => panic!(
+            "F26 regression: expected AwaitingApproval, got {other:?} — \
+             the loop will advance instead of suspending"
+        ),
+    }
+    // Loop signal must be WaitApproval — the outer loop picks this up
+    // and yields LoopTermination::WaitingApproval.
+    match &outcome.loop_signal {
+        cairn_orchestrator::LoopSignal::WaitApproval { approval_id } => {
+            assert_eq!(approval_id.as_str(), expected_id.as_str());
+        }
+        other => panic!("expected WaitApproval loop_signal, got {other:?}"),
+    }
+    // The tool MUST NOT have run yet — nobody has approved it.
+    assert_eq!(
+        seen.lock().unwrap().len(),
+        0,
+        "F26 regression: tool ran without operator approval"
+    );
+
+    // Projection state: the proposal is Pending, waiting for operator.
+    let reader = ToolCallApprovalReaderAdapter::new(store.clone());
+    let stored = reader
+        .get_tool_call_proposal(&expected_id)
+        .await
+        .expect("reader")
+        .expect("proposal persisted");
+    use cairn_runtime::tool_call_approvals::ToolCallApprovalReader as _;
+    use cairn_runtime::tool_call_approvals::StoredProposalState;
+    assert!(
+        matches!(stored.state, StoredProposalState::Pending),
+        "proposal must be Pending after suspend, not {:?}",
+        stored.state
+    );
+
+    // Now operator approves. The F25 drain path (exercised by
+    // `test_drain_approved_executes_bash.rs`) is what runs the tool on
+    // the next orchestrate invocation. Here we just verify the approve
+    // call succeeds — it would have dead-locked before F26 because
+    // nobody was parked on the oneshot.
+    svc.approve(
+        expected_id.clone(),
+        OperatorId::new("op"),
+        ApprovalScope::Once,
+        None,
+    )
+    .await
+    .expect("operator approve");
 }
 
-/// Operator rejects the proposal: execute returns Failed with the
-/// rejection reason; the tool is NEVER invoked.
+/// F26: regardless of what the operator eventually does (approve /
+/// reject / amend) the FIRST execute call must return
+/// `AwaitingApproval` immediately. The reject/approve/amend flows are
+/// handled on subsequent orchestrate invocations via the F25 drain
+/// path. This test pins: rejection issued AFTER execute returned must
+/// not retroactively affect the returned status.
 #[tokio::test(flavor = "multi_thread")]
-async fn rejection_surfaces_tool_result_error() {
+async fn pending_approval_returns_before_operator_can_reject() {
     let store = Arc::new(InMemoryStore::new());
     let svc = build_service(store.clone());
     let seen = Arc::new(Mutex::new(vec![]));
@@ -320,31 +391,43 @@ async fn rejection_surfaces_tool_result_error() {
     let args = json!({"k": "v"});
     let expected_id = derive_expected_call_id("run-reject", 0, 0, "recorder", &args);
 
-    let svc_bg = svc.clone();
-    let id_bg = expected_id.clone();
-    tokio::spawn(async move {
-        tokio::time::sleep(Duration::from_millis(50)).await;
-        svc_bg
-            .reject(id_bg, OperatorId::new("op"), Some("not safe".to_owned()))
-            .await
-            .expect("bg reject");
-    });
-
     let decide = decide_with(vec![invoke_proposal("recorder", args, true)]);
     let outcome = phase.execute(&cx, &decide).await.expect("execute");
-    match &outcome.results[0].status {
-        cairn_orchestrator::ActionStatus::Failed { reason } => {
-            assert!(reason.contains("not safe"), "got: {reason}");
-        }
-        other => panic!("expected Failed, got {other:?}"),
-    }
-    assert_eq!(seen.lock().unwrap().len(), 0, "tool must not run on reject");
+
+    // Execute returned AwaitingApproval immediately — the operator
+    // hasn't had a chance to do anything yet.
+    assert!(
+        matches!(
+            outcome.results[0].status,
+            cairn_orchestrator::ActionStatus::AwaitingApproval { .. }
+        ),
+        "F26: expected AwaitingApproval, got {:?}",
+        outcome.results[0].status
+    );
+    assert_eq!(seen.lock().unwrap().len(), 0, "tool must not run pre-approval");
+
+    // Now the operator rejects. That decision is durable in the
+    // projection; a future orchestrate call would surface a
+    // Rejected-state row via the F25 drain reader.
+    svc.reject(
+        expected_id.clone(),
+        OperatorId::new("op"),
+        Some("not safe".to_owned()),
+    )
+    .await
+    .expect("reject");
+    // Tool still never ran.
+    assert_eq!(seen.lock().unwrap().len(), 0);
 }
 
-/// Timeout: operator never responds, `await_decision` fires its timer,
-/// execute returns Failed.
+/// F26: pending approval does NOT self-timeout inside a single execute
+/// call. The "timeout" concept now lives at the run-suspension layer
+/// (operator SLA / auto-reject sweeper), not inside the orchestrator
+/// loop. This test locks in that execute returns AwaitingApproval
+/// promptly even when the context configures a tiny approval_timeout
+/// — because the timeout is no longer honoured in-process.
 #[tokio::test(flavor = "multi_thread")]
-async fn timeout_auto_rejects() {
+async fn pending_approval_does_not_block_on_approval_timeout() {
     let store = Arc::new(InMemoryStore::new());
     let svc = build_service(store.clone());
     let seen = Arc::new(Mutex::new(vec![]));
@@ -354,19 +437,28 @@ async fn timeout_auto_rejects() {
     });
     let registry = build_registry(tool.clone());
     let phase = build_phase(store.clone(), registry, svc.clone());
-    // 100ms timeout; no operator action.
+    // 100ms timeout; with the pre-F26 blocking gate this would drive
+    // `await_decision` to fire and return Failed. Post-F26 the field
+    // is still accepted for backward-compat but the hot path ignores
+    // it — execute returns AwaitingApproval near-instantly.
     let cx = ctx_with_timeout("run-to", "sess-to", Duration::from_millis(100));
     let decide = decide_with(vec![invoke_proposal("recorder", json!({"k": "v"}), true)]);
+    let start = std::time::Instant::now();
     let outcome = phase.execute(&cx, &decide).await.expect("execute");
-    match &outcome.results[0].status {
-        cairn_orchestrator::ActionStatus::Failed { reason } => {
-            assert!(
-                reason.to_lowercase().contains("timeout"),
-                "expected timeout reason, got: {reason}"
-            );
-        }
-        other => panic!("expected Failed, got {other:?}"),
-    }
+    let elapsed = start.elapsed();
+
+    assert!(
+        elapsed < Duration::from_millis(80),
+        "F26 regression: execute blocked for {elapsed:?} — must not honour approval_timeout in-process"
+    );
+    assert!(
+        matches!(
+            outcome.results[0].status,
+            cairn_orchestrator::ActionStatus::AwaitingApproval { .. }
+        ),
+        "expected AwaitingApproval, got {:?}",
+        outcome.results[0].status
+    );
     assert_eq!(seen.lock().unwrap().len(), 0);
 }
 
@@ -433,31 +525,61 @@ async fn parallel_batch_executes_auto_approved_while_waiting_on_operator() {
     let start = std::time::Instant::now();
     let outcome = phase.execute(&cx, &decide).await.expect("execute");
     let elapsed = start.elapsed();
+    // Suppress unused-var on the pre-F26 background approver — kept
+    // inert so the test continues to exercise the approval projection
+    // writer, but the operator's decision no longer races with
+    // execute in the F26 flow.
+    let _ = slow_id;
 
-    // Both succeeded.
-    assert!(matches!(
-        outcome.results[0].status,
-        cairn_orchestrator::ActionStatus::Succeeded
-    ));
-    assert!(matches!(
-        outcome.results[1].status,
-        cairn_orchestrator::ActionStatus::Succeeded
-    ));
-    assert_eq!(seen.lock().unwrap().len(), 2);
-
-    // Parallelism marker: total elapsed must be < 2x the slow wait.
-    // Serial would be ~0 + 200ms; parallel is max(~0, 200ms) = ~200ms.
-    // Either way the bound < 400ms is a safe parallel check.
+    // F26 contract: batch returns IMMEDIATELY (no in-process wait).
+    // The auto-approved fast entry ran; the pending slow entry is
+    // suspended. The outer loop's earliest-terminal-signal aggregator
+    // (see `execute_impl::derive_signal` + tests) surfaces a
+    // WaitApproval loop_signal so the orchestrator suspends the run
+    // cleanly — even though the auto-approved fast tool already ran.
     assert!(
-        elapsed < Duration::from_millis(400),
-        "batch should not serialize; took {elapsed:?}"
+        elapsed < Duration::from_millis(500),
+        "F26 regression: parallel batch blocked for {elapsed:?} — must return promptly"
     );
+    // Fast auto-approved → ran.
+    assert!(
+        matches!(
+            outcome.results[0].status,
+            cairn_orchestrator::ActionStatus::Succeeded
+        ),
+        "fast (auto-approved) should have run, got {:?}",
+        outcome.results[0].status
+    );
+    // Slow pending → AwaitingApproval, did NOT run.
+    assert!(
+        matches!(
+            outcome.results[1].status,
+            cairn_orchestrator::ActionStatus::AwaitingApproval { .. }
+        ),
+        "slow (pending) should be AwaitingApproval, got {:?}",
+        outcome.results[1].status
+    );
+    // Only the fast tool left a trace.
+    assert_eq!(
+        seen.lock().unwrap().len(),
+        1,
+        "only fast auto-approved tool should have run"
+    );
+    assert_eq!(seen.lock().unwrap()[0], fast_args);
 }
 
-/// Amend then approve: operator edits the args, then approves. Execute
-/// must run the tool with the AMENDED args, not the original LLM args.
+/// F26: operator amendments now flow through the drain path on a
+/// subsequent orchestrate invocation — not through a single blocking
+/// execute. The first execute returns AwaitingApproval immediately
+/// (no background amend can race with a non-blocking call). The
+/// actual "amended args flow through to the tool" contract is pinned
+/// by `test_drain_approved_executes_bash.rs` which exercises the
+/// propose → approve → drain → dispatch path end to end with args
+/// variation. Here we pin the surrounding F26 contract: first execute
+/// must not run the tool and must not block, regardless of whether the
+/// operator is amending.
 #[tokio::test(flavor = "multi_thread")]
-async fn amend_then_approve_uses_amended_args() {
+async fn amend_after_pending_does_not_retroactively_run_tool_in_first_execute() {
     let store = Arc::new(InMemoryStore::new());
     let svc = build_service(store.clone());
     let seen = Arc::new(Mutex::new(vec![]));
@@ -472,31 +594,38 @@ async fn amend_then_approve_uses_amended_args() {
     let amended = json!({"k": "amended"});
     let expected_id = derive_expected_call_id("run-amend", 0, 0, "recorder", &original);
 
-    let svc_bg = svc.clone();
-    let id_bg = expected_id.clone();
-    let amended_bg = amended.clone();
-    tokio::spawn(async move {
-        tokio::time::sleep(Duration::from_millis(50)).await;
-        svc_bg
-            .amend(id_bg.clone(), OperatorId::new("op"), amended_bg)
-            .await
-            .expect("amend");
-        svc_bg
-            .approve(id_bg, OperatorId::new("op"), ApprovalScope::Once, None)
-            .await
-            .expect("approve");
-    });
-
     let decide = decide_with(vec![invoke_proposal("recorder", original.clone(), true)]);
     let outcome = phase.execute(&cx, &decide).await.expect("execute");
-    assert!(matches!(
-        outcome.results[0].status,
-        cairn_orchestrator::ActionStatus::Succeeded
-    ));
-    let seen_guard = seen.lock().unwrap();
-    assert_eq!(seen_guard.len(), 1);
+
+    // Execute returned without blocking — nothing the operator does
+    // now will change the return value of the call we already made.
+    assert!(
+        matches!(
+            outcome.results[0].status,
+            cairn_orchestrator::ActionStatus::AwaitingApproval { .. }
+        ),
+        "F26: expected AwaitingApproval, got {:?}",
+        outcome.results[0].status
+    );
+    assert_eq!(seen.lock().unwrap().len(), 0, "tool must not run pre-approval");
+
+    // Operator amends + approves after the fact. Writes go to the
+    // projection; drain path picks them up on the next orchestrate.
+    svc.amend(expected_id.clone(), OperatorId::new("op"), amended.clone())
+        .await
+        .expect("amend");
+    svc.approve(
+        expected_id.clone(),
+        OperatorId::new("op"),
+        ApprovalScope::Once,
+        None,
+    )
+    .await
+    .expect("approve");
+    // Still not run — this execute call is already done.
     assert_eq!(
-        seen_guard[0], amended,
-        "tool must run with AMENDED args, not original"
+        seen.lock().unwrap().len(),
+        0,
+        "tool must not retroactively run inside the already-returned execute"
     );
 }
