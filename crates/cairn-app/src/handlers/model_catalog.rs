@@ -87,7 +87,7 @@ pub(crate) struct ListModelCatalogResponse {
 /// One row in the providers summary response.
 #[derive(Clone, Debug, Serialize)]
 pub struct ProviderCount {
-    pub name:  String,
+    pub name: String,
     pub count: usize,
 }
 
@@ -274,9 +274,7 @@ pub(crate) async fn list_catalog_providers_handler(
 
     // Ignore the `Result`: another request may have populated the cache
     // between our `get()` and `set()`. Either snapshot is correct.
-    let _ = state
-        .model_catalog_providers_cache
-        .set(providers.clone());
+    let _ = state.model_catalog_providers_cache.set(providers.clone());
 
     Ok(Json(CatalogProvidersResponse { providers }))
 }

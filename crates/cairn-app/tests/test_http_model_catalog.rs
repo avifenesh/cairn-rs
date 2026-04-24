@@ -245,8 +245,7 @@ async fn catalog_missing_bearer_returns_401() {
 async fn catalog_ordering_is_deterministic() {
     let h = LiveHarness::setup().await;
 
-    let (s, body) =
-        get_catalog(&h, "?provider=openai&limit=500&supports_tools=true").await;
+    let (s, body) = get_catalog(&h, "?provider=openai&limit=500&supports_tools=true").await;
     assert_eq!(s, 200);
     let items = body["items"].as_array().unwrap();
     assert!(items.len() >= 2);
@@ -263,10 +262,7 @@ async fn catalog_ordering_is_deterministic() {
                 "tie-break on id violated at cost={c}: {prev_id} then {id}"
             );
         } else {
-            assert!(
-                c >= prev_cost,
-                "cost ASC violated: {prev_cost} then {c}"
-            );
+            assert!(c >= prev_cost, "cost ASC violated: {prev_cost} then {c}");
         }
         prev_cost = c;
         prev_id = id;
@@ -330,5 +326,8 @@ async fn catalog_search_matches_provider_name() {
     let any_openai = items
         .iter()
         .any(|it| it["provider"].as_str().unwrap() == "openai");
-    assert!(any_openai, "search=openai should surface openai-family entries");
+    assert!(
+        any_openai,
+        "search=openai should surface openai-family entries"
+    );
 }
