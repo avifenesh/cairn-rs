@@ -534,13 +534,13 @@ where
             self.emitter.on_decide_completed(ctx, &decide_output).await;
 
             // ── (3a') Emitter fatal-error check ──────────────────────────────
-            // `on_decide_completed` is the first callback that dual-writes
-            // provider-call telemetry into the durable secondary (see
-            // TracingEmitter in cairn-app). A secondary-write failure means
-            // the in-memory and durable stores have diverged — the next
-            // iteration would read stale state, so we abort the loop with a
-            // clear store error instead of looping toward the iteration cap
-            // and silently dropping work (F24 dogfood repro, 2026-04-23).
+            // `on_decide_completed` is the only callback that dual-writes
+            // provider-call telemetry into the durable secondary (see the
+            // `TracingEmitter` implementation in `cairn-app`). When its
+            // append fails, the in-memory and durable logs have diverged
+            // — the next iteration would read stale state from the
+            // primary, so the loop must abort with a store error rather
+            // than silently continue toward the iteration cap.
             if let Some(msg) = self.emitter.take_fatal_error() {
                 tracing::error!(
                     run_id    = %ctx.run_id,

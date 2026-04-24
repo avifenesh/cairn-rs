@@ -106,13 +106,28 @@ jobs:
         env:
           CARGO_BUILD_JOBS: "2"
           RUSTFLAGS: "-C debuginfo=0"
-      - name: integration tests (store + api + memory + tools + graph + agent + workspace + integrations)
+      - name: integration tests (api + memory + tools + graph + agent + workspace + integrations)
         # These crates ship integration tests under `tests/` that
         # `--workspace --lib` does not execute. All crates listed here
         # run in-process with no external services (no Postgres/Valkey/
         # network), so they belong in the plain `test` job rather than
-        # `fabric-integration`.
-        run: cargo test --tests -p cairn-store -p cairn-api -p cairn-memory -p cairn-tools -p cairn-graph -p cairn-agent -p cairn-workspace -p cairn-integrations
+        # `fabric-integration`. cairn-store runs in its own step below
+        # with `--features sqlite,postgres` so feature-gated tests
+        # actually execute.
+        run: cargo test --tests -p cairn-api -p cairn-memory -p cairn-tools -p cairn-graph -p cairn-agent -p cairn-workspace -p cairn-integrations
+        timeout-minutes: 15
+        env:
+          CARGO_BUILD_JOBS: "2"
+          RUSTFLAGS: "-C debuginfo=0"
+      - name: integration tests (cairn-store with sqlite + postgres features)
+        # cairn-store's backend-specific tests (FK ordering, prompt-schema
+        # hardening, migration contract) are behind `#[cfg(feature = ...)]`
+        # gates. Without the features enabled, copilot #282 flagged that
+        # none of those assertions execute in CI. SQLite tests run live
+        # against `SqliteAdapter::in_memory()`; Postgres tests are
+        # static-SQL assertions against embedded migrations and need no
+        # live database.
+        run: cargo test --tests -p cairn-store --features sqlite,postgres
         timeout-minutes: 15
         env:
           CARGO_BUILD_JOBS: "2"

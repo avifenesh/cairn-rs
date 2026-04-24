@@ -484,112 +484,14 @@ pub(crate) fn build_orchestrator_emitter(
             d: &cairn_orchestrator::DecideOutput,
         ) {
             self.inner.on_decide_completed(ctx, d).await;
-            // Emit RouteDecisionMade + ProviderCallCompleted in a single
-            // append so the Postgres projection applies RouteDecisionMade
-            // before ProviderCallCompleted's FK reference to it. See
-            // `handlers/runs.rs::on_decide_completed` for the F24 fix
-            // rationale (2026-04-23).
-            let now = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_millis() as u64;
-            let call_id = format!("orch_{}_{}", ctx.run_id.as_str(), now);
-            let route_decision_id = cairn_domain::RouteDecisionId::new(format!("rd_{call_id}"));
-            let route_attempt_id = cairn_domain::RouteAttemptId::new(format!("ra_{call_id}"));
-            let provider_binding_id = cairn_domain::ProviderBindingId::new("brain");
-
-            let route_event = cairn_domain::EventEnvelope::for_runtime_event(
-                cairn_domain::EventId::new(format!("evt_route_{call_id}")),
-                cairn_domain::EventSource::Runtime,
-                cairn_domain::RuntimeEvent::RouteDecisionMade(
-                    cairn_domain::events::RouteDecisionMade {
-                        project: ctx.project.clone(),
-                        route_decision_id: route_decision_id.clone(),
-                        operation_kind: cairn_domain::providers::OperationKind::Generate,
-                        selected_provider_binding_id: Some(provider_binding_id.clone()),
-                        final_status: cairn_domain::providers::RouteDecisionStatus::Selected,
-                        attempt_count: 1,
-                        fallback_used: false,
-                        decided_at: now,
-                    },
-                ),
-            );
-
-            let provider_event = cairn_domain::EventEnvelope::for_runtime_event(
-                cairn_domain::EventId::new(format!("evt_trace_{call_id}")),
-                cairn_domain::EventSource::Runtime,
-                cairn_domain::RuntimeEvent::ProviderCallCompleted(
-                    cairn_domain::events::ProviderCallCompleted {
-                        project: ctx.project.clone(),
-                        provider_call_id: cairn_domain::ProviderCallId::new(&call_id),
-                        route_decision_id,
-                        route_attempt_id,
-                        provider_binding_id,
-                        provider_connection_id: cairn_domain::ProviderConnectionId::new("brain"),
-                        provider_model_id: cairn_domain::ProviderModelId::new(&d.model_id),
-                        operation_kind: cairn_domain::providers::OperationKind::Generate,
-                        status: cairn_domain::providers::ProviderCallStatus::Succeeded,
-                        latency_ms: Some(d.latency_ms),
-                        input_tokens: d.input_tokens,
-                        output_tokens: d.output_tokens,
-                        cost_micros: Some(
-                            ((d.input_tokens.unwrap_or(0) as u64).saturating_mul(500)
-                                + (d.output_tokens.unwrap_or(0) as u64).saturating_mul(1500))
-                                / 1_000,
-                        ),
-                        completed_at: now,
-                        session_id: Some(ctx.session_id.clone()),
-                        run_id: Some(ctx.run_id.clone()),
-                        error_class: None,
-                        raw_error_message: None,
-                        retry_count: 0,
-                        task_id: ctx
-                            .task_id
-                            .as_ref()
-                            .map(|t| cairn_domain::TaskId::new(t.as_str())),
-                        prompt_release_id: None,
-                        fallback_position: 0,
-                        started_at: now.saturating_sub(d.latency_ms),
-                        finished_at: now,
-                    },
-                ),
-            );
-            let provider_payload = provider_event.payload.clone();
-            if let Err(e) = self.store.append(&[route_event, provider_event]).await {
-                tracing::error!(
-                    run_id = %ctx.run_id,
-                    error = %e,
-                    "event store append failed — in-memory/secondary logs have diverged, aborting run"
-                );
-                // SEC-007: keep the latched public message class-level
-                // only — raw `{e}` is logged above, not folded here.
-                let mut slot = self.fatal_error.lock().unwrap_or_else(|p| p.into_inner());
-                *slot = Some(format!(
-                    "dual-write divergence on run={}",
-                    ctx.run_id.as_str()
-                ));
-            }
-            let _ = self.exporter.export_event(&provider_payload).await;
-
-            use cairn_store::projections::LlmCallTraceReadModel;
-            let input_tokens = d.input_tokens.unwrap_or(0);
-            let output_tokens = d.output_tokens.unwrap_or(0);
-            let cost_micros = ((input_tokens as u64).saturating_mul(500)
-                + (output_tokens as u64).saturating_mul(1500))
-                / 1_000;
-            let trace = cairn_domain::LlmCallTrace {
-                trace_id: call_id,
-                model_id: d.model_id.clone(),
-                prompt_tokens: input_tokens,
-                completion_tokens: output_tokens,
-                latency_ms: d.latency_ms,
-                cost_micros,
-                session_id: Some(ctx.session_id.clone()),
-                run_id: Some(ctx.run_id.clone()),
-                created_at_ms: now,
-                is_error: false,
-            };
-            let _ = self.store.insert_trace(trace).await;
+            crate::tracing_emitter::record_decide_trace(
+                ctx,
+                d,
+                &self.store,
+                &self.exporter,
+                &self.fatal_error,
+            )
+            .await;
         }
         async fn on_tool_called(
             &self,

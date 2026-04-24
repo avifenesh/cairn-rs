@@ -2267,140 +2267,14 @@ pub(crate) async fn orchestrate_run_handler(
             d: &cairn_orchestrator::DecideOutput,
         ) {
             self.inner.on_decide_completed(ctx, d).await;
-            // Emit RouteDecisionMade + ProviderCallCompleted so LLM traces
-            // are populated.
-            //
-            // **Event order matters for Postgres (F24 dogfood fix,
-            // 2026-04-23).** `provider_calls.route_decision_id` has a FK
-            // to `route_decisions(route_decision_id)`. Both events share
-            // the same `PgEventLog::append` transaction and are applied
-            // by `PgSyncProjection` in slice order, so we MUST emit
-            // `RouteDecisionMade` first — otherwise the
-            // `provider_calls` INSERT fires before the parent row exists
-            // and Postgres raises a FK violation. The old code emitted
-            // only `ProviderCallCompleted` with a synthetic
-            // `route_decision_id`, which silently worked on the
-            // InMemory primary (no FK) but blew up on the Postgres
-            // secondary under dogfood `--mode team`. The divergence was
-            // logged at WARN "non-fatal" and the orchestrator loop
-            // kept spinning — dropping the proposed tool_call.
-            let now = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_millis() as u64;
-            let call_id = format!("orch_{}_{}", ctx.run_id.as_str(), now);
-            let route_decision_id = cairn_domain::RouteDecisionId::new(format!("rd_{call_id}"));
-            let route_attempt_id = cairn_domain::RouteAttemptId::new(format!("ra_{call_id}"));
-            let provider_binding_id = cairn_domain::ProviderBindingId::new("brain");
-
-            let route_event = cairn_domain::EventEnvelope::for_runtime_event(
-                cairn_domain::EventId::new(format!("evt_route_{call_id}")),
-                cairn_domain::EventSource::Runtime,
-                cairn_domain::RuntimeEvent::RouteDecisionMade(
-                    cairn_domain::events::RouteDecisionMade {
-                        project: ctx.project.clone(),
-                        route_decision_id: route_decision_id.clone(),
-                        operation_kind: cairn_domain::providers::OperationKind::Generate,
-                        selected_provider_binding_id: Some(provider_binding_id.clone()),
-                        final_status: cairn_domain::providers::RouteDecisionStatus::Selected,
-                        attempt_count: 1,
-                        fallback_used: false,
-                        decided_at: now,
-                    },
-                ),
-            );
-
-            let provider_event = cairn_domain::EventEnvelope::for_runtime_event(
-                cairn_domain::EventId::new(format!("evt_trace_{call_id}")),
-                cairn_domain::EventSource::Runtime,
-                cairn_domain::RuntimeEvent::ProviderCallCompleted(
-                    cairn_domain::events::ProviderCallCompleted {
-                        project: ctx.project.clone(),
-                        provider_call_id: cairn_domain::ProviderCallId::new(&call_id),
-                        route_decision_id,
-                        route_attempt_id,
-                        provider_binding_id,
-                        provider_connection_id: cairn_domain::ProviderConnectionId::new("brain"),
-                        provider_model_id: cairn_domain::ProviderModelId::new(&d.model_id),
-                        operation_kind: cairn_domain::providers::OperationKind::Generate,
-                        status: cairn_domain::providers::ProviderCallStatus::Succeeded,
-                        latency_ms: Some(d.latency_ms),
-                        input_tokens: d.input_tokens,
-                        output_tokens: d.output_tokens,
-                        cost_micros: Some(
-                            ((d.input_tokens.unwrap_or(0) as u64).saturating_mul(500)
-                                + (d.output_tokens.unwrap_or(0) as u64).saturating_mul(1500))
-                                / 1_000,
-                        ),
-                        completed_at: now,
-                        session_id: Some(ctx.session_id.clone()),
-                        run_id: Some(ctx.run_id.clone()),
-                        error_class: None,
-                        raw_error_message: None,
-                        retry_count: 0,
-                        task_id: ctx
-                            .task_id
-                            .as_ref()
-                            .map(|t| cairn_domain::TaskId::new(t.as_str())),
-                        prompt_release_id: None,
-                        fallback_position: 0,
-                        started_at: now.saturating_sub(d.latency_ms),
-                        finished_at: now,
-                    },
-                ),
-            );
-            let provider_payload = provider_event.payload.clone();
-            if let Err(e) = self.store.append(&[route_event, provider_event]).await {
-                // Fail LOUD: a dual-write failure against the durable
-                // secondary (Postgres in team mode) means the in-memory
-                // and durable event logs have diverged. Continuing the
-                // orchestrator loop would silently lose this iteration's
-                // tool_call because the next iteration reads from the
-                // in-memory primary which no longer matches the
-                // secondary. The loop runner consults
-                // `take_fatal_error()` after `on_decide_completed` and
-                // aborts with `OrchestratorError::Store`.
-                tracing::error!(
-                    run_id    = %ctx.run_id,
-                    error     = %e,
-                    "event store append failed — in-memory/secondary logs have diverged, aborting run"
-                );
-                // SEC-007: keep the latched public message class-level
-                // only. The `{e}` detail (raw driver text / constraint
-                // names / schema fragments) is already logged at ERROR
-                // above for operators; it must NOT be folded into the
-                // `OrchestratorError::Store` message that the API
-                // renders to clients.
-                let mut slot = self.fatal_error.lock().unwrap_or_else(|p| p.into_inner());
-                *slot = Some(format!(
-                    "dual-write divergence on run={}",
-                    ctx.run_id.as_str()
-                ));
-            }
-            let _ = self.exporter.export_event(&provider_payload).await;
-
-            // Insert into the LlmCallTrace read model so /v1/traces is populated.
-            use cairn_store::projections::LlmCallTraceReadModel;
-            let input_tokens = d.input_tokens.unwrap_or(0);
-            let output_tokens = d.output_tokens.unwrap_or(0);
-            // Approximate cost: $0.50/M input, $1.50/M output (generic estimate).
-            // Multiply first to avoid integer truncation on small token counts.
-            let cost_micros = ((input_tokens as u64).saturating_mul(500)
-                + (output_tokens as u64).saturating_mul(1500))
-                / 1_000;
-            let trace = cairn_domain::LlmCallTrace {
-                trace_id: call_id,
-                model_id: d.model_id.clone(),
-                prompt_tokens: input_tokens,
-                completion_tokens: output_tokens,
-                latency_ms: d.latency_ms,
-                cost_micros,
-                session_id: Some(ctx.session_id.clone()),
-                run_id: Some(ctx.run_id.clone()),
-                created_at_ms: now,
-                is_error: false,
-            };
-            let _ = self.store.insert_trace(trace).await;
+            crate::tracing_emitter::record_decide_trace(
+                ctx,
+                d,
+                &self.store,
+                &self.exporter,
+                &self.fatal_error,
+            )
+            .await;
         }
         async fn on_tool_called(
             &self,
