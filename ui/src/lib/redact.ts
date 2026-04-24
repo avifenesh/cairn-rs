@@ -61,10 +61,17 @@ const PROVIDER_KEY_RE = new RegExp(
   "g",
 );
 
-/** Replace every secret-shaped substring in `text` with [REDACTED]. */
-export function redactSecrets(text: string): string {
-  if (!text) return text;
-  let out = text.replace(QUERY_PARAM_RE, (_m, name) => `${name}${REDACTED}`);
+/** Replace every secret-shaped substring in `text` with [REDACTED].
+ *
+ * Accepts non-string inputs defensively: callers sometimes funnel raw
+ * JSON error bodies through here (`{ message: {...} }`, arrays, etc.),
+ * and `.replace` on a non-string would throw. Non-strings are coerced
+ * via `String()` before pattern matching. */
+export function redactSecrets(text: unknown): string {
+  if (text == null) return "";
+  const s = typeof text === "string" ? text : String(text);
+  if (!s) return s;
+  let out = s.replace(QUERY_PARAM_RE, (_m, name) => `${name}${REDACTED}`);
   out = out.replace(AUTH_HEADER_RE, (_m, prefix) => `${prefix}${REDACTED}`);
   out = out.replace(API_KEY_HEADER_RE, (_m, prefix) => `${prefix}${REDACTED}`);
   out = out.replace(PROVIDER_KEY_RE, REDACTED);

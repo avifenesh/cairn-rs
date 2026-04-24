@@ -50,13 +50,18 @@ export interface ApiClientConfig {
 export class ApiError extends Error {
   readonly status: number;
   readonly code: string;
-  constructor(status: number, code: string, message: string) {
+  constructor(status: number, code: string, message: unknown) {
     // SECURITY: final belt-and-suspenders redaction. The backend is the
     // primary defence (see crates/cairn-providers/src/redact.rs), but any
     // error text that reaches a user-visible toast flows through here
     // first. Redacting at construction means every consumer of
     // `ApiError.message` is safe by default.
-    super(redactSecrets(message));
+    //
+    // Coerce to string before redacting: some legacy handlers return
+    // `{ message: {...} }` or `{ error: <array> }` as the error body,
+    // and `redactSecrets` would crash calling `.replace` on a non-string.
+    // String() is safe for every JS value (null/undefined/object/array).
+    super(redactSecrets(typeof message === "string" ? message : String(message)));
     this.name = "ApiError";
     this.status = status;
     this.code = code;
