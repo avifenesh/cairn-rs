@@ -791,13 +791,34 @@ function AddProviderModal({ onClose, onCreated }: AddProviderModalProps) {
           });
           credentialId = stored.id;
         } catch (e) {
-          // If the credential already exists for this (tenant, provider_id),
-          // the user is retrying after a partial failure — continue without
-          // storing so the connection itself can still be registered.
-          // #251: surface the failure as a warning rather than silently
-          // dropping it so the user can decide whether to change the ID.
+          // Re-use an existing credential on 409 (retry after a partial
+          // failure). Copilot flagged that we previously left credentialId
+          // undefined here, which silently registered a connection without
+          // a linked credential. Fix: fetch the active credential for this
+          // (tenant, provider_id) and attach its ID. If we can't find it
+          // (lookup fails, no active match), surface a warning and proceed
+          // without the link rather than block registration.
           if (e instanceof ApiError && e.status === 409) {
-            toast.warning(`Credential for "${connectionId}" already exists — re-using.`);
+            try {
+              const creds = await defaultApi.getCredentials(scope.tenant_id, { limit: 200 });
+              const match = creds.items.find(
+                c => c.provider_id === connectionId.trim() && c.active,
+              );
+              if (match) {
+                credentialId = match.id;
+                toast.warning(
+                  `Credential for "${connectionId}" already exists — re-using id ${match.id}.`,
+                );
+              } else {
+                toast.warning(
+                  `Credential for "${connectionId}" already exists but is revoked — connection will register without a linked key.`,
+                );
+              }
+            } catch {
+              toast.warning(
+                `Credential for "${connectionId}" already exists — registering connection without linking (could not look up existing id).`,
+              );
+            }
           } else {
             throw e;
           }
