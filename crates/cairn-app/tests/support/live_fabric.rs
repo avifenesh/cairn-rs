@@ -381,13 +381,11 @@ fn spawn_subprocess_internal(
         )
         // Avoid inheriting the parent test process's log-dir setting.
         .env_remove("CAIRN_LOG_DIR")
-        .stdout(
-            if std::env::var("CAIRN_TEST_LOG_FILE").is_ok() {
-                Stdio::piped()
-            } else {
-                Stdio::null()
-            },
-        )
+        .stdout(if std::env::var("CAIRN_TEST_LOG_FILE").is_ok() {
+            Stdio::piped()
+        } else {
+            Stdio::null()
+        })
         .stderr(Stdio::piped())
         .kill_on_drop(true);
 
@@ -423,9 +421,7 @@ async fn read_listening_banner(mut child: Child) -> (Child, String) {
             let mut lines = BufReader::new(stdout).lines();
             while let Ok(Some(line)) = lines.next_line().await {
                 if let Some(w) = writer.as_mut() {
-                    let _ = w
-                        .write_all(format!("[app-out] {line}\n").as_bytes())
-                        .await;
+                    let _ = w.write_all(format!("[app-out] {line}\n").as_bytes()).await;
                     let _ = w.flush().await;
                 }
             }
