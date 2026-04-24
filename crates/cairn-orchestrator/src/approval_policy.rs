@@ -120,6 +120,16 @@ pub fn derive_match_policy(
         }
     }
 
+    // `ExactPath` requires an absolute canonical path — a relative path
+    // (e.g. "src/lib.rs") would be cwd-dependent and could silently
+    // auto-approve a different file on the next invocation with a
+    // different working directory. Fall through to `Exact` for that
+    // case so the session allow rule only matches byte-identical args.
+    // (Copilot review feedback on PR #270.)
+    if !canon_candidate.is_absolute() {
+        return ApprovalMatchPolicy::Exact;
+    }
+
     ApprovalMatchPolicy::ExactPath {
         path: canon_candidate.display().to_string(),
     }
@@ -194,6 +204,25 @@ mod tests {
     /// match every candidate and silently broaden session approvals to
     /// the whole filesystem. Verify the code falls through to
     /// `ExactPath` instead.
+    /// Regression for a Copilot review finding on PR #270.
+    ///
+    /// A relative candidate path (e.g. "src/lib.rs") is cwd-dependent;
+    /// returning `ExactPath` would auto-approve a different file on
+    /// the next invocation with a different working directory.
+    /// Fall through to the safer `Exact`.
+    #[test]
+    fn relative_candidate_path_falls_back_to_exact() {
+        let policy = derive_match_policy(
+            ToolEffect::Observational,
+            &json!({"path": "src/lib.rs"}),
+            None,
+        );
+        assert!(
+            matches!(policy, ApprovalMatchPolicy::Exact),
+            "relative candidate must not become ExactPath, got {policy:?}"
+        );
+    }
+
     #[test]
     fn relative_project_root_does_not_widen() {
         let policy = derive_match_policy(

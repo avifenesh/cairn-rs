@@ -253,11 +253,37 @@ impl ExecutePhase for RuntimeExecutePhase {
         let mut loop_signal = LoopSignal::Continue;
 
         // ── Phase 1: parallel InvokeTool dispatch ────────────────────────
+        //
+        // Only parallel-batch InvokeTool proposals whose position is
+        // BEFORE the first always-terminal control-flow proposal
+        // (`CompleteRun`, `SpawnSubagent`, `EscalateToOperator`). The old
+        // sequential path would break on those before reaching later
+        // InvokeTool proposals, and we must preserve that semantic — a
+        // `[CompleteRun, invoke_foo]` decide output must NOT run `foo`.
+        //
+        // `SendNotification` and `CreateMemory` are non-InvokeTool but
+        // never set terminal signals, so they do NOT split the batch.
+        let first_terminal_idx = decide.proposals.iter().position(|p| {
+            matches!(
+                p.action_type,
+                ActionType::CompleteRun
+                    | ActionType::SpawnSubagent
+                    | ActionType::EscalateToOperator
+            )
+        });
         let invoke_indices: Vec<usize> = decide
             .proposals
             .iter()
             .enumerate()
-            .filter_map(|(i, p)| (p.action_type == ActionType::InvokeTool).then_some(i))
+            .filter_map(|(i, p)| {
+                if p.action_type != ActionType::InvokeTool {
+                    return None;
+                }
+                match first_terminal_idx {
+                    Some(k) if i > k => None,
+                    _ => Some(i),
+                }
+            })
             .collect();
 
         if !invoke_indices.is_empty() {
@@ -1048,12 +1074,19 @@ impl RuntimeExecutePhase {
         // + tool_name + normalized_args) so a resume that re-enters this
         // path for the same iteration sees the same id — the underlying
         // service short-circuits via the projection reader.
+        // Fall back to `default_normalize_for_cache` (not
+        // `raw_args.to_string()`) so the derived id stays deterministic
+        // across re-entry even if the proposal is reconstructed from a
+        // different source whose JSON key ordering differs. The two
+        // diverge for object payloads because `Value::to_string()`
+        // preserves insertion order; the normaliser sorts keys.
+        // (Copilot review feedback on PR #270.)
         let normalized = self
             .tool_registry
             .as_ref()
             .and_then(|reg| reg.get(&tool_name))
             .map(|h| h.normalize_for_cache(&raw_args))
-            .unwrap_or_else(|| raw_args.to_string());
+            .unwrap_or_else(|| cairn_tools::builtins::default_normalize_for_cache(&raw_args));
         let call_id = ToolCallId::derive(
             ctx.run_id.as_str(),
             ctx.iteration,
