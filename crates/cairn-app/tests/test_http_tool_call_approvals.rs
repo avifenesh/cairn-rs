@@ -78,7 +78,10 @@ async fn get_json(
         Some(v) => Body::from(serde_json::to_vec(&v).unwrap()),
         None => Body::empty(),
     };
-    let res = app.oneshot(builder.body(body_bytes).unwrap()).await.unwrap();
+    let res = app
+        .oneshot(builder.body(body_bytes).unwrap())
+        .await
+        .unwrap();
     let status = res.status();
     let bytes = to_bytes(res.into_body(), usize::MAX).await.unwrap();
     let json = if bytes.is_empty() {
@@ -97,13 +100,7 @@ async fn list_returns_seeded_proposal() {
     seed_principal_for(&state, ACTOR, "default_tenant");
     seed_proposal(&state, "tc_list_1").await;
 
-    let (status, body) = get_json(
-        app,
-        "GET",
-        "/v1/tool-call-approvals?run_id=run_1",
-        None,
-    )
-    .await;
+    let (status, body) = get_json(app, "GET", "/v1/tool-call-approvals?run_id=run_1", None).await;
     assert_eq!(status, StatusCode::OK, "list: {body}");
     let items = body.get("items").and_then(Value::as_array).expect("items");
     assert!(items.iter().any(|r| r["call_id"] == "tc_list_1"));

@@ -179,15 +179,16 @@ async fn load_record_visible_to_tenant(
     let reader: &dyn ToolCallApprovalReadModel = state.runtime.store.as_ref();
     match reader.get(call_id).await {
         Ok(Some(record))
-            if tenant_scope.is_admin
-                || record.project.tenant_id == *tenant_scope.tenant_id() =>
+            if tenant_scope.is_admin || record.project.tenant_id == *tenant_scope.tenant_id() =>
         {
             Ok(record)
         }
-        Ok(_) => Err(
-            AppApiError::new(StatusCode::NOT_FOUND, "not_found", "tool-call approval not found")
-                .into_response(),
-        ),
+        Ok(_) => Err(AppApiError::new(
+            StatusCode::NOT_FOUND,
+            "not_found",
+            "tool-call approval not found",
+        )
+        .into_response()),
         Err(err) => Err(store_error_response(err)),
     }
 }
@@ -299,9 +300,7 @@ pub(crate) async fn approve_tool_call_approval_handler(
     //    the proposal's captured default.
     let scope = match body.scope {
         ApproveScope::Once => ApprovalScope::Once,
-        ApproveScope::Session {
-            match_policy: None,
-        } => ApprovalScope::Session {
+        ApproveScope::Session { match_policy: None } => ApprovalScope::Session {
             match_policy: record.match_policy.clone(),
         },
         ApproveScope::Session {

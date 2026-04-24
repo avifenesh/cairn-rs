@@ -13,7 +13,6 @@ use crate::runs::RunService;
 use crate::services::resource_sharing_impl::ResourceSharingServiceImpl;
 use crate::services::tool_call_approval_impl::ToolCallApprovalServiceImpl;
 use crate::services::ToolInvocationServiceImpl;
-use crate::tool_call_approvals::ToolCallApprovalService;
 use crate::services::{
     ApprovalPolicyServiceImpl, ApprovalServiceImpl, AuditServiceImpl, BudgetServiceImpl,
     ChannelServiceImpl, CheckpointServiceImpl, CredentialServiceImpl, DefaultsServiceImpl,
@@ -28,6 +27,7 @@ use crate::services::{
 };
 use crate::sessions::SessionService;
 use crate::tasks::TaskService;
+use crate::tool_call_approvals::ToolCallApprovalService;
 use crate::ProviderRegistry;
 
 /// Bundled runtime services backed by `InMemoryStore`.
