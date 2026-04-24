@@ -668,6 +668,17 @@ fn find_sse_boundary(buf: &[u8]) -> Option<(usize, usize)> {
     }
 }
 
+/// Streaming parser for the structured-response variant of Z.ai's SSE.
+///
+/// Holds a single `tool_buf` because Z.ai's coding endpoint emits one
+/// tool call at a time (observed 2026-04-24 — no parallel tool deltas
+/// in practice). If that changes upstream, the tool-call variant
+/// `parse_tool_chunk` already maintains a `HashMap<index, state>` and
+/// should be used instead via `chat_stream_with_tools`. Gemini review
+/// on #280 flagged the single-buf design; we keep it for now because
+/// (a) it mirrors `wire::openai_compat`'s shape for minimum surface
+/// area, and (b) the parallel-tool path is untested against a live
+/// GLM response. Revisit when Z.ai documents parallel-call support.
 struct SseParser {
     buf: Vec<u8>,
     tool_buf: ToolCall,
@@ -742,9 +753,12 @@ impl SseParser {
                     return;
                 }
                 data.push_str(d);
-            } else {
-                data.push_str(line);
             }
+            // Per the SSE spec, lines without a recognised field name (e.g.
+            // `event:`, `id:`, `:` comments) are ignored. Previously we
+            // concatenated them into the data buffer, which broke JSON
+            // parsing when a server emitted a keep-alive comment mid-frame.
+            // Gemini review on #280.
         }
         if data.is_empty() {
             return;
