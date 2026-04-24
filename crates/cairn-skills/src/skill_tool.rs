@@ -87,7 +87,10 @@ pub fn __clear_activated_sets_for_tests() {
 pub fn skill_roots_for(ctx: &ToolContext) -> Vec<String> {
     let cwd: PathBuf = ctx.working_dir.clone();
     vec![
-        cwd.join(".cairn").join("skills").to_string_lossy().into_owned(),
+        cwd.join(".cairn")
+            .join("skills")
+            .to_string_lossy()
+            .into_owned(),
         cwd.join("skills").to_string_lossy().into_owned(),
     ]
 }

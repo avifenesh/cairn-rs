@@ -23,7 +23,7 @@ use std::fs;
 
 use cairn_domain::ProjectKey;
 use cairn_harness_tools::HarnessBuiltin;
-use cairn_skills::{HarnessSkill, __clear_activated_sets_for_tests};
+use cairn_skills::{__clear_activated_sets_for_tests, HarnessSkill};
 use cairn_tools::builtins::{ToolContext, ToolError, ToolHandler};
 use harness_core::ToolErrorCode;
 use serde_json::json;
@@ -45,9 +45,7 @@ fn ctx_for(dir: &TempDir, session_id: &str) -> ToolContext {
 fn plant_skill(dir: &TempDir, name: &str, description: &str, body: &str) {
     let skill_dir = dir.path().join(".cairn").join("skills").join(name);
     fs::create_dir_all(&skill_dir).unwrap();
-    let content = format!(
-        "---\nname: {name}\ndescription: {description}\n---\n\n{body}\n"
-    );
+    let content = format!("---\nname: {name}\ndescription: {description}\n---\n\n{body}\n");
     fs::write(skill_dir.join("SKILL.md"), content).unwrap();
 }
 
@@ -168,7 +166,10 @@ async fn unknown_skill_returns_not_found_with_suggestions() {
 
     assert_eq!(res.output["kind"], "not_found");
     assert_eq!(res.output["name"], "run-analyzis");
-    let siblings = res.output["siblings"].as_array().cloned().unwrap_or_default();
+    let siblings = res.output["siblings"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
     assert!(
         !siblings.is_empty(),
         "fuzzy-suggester should return at least one neighbour"

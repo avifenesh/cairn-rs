@@ -1950,9 +1950,8 @@ pub(crate) async fn orchestrate_run_handler(
         let scratch_pad: std::sync::Arc<dyn cairn_tools::ToolHandler> =
             std::sync::Arc::new(ScratchPadTool::new());
         // Skills — agentskills.io activation via published harness-skill.
-        let skill_tool: std::sync::Arc<dyn cairn_tools::ToolHandler> = std::sync::Arc::new(
-            HarnessBuiltin::<cairn_skills::HarnessSkill>::new(),
-        );
+        let skill_tool: std::sync::Arc<dyn cairn_tools::ToolHandler> =
+            std::sync::Arc::new(HarnessBuiltin::<cairn_skills::HarnessSkill>::new());
         let file_write: std::sync::Arc<dyn cairn_tools::ToolHandler> =
             std::sync::Arc::new(HarnessBuiltin::<HarnessWrite>::new());
         let edit_tool: std::sync::Arc<dyn cairn_tools::ToolHandler> =
