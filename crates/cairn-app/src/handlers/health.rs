@@ -1073,6 +1073,14 @@ async fn validate_setting_value(
         // to keep this PR scoped to the F20/F21 correctness fix.
         const PAGE_SIZE: usize = 200;
         const MAX_PAGES_PER_TENANT: usize = 50; // 10 000-connection ceiling
+                                                // Authoritative scopes (Tenant/Workspace/Project) resolve to
+                                                // exactly one tenant — if its store lookup fails we CANNOT say
+                                                // the model is unknown, so we surface 503 instead of misleading
+                                                // 422. System scope walks many tenants as a best-effort fan-out;
+                                                // a single tenant's store hiccup there is logged-but-skipped so
+                                                // one bad row can't block a system-wide default update.
+        use cairn_domain::Scope;
+        let authoritative = matches!(scope, Scope::Tenant | Scope::Workspace | Scope::Project);
         let tenants = resolve_tenants_for_scope(state, scope, scope_id).await;
         for tenant in &tenants {
             for page in 0..MAX_PAGES_PER_TENANT {
@@ -1084,7 +1092,26 @@ async fn validate_setting_value(
                     .await
                 {
                     Ok(r) => r,
-                    Err(_) => break, // store error — skip this tenant
+                    Err(err) => {
+                        if authoritative {
+                            return Err(AppApiError::new(
+                                StatusCode::SERVICE_UNAVAILABLE,
+                                "provider_connection_lookup_failed",
+                                format!(
+                                    "could not verify {key}={model_id}: \
+                                     provider connections unavailable for \
+                                     tenant {tenant}: {err}",
+                                ),
+                            )
+                            .into_response());
+                        }
+                        tracing::warn!(
+                            tenant = %tenant,
+                            error = %err,
+                            "skipping tenant during system-scope model validation",
+                        );
+                        break;
+                    }
                 };
                 if records
                     .iter()
