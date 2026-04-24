@@ -398,6 +398,14 @@ impl PgSyncProjection {
             // RFC 020 Track 4: boot-level recovery audit event.
             RuntimeEvent::RecoverySummaryEmitted(_) => log_stub("RecoverySummaryEmitted"),
 
+            // PR BP-1: tool-call approval foundation events — no projection
+            // table yet; a later PR in the wave wires these into the
+            // approvals / tool-call projections.
+            RuntimeEvent::ToolCallProposed(_) => log_stub("ToolCallProposed"),
+            RuntimeEvent::ToolCallApproved(_) => log_stub("ToolCallApproved"),
+            RuntimeEvent::ToolCallRejected(_) => log_stub("ToolCallRejected"),
+            RuntimeEvent::ToolCallAmended(_) => log_stub("ToolCallAmended"),
+
             RuntimeEvent::TenantCreated(e) => {
                 sqlx::query(
                     "INSERT INTO tenants (tenant_id, name, created_at, updated_at)

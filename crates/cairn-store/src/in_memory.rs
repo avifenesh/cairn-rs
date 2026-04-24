@@ -1303,7 +1303,14 @@ impl InMemoryStore {
             | RuntimeEvent::ToolInvocationCacheHit(_)
             | RuntimeEvent::ToolRecoveryPaused(_)
             // RFC 020 Track 4: boot-level recovery audit event.
-            | RuntimeEvent::RecoverySummaryEmitted(_) => {}
+            | RuntimeEvent::RecoverySummaryEmitted(_)
+            // PR BP-1: tool-call approval foundation events — no
+            // in-memory projection update yet; a later PR in the wave
+            // wires in the projection state.
+            | RuntimeEvent::ToolCallProposed(_)
+            | RuntimeEvent::ToolCallApproved(_)
+            | RuntimeEvent::ToolCallRejected(_)
+            | RuntimeEvent::ToolCallAmended(_) => {}
             RuntimeEvent::ScheduledTaskCreated(e) => {
                 state.scheduled_tasks.insert(
                     e.scheduled_task_id.as_str().to_owned(),

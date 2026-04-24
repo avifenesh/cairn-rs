@@ -920,6 +920,10 @@ pub fn event_type_name(event: &RuntimeEvent) -> &'static str {
         RuntimeEvent::ApprovalRequested(_) => "approval_requested",
         RuntimeEvent::ApprovalResolved(_) => "approval_resolved",
         RuntimeEvent::ApprovalDelegated(_) => "approval_delegated",
+        RuntimeEvent::ToolCallProposed(_) => "tool_call_proposed",
+        RuntimeEvent::ToolCallApproved(_) => "tool_call_approved",
+        RuntimeEvent::ToolCallRejected(_) => "tool_call_rejected",
+        RuntimeEvent::ToolCallAmended(_) => "tool_call_amended",
         RuntimeEvent::AuditLogEntryRecorded(_) => "audit_log_entry_recorded",
         RuntimeEvent::ApprovalPolicyCreated(_) => "approval_policy_created",
         RuntimeEvent::CheckpointRecorded(_) => "checkpoint_recorded",
@@ -1119,6 +1123,30 @@ pub(crate) fn event_message(event: &RuntimeEvent) -> String {
             format!(
                 "Approval {} delegated to {}",
                 delegated.approval_id, delegated.delegated_to
+            )
+        }
+        RuntimeEvent::ToolCallProposed(event) => {
+            format!(
+                "Tool call {} ({}) proposed for approval",
+                event.call_id, event.tool_name
+            )
+        }
+        RuntimeEvent::ToolCallApproved(event) => {
+            format!(
+                "Tool call {} approved by {}",
+                event.call_id, event.operator_id
+            )
+        }
+        RuntimeEvent::ToolCallRejected(event) => {
+            format!(
+                "Tool call {} rejected by {}",
+                event.call_id, event.operator_id
+            )
+        }
+        RuntimeEvent::ToolCallAmended(event) => {
+            format!(
+                "Tool call {} amended by {}",
+                event.call_id, event.operator_id
             )
         }
         RuntimeEvent::AuditLogEntryRecorded(entry) => {
