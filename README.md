@@ -1,4 +1,4 @@
-# cairn-rs
+# cairn-rs - dogfooding now, still WIP, give it a ~2 days before you try. or not, extra validation is a bless.
 
 **Self-hostable Rust control plane for production AI agent deployments.**
 
