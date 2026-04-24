@@ -1452,13 +1452,6 @@ struct InstallationRepositoriesResponse {
 }
 
 #[derive(serde::Deserialize)]
-struct InstallationAccessTokenResponse {
-    #[allow(dead_code)]
-    token: String,
-    expires_at: String,
-}
-
-#[derive(serde::Deserialize)]
 struct InstallationLookupResponse {
     #[serde(default)]
     account: Option<InstallationLookupAccount>,
@@ -1476,8 +1469,24 @@ pub(crate) async fn verify_github_installation_handler(
     // Build a short-lived HTTP client per verify. The endpoint is
     // operator-triggered (not hot-path) and the GitHub calls only take
     // a few hundred ms, so a dedicated client keeps this path self-
-    // contained without depending on AppState plumbing.
-    let http = reqwest::Client::new();
+    // contained without depending on AppState plumbing. Bound the
+    // total time we'll wait on api.github.com so a stalled TLS/DNS
+    // handshake can't pin an axum worker indefinitely.
+    let http = match reqwest::Client::builder()
+        .connect_timeout(std::time::Duration::from_secs(5))
+        .timeout(std::time::Duration::from_secs(15))
+        .build()
+    {
+        Ok(c) => c,
+        Err(e) => {
+            return AppApiError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "http_client_build_failed",
+                format!("could not build HTTP client: {e}"),
+            )
+            .into_response();
+        }
+    };
     if body.private_key.trim().is_empty() {
         return AppApiError::new(
             StatusCode::BAD_REQUEST,
@@ -1507,8 +1516,8 @@ pub(crate) async fn verify_github_installation_handler(
         body.installation_id,
         http.clone(),
     );
-    let access_token = match token_manager.refresh().await {
-        Ok(t) => t,
+    let (access_token, expires_at) = match token_manager.refresh_with_metadata().await {
+        Ok(pair) => pair,
         Err(e) => {
             return AppApiError::new(
                 StatusCode::BAD_GATEWAY,
@@ -1623,32 +1632,8 @@ pub(crate) async fn verify_github_installation_handler(
         }
     };
 
-    // The access-token refresh above already fetched the expiry, but we
-    // discarded it. Do a minimal POST to the same endpoint here ONLY
-    // when we need the timestamp for the UI; since the token manager
-    // doesn't expose `expires_at`, we refetch using the JWT directly.
-    let expires_at = match http
-        .post(format!(
-            "https://api.github.com/app/installations/{}/access_tokens",
-            body.installation_id
-        ))
-        .header("Authorization", format!("Bearer {jwt}"))
-        .header("Accept", "application/vnd.github+json")
-        .header("User-Agent", "cairn-app/verify-installation")
-        .header("X-GitHub-Api-Version", "2022-11-28")
-        .send()
-        .await
-    {
-        Ok(resp) if resp.status().is_success() => {
-            match resp.json::<InstallationAccessTokenResponse>().await {
-                Ok(t) => t.expires_at,
-                Err(_) => String::new(),
-            }
-        }
-        // Non-fatal — we already verified the installation works.
-        _ => String::new(),
-    };
-
+    // `expires_at` came back alongside the access token from the first
+    // refresh — no need for a redundant second token mint.
     Json(VerifyInstallationResponse {
         verified: true,
         owner,

@@ -293,7 +293,7 @@ function VerifyGitHubInstallationCard() {
           </div>
         </div>
         <a
-          href="https://github.com/apps/YOUR_APP_SLUG/installations/new"
+          href="https://docs.github.com/en/apps/creating-github-apps/about-creating-github-apps/about-creating-github-apps"
           target="_blank"
           rel="noopener noreferrer"
           className={clsx(
@@ -301,8 +301,9 @@ function VerifyGitHubInstallationCard() {
             border.default, text.secondary,
             "hover:bg-zinc-100 dark:hover:bg-zinc-800"
           )}
+          title="Open GitHub's docs for creating/installing an App"
         >
-          <ExternalLink size={12} /> Install on GitHub
+          <ExternalLink size={12} /> GitHub App docs
         </a>
       </div>
 

@@ -159,8 +159,20 @@ impl InstallationToken {
         self.refresh().await
     }
 
+    /// Force-refresh the installation access token and return both the
+    /// token and the raw ISO-8601 `expires_at` timestamp returned by
+    /// GitHub. Useful for verify flows that want to surface expiry
+    /// metadata without re-minting a second token.
+    pub async fn refresh_with_metadata(&self) -> Result<(String, String), GitHubError> {
+        self.refresh_inner().await
+    }
+
     /// Force-refresh the installation access token.
     pub async fn refresh(&self) -> Result<String, GitHubError> {
+        self.refresh_inner().await.map(|(token, _)| token)
+    }
+
+    async fn refresh_inner(&self) -> Result<(String, String), GitHubError> {
         let jwt = self.credentials.generate_jwt()?;
 
         let url = format!(
@@ -191,6 +203,7 @@ impl InstallationToken {
             .unwrap_or_else(|| SystemTime::now() + Duration::from_secs(3600));
 
         let token = token_resp.token.clone();
+        let expires_at_raw = token_resp.expires_at.clone();
 
         let mut cache = self.token_cache.write().await;
         *cache = Some(CachedToken {
@@ -203,7 +216,7 @@ impl InstallationToken {
             "GitHub installation access token refreshed"
         );
 
-        Ok(token)
+        Ok((token, expires_at_raw))
     }
 }
 

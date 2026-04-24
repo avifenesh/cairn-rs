@@ -43,7 +43,11 @@ impl ProjectLocalPaths {
     }
 
     pub fn allow(&self, project: &ProjectKey, path: &str) {
-        let mut guard = self.paths.write().expect("local_paths lock poisoned");
+        // Poison-tolerant lock: `into_inner()` recovers the inner state
+        // after a previous writer panicked mid-update, so a single
+        // unrelated panic can't deadlock repo attach for the process
+        // lifetime.
+        let mut guard = self.paths.write().unwrap_or_else(|e| e.into_inner());
         guard
             .entry(project.clone())
             .or_default()
@@ -51,7 +55,7 @@ impl ProjectLocalPaths {
     }
 
     pub fn revoke(&self, project: &ProjectKey, path: &str) -> bool {
-        let mut guard = self.paths.write().expect("local_paths lock poisoned");
+        let mut guard = self.paths.write().unwrap_or_else(|e| e.into_inner());
         if let Some(set) = guard.get_mut(project) {
             let removed = set.remove(path);
             if set.is_empty() {
@@ -63,22 +67,22 @@ impl ProjectLocalPaths {
     }
 
     pub fn list(&self, project: &ProjectKey) -> Vec<String> {
-        let mut paths = self
-            .paths
-            .read()
-            .ok()
-            .and_then(|m| m.get(project).cloned())
-            .map(|s| s.into_iter().collect::<Vec<_>>())
+        // Recover on poison rather than silently returning an empty
+        // list — that would hide attached paths from the UI.
+        let guard = self.paths.read().unwrap_or_else(|e| e.into_inner());
+        let mut paths = guard
+            .get(project)
+            .map(|s| s.iter().cloned().collect::<Vec<_>>())
             .unwrap_or_default();
         paths.sort();
         paths
     }
 
     pub fn contains(&self, project: &ProjectKey, path: &str) -> bool {
-        self.paths
-            .read()
-            .ok()
-            .and_then(|m| m.get(project).map(|s| s.contains(path)))
+        let guard = self.paths.read().unwrap_or_else(|e| e.into_inner());
+        guard
+            .get(project)
+            .map(|s| s.contains(path))
             .unwrap_or(false)
     }
 }
@@ -430,14 +434,48 @@ fn add_local_fs_path(
     if !p.is_absolute() {
         return bad_request_response("local_fs repo_id must be an absolute path");
     }
-    if trimmed.contains("..") {
-        return bad_request_response("local_fs repo_id must not contain `..` segments");
+    // Inspect each normalised component rather than a substring: a
+    // legitimate filename like `build..v2` contains `..` but is not a
+    // traversal. Only reject when a component is literally `..` or `.`.
+    if p.components().any(|c| {
+        matches!(
+            c,
+            std::path::Component::ParentDir | std::path::Component::CurDir
+        )
+    }) {
+        return bad_request_response(
+            "local_fs repo_id must not contain `.` or `..` path components",
+        );
     }
     if !p.exists() {
         return bad_request_response(format!("local_fs path does not exist: {trimmed}"));
     }
     if !p.is_dir() {
         return bad_request_response(format!("local_fs path is not a directory: {trimmed}"));
+    }
+    // Optional base-directory fence: when `CAIRN_LOCAL_FS_BASE` is set,
+    // refuse any path that doesn't canonicalise under that prefix.
+    // This is the single lever a deploying operator has to stop other
+    // workspace operators from pointing cairn at sensitive dirs like
+    // `/etc` or `/var/log`. When unset, we fall back to the existing
+    // tenant-scope guard which at least blocks cross-tenant access.
+    if let Ok(base) = std::env::var("CAIRN_LOCAL_FS_BASE") {
+        let base = std::path::PathBuf::from(base);
+        match (p.canonicalize(), base.canonicalize()) {
+            (Ok(canon), Ok(base_canon)) if canon.starts_with(&base_canon) => {
+                // ok
+            }
+            (Ok(_), Ok(_)) => {
+                return bad_request_response(
+                    "local_fs path is outside the configured CAIRN_LOCAL_FS_BASE",
+                );
+            }
+            _ => {
+                return bad_request_response(
+                    "local_fs path could not be canonicalised for base-dir check",
+                );
+            }
+        }
     }
 
     let already = state.project_local_paths.contains(&ctx.project, trimmed);

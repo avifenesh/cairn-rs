@@ -1389,6 +1389,31 @@ pub const OPENAPI_JSON: &str = r##"{
         "responses": { "200": { "description": "Task status" } }
       }
     },
+    "/v1/projects/{project}/local-paths": {
+      "delete": {
+        "tags": ["Projects"],
+        "summary": "Detach a local_fs path from a project",
+        "description": "Removes a local-filesystem pseudo-repo previously attached via `POST /v1/projects/{project}/repos` with `host=local_fs`. Separate from the `/repos/{owner}/{repo}` endpoint because arbitrary filesystem paths can't be split into two path segments.",
+        "operationId": "detachProjectLocalPath",
+        "parameters": [{ "name": "project", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["path"],
+                "properties": { "path": { "type": "string" } }
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": { "description": "Detached" },
+          "404": { "description": "No such path attached to this project" }
+        }
+      }
+    },
     "/v1/integrations/github/verify-installation": {
       "post": {
         "tags": ["Integrations"],

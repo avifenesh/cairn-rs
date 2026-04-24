@@ -454,7 +454,7 @@ export function ProjectReposPage() {
         csvRow={r => [r.repo_id, r.host ?? "github", r.clone_status, r.added_at ?? "", r.last_used_at ?? ""]}
         csvHeaders={["Repo", "Host", "Clone", "Added", "Last Used"]}
         filename="project-repos"
-        emptyText="No repos attached. Click 'Attach repo' to link a GitHub repo to this project."
+        emptyText="No repos attached. Click 'Attach repo' to link a GitHub repository or local filesystem path to this project."
       />
     </div>
   );
