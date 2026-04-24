@@ -20,6 +20,12 @@ import { clsx } from "clsx";
 import { Drawer } from "../components/Drawer";
 import { useToast } from "../components/Toast";
 import { defaultApi } from "../lib/api";
+import {
+  mapRunActionError,
+  stateGateTooltip,
+  PAUSABLE_RUN_STATES,
+  TERMINAL_RUN_STATES,
+} from "../lib/runStateErrors";
 import { useEventStream, MAX_EVENTS as STREAM_BUFFER_MAX } from "../hooks/useEventStream";
 import type {
   SessionRecord, RunRecord, TaskRecord, InterventionAction, InterveneRequest,
@@ -178,8 +184,10 @@ function TaskRow({ task, fresh }: { task: TaskRecord; fresh: boolean }) {
 
 // ── Run quick actions (issues #166/#173) ──────────────────────────────────────
 
-const RUNNING_STATES = new Set(["pending", "running", "waiting_approval", "waiting_dependency"]);
-const TERMINAL_STATES = new Set(["completed", "failed", "canceled"]);
+// Canonical pause / terminal sets live in `lib/runStateErrors.ts` so all
+// pages agree on what's pausable and what's terminal.
+const RUNNING_STATES = PAUSABLE_RUN_STATES;
+const TERMINAL_STATES = TERMINAL_RUN_STATES;
 
 /**
  * Page-level intervention drawer. Single instance per page keyed by the
@@ -220,7 +228,7 @@ function PageInterveneDrawer({
       onSuccess();
       onClose();
     },
-    onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Intervene failed."),
+    onError: (e: unknown) => toast.error(mapRunActionError(e, "Intervene failed.", "intervene")),
   });
 
   return (
@@ -323,22 +331,22 @@ function RunQuickActions({ run, onIntervene, onDiagnosed }: RunQuickActionsProps
   const pauseMut = useMutation({
     mutationFn: () => defaultApi.pauseRun(run.run_id, { reason_kind: "operator_pause", actor: "operator" }),
     onSuccess: () => { toast.success("Run paused."); invalidate(); },
-    onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Pause failed."),
+    onError: (e: unknown) => toast.error(mapRunActionError(e, "Pause failed.", "pause")),
   });
   const resumeMut = useMutation({
     mutationFn: () => defaultApi.resumeRun(run.run_id, { trigger: "operator_resume", target: "running" }),
     onSuccess: () => { toast.success("Run resumed."); invalidate(); },
-    onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Resume failed."),
+    onError: (e: unknown) => toast.error(mapRunActionError(e, "Resume failed.", "resume")),
   });
   const orchestrateMut = useMutation({
     mutationFn: () => defaultApi.orchestrateRun(run.run_id, {}),
     onSuccess: () => { toast.success("Orchestration step triggered."); invalidate(); },
-    onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Orchestrate failed."),
+    onError: (e: unknown) => toast.error(mapRunActionError(e, "Orchestrate failed.", "orchestrate")),
   });
   const diagnoseMut = useMutation({
     mutationFn: () => defaultApi.diagnoseRun(run.run_id),
     onSuccess: (data) => onDiagnosed(run.run_id, data),
-    onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Diagnose failed."),
+    onError: (e: unknown) => toast.error(mapRunActionError(e, "Diagnose failed.", "diagnose")),
   });
 
   const canPause  = RUNNING_STATES.has(run.state) && run.state !== "paused";
@@ -364,11 +372,11 @@ function RunQuickActions({ run, onIntervene, onDiagnosed }: RunQuickActionsProps
 
   return (
     <div className="flex items-center gap-0.5 shrink-0" onClick={(e) => e.stopPropagation()}>
-      {iconBtn(() => pauseMut.mutate(),       !canPause,      pauseMut.isPending,       <Pause size={11} />,        canPause ? "Pause run" : "Run is not pausable")}
-      {iconBtn(() => resumeMut.mutate(),      !canResume,     resumeMut.isPending,      <Play size={11} />,         canResume ? "Resume run" : "Run is not paused")}
-      {iconBtn(() => orchestrateMut.mutate(), isTerminal,     orchestrateMut.isPending, <Sparkles size={11} />,     "Orchestrate next step")}
+      {iconBtn(() => pauseMut.mutate(),       !canPause,      pauseMut.isPending,       <Pause size={11} />,        canPause ? "Pause run" : stateGateTooltip("pause", run.state))}
+      {iconBtn(() => resumeMut.mutate(),      !canResume,     resumeMut.isPending,      <Play size={11} />,         canResume ? "Resume run" : stateGateTooltip("resume", run.state))}
+      {iconBtn(() => orchestrateMut.mutate(), isTerminal,     orchestrateMut.isPending, <Sparkles size={11} />,     isTerminal ? stateGateTooltip("orchestrate", run.state) : "Orchestrate next step")}
       {iconBtn(() => diagnoseMut.mutate(),    false,          diagnoseMut.isPending,    <Stethoscope size={11} />,  "Diagnose run")}
-      {iconBtn(() => onIntervene(run.run_id), isTerminal,     false,                    <MessageSquare size={11} />,"Intervene")}
+      {iconBtn(() => onIntervene(run.run_id), isTerminal,     false,                    <MessageSquare size={11} />, isTerminal ? stateGateTooltip("intervene", run.state) : "Intervene")}
     </div>
   );
 }

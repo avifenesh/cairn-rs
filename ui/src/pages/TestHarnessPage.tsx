@@ -16,6 +16,7 @@ import {
 import { clsx } from "clsx";
 import { card as cardPreset } from "../lib/design-system";
 import { defaultApi } from "../lib/api";
+import { PAUSABLE_RUN_STATES, TERMINAL_RUN_STATES } from "../lib/runStateErrors";
 import { useScope, type ProjectScope } from "../hooks/useScope";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -34,8 +35,12 @@ interface StepDef {
   id:          string;
   label:       string;
   description: string;
-  /** Receives the shared context bag; returns the request payload logged. */
-  run: (ctx: Record<string, unknown>) => Promise<unknown>;
+  /**
+   * Receives the shared context bag plus a `shouldAbort()` callback the
+   * step can poll if it does any looping/waiting. Returns the response
+   * payload to log in the step card.
+   */
+  run: (ctx: Record<string, unknown>, shouldAbort: () => boolean) => Promise<unknown>;
 }
 
 interface ScenarioDef {
@@ -55,6 +60,54 @@ function makeId(prefix: string): string {
 function fmtMs(ms: number): string {
   if (ms < 1_000) return `${ms}ms`;
   return `${(ms / 1_000).toFixed(2)}s`;
+}
+
+/**
+ * Poll `getRun` until `run.state` is in `PAUSABLE_RUN_STATES` or the
+ * timeout elapses. Returns `{ state, waited_ms }` so the harness step
+ * log shows how long it took to reach a pausable state. On timeout or
+ * terminal state, throws an `Error` with an operator-readable message
+ * rather than letting the downstream pause call surface a raw
+ * state-machine error (issue #257).
+ *
+ * `shouldAbort` is polled before each network call and before each sleep
+ * so clicking Stop/Reset mid-poll tears the helper down within one
+ * `pollIntervalMs` — no late state updates leak after abort.
+ */
+async function waitForPausableState(
+  runId: string,
+  shouldAbort: () => boolean = () => false,
+  timeoutMs = 10_000,
+  pollIntervalMs = 250,
+): Promise<{ state: string; waited_ms: number }> {
+  const started = Date.now();
+  let last = "unknown";
+  while (Date.now() - started < timeoutMs) {
+    if (shouldAbort()) {
+      throw new Error("aborted");
+    }
+    const r = await defaultApi.getRun(runId);
+    last = r.state;
+    if (PAUSABLE_RUN_STATES.has(r.state)) {
+      return { state: r.state, waited_ms: Date.now() - started };
+    }
+    // Terminal states will never reach pausable — fail fast.
+    if (TERMINAL_RUN_STATES.has(r.state)) {
+      throw new Error(`Run reached terminal state '${r.state}' before becoming pausable`);
+    }
+    // Interruptible sleep: resolve early on abort so Stop tears down
+    // within one poll interval instead of sitting on a dead setTimeout.
+    await new Promise<void>(res => {
+      const t = setInterval(() => {
+        if (shouldAbort()) {
+          clearInterval(t);
+          res();
+        }
+      }, 25);
+      setTimeout(() => { clearInterval(t); res(); }, pollIntervalMs);
+    });
+  }
+  throw new Error(`Run did not reach pausable state in ${Math.round(timeoutMs / 1000)}s (last state: ${last})`);
 }
 
 // ── Scenario definitions ──────────────────────────────────────────────────────
@@ -125,6 +178,21 @@ function buildScenarios(scope: ProjectScope): ScenarioDef[] {
           const found = runs.find(r => r.run_id === ctx["run_id"]);
           if (!found) throw new Error(`run ${ctx["run_id"]} not found in list`);
           return { found: true, state: found.state };
+        },
+      },
+      {
+        id: "wait_pausable",
+        label: "Wait for pausable state",
+        description: "Poll GET /v1/runs/:id until state is pausable (10s timeout)",
+        run: async (ctx, shouldAbort) => {
+          // Bug #257 — the harness used to call pause immediately after
+          // create_run. Depending on scheduler timing the run could be
+          // in an intermediate state (e.g. `partial_fence_triple`) that
+          // rejects the pause transition with a raw state-machine error.
+          // Poll until the run is in a pausable state or fail with a
+          // human-readable message. Thread `shouldAbort` so Stop/Reset
+          // from the harness UI tears the poll down mid-flight.
+          return waitForPausableState(String(ctx["run_id"]), shouldAbort, 10_000);
         },
       },
       {
@@ -455,7 +523,7 @@ function ScenarioCard({
       let status:   StepStatus = "pass";
 
       try {
-        response = await step.run(ctx);
+        response = await step.run(ctx, () => abortRef.current);
       } catch (e: unknown) {
         status = "fail";
         error  = e instanceof Error ? e.message : String(e);
