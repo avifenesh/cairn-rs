@@ -252,22 +252,53 @@ pub(crate) async fn list_tool_call_approvals_handler(
         return crate::errors::tenant_scope_mismatch_error().into_response();
     }
 
-    // Pull an unpaginated candidate window (capped at `MAX_LIST_FETCH`).
-    // For run/session we read the whole list (lightweight — a single
-    // run's approval count is bounded in practice). For the inbox we
-    // ask the projection to give us up to `MAX_LIST_FETCH` entries,
-    // which is large enough that a short page after filtering is a
-    // signal the operator needs to refine their query, not a pagination
-    // artefact.
+    // Branch selection:
+    //
+    // * run_id / session_id — the projection currently exposes no
+    //   pagination for these paths, so we read the full list and slice
+    //   in-memory. A single run's approval count is bounded in practice
+    //   by the agent's tool-budget; refuse pagination requests that
+    //   would reach past `MAX_LIST_FETCH` rather than silently produce
+    //   an empty tail.
+    //
+    // * project inbox — the projection only returns `pending` records,
+    //   *and* it accepts `(limit, offset)`. When the caller has no
+    //   state filter (or filters to `pending`) we push `offset`/`limit`
+    //   down to the projection, so pagination scales past
+    //   `MAX_LIST_FETCH`. For any other state filter the inbox always
+    //   yields an empty set (the projection doesn't return resolved
+    //   records on this path); return `[]` up front instead of doing an
+    //   expensive fetch + filter that we already know will be empty.
+    let push_down_inbox_pagination = query.run_id.is_none()
+        && query.session_id.is_none()
+        && matches!(state_filter, None | Some(ToolCallApprovalState::Pending));
+
+    if offset.saturating_add(limit) > MAX_LIST_FETCH && !push_down_inbox_pagination {
+        return AppApiError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "pagination_out_of_range",
+            format!(
+                "offset + limit must be <= {MAX_LIST_FETCH} when listing by run_id / session_id or when filtering by non-pending state"
+            ),
+        )
+        .into_response();
+    }
+
     let records: Result<Vec<ToolCallApprovalRecord>, _> = if let Some(rid) = query.run_id.as_deref()
     {
         reader.list_for_run(&RunId::new(rid)).await
     } else if let Some(sid) = query.session_id.as_deref() {
         reader.list_for_session(&SessionId::new(sid)).await
-    } else {
+    } else if push_down_inbox_pagination {
+        // Fetch one extra row to detect `has_more` without a second
+        // round-trip.
         reader
-            .list_pending_for_project(&project, MAX_LIST_FETCH, 0)
+            .list_pending_for_project(&project, limit.saturating_add(1), offset)
             .await
+    } else {
+        // Non-pending state filter on the inbox: projection never
+        // produces these records. Short-circuit.
+        Ok(Vec::new())
     };
 
     match records {
@@ -279,9 +310,18 @@ pub(crate) async fn list_tool_call_approvals_handler(
             if let Some(st) = state_filter {
                 items.retain(|r| r.state == st);
             }
-            // Apply `limit`/`offset` uniformly across every selection
-            // branch (fixes Copilot #L220). `has_more` reports whether
-            // any filtered record remains beyond the returned window.
+
+            // Inbox push-down path: we fetched `limit + 1` starting at
+            // `offset` already — trim the peek row and report has_more
+            // directly.
+            if push_down_inbox_pagination {
+                let has_more = items.len() > limit;
+                items.truncate(limit);
+                return (StatusCode::OK, Json(ListResponse { items, has_more })).into_response();
+            }
+
+            // run_id / session_id path: apply `limit`/`offset` in memory
+            // against the tenant- + state-filtered set.
             let total_after_filter = items.len();
             let end = offset.saturating_add(limit).min(total_after_filter);
             let start = offset.min(total_after_filter);
