@@ -523,6 +523,19 @@ pub const OPENAPI_JSON: &str = r##"{
         "responses": { "200": { "description": "Events page" } }
       }
     },
+    "/v1/runs/{id}/telemetry": {
+      "get": {
+        "tags": ["Runs", "Observability"],
+        "summary": "Live-aggregated per-run telemetry (provider calls + tool invocations + totals)",
+        "description": "Returns the run state + stuck flag, every provider call with model/tokens/cost/latency, every tool invocation with duration, and running totals suitable for the operator observability panel. Aggregated at read time from the InMemory projection.",
+        "operationId": "getRunTelemetry",
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": {
+          "200": { "description": "Run telemetry payload" },
+          "404": { "description": "Run not found or not visible to tenant" }
+        }
+      }
+    },
     "/v1/runs/{id}/tool-invocations": {
       "get": {
         "tags": ["Runs"],
@@ -1006,6 +1019,21 @@ pub const OPENAPI_JSON: &str = r##"{
       }
     },
     "/v1/settings/defaults/{scope}/{scope_id}/{key}": {
+      "get": {
+        "tags": ["Admin"],
+        "summary": "Fetch a single stored default setting by exact scope",
+        "description": "Returns the stored default at the exact `(scope, scope_id, key)` triple. This endpoint is exact-lookup — for fallback resolution across the scope cascade use `GET /v1/settings/defaults/resolve/{key}?project=...`. 404 when no value has been persisted at this triple.",
+        "operationId": "getDefaultSetting",
+        "parameters": [
+          { "name": "scope", "in": "path", "required": true, "schema": { "type": "string", "enum": ["system", "tenant", "workspace", "project"] } },
+          { "name": "scope_id", "in": "path", "required": true, "schema": { "type": "string" } },
+          { "name": "key", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": { "description": "`{ scope, scope_id, key, value, source }`" },
+          "404": { "description": "Setting not set at this scope" }
+        }
+      },
       "put": {
         "tags": ["Admin"],
         "summary": "Set a scoped default setting",

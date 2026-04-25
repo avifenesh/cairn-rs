@@ -926,7 +926,17 @@ const NUMERIC_KEYS: &[(&str, f64, f64)] = &[
     ("max_tokens", 1.0, 1_000_000.0),
     ("timeout_ms", 1.0, 3_600_000.0),
     ("temperature", 0.0, 2.0),
+    // F29 CD: operator-tunable stalled-run threshold, in milliseconds.
+    // Floor of 1 ms is intentional — integration tests need to force
+    // runs to appear stuck on short timelines. Ceiling of 24 h keeps
+    // the range typed as finite u64.
+    ("stuck_run_threshold_ms", 1.0, 86_400_000.0),
 ];
+
+/// Numeric keys whose value is read as a `u64` at the request site and
+/// therefore must be persisted as a whole number. Fractional floats are
+/// rejected at PUT so the read site never silently drops a value.
+const INTEGER_ONLY_KEYS: &[&str] = &["stuck_run_threshold_ms", "timeout_ms", "max_tokens"];
 
 /// Per-key cap on JSON-string length. Model ids are short; free-form
 /// prompt-like keys get a wider budget.
@@ -990,6 +1000,14 @@ async fn validate_setting_value(
         if !n.is_finite() || n < *min || n > *max {
             return Err(bad_request_response(format!(
                 "{key} must be within [{min}, {max}]"
+            )));
+        }
+        // Integer-only duration keys — `as_u64()` at the read site would
+        // silently drop a fractional value, which then falls back to the
+        // hard-coded default and misleads the operator. Reject at PUT.
+        if INTEGER_ONLY_KEYS.contains(&key) && n.fract() != 0.0 {
+            return Err(bad_request_response(format!(
+                "{key} must be a whole number"
             )));
         }
         return Ok(());
@@ -1176,6 +1194,45 @@ pub(crate) async fn set_default_setting_handler(
     {
         Ok(setting) => (StatusCode::OK, Json(setting)).into_response(),
         Err(err) => runtime_error_response(err),
+    }
+}
+
+/// `GET /v1/settings/defaults/:scope/:scope_id/:key` — fetch a single stored
+/// default setting by exact scope coordinates.
+///
+/// Returns `{scope, scope_id, key, value, source}` on hit, or 404 when the
+/// triple has not been explicitly persisted. `source` always equals the
+/// requested `scope` (this endpoint is exact-lookup — for fallback
+/// resolution use `GET /v1/settings/defaults/resolve/:key?project=…`).
+pub(crate) async fn get_default_setting_handler(
+    State(state): State<Arc<AppState>>,
+    Path((scope, scope_id, key)): Path<(String, String, String)>,
+) -> impl IntoResponse {
+    use cairn_store::projections::DefaultsReadModel;
+
+    let Some(scope_enum) = parse_scope_name(&scope) else {
+        return bad_request_response("invalid scope");
+    };
+
+    match DefaultsReadModel::get(state.runtime.store.as_ref(), scope_enum, &scope_id, &key).await {
+        Ok(Some(setting)) => (
+            StatusCode::OK,
+            Json(serde_json::json!({
+                "scope": scope,
+                "scope_id": scope_id,
+                "key": key,
+                "value": setting.value,
+                "source": scope,
+            })),
+        )
+            .into_response(),
+        Ok(None) => AppApiError::new(
+            StatusCode::NOT_FOUND,
+            "not_found",
+            format!("default setting '{scope}/{scope_id}/{key}' not set"),
+        )
+        .into_response(),
+        Err(err) => store_error_response(err),
     }
 }
 

@@ -4,7 +4,7 @@ Deployment-wide settings, operator configuration, assistant/chat, bundles (impor
 
 Source of truth: [`tests/compat/http_routes.tsv`](../../tests/compat/http_routes.tsv). Drift from this table against the live router is enforced by `cargo test -p cairn-api --test compat_catalog_sync`.
 
-**Routes: 51**
+**Routes: 52**
 
 | Method | Path | Classification | Notes |
 |---|---|---|---|
@@ -46,6 +46,7 @@ Source of truth: [`tests/compat/http_routes.tsv`](../../tests/compat/http_routes
 | `POST` | `/v1/poll/run` | Preserve | { ok } |
 | `GET` | `/v1/settings` | Preserve | deployment settings |
 | `DELETE` | `/v1/settings/defaults/:scope/:scope_id/:key` | Preserve |  |
+| `GET` | `/v1/settings/defaults/:scope/:scope_id/:key` | Preserve | F29 CD; exact-lookup GET returning `{scope, scope_id, key, value, source}` or 404 |
 | `PUT` | `/v1/settings/defaults/:scope/:scope_id/:key` | Preserve |  |
 | `GET` | `/v1/settings/defaults/all` | Preserve |  |
 | `GET` | `/v1/settings/defaults/resolve/:key` | Preserve |  |

@@ -1567,3 +1567,63 @@ export interface ModelCatalogProvidersResponse {
   providers: ModelCatalogProvider[];
 }
 
+// ── F29 CD: Run Telemetry ──────────────────────────────────────────────────
+// Wire shape of `GET /v1/runs/:run_id/telemetry`. All keys are snake_case on
+// the wire — this matches the JSON the handler emits. CE will build the
+// TanStack Query hook against these types.
+
+export interface RunTelemetryProviderCall {
+  provider_call_id: string;
+  model: string;
+  /** ProviderCallStatus (snake_case): "succeeded" | "failed" | "cancelled". */
+  status: "succeeded" | "failed" | "cancelled";
+  input_tokens: number;
+  output_tokens: number;
+  cost_micros: number;
+  latency_ms: number;
+  started_at_ms: number;
+  finished_at_ms: number;
+  error_class: string | null;
+  error_message: string | null;
+}
+
+/** ToolInvocationState variants (snake_case) as emitted by the API. */
+export type ToolInvocationState =
+  | "requested"
+  | "started"
+  | "completed"
+  | "failed"
+  | "canceled";
+
+export interface RunTelemetryToolInvocation {
+  invocation_id: string;
+  tool_name: string;
+  status: ToolInvocationState;
+  started_at_ms: number;
+  finished_at_ms: number;
+  duration_ms: number;
+}
+
+export interface RunTelemetryTotals {
+  cost_micros: number;
+  input_tokens: number;
+  output_tokens: number;
+  provider_calls: number;
+  tool_calls: number;
+  errors: number;
+  wall_ms: number;
+}
+
+export interface RunTelemetry {
+  run_id: string;
+  /** RunState variant. */
+  state: string;
+  stuck: boolean;
+  stuck_since_ms: number | null;
+  provider_calls: RunTelemetryProviderCall[];
+  tool_invocations: RunTelemetryToolInvocation[];
+  totals: RunTelemetryTotals;
+  /** Populated by CF. Empty object in CD. */
+  phase_timings: Record<string, unknown>;
+}
+

@@ -358,6 +358,9 @@ impl AppBootstrap {
                     (HttpMethod::Get, "/v1/settings/tls") => {
                         router.route(&path, get(get_tls_settings_handler))
                     }
+                    (HttpMethod::Get, "/v1/settings/defaults/:scope/:scope_id/:key") => {
+                        router.route(&path, get(get_default_setting_handler))
+                    }
                     (HttpMethod::Put, "/v1/settings/defaults/:scope/:scope_id/:key") => {
                         router.route(&path, put(set_default_setting_handler))
                     }
@@ -590,6 +593,9 @@ impl AppBootstrap {
                     }
                     (HttpMethod::Get, "/v1/runs/:id/interventions") => {
                         router.route(&path, get(list_run_interventions_handler))
+                    }
+                    (HttpMethod::Get, "/v1/runs/:id/telemetry") => {
+                        router.route(&path, get(get_run_telemetry_handler))
                     }
                     (HttpMethod::Get, "/v1/costs") => {
                         router.route(&path, get(list_tenant_costs_handler))
@@ -1004,6 +1010,7 @@ impl AppBootstrap {
             .route("/v1/runs", post(create_run_handler))
             .route("/v1/runs/:id/audit", get(get_run_audit_trail_handler))
             .route("/v1/runs/:id/cost", get(get_run_cost_handler))
+            .route("/v1/runs/:id/telemetry", get(get_run_telemetry_handler))
             .route("/v1/runs/:id/recover", post(recover_run_handler))
             .route("/v1/runs/:id/events", get(list_run_events_handler))
             .route("/v1/runs/:id/replay", get(replay_run_handler))
@@ -1295,7 +1302,9 @@ impl AppBootstrap {
             )
             .route(
                 "/v1/settings/defaults/:scope/:scope_id/:key",
-                put(set_default_setting_handler).delete(clear_default_setting_handler),
+                get(get_default_setting_handler)
+                    .put(set_default_setting_handler)
+                    .delete(clear_default_setting_handler),
             )
             // ── Approvals ─────────────────────────────────────────────────────────────
             .route("/v1/approvals/:id/approve", post(approve_approval_handler))

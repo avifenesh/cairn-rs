@@ -113,6 +113,53 @@ impl StalledRunsQuery {
     }
 }
 
+/// Settings-defaults key for the stuck-run threshold (system scope, milliseconds).
+pub(crate) const STUCK_RUN_THRESHOLD_KEY: &str = "stuck_run_threshold_ms";
+
+/// Read the system-scope `stuck_run_threshold_ms` default, if set.
+///
+/// Returns `None` when unset, when the stored value is not a non-negative
+/// whole number, OR when the projection read fails — in the last case the
+/// error is logged at `warn` and callers fall back to the hard-coded
+/// default so a transient store outage never turns `/v1/runs/stalled` into
+/// a 500. An operator-visible store outage is already surfaced by the
+/// dedicated store-health surface (`GET /v1/status`).
+pub(crate) async fn resolve_stuck_run_threshold_ms(state: &AppState) -> Option<u64> {
+    use cairn_domain::Scope;
+    use cairn_store::projections::DefaultsReadModel;
+
+    let record = match DefaultsReadModel::get(
+        state.runtime.store.as_ref(),
+        Scope::System,
+        "system",
+        STUCK_RUN_THRESHOLD_KEY,
+    )
+    .await
+    {
+        Ok(Some(r)) => r,
+        Ok(None) => return None,
+        Err(err) => {
+            tracing::warn!(
+                error = %err,
+                key = STUCK_RUN_THRESHOLD_KEY,
+                "failed to read stuck-run threshold default; falling back to hard-coded value"
+            );
+            return None;
+        }
+    };
+    // Accept both JSON integer and JSON float forms — validation
+    // guarantees the stored number is whole and within u64 range.
+    record.value.as_u64().or_else(|| {
+        record.value.as_f64().and_then(|n| {
+            if n.is_finite() && n.fract() == 0.0 && n >= 0.0 && n <= u64::MAX as f64 {
+                Some(n as u64)
+            } else {
+                None
+            }
+        })
+    })
+}
+
 #[derive(Clone, Debug, serde::Deserialize)]
 pub(crate) struct ReplayToCheckpointQuery {
     pub(crate) checkpoint_id: String,
@@ -526,18 +573,33 @@ pub(crate) async fn list_stalled_runs_handler(
     tenant_scope: TenantScope,
     Query(query): Query<StalledRunsQuery>,
 ) -> impl IntoResponse {
-    let stale_after_ms = query.stale_after_ms();
-    let running_runs =
-        match RunReadModel::list_by_state(state.runtime.store.as_ref(), RunState::Running, 10_000)
+    // Resolve stale threshold: explicit `?minutes=` query wins; otherwise read
+    // the system-scope `stuck_run_threshold_ms` default; finally fall back to
+    // the hard-coded 30-minute default baked into `StalledRunsQuery`.
+    let stale_after_ms = if query.minutes.is_some() {
+        query.stale_after_ms()
+    } else {
+        resolve_stuck_run_threshold_ms(state.as_ref())
             .await
+            .unwrap_or_else(|| query.stale_after_ms())
+    };
+
+    // Cover both Running and Pending so zombie pending runs (that never
+    // started) surface as stalled — see F29 CD dogfood blocker.
+    let mut candidate_runs = Vec::new();
+    for target_state in [RunState::Running, RunState::Pending] {
+        match RunReadModel::list_by_state(state.runtime.store.as_ref(), target_state, 10_000).await
         {
-            Ok(runs) => runs,
+            Ok(runs) => candidate_runs.extend(runs),
             Err(err) => return store_error_response(err),
-        };
+        }
+    }
 
     let mut items = Vec::new();
-    for run in running_runs {
-        if run.project.tenant_id != *tenant_scope.tenant_id() {
+    for run in candidate_runs {
+        // Admin service account sees all tenants; operator tenants are
+        // restricted to their own runs.
+        if !tenant_scope.is_admin && run.project.tenant_id != *tenant_scope.tenant_id() {
             continue;
         }
 
@@ -556,6 +618,228 @@ pub(crate) async fn list_stalled_runs_handler(
         }),
     )
         .into_response()
+}
+
+/// `GET /v1/runs/:id/telemetry` — live-aggregated per-run telemetry.
+///
+/// Aggregates the run state, all provider calls, and all tool invocations
+/// into a single JSON payload suitable for the operator observability panel.
+/// See F29 CD.
+pub(crate) async fn get_run_telemetry_handler(
+    State(state): State<Arc<AppState>>,
+    tenant_scope: TenantScope,
+    Path(id): Path<String>,
+) -> impl IntoResponse {
+    let run_id = id;
+    use cairn_store::projections::{ProviderCallReadModel, ToolInvocationReadModel};
+
+    let run_id = RunId::new(run_id);
+    let store = state.runtime.store.as_ref();
+
+    let run = match RunReadModel::get(store, &run_id).await {
+        Ok(Some(r)) => r,
+        Ok(None) => {
+            return AppApiError::new(StatusCode::NOT_FOUND, "not_found", "run not found")
+                .into_response()
+        }
+        Err(err) => return store_error_response(err),
+    };
+
+    // Tenant scoping. Admin service account + System principals bypass —
+    // operator tenants are restricted to their own runs.
+    if !tenant_scope.is_admin && run.project.tenant_id != *tenant_scope.tenant_id() {
+        return AppApiError::new(StatusCode::NOT_FOUND, "not_found", "run not found")
+            .into_response();
+    }
+
+    // Stuck-flag derivation (reuse the stuck-threshold default).
+    let stale_after_ms = resolve_stuck_run_threshold_ms(state.as_ref())
+        .await
+        .unwrap_or(30 * 60_000);
+    let now = now_ms();
+    let non_terminal = matches!(run.state, RunState::Pending | RunState::Running);
+    let stuck = non_terminal && now.saturating_sub(run.updated_at) > stale_after_ms;
+    let stuck_since_ms = if stuck { Some(run.updated_at) } else { None };
+
+    let provider_calls = match ProviderCallReadModel::list_by_run(store, &run_id, 1000).await {
+        Ok(calls) => calls,
+        Err(err) => return store_error_response(err),
+    };
+    let tool_invocations = match ToolInvocationReadModel::list_by_run(store, &run_id, 1000, 0).await
+    {
+        Ok(invs) => invs,
+        Err(err) => return store_error_response(err),
+    };
+
+    // Totals + row serialization.
+    let mut total_cost_micros: u128 = 0;
+    let mut total_input_tokens: u128 = 0;
+    let mut total_output_tokens: u128 = 0;
+    let mut total_errors: u64 = 0;
+    let mut wall_min: Option<u64> = None;
+    let mut wall_max: Option<u64> = None;
+
+    let provider_rows: Vec<serde_json::Value> = provider_calls
+        .iter()
+        .map(|c| {
+            total_cost_micros =
+                total_cost_micros.saturating_add(c.cost_micros.unwrap_or(0) as u128);
+            total_input_tokens =
+                total_input_tokens.saturating_add(c.input_tokens.unwrap_or(0) as u128);
+            total_output_tokens =
+                total_output_tokens.saturating_add(c.output_tokens.unwrap_or(0) as u128);
+            if c.status != cairn_domain::providers::ProviderCallStatus::Succeeded {
+                total_errors = total_errors.saturating_add(1);
+            }
+            if c.started_at_ms > 0 {
+                wall_min = Some(wall_min.map_or(c.started_at_ms, |m| m.min(c.started_at_ms)));
+            }
+            if c.finished_at_ms > 0 {
+                wall_max = Some(wall_max.map_or(c.finished_at_ms, |m| m.max(c.finished_at_ms)));
+            }
+            let latency_ms = c.latency_ms.unwrap_or_else(|| {
+                if c.finished_at_ms >= c.started_at_ms && c.started_at_ms > 0 {
+                    c.finished_at_ms - c.started_at_ms
+                } else {
+                    0
+                }
+            });
+            // error_class is Serialize via its enum derive; render as snake_case string.
+            let error_class = c
+                .error_class
+                .as_ref()
+                .map(|ec| serde_json::to_value(ec).unwrap_or(serde_json::Value::Null));
+            serde_json::json!({
+                "provider_call_id": c.provider_call_id.as_str(),
+                "model": c.provider_model_id.as_str(),
+                "status": c.status,
+                "input_tokens": c.input_tokens.unwrap_or(0),
+                "output_tokens": c.output_tokens.unwrap_or(0),
+                "cost_micros": c.cost_micros.unwrap_or(0),
+                "latency_ms": latency_ms,
+                "started_at_ms": c.started_at_ms,
+                "finished_at_ms": c.finished_at_ms,
+                "error_class": error_class,
+                "error_message": redact_provider_error(c.raw_error_message.as_deref()),
+            })
+        })
+        .collect();
+
+    let tool_rows: Vec<serde_json::Value> = tool_invocations
+        .iter()
+        .map(|t| {
+            // Count Failed / Canceled tool invocations toward totals.errors
+            // so operator dashboards don't under-report when a run's
+            // errors all live on the tool side.
+            if matches!(
+                t.state,
+                cairn_domain::tool_invocation::ToolInvocationState::Failed
+                    | cairn_domain::tool_invocation::ToolInvocationState::Canceled
+            ) {
+                total_errors = total_errors.saturating_add(1);
+            }
+
+            // Wall bounds:
+            // - lower bound = start_at_ms when present (any state).
+            // - upper bound = finish_at_ms when present; for in-flight
+            //   invocations (started, not terminal, no finish_at), treat
+            //   `now` as the effective end so wall_ms reflects ongoing
+            //   work instead of 0.
+            if let Some(start) = t.started_at_ms {
+                if start > 0 {
+                    wall_min = Some(wall_min.map_or(start, |m| m.min(start)));
+                }
+            }
+            if let Some(end) = t.finished_at_ms {
+                if end > 0 {
+                    wall_max = Some(wall_max.map_or(end, |m| m.max(end)));
+                }
+            } else if let Some(start) = t.started_at_ms {
+                // In-flight invocation — extend wall to `now`.
+                if start > 0 && !t.state.is_terminal() {
+                    wall_max = Some(wall_max.map_or(now, |m| m.max(now)));
+                }
+            }
+            let duration_ms = match (t.started_at_ms, t.finished_at_ms) {
+                (Some(s), Some(f)) if f >= s => f - s,
+                (Some(s), None) if s > 0 && !t.state.is_terminal() && now >= s => now - s,
+                _ => 0,
+            };
+            let tool_name = match &t.target {
+                cairn_domain::tool_invocation::ToolInvocationTarget::Builtin { tool_name } => {
+                    tool_name.as_str()
+                }
+                cairn_domain::tool_invocation::ToolInvocationTarget::Plugin {
+                    tool_name, ..
+                } => tool_name.as_str(),
+            };
+            serde_json::json!({
+                "invocation_id": t.invocation_id.as_str(),
+                "tool_name": tool_name,
+                "status": t.state,
+                "started_at_ms": t.started_at_ms.unwrap_or(0),
+                "finished_at_ms": t.finished_at_ms.unwrap_or(0),
+                "duration_ms": duration_ms,
+            })
+        })
+        .collect();
+
+    let wall_ms = match (wall_min, wall_max) {
+        (Some(a), Some(b)) if b >= a => b - a,
+        _ => 0,
+    };
+
+    let body = serde_json::json!({
+        "run_id": run.run_id.to_string(),
+        "state": run.state,
+        "stuck": stuck,
+        "stuck_since_ms": stuck_since_ms,
+        "provider_calls": provider_rows,
+        "tool_invocations": tool_rows,
+        "totals": {
+            // Clamp u128 → u64 to avoid modular wrap on pathological runs.
+            "cost_micros": u128::min(total_cost_micros, u64::MAX as u128) as u64,
+            "input_tokens": u128::min(total_input_tokens, u64::MAX as u128) as u64,
+            "output_tokens": u128::min(total_output_tokens, u64::MAX as u128) as u64,
+            "provider_calls": provider_calls.len() as u64,
+            "tool_calls": tool_invocations.len() as u64,
+            "errors": total_errors,
+            "wall_ms": wall_ms,
+        },
+        "phase_timings": {},
+    });
+
+    (StatusCode::OK, Json(body)).into_response()
+}
+
+/// Redact unsafe provider error strings for telemetry responses.
+///
+/// Provider-layer errors already flow through `cairn_providers::redact` —
+/// this is the belt-and-suspenders guard at the API boundary:
+///
+/// - `None` input → `None` output.
+/// - String with a live-looking `bearer ... sk-...` pattern → replaced
+///   with the fixed marker `"<redacted: leaked credential pattern>"`.
+///   The returned `Option` is always `Some` here — downstream JSON
+///   callers see the marker, not `null`, so the UI can distinguish
+///   "redacted" from "no error at all".
+/// - Otherwise → pass through; if longer than 1024 chars, truncate
+///   with a trailing ellipsis.
+fn redact_provider_error(raw: Option<&str>) -> Option<String> {
+    let raw = raw?;
+    let lower = raw.to_ascii_lowercase();
+    if lower.contains("bearer ") && lower.contains("sk-") {
+        // Likely still carries a live key. Drop rather than leak.
+        return Some("<redacted: leaked credential pattern>".to_owned());
+    }
+    const MAX: usize = 1024;
+    if raw.len() > MAX {
+        let mut s = raw.chars().take(MAX).collect::<String>();
+        s.push_str("...");
+        Some(s)
+    } else {
+        Some(raw.to_owned())
+    }
 }
 
 pub(crate) async fn list_escalated_runs_handler(
@@ -3011,5 +3295,53 @@ mod tests {
         assert!(r.validate().is_ok());
         r.parent_run_id = Some("parent\x07id".into());
         assert!(r.validate().is_err());
+    }
+
+    // ── F29 CD: redact_provider_error ───────────────────────────────
+    //
+    // Security-sensitive: this function is the last line of defence
+    // against an upstream provider echoing a live Authorization header
+    // into an error payload. The matrix below locks in the three cases
+    // the telemetry handler relies on.
+
+    #[test]
+    fn redact_provider_error_drops_leaked_bearer_key() {
+        // Build the leaked marker at runtime so GitGuardian static scans
+        // don't flag this literal as a real credential.
+        let marker = format!("sk-{}", "fake-test-only-".to_owned() + &"x".repeat(24));
+        let leaked = format!("upstream returned: Authorization: Bearer {marker} denied");
+        let out = redact_provider_error(Some(&leaked)).expect("some");
+        assert!(
+            !out.contains(&marker),
+            "leaked credential pattern must not survive: {out}"
+        );
+        assert!(
+            out.contains("<redacted"),
+            "expected explicit redaction marker, got: {out}"
+        );
+    }
+
+    #[test]
+    fn redact_provider_error_truncates_oversize_payload() {
+        let huge = "x".repeat(4096);
+        let out = redact_provider_error(Some(&huge)).expect("some");
+        // Truncation cap is 1024 chars + 3-char ellipsis.
+        assert!(out.len() <= 1024 + 3, "length cap broken: {}", out.len());
+        assert!(out.ends_with("..."), "ellipsis marker missing: {out}");
+    }
+
+    #[test]
+    fn redact_provider_error_passes_clean_message_through() {
+        let msg = "provider returned 500: upstream timeout";
+        assert_eq!(
+            redact_provider_error(Some(msg)).as_deref(),
+            Some(msg),
+            "clean message must pass through verbatim"
+        );
+    }
+
+    #[test]
+    fn redact_provider_error_none_stays_none() {
+        assert_eq!(redact_provider_error(None), None);
     }
 }
