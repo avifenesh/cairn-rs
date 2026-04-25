@@ -15,7 +15,9 @@ use cairn_fabric::stream::{restore_frames, FRAME_CHECKPOINT, FRAME_TOOL_CALL, FR
 use flowfabric::core::contracts::{AppendFrameArgs, AppendFrameResult, STREAM_READ_HARD_CAP};
 use flowfabric::core::keys::ExecKeyContext;
 use flowfabric::core::partition::execution_partition;
-use flowfabric::core::types::{AttemptId, AttemptIndex, ExecutionId, LeaseEpoch, LeaseId, TimestampMs};
+use flowfabric::core::types::{
+    AttemptId, AttemptIndex, ExecutionId, LeaseEpoch, LeaseId, TimestampMs,
+};
 use flowfabric::script::functions::stream::{ff_append_frame, StreamOpKeys};
 
 use crate::TestHarness;

@@ -328,7 +328,8 @@ async fn test_signal_delivery_is_idempotent() {
         .cloned()
         .filter(|s| !s.is_empty())
         .expect("current_waitpoint_id must be set after enter_waiting_approval");
-    let wp_id = flowfabric::core::types::WaitpointId::parse(&wp_id_str).expect("waitpoint_id must parse");
+    let wp_id =
+        flowfabric::core::types::WaitpointId::parse(&wp_id_str).expect("waitpoint_id must parse");
     let eid = cairn_fabric::id_map::session_run_to_execution_id(
         &h.project,
         &session_id,

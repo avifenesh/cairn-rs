@@ -1,5 +1,7 @@
 use flowfabric::core::keys::{ExecKeyContext, IndexKeys};
-use flowfabric::core::types::{AttemptIndex, ExecutionId, LaneId, Namespace, WaitpointId, WorkerInstanceId};
+use flowfabric::core::types::{
+    AttemptIndex, ExecutionId, LaneId, Namespace, WaitpointId, WorkerInstanceId,
+};
 
 pub fn build_create_execution(
     ctx: &ExecKeyContext,

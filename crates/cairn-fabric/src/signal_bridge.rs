@@ -74,8 +74,10 @@ impl SignalBridge {
             .into_bytes()
         });
 
-        let partition =
-            flowfabric::core::partition::execution_partition(execution_id, &self.runtime.partition_config);
+        let partition = flowfabric::core::partition::execution_partition(
+            execution_id,
+            &self.runtime.partition_config,
+        );
         let ctx = ExecKeyContext::new(&partition, execution_id);
         let waitpoint_token =
             read_waitpoint_token(&self.runtime.client, &ctx, waitpoint_id).await?;
@@ -139,8 +141,10 @@ impl SignalBridge {
         result_payload: Option<Vec<u8>>,
     ) -> Result<SignalOutcome, FabricError> {
         let safe_id = sanitize_signal_component(invocation_id);
-        let partition =
-            flowfabric::core::partition::execution_partition(execution_id, &self.runtime.partition_config);
+        let partition = flowfabric::core::partition::execution_partition(
+            execution_id,
+            &self.runtime.partition_config,
+        );
         let ctx = ExecKeyContext::new(&partition, execution_id);
         let waitpoint_token =
             read_waitpoint_token(&self.runtime.client, &ctx, waitpoint_id).await?;
@@ -165,8 +169,10 @@ impl SignalBridge {
         waitpoint_id: &WaitpointId,
         signal: Signal,
     ) -> Result<SignalOutcome, FabricError> {
-        let partition =
-            flowfabric::core::partition::execution_partition(execution_id, &self.runtime.partition_config);
+        let partition = flowfabric::core::partition::execution_partition(
+            execution_id,
+            &self.runtime.partition_config,
+        );
         let ctx = flowfabric::core::keys::ExecKeyContext::new(&partition, execution_id);
         let idx = flowfabric::core::keys::IndexKeys::new(&partition);
 

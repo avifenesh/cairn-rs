@@ -20,8 +20,7 @@ use cairn_domain::ids::{RunId, SessionId};
 use cairn_domain::lifecycle::{FailureClass, RunState};
 use cairn_domain::tenancy::ProjectKey;
 use flowfabric::core::contracts::{
-    ClaimGrant, ResumeCondition, ResumePolicy, SignalMatcher, SuspendOutcome,
-    SuspensionReasonCode,
+    ClaimGrant, ResumeCondition, ResumePolicy, SignalMatcher, SuspendOutcome, SuspensionReasonCode,
 };
 use flowfabric::core::types::TimestampMs;
 use flowfabric::sdk::task::{ClaimedTask, FailOutcome, ResumeSignal};
@@ -58,8 +57,7 @@ impl CairnWorker {
             config.valkey_host.clone(),
             config.valkey_port,
         );
-        if let flowfabric::core::backend::BackendConnection::Valkey(ref mut vk) =
-            backend.connection
+        if let flowfabric::core::backend::BackendConnection::Valkey(ref mut vk) = backend.connection
         {
             vk.tls = config.tls;
             vk.cluster = config.cluster;
@@ -524,9 +522,12 @@ async fn cg_a_suspend(
         waitpoint_key,
         matcher: SignalMatcher::ByName(signal_name),
     };
-    let timeout = params
-        .timeout_ms
-        .map(|ms| (TimestampMs::from_millis(TimestampMs::now().0 + ms as i64), params.timeout_behavior));
+    let timeout = params.timeout_ms.map(|ms| {
+        (
+            TimestampMs::from_millis(TimestampMs::now().0 + ms as i64),
+            params.timeout_behavior,
+        )
+    });
     let handle = task
         .suspend(
             reason_code,

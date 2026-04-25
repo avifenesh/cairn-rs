@@ -154,9 +154,7 @@ pub fn ff_task_state_to_public_states(state: TaskState) -> &'static [PublicState
             PublicState::RateLimited,
         ],
         // FF 0.9 `Resumable` joins `Active` under cairn's Running label.
-        TaskState::Leased | TaskState::Running => {
-            &[PublicState::Active, PublicState::Resumable]
-        }
+        TaskState::Leased | TaskState::Running => &[PublicState::Active, PublicState::Resumable],
         TaskState::WaitingApproval => &[PublicState::Suspended],
         TaskState::Paused => &[PublicState::Suspended],
         TaskState::WaitingDependency => &[PublicState::WaitingChildren],

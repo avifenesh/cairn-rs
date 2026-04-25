@@ -40,12 +40,12 @@ use cairn_fabric::test_harness::valkey_endpoint;
 use cairn_fabric::{id_map, FabricConfig, FabricServices};
 use cairn_store::projections::FfLeaseHistoryCursorStore;
 use cairn_store::InMemoryStore;
-use flowfabric::valkey::{ValkeyBackend, COMPLETION_CHANNEL};
 use flowfabric::core::backend::{ScannerFilter, ValkeyConnection};
 use flowfabric::core::completion_backend::CompletionBackend;
 use flowfabric::core::keys::ExecKeyContext;
 use flowfabric::core::partition::{execution_partition, PartitionConfig};
 use flowfabric::core::types::FlowId;
+use flowfabric::valkey::{ValkeyBackend, COMPLETION_CHANNEL};
 use futures::StreamExt;
 use std::sync::Arc;
 

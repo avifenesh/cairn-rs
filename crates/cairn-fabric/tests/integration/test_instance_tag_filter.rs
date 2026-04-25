@@ -64,7 +64,9 @@ async fn spawn_instance(instance_suffix: &str) -> TestInstance {
         worker_instance_id: flowfabric::core::types::WorkerInstanceId::new(format!(
             "instance-{instance_suffix}-{suffix}"
         )),
-        namespace: flowfabric::core::types::Namespace::new(format!("ns-{instance_suffix}-{suffix}")),
+        namespace: flowfabric::core::types::Namespace::new(format!(
+            "ns-{instance_suffix}-{suffix}"
+        )),
         lease_ttl_ms: 30_000,
         grant_ttl_ms: 5_000,
         max_concurrent_tasks: 4,

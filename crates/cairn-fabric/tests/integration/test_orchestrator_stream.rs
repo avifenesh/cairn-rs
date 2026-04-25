@@ -342,7 +342,9 @@ fn worker_config_from(h: &TestHarness) -> FabricConfig {
         cluster: h.fabric.runtime.config.cluster,
         lane_id: h.fabric.runtime.config.lane_id.clone(),
         worker_id: flowfabric::core::types::WorkerId::new("orchestrator-stream-worker"),
-        worker_instance_id: flowfabric::core::types::WorkerInstanceId::new(uuid::Uuid::new_v4().to_string()),
+        worker_instance_id: flowfabric::core::types::WorkerInstanceId::new(
+            uuid::Uuid::new_v4().to_string(),
+        ),
         namespace: h.fabric.runtime.config.namespace.clone(),
         lease_ttl_ms: h.fabric.runtime.config.lease_ttl_ms,
         grant_ttl_ms: h.fabric.runtime.config.grant_ttl_ms,
