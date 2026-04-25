@@ -242,6 +242,15 @@ pub struct ProviderCallRecord {
     #[serde(default)]
     pub cost_type: ProviderCostType,
     pub error_class: Option<ProviderCallErrorClass>,
+    /// Unix epoch ms when the call was dispatched to the provider (0 if unknown).
+    #[serde(default)]
+    pub started_at_ms: u64,
+    /// Unix epoch ms when the provider response was received (0 if unknown).
+    #[serde(default)]
+    pub finished_at_ms: u64,
+    /// Provider error message (redacted of any secrets) on failure, None on success.
+    #[serde(default)]
+    pub raw_error_message: Option<String>,
 }
 
 impl RouteDecisionRecord {
@@ -846,6 +855,9 @@ mod tests {
             cost_micros: Some(9000),
             cost_type: ProviderCostType::Metered,
             error_class: None,
+            started_at_ms: 0,
+            finished_at_ms: 0,
+            raw_error_message: None,
         }];
         let decision = RouteDecisionRecord {
             route_decision_id: "route_decision_1".into(),
@@ -902,6 +914,9 @@ mod tests {
             cost_micros: Some(1000),
             cost_type: ProviderCostType::Metered,
             error_class: Some(ProviderCallErrorClass::ProviderError),
+            started_at_ms: 0,
+            finished_at_ms: 0,
+            raw_error_message: None,
         }];
         let decision = RouteDecisionRecord {
             route_decision_id: "route_decision_1".into(),
@@ -1062,6 +1077,9 @@ mod rfc009_tests {
             cost_micros: Some(1200),
             cost_type: ProviderCostType::Metered,
             error_class: None,
+            started_at_ms: 0,
+            finished_at_ms: 0,
+            raw_error_message: None,
         };
 
         // RFC 009: every provider call must link to exactly one route_decision and attempt.
@@ -1212,6 +1230,9 @@ mod rfc009_tests {
             cost_micros: Some(1500),
             cost_type: ProviderCostType::Metered,
             error_class: None,
+            started_at_ms: 0,
+            finished_at_ms: 0,
+            raw_error_message: None,
         };
         assert_eq!(record.cost_type, ProviderCostType::Metered);
         assert!(!record.cost_type.is_free());

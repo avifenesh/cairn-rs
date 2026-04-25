@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 use cairn_domain::providers::{ProviderCallRecord, RouteAttemptRecord, RouteDecisionRecord};
-use cairn_domain::{ProjectKey, RouteAttemptId, RouteDecisionId};
+use cairn_domain::{ProjectKey, RouteAttemptId, RouteDecisionId, RunId};
 
 use crate::error::StoreError;
 
@@ -54,4 +54,17 @@ pub trait ProviderCallReadModel: Send + Sync {
         decision_id: &RouteDecisionId,
         limit: usize,
     ) -> Result<Vec<ProviderCallRecord>, StoreError>;
+
+    /// List provider calls attached to a run, ordered by start time (ascending).
+    ///
+    /// Default implementation returns an empty vector so backends that do not
+    /// yet surface run-scoped provider calls compile without panic.
+    async fn list_by_run(
+        &self,
+        run_id: &RunId,
+        limit: usize,
+    ) -> Result<Vec<ProviderCallRecord>, StoreError> {
+        let _ = (run_id, limit);
+        Ok(vec![])
+    }
 }

@@ -1442,6 +1442,9 @@ impl InMemoryStore {
                         cost_micros: e.cost_micros,
                         cost_type: cairn_domain::providers::ProviderCostType::default(),
                         error_class: e.error_class,
+                        started_at_ms: e.started_at,
+                        finished_at_ms: e.finished_at,
+                        raw_error_message: e.raw_error_message.clone(),
                     },
                 );
                 // GAP-010: derive LlmCallTrace from every ProviderCallCompleted.
@@ -3263,6 +3266,28 @@ impl ProviderCallReadModel for InMemoryStore {
             .take(limit)
             .cloned()
             .collect();
+        Ok(results)
+    }
+
+    async fn list_by_run(
+        &self,
+        run_id: &cairn_domain::RunId,
+        limit: usize,
+    ) -> Result<Vec<cairn_domain::providers::ProviderCallRecord>, StoreError> {
+        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        let mut results: Vec<_> = state
+            .provider_calls
+            .values()
+            .filter(|c| c.run_id.as_ref() == Some(run_id))
+            .cloned()
+            .collect();
+        // Stable order: by started_at_ms ascending, then by provider_call_id.
+        results.sort_by(|a, b| {
+            a.started_at_ms
+                .cmp(&b.started_at_ms)
+                .then_with(|| a.provider_call_id.as_str().cmp(b.provider_call_id.as_str()))
+        });
+        results.truncate(limit);
         Ok(results)
     }
 }
