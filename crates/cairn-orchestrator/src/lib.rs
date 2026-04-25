@@ -59,3 +59,41 @@ pub use gather_impl::StandardGatherPhase;
 
 pub mod execute_impl;
 pub use execute_impl::RuntimeExecutePhase;
+
+/// Test-only helpers exposed for cross-crate regression tests.
+///
+/// These forward to private prompt builders in `decide_impl.rs` so
+/// integration tests (e.g. `cairn-app` F30 termination test) can
+/// snapshot the prompt without us having to export the builder itself.
+///
+/// Gated behind the `test-hooks` Cargo feature so production builds do
+/// not expose internal prompt APIs as a stable surface. Test crates
+/// opt in with `cairn-orchestrator = { …, features = ["test-hooks"] }`.
+#[cfg(feature = "test-hooks")]
+#[doc(hidden)]
+pub mod decide_impl_test_hooks {
+    use crate::context::{GatherOutput, OrchestrationContext};
+    use cairn_tools::builtins::BuiltinToolDescriptor;
+
+    /// Build the DECIDE phase system prompt. Forwards to
+    /// `decide_impl::build_system_prompt`.
+    pub fn build_system_prompt_for_tests(
+        agent_type: &str,
+        tools: &[BuiltinToolDescriptor],
+        native_tools_enabled: bool,
+    ) -> String {
+        crate::decide_impl::build_system_prompt_pub(agent_type, tools, native_tools_enabled)
+    }
+
+    /// Build the DECIDE phase user message. Forwards to
+    /// `decide_impl::build_user_message` (which is crate-private).
+    ///
+    /// F30 uses this to assert the footer no longer reintroduces the
+    /// pre-fix four-phase workflow.
+    pub fn build_user_message_for_tests(
+        ctx: &OrchestrationContext,
+        gather: &GatherOutput,
+    ) -> String {
+        crate::decide_impl::build_user_message_pub(ctx, gather, None)
+    }
+}

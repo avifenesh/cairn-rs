@@ -436,6 +436,32 @@ impl DecidePhase for LlmDecidePhase {
 /// Uses `default_roles()` to look up the canonical system-prompt fragment for
 /// the matching role.  Falls back to a generic orchestrator prompt if the role
 /// is not registered.
+/// Public wrapper for cross-crate regression tests. Gated behind the
+/// `test-hooks` Cargo feature so this symbol is absent from production
+/// builds. See `crate::decide_impl_test_hooks`.
+#[cfg(feature = "test-hooks")]
+#[doc(hidden)]
+pub fn build_system_prompt_pub(
+    agent_type: &str,
+    tools: &[BuiltinToolDescriptor],
+    native_tools_enabled: bool,
+) -> String {
+    build_system_prompt(agent_type, tools, native_tools_enabled)
+}
+
+/// Public wrapper for cross-crate regression tests. Gated behind the
+/// `test-hooks` Cargo feature so this symbol is absent from production
+/// builds. See `crate::decide_impl_test_hooks`.
+#[cfg(feature = "test-hooks")]
+#[doc(hidden)]
+pub fn build_user_message_pub(
+    ctx: &OrchestrationContext,
+    gather: &GatherOutput,
+    budget: Option<&TokenBudget>,
+) -> String {
+    build_user_message(ctx, gather, budget)
+}
+
 fn build_system_prompt(
     agent_type: &str,
     tools: &[BuiltinToolDescriptor],
@@ -517,7 +543,10 @@ When no tool call is needed (completing, escalating, recording memory,
 spawning a sub-agent, notifying), respond with ONLY a JSON array of
 action objects — no prose, no markdown fences — with fields:
 - "action_type": one of "invoke_tool"|"complete_run"|"create_memory"|"spawn_subagent"|"send_notification"|"escalate_to_operator"
-- "description": concise explanation (for complete_run: a summary of what was accomplished)
+- "description": concise explanation for most actions; for complete_run,
+                 the FULL user-facing answer (prose, bullets, whatever the
+                 user asked for) — this is what the user sees as the run's
+                 final output.
 - "confidence": float 0.0-1.0
 - "requires_approval": boolean
 - "tool_name" (for invoke_tool/spawn_subagent): tool ID or sub-agent role
@@ -527,7 +556,9 @@ Field conventions:
 - invoke_tool:    ONLY as a text-channel fallback when native tool
                   calling is unavailable or failed; tool_name = tool ID,
                   tool_args = {...}. Prefer native tool calls.
-- complete_run:   description = summary of what was accomplished
+- complete_run:   description = the full user-facing answer. NOT a meta-
+                  summary like "answered the user's question." Write it
+                  for the user to read.
 - spawn_subagent: tool_name = role,  tool_args = {"goal": "..."}
 - create_memory:  tool_args = {"content": "..."}"#
             .to_owned()
@@ -536,7 +567,10 @@ Field conventions:
             "## Response format\n\
              Respond ONLY with a JSON array of action objects. Each object MUST have:\n\
              - \"action_type\": one of {action_types}\n\
-             - \"description\": concise explanation\n\
+             - \"description\": concise explanation for most actions; for \
+               complete_run, the FULL user-facing answer (prose, bullets, \
+               whatever the user asked for). The user sees this verbatim as \
+               the run's final output — write it for them to read.\n\
              - \"confidence\": float 0.0–1.0\n\
              - \"requires_approval\": boolean\n\
              - \"tool_name\" (for invoke_tool/spawn_subagent): tool ID or sub-agent role\n\
@@ -544,7 +578,8 @@ Field conventions:
              \n\
              Field conventions:\n\
              - invoke_tool:    tool_name = tool ID,  tool_args = {{...}}\n\
-             - complete_run:   description = summary of what was accomplished\n\
+             - complete_run:   description = the full user-facing answer \
+               (not a meta-summary like \"answered the user's question\")\n\
              - spawn_subagent: tool_name = role,  tool_args = {{\"goal\": \"...\"}}\n\
              - create_memory:  tool_args = {{\"content\": \"...\"}}\n\
              \n\
@@ -553,56 +588,92 @@ Field conventions:
         )
     };
 
+    // Prompt design note (F30 fix, 2026-04-24):
+    //
+    // The previous prompt forced every run through a four-phase
+    // Understand → Act → Verify → Complete workflow and explicitly required
+    // "You have taken action toward the goal (not just read/searched)"
+    // before the model was allowed to call `complete_run`. For prose /
+    // analysis / Q&A prompts (the dogfood run 1 baseline: "Summarise
+    // Minecraft creative mode in three bullets") there IS no artifact to
+    // produce — the direct answer IS the deliverable. The old prompt
+    // therefore pushed the model into an 8-iteration introspection loop:
+    // it kept calling read-only tools looking for "action to take" that
+    // never existed, hit `max_iterations_reached`, and returned no output.
+    //
+    // The replacement prompt splits tasks into two modes:
+    //
+    //   - Direct-answer tasks (Q&A, summaries, explanations, analysis):
+    //     call `complete_run` IMMEDIATELY with the full answer as
+    //     `description`. No tools required. Do not "gather context" first
+    //     by default.
+    //
+    //   - Artifact tasks (produce code, edit files, open PRs, run
+    //     commands): use tools, verify, then `complete_run`.
+    //
+    // If you ever reintroduce a "gather context first" instruction, make
+    // sure the F30 regression test
+    // (`test_f30_orchestrator_termination::direct_answer_prompt_calls_complete_run_in_one_iteration`)
+    // still passes — it asserts the loop terminates on iteration 0 for a
+    // trivially-answerable prompt.
     format!(
         "{role_prompt}\
          {tools_section}\n\
          \n\
-         ## Workflow\n\
-         Follow these phases in order:\n\
+         ## How to decide what to do\n\
+         Your first move depends on the goal:\n\
          \n\
-         ### Phase 1: Understand\n\
-         Read the goal carefully. Use tools to gather context — search memory, \
-         read files, explore the codebase. Identify what needs to happen.\n\
+         **If you already have the information to answer** (you know the \
+         subject, the goal is general knowledge, or relevant context is \
+         already in this prompt):\n\
+         → Call `complete_run` RIGHT NOW. Put the full user-facing answer \
+         in the `description` field. Do not call tools just to appear \
+         thorough.\n\
          \n\
-         ### Phase 2: Act\n\
-         Take concrete actions toward the goal. Write files, run commands, \
-         make API calls — whatever the task requires. Reading and analysing \
-         alone is not sufficient if the goal requires producing artifacts.\n\
+         **If the goal needs external information you don't have** (reading \
+         a specific file, searching memory or the codebase, fetching from \
+         the web, querying the graph, looking up domain-specific state):\n\
+         → Call the appropriate read/search/fetch tool, then on the next \
+         iteration answer with `complete_run` once you have what you need. \
+         Do not loop gathering more context than the answer requires.\n\
          \n\
-         ### Phase 3: Verify\n\
-         Check that your actions achieved the goal. Run tests, read the \
-         output, confirm the result. If something failed, fix it before \
-         moving on.\n\
+         **If the goal requires producing or modifying artifacts** (writing \
+         files, running commands, opening PRs, editing code, calling \
+         external APIs that change state):\n\
+         → Use tools to do the work, verify the result, then call \
+         `complete_run` with a summary of what you produced.\n\
          \n\
-         ### Phase 4: Complete\n\
-         Only after you have taken action and verified the result, call \
-         complete_run with a summary of what you accomplished.\n\
+         **Never call tools to introspect THIS run itself** — the goal, \
+         iteration number, prior steps, and approvals are already in this \
+         prompt. Do not look them up via introspection tools even if those \
+         tools exist in your toolbox.\n\
          \n\
          ## Tool usage\n\
-         - Prefer read/search/fetch tools before writes.\n\
-         - For JSON-fallback actions you emit as text, set \
-           requires_approval=false for read/search/fetch-only operations.\n\
-         - Set requires_approval=true for writes, code execution, sending \
-           messages, or any destructive action. If unsure whether an \
-           action is sensitive, set requires_approval=true.\n\
-         - Store key findings with create_memory so they persist.\n\
-         - Use spawn_subagent only when the task is genuinely multi-part \
+         - Only call a tool if the answer genuinely requires information or \
+           side effects you don't already have. Don't call read-only tools \
+           just to appear thorough.\n\
+         - Never call the same tool with the same arguments twice. If a \
+           tool returned what you needed, use it; don't re-query.\n\
+         - Set `requires_approval=false` for read/search/fetch-only \
+           operations. Set `requires_approval=true` for writes, code \
+           execution, sending messages, or any destructive action.\n\
+         - Use `spawn_subagent` only when the task is genuinely multi-part \
            and benefits from parallel execution.\n\
-         - If blocked and need human input → escalate_to_operator.\n\
+         - If blocked and you need human input → `escalate_to_operator`.\n\
          \n\
-         ## Completion criteria\n\
-         Before calling complete_run, verify:\n\
-         - You have taken action toward the goal (not just read/searched).\n\
-         - If the goal requires artifacts (code, files, PRs), they exist.\n\
-         - You have verified the result where possible.\n\
-         If any criterion is not met, continue working.\n\
+         ## Completion\n\
+         `complete_run` ends the run and returns your `description` to the \
+         user as the final answer. Write it for the user, not for yourself: \
+         include the actual content (the bullet list, the summary, the \
+         explanation), not a meta-description like 'answered the user's \
+         question'.\n\
          \n\
          ## Tips\n\
-         - If a tool call fails, analyse the error and try a different approach. \
-           Do not retry the same failing call.\n\
+         - If a tool call fails, analyse the error and try a different \
+           approach. Do not retry the same failing call.\n\
          - When reading large outputs, focus on the relevant sections.\n\
-         - If stuck, search for similar patterns or ask for help via \
-           escalate_to_operator.\n\
+         - If you already answered the goal in a previous iteration (check \
+           step history), call `complete_run` now — don't re-do the work.\n\
          \n\
          {response_format}",
     )
@@ -632,15 +703,23 @@ fn build_user_message(
     );
     let has_memory = !gather.memory_chunks.is_empty();
     let memory_hint = if has_memory {
-        "Memory contains relevant context above. Use it to inform your next action.".to_owned()
+        "Memory contains relevant context above. Use it to inform your answer.".to_owned()
     } else {
-        "No relevant memories found. Use other available tools to gather what you need.".to_owned()
+        "No relevant memories retrieved. If the goal needs external information, \
+         call a tool to fetch it; otherwise answer directly."
+            .to_owned()
     };
+    // F30: footer must not reintroduce the pre-fix four-phase workflow
+    // (see `build_system_prompt`'s design note). The decision rule is
+    // restated concisely so the user message echoes the system prompt
+    // instead of contradicting it.
     let footer = format!(
         "## Next step\n\
          {memory_hint}\n\
-         Decide your next action based on the workflow phases: \
-         Understand → Act → Verify → Complete.\n\
+         If you already have the answer, call complete_run now with the \
+         full answer in `description`. If you need external information, \
+         call the appropriate tool. Do not call introspection tools about \
+         this run itself.\n\
          Return a JSON action array."
     );
 

@@ -1963,6 +1963,22 @@ pub(crate) async fn orchestrate_run_handler(
     use cairn_runtime::services::{
         ApprovalServiceImpl, CheckpointServiceImpl, MailboxServiceImpl, ToolInvocationServiceImpl,
     };
+    // F30 (2026-04-24): introspection tools (`GetRunTool`, `GetTaskTool`,
+    // `GetApprovalsTool`, `ListRunsTool`, `SearchEventsTool`,
+    // `WaitForTaskTool`) are kept registered — they serve legitimate
+    // agent-task goals like "list every failed run from today" or "check
+    // the status of task I created earlier." Removing them outright
+    // would cripple system-aware prompts.
+    //
+    // The loop-exhaustion bug (dogfood run 1 evidence: 15 introspection
+    // calls per trivial prose prompt) is instead closed at the prompt
+    // layer: the system prompt now explicitly forbids calling
+    // introspection tools on THIS run itself (the goal, iteration
+    // number, and step history are already in the prompt), while still
+    // allowing them for genuinely system-aware tasks where the user's
+    // goal is to look at OTHER runs / tasks / approvals. See the F30
+    // design note in
+    // `crates/cairn-orchestrator/src/decide_impl.rs::build_system_prompt`.
     use cairn_tools::{
         BuiltinToolRegistry, CalculateTool, CancelTaskTool, CreateTaskTool, GetApprovalsTool,
         GetRunTool, GetTaskTool, GraphQueryTool, HttpRequestTool, JsonExtractTool, ListRunsTool,
