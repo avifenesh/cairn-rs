@@ -49,6 +49,27 @@ use crate::context::{
 use crate::error::OrchestratorError;
 use crate::execute::{ApprovedDispatch, ExecutePhase};
 
+// ── Unrecoverable-internal-failure marker (F35 review feedback) ─────────────
+//
+// Most `ActionStatus::Failed` reasons on an `InvokeTool` proposal are
+// recoverable tool errors (NOT_FOUND, InvalidArgs, PermissionDenied,
+// Timeout, upstream 5xx) that the LLM should see as tool_result feedback
+// and adapt to on the next DECIDE turn — see `derive_signal` / the
+// `LoopSignal::Continue` branch for the F35 contract.
+//
+// A small set of failures are *not* LLM-recoverable: they indicate
+// orchestrator-side misconfiguration or state corruption the model cannot
+// fix by picking a different tool or arg (e.g. the tool registry wasn't
+// wired at all — no tool choice will ever work). If we treated those the
+// same as recoverable errors, the run would burn iterations until
+// `max_iterations` before failing, producing noisy telemetry and charging
+// the operator for zero-signal LLM calls.
+//
+// The execute phase tags such reasons with this prefix; `derive_signal`
+// special-cases the prefix and promotes the result to `LoopSignal::Failed`
+// so the loop terminates fast with a clear operator-facing reason.
+pub(crate) const UNRECOVERABLE_INTERNAL_PREFIX: &str = "internal_unrecoverable: ";
+
 // ── RuntimeExecutePhase ───────────────────────────────────────────────────────
 
 /// Concrete `ExecutePhase` that routes `ActionProposal` variants through the
@@ -496,8 +517,7 @@ impl RuntimeExecutePhase {
             Some(r) => r,
             None => {
                 let reason = format!(
-                    "tool_registry not wired — cannot drain approved tool `{}`",
-                    tool_name
+                    "{UNRECOVERABLE_INTERNAL_PREFIX}tool_registry not wired — cannot drain approved tool `{tool_name}`"
                 );
                 self.tool_invocation_service
                     .record_failed(
@@ -968,8 +988,7 @@ impl RuntimeExecutePhase {
                         .map(|r| r.output)
                         .map_err(|e| e.to_string()),
                     None => Err(format!(
-                        "tool_registry not wired — cannot dispatch tool `{}`",
-                        tool_name
+                        "{UNRECOVERABLE_INTERNAL_PREFIX}tool_registry not wired — cannot dispatch tool `{tool_name}`"
                     )),
                 };
 
@@ -1576,8 +1595,18 @@ fn derive_signal(result: &ActionResult, current: &LoopSignal) -> LoopSignal {
         // F35: InvokeTool failures surface to the LLM as tool_result
         // feedback; the loop continues. Non-InvokeTool failures are
         // orchestrator-level and remain terminal.
+        //
+        // Exception (F35 review round 2 — Copilot): an InvokeTool
+        // failure tagged with `UNRECOVERABLE_INTERNAL_PREFIX`
+        // indicates orchestrator-side misconfiguration (e.g. tool
+        // registry not wired) that the LLM cannot recover from by
+        // picking a different tool / args. Those short-circuit to
+        // `LoopSignal::Failed` so the run fails fast instead of
+        // burning iterations on calls that will never succeed.
         ActionStatus::Failed { reason } => {
-            if result.proposal.action_type == ActionType::InvokeTool {
+            if result.proposal.action_type == ActionType::InvokeTool
+                && !reason.starts_with(UNRECOVERABLE_INTERNAL_PREFIX)
+            {
                 LoopSignal::Continue
             } else {
                 LoopSignal::Failed {
@@ -1774,6 +1803,50 @@ mod signal_aggregation_tests {
                 assert_eq!(child_task_id.as_str(), "child-1");
             }
             other => panic!("expected WaitSubagent, got {other:?}"),
+        }
+    }
+
+    /// F35 regression: a *recoverable* InvokeTool failure (NOT_FOUND,
+    /// InvalidArgs, etc.) must map to `LoopSignal::Continue` so the
+    /// error flows back to the LLM as tool_result feedback on the next
+    /// DECIDE turn. Pre-F35 this was `LoopSignal::Failed`, which
+    /// terminated the run on the first tool miss.
+    #[test]
+    fn derive_signal_keeps_loop_continuing_on_recoverable_tool_error() {
+        let failed = invoke_result(ActionStatus::Failed {
+            reason: "Error [NOT_FOUND]: File not found: /tmp/ghost.md".to_owned(),
+        });
+        let got = derive_signal(&failed, &LoopSignal::Continue);
+        assert!(
+            matches!(got, LoopSignal::Continue),
+            "expected Continue on recoverable tool error, got {got:?}"
+        );
+    }
+
+    /// F35 review round 2 (Copilot): an InvokeTool failure tagged with
+    /// `UNRECOVERABLE_INTERNAL_PREFIX` signals orchestrator-side
+    /// misconfiguration (e.g. tool registry not wired) that the LLM
+    /// cannot fix by picking a different tool or args. Those must
+    /// short-circuit to `LoopSignal::Failed` so the run fails fast
+    /// instead of burning iterations.
+    #[test]
+    fn derive_signal_escalates_unrecoverable_internal_tool_error() {
+        let failed = invoke_result(ActionStatus::Failed {
+            reason: format!(
+                "{}tool_registry not wired — cannot dispatch tool `read`",
+                super::UNRECOVERABLE_INTERNAL_PREFIX
+            ),
+        });
+        let got = derive_signal(&failed, &LoopSignal::Continue);
+        match got {
+            LoopSignal::Failed { reason } => {
+                assert!(
+                    reason.starts_with(super::UNRECOVERABLE_INTERNAL_PREFIX),
+                    "reason must carry the sentinel prefix through to loop termination \
+                     so the operator sees the misconfiguration tag; got {reason:?}"
+                );
+            }
+            other => panic!("expected Failed on unrecoverable-internal tool error, got {other:?}"),
         }
     }
 }

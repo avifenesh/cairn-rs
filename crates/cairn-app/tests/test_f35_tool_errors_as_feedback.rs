@@ -151,6 +151,28 @@ async fn setup_and_orchestrate(
     max_iterations: u32,
     suffix_prefix: &str,
 ) -> (u16, Value) {
+    // Use the built-in `default_*` triple for the HTTP requests.
+    //
+    // Copilot review on PR #295 suggested threading `h.tenant/workspace/
+    // project` here. That would be ideal, but the credential/connection
+    // endpoints reject requests against non-provisioned tenants with
+    // 404, and LiveHarness does NOT pre-provision its uuid-scoped
+    // triple — the cairn-app binary auto-creates only the canonical
+    // `default_*` triple on boot (see handlers/admin.rs DEFAULT_TENANT_ID).
+    //
+    // Isolation between concurrent tests is already preserved at two
+    // lower layers:
+    //   1. Each harness is its own cairn-app *subprocess* with its own
+    //      ephemeral port + its own in-memory cairn-store (so sessions
+    //      and runs never collide across tests).
+    //   2. The FF keyspace is hash-tagged per harness via the suffix
+    //      embedded into connection/session/run ids, which keeps Valkey
+    //      keys disjoint even when two tests share the same testcontainer.
+    //
+    // So using the shared `default_tenant` namespace here is safe — the
+    // layers that matter for cross-test pollution are the subprocess
+    // boundary + the per-harness suffix. F30's harness uses the same
+    // pattern for the same reason; see `test_f30_orchestrator_termination.rs`.
     let suffix = format!("{}_{}", suffix_prefix, h.project);
     let tenant = "default_tenant".to_owned();
     let workspace = "default_workspace".to_owned();
