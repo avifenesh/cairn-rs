@@ -207,8 +207,7 @@ async fn orchestrator_loop_emits_four_frames_in_per_iteration_order() {
         h.partition_config(),
     );
     let frames: Vec<StreamFrame> = cairn_fabric::stream::restore_frames(
-        &h.fabric.runtime.client,
-        h.partition_config(),
+        h.fabric.runtime.backend.as_ref(),
         &eid,
         flowfabric::core::types::AttemptIndex::new(0),
         100,

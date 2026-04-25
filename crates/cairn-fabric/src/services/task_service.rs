@@ -901,7 +901,7 @@ impl FabricTaskService {
                     })?;
                 crate::suspension::SuspensionParams {
                     reason_code: "waiting_for_signal".into(),
-                    condition_matchers: vec![flowfabric::sdk::task::ConditionMatcher {
+                    condition_matchers: vec![crate::suspension::ConditionMatcher {
                         signal_name: signal_name.to_owned(),
                     }],
                     timeout_ms: reason.resume_after_ms,
@@ -912,7 +912,7 @@ impl FabricTaskService {
                 let detail = reason.detail.as_deref().unwrap_or("policy");
                 crate::suspension::SuspensionParams {
                     reason_code: "paused_by_policy".into(),
-                    condition_matchers: vec![flowfabric::sdk::task::ConditionMatcher {
+                    condition_matchers: vec![crate::suspension::ConditionMatcher {
                         signal_name: format!("policy_resolved:{detail}"),
                     }],
                     timeout_ms: reason.resume_after_ms,
@@ -1083,13 +1083,12 @@ fn build_suspend_input(
     params: &crate::suspension::SuspensionParams,
     match_mode: &'static str,
 ) -> SuspendRunInput {
-    let timeout_behavior_str = match params.timeout_behavior {
-        flowfabric::sdk::task::TimeoutBehavior::Fail => "fail",
-        flowfabric::sdk::task::TimeoutBehavior::Cancel => "cancel",
-        flowfabric::sdk::task::TimeoutBehavior::Expire => "expire",
-        flowfabric::sdk::task::TimeoutBehavior::AutoResume => "auto_resume_with_timeout_signal",
-        flowfabric::sdk::task::TimeoutBehavior::Escalate => "escalate",
-    };
+    // FF 0.9 (RFC-013) added `TimeoutBehavior::as_wire_str()`; cairn's
+    // Lua FCALL args consume this wire form directly. This also
+    // handles the `#[non_exhaustive]` enum contract — a new variant
+    // added upstream routes through `as_wire_str` without a cairn
+    // code change.
+    let timeout_behavior_str = params.timeout_behavior.as_wire_str();
 
     let required_names: Vec<&str> = params
         .condition_matchers

@@ -1,12 +1,14 @@
 use std::sync::Arc;
 
 use ferriskey::Client;
-use flowfabric::valkey::ValkeyBackend;
 use flowfabric::core::backend::{ScannerFilter, ValkeyConnection};
+use flowfabric::core::capability::CapabilityMatrix;
 use flowfabric::core::completion_backend::CompletionBackend;
-use flowfabric::core::keys::IndexKeys;
-use flowfabric::core::partition::{Partition, PartitionConfig, PartitionFamily};
+use flowfabric::core::contracts::SeedWaitpointHmacSecretArgs;
+use flowfabric::core::engine_backend::EngineBackend;
+use flowfabric::core::partition::PartitionConfig;
 use flowfabric::engine::{Engine, EngineConfig};
+use flowfabric::valkey::ValkeyBackend;
 
 use crate::config::FabricConfig;
 use crate::error::FabricError;
@@ -24,6 +26,18 @@ pub struct FabricRuntime {
     /// lets cairn-app append FF's Prometheus text to its `/metrics`
     /// response without threading a second handle through startup.
     pub ff_metrics: Arc<ff_observability::Metrics>,
+    /// FF 0.9 (FF#277) capability matrix snapshot, computed once at
+    /// boot and cached. Consumers inspect this to grey-render features
+    /// a backend does not support without round-tripping into Valkey.
+    /// CG-a wires the startup call + getter; CJ-2 consumes it from the
+    /// UI greyrender.
+    pub capabilities: CapabilityMatrix,
+    /// Typed handle to the backend. Held for the post-boot surface
+    /// (`restore_frames` stream reads, etc.) that now takes
+    /// `&dyn EngineBackend`. Kept alongside the raw `client` for CG-a
+    /// — CG-b drops the raw client once `subscribe_lease_history` is
+    /// trait-based (FF#282).
+    pub backend: Arc<dyn EngineBackend>,
 }
 
 const CONNECT_MAX_ATTEMPTS: u32 = 3;
@@ -75,34 +89,6 @@ impl FabricRuntime {
         // `version_check` module docs for the full rationale.
         crate::version_check::verify_valkey_version(&client).await?;
 
-        let mut lib_loaded = false;
-        for attempt in 0..CONNECT_MAX_ATTEMPTS {
-            match flowfabric::script::loader::ensure_library(&client).await {
-                Ok(()) => {
-                    lib_loaded = true;
-                    break;
-                }
-                Err(e) => {
-                    let msg = e.to_string();
-                    if attempt + 1 < CONNECT_MAX_ATTEMPTS {
-                        let backoff = 500 * (1 << attempt);
-                        tracing::warn!(
-                            attempt = attempt + 1,
-                            error = %msg,
-                            backoff_ms = backoff,
-                            "ensure_library failed, retrying"
-                        );
-                        tokio::time::sleep(std::time::Duration::from_millis(backoff)).await;
-                    } else {
-                        return Err(FabricError::Valkey(format!("script load: {msg}")));
-                    }
-                }
-            }
-        }
-        if !lib_loaded {
-            return Err(FabricError::Valkey("script load: retries exhausted".into()));
-        }
-
         let partition_config = PartitionConfig::default();
 
         // PERF#5/#6: operators need to see the partition counts on boot
@@ -118,13 +104,6 @@ impl FabricRuntime {
              64→256 in RFC-011; ExecutionId stability depends on keeping \
              this count fixed across the cluster lifetime)"
         );
-
-        // Seed the waitpoint HMAC secret BEFORE Engine::start so any
-        // suspend-path FCALL the engine scanners trigger finds an
-        // initialized secrets hash. Idempotent: re-running boot with the
-        // same secret is safe; HSETs are per-partition hash-tagged so no
-        // CROSSSLOT risk under cluster.
-        seed_waitpoint_hmac_secret_if_configured(&client, &config, &partition_config).await?;
 
         // Build the per-consumer `ScannerFilter` (FF PR #127 / issue #122).
         //
@@ -182,6 +161,53 @@ impl FabricRuntime {
             valkey_conn,
         );
 
+        // FF 0.9 (FF#281): backend.prepare() replaces the hand-rolled
+        // `ff_script::loader::ensure_library` retry loop. The Valkey
+        // impl runs FUNCTION LOAD REPLACE and is idempotent — safe to
+        // call on every boot. Fails loud with EngineError::Backend on
+        // transport errors; cairn propagates as FabricError::Engine.
+        let prepare_outcome = backend
+            .prepare()
+            .await
+            .map_err(|e| FabricError::Engine(e))?;
+        tracing::info!(outcome = ?prepare_outcome, "backend prepared (FF#281)");
+
+        // FF 0.9 (FF#280): seed the waitpoint HMAC secret via the
+        // trait method. Replaces cairn's per-partition HSET loop.
+        // Idempotent upstream — operators can call it every boot and
+        // observe `SeedOutcome::AlreadySeeded` after the first.
+        let (secret, kid) = match (
+            config.waitpoint_hmac_secret.as_deref(),
+            config.resolved_waitpoint_hmac_kid(),
+        ) {
+            (Some(s), Some(k)) => (s, k),
+            _ => {
+                return Err(FabricError::Config(
+                    "CAIRN_FABRIC_WAITPOINT_HMAC_SECRET is required — boot refuses \
+                     to ship a runtime that would reject every ff_suspend_execution \
+                     with hmac_secret_not_initialized. Set the secret (64 hex chars) \
+                     plus CAIRN_FABRIC_WAITPOINT_HMAC_KID."
+                        .to_owned(),
+                ));
+            }
+        };
+        let seed_outcome = backend
+            .seed_waitpoint_hmac_secret(SeedWaitpointHmacSecretArgs::new(kid, secret))
+            .await
+            .map_err(|e| FabricError::Engine(e))?;
+        tracing::info!(kid = %kid, outcome = ?seed_outcome, "waitpoint HMAC secret seeded (FF#280)");
+
+        // FF 0.9 (FF#277): snapshot the backend's capability matrix
+        // once at boot so consumers (cairn-app `/v1/status`, UI
+        // grey-rendering) can reason about backend-parity gaps without
+        // per-request RTT. CJ-2 consumes this via AppState.
+        let capabilities = backend.capabilities_matrix();
+        tracing::info!(
+            backend = %capabilities.identity.family,
+            version = ?capabilities.identity.version,
+            "backend capabilities captured (FF#277)"
+        );
+
         // Open the filtered completion stream. The backend applies the
         // filter at push time (one HGET on the exec's tags hash per
         // frame when `instance_tag` is set), so foreign completions
@@ -221,13 +247,34 @@ impl FabricRuntime {
         );
         tracing::info!("fabric runtime started");
 
+        // `ValkeyBackend::from_client_partitions_and_connection` returns
+        // an `Arc<ValkeyBackend>`; coerce to the trait object so the
+        // post-boot surface (`restore_frames`, future trait-consumers
+        // from CG-b) holds a stable dyn-compatible handle.
+        let backend: Arc<dyn EngineBackend> = backend;
+
         Ok(Self {
             client,
             engine,
             partition_config,
             config: Arc::new(config),
             ff_metrics,
+            capabilities,
+            backend,
         })
+    }
+
+    /// Expose the cached capability matrix. Stable snapshot captured at
+    /// boot; callers MUST treat it as read-only (FF#277).
+    pub fn capabilities(&self) -> &CapabilityMatrix {
+        &self.capabilities
+    }
+
+    /// Expose the backend handle for post-boot consumers that need the
+    /// typed trait surface (stream reads, future lease-history
+    /// subscriber in CG-b).
+    pub fn backend(&self) -> &Arc<dyn EngineBackend> {
+        &self.backend
     }
 
     pub async fn fcall(
@@ -267,63 +314,7 @@ impl FabricRuntime {
     }
 }
 
-/// Seed the waitpoint HMAC secret across every execution partition.
-/// Fails loud if `config.waitpoint_hmac_secret` is `None` — production
-/// can't ship without it because every `ff_suspend_execution` would
-/// reject with `hmac_secret_not_initialized`.
-///
-/// Hash layout per partition:
-///   HSET waitpoint_hmac_secrets:{p:N} current_kid <kid>
-///   HSET waitpoint_hmac_secrets:{p:N} secret:<kid> <secret_hex>
-///
-/// Idempotent on re-run with the same secret. **Not** a live rotation —
-/// use FF's `rotate_waitpoint_hmac_secret` for that.
-async fn seed_waitpoint_hmac_secret_if_configured(
-    client: &Client,
-    config: &FabricConfig,
-    partition_config: &PartitionConfig,
-) -> Result<(), FabricError> {
-    let (secret, kid) = match (
-        config.waitpoint_hmac_secret.as_deref(),
-        config.resolved_waitpoint_hmac_kid(),
-    ) {
-        (Some(s), Some(k)) => (s, k),
-        _ => {
-            return Err(FabricError::Config(
-                "CAIRN_FABRIC_WAITPOINT_HMAC_SECRET is required — boot refuses \
-                 to ship a runtime that would reject every ff_suspend_execution \
-                 with hmac_secret_not_initialized. Set the secret (64 hex chars) \
-                 plus CAIRN_FABRIC_WAITPOINT_HMAC_KID."
-                    .to_owned(),
-            ));
-        }
-    };
-
-    let num_partitions = partition_config.num_flow_partitions;
-    let secret_field = format!("secret:{kid}");
-
-    for index in 0..num_partitions {
-        let partition = Partition {
-            family: PartitionFamily::Execution,
-            index,
-        };
-        let key = IndexKeys::new(&partition).waitpoint_hmac_secrets();
-
-        let _: i64 = client.hset(&key, "current_kid", kid).await.map_err(|e| {
-            FabricError::Valkey(format!("HSET current_kid on partition {index}: {e}"))
-        })?;
-        let _: i64 = client
-            .hset(&key, &secret_field, secret)
-            .await
-            .map_err(|e| {
-                FabricError::Valkey(format!("HSET {secret_field} on partition {index}: {e}"))
-            })?;
-    }
-
-    tracing::info!(
-        kid = %kid,
-        partitions = num_partitions,
-        "seeded waitpoint HMAC secret"
-    );
-    Ok(())
-}
+// FF 0.9 (FF#280) adopted: `seed_waitpoint_hmac_secret_if_configured`
+// (~45 LOC of per-partition HSET loops) was deleted in favour of
+// `EngineBackend::seed_waitpoint_hmac_secret`. Call site lives in
+// `FabricRuntime::start` above.

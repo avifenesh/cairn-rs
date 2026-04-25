@@ -1347,6 +1347,11 @@ fn map_report_usage_result(r: ReportUsageResult) -> BudgetSpendOutcome {
             current_usage,
             hard_limit,
         },
+        // `ReportUsageResult` is `#[non_exhaustive]`. All known FF 0.9
+        // variants are handled above; a new variant added upstream
+        // (e.g. RFC-015 quota-scoped breach) should fail loud so cairn
+        // audits the mapping rather than silently dropping the result.
+        other => panic!("unhandled ReportUsageResult variant (post-FF-0.9 addition): {other:?}"),
     }
 }
 

@@ -141,10 +141,11 @@ async fn test_checkpoint_restore_reads_frames() {
         );
     }
 
-    // Restore — this is the API under test.
+    // Restore — this is the API under test. FF 0.9 (FF#281 + trait-
+    // stream surface) consolidated the (client, partition_config) pair
+    // into a single `&dyn EngineBackend` — the backend holds both.
     let frames = restore_frames(
-        &h.fabric.runtime.client,
-        &h.fabric.runtime.partition_config,
+        h.fabric.runtime.backend.as_ref(),
         &eid,
         attempt_index,
         STREAM_READ_HARD_CAP,

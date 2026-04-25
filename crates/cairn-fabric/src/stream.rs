@@ -1,5 +1,5 @@
 use flowfabric::core::contracts::StreamFrame;
-use flowfabric::core::partition::PartitionConfig;
+use flowfabric::core::engine_backend::EngineBackend;
 use flowfabric::core::types::{AttemptIndex, ExecutionId};
 use flowfabric::sdk::task::{read_stream, AppendFrameOutcome, ClaimedTask, StreamCursor};
 
@@ -35,19 +35,18 @@ pub const FRAME_CHECKPOINT: &str = "checkpoint";
 /// (recovery, replay) and infrequent enough that the head-of-line cost is
 /// acceptable. Raise the concern again if restore goes on any hot path.
 pub async fn restore_frames(
-    client: &ferriskey::Client,
-    partition_config: &PartitionConfig,
+    backend: &dyn EngineBackend,
     execution_id: &ExecutionId,
     attempt_index: AttemptIndex,
     count_limit: u64,
 ) -> Result<Vec<StreamFrame>, FabricError> {
-    // FF 0.3.1 replaced the `&str` XRANGE markers with a typed
-    // `StreamCursor` enum at the adapter edge (ff-core#contracts).
-    // `Start` / `End` are the `-` / `+` equivalents — full-range read
-    // behavior unchanged.
+    // FF 0.9 (FF#281 + RFC-012 stream surface) collapsed the old
+    // `(client, partition_config)` pair into a single
+    // `&dyn EngineBackend` — the backend owns both the transport client
+    // and the partition routing. Cursor shape is unchanged: `Start`
+    // / `End` are the `-` / `+` XRANGE markers, full-range read.
     let result = read_stream(
-        client,
-        partition_config,
+        backend,
         execution_id,
         attempt_index,
         StreamCursor::Start,

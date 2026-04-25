@@ -1,3 +1,4 @@
+use flowfabric::core::engine_error::{BackendError, EngineError};
 use flowfabric::script::ScriptError;
 
 #[derive(Debug, thiserror::Error)]
@@ -6,6 +7,18 @@ pub enum FabricError {
     Valkey(String),
     #[error("script: {0}")]
     Script(#[from] ScriptError),
+    /// FF 0.9 typed backend-transport error (FF#277 adoption). Preferred
+    /// over stringly-typed `FabricError::Valkey` for new call sites.
+    /// CG-a introduces the variant + `#[from]`; existing string-based
+    /// errors stay until CH collapses the full error surface.
+    #[error("backend: {0}")]
+    Backend(#[from] BackendError),
+    /// FF 0.9 typed engine-layer error (FF#277 adoption). `prepare()`,
+    /// `seed_waitpoint_hmac_secret`, `capabilities_matrix`, and
+    /// long-term every `EngineBackend` trait method surface this
+    /// variant. CH migrates per-variant string classifiers.
+    #[error("engine: {0}")]
+    Engine(#[from] EngineError),
     #[error("config: {0}")]
     Config(String),
     #[error("bridge: {0}")]
