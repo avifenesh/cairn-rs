@@ -167,6 +167,12 @@ fn assert_list_and_detail_agree(list_body: &Value, detail_body: &Value, run_id: 
     let list_run = find_run(list_body, run_id);
     let detail = detail_run(detail_body);
 
+    // `serde_json::Value::Index` coerces missing keys to `Value::Null`, so a
+    // handler that silently dropped a field would still pass an
+    // `[field] == [field]` comparison (both Null). Use `.get()` and fail
+    // loud on absence — fields whose JSON value is legitimately `null`
+    // (e.g. `failure_class` on a pending run) still have the key present,
+    // so this distinguishes "null value" (OK) from "key missing" (regression).
     for field in [
         "run_id",
         "session_id",
@@ -177,8 +183,14 @@ fn assert_list_and_detail_agree(list_body: &Value, detail_body: &Value, run_id: 
         "resume_trigger",
         "updated_at",
     ] {
+        let list_value = list_run.get(field).unwrap_or_else(|| {
+            panic!("list payload missing field `{field}` for run {run_id}\n  list  = {list_run}")
+        });
+        let detail_value = detail.get(field).unwrap_or_else(|| {
+            panic!("detail payload missing field `{field}` for run {run_id}\n  detail= {detail}")
+        });
         assert_eq!(
-            list_run[field], detail[field],
+            list_value, detail_value,
             "field `{field}` diverged between list and detail for run {run_id}\n  list  = {list_run}\n  detail= {detail}",
         );
     }
