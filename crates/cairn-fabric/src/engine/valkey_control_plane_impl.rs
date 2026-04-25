@@ -517,6 +517,7 @@ impl ControlPlaneBackend for ValkeyEngine {
             &input.lease.lease_id,
             &input.lease.lease_epoch,
             &input.lease.attempt_id,
+            &input.lease.source,
         );
         let key_refs: Vec<&str> = keys.iter().map(|s| s.as_str()).collect();
         let arg_refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
@@ -565,6 +566,7 @@ impl ControlPlaneBackend for ValkeyEngine {
             &input.reason,
             &input.category,
             &retry_policy_json,
+            &input.lease.source,
         );
         let key_refs: Vec<&str> = keys.iter().map(|s| s.as_str()).collect();
         let arg_refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();

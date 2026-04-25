@@ -90,10 +90,27 @@ impl FabricRunService {
 
     /// Resolve the lease / attempt context needed by lifecycle FCALLs.
     ///
-    /// Fills in "cairn" defaults for lane_id / worker_instance_id when
-    /// FF hasn't stamped them yet (early-lifecycle runs that haven't
-    /// been claimed). Matches the pre-migration behaviour of the
-    /// direct `HGETALL exec_core` reads.
+    /// Two coherent shapes per RFC #58.5 (`resolve_lease_fence` in
+    /// `flowfabric.lua`):
+    ///
+    /// * **Active lease** — `snapshot.current_lease = Some(_)`:
+    ///   populate all three fence tokens (`lease_id`, `lease_epoch`,
+    ///   `attempt_id`) from the lease + current attempt. Leave `source`
+    ///   empty so FF validates the caller against the stored lease.
+    /// * **No active lease** (claim never happened, lease expired, or
+    ///   `current_lease_id` cleared by a prior lease release) — emit
+    ///   **all three fence tokens empty** and set
+    ///   `source = "operator_override"`. Any *mix* of set/empty triggers
+    ///   FF's `partial_fence_triple` rejection, which surfaces to the
+    ///   user as an opaque `fabric layer error` (F37).
+    ///
+    /// Cairn is the sole authoritative writer of run-execution lifecycle
+    /// events — the orchestrator owns the run end-to-end and no other
+    /// process can legitimately complete/fail a cairn run — so the
+    /// unfenced `operator_override` path is safe here. FF still
+    /// validates the execution is in an active lifecycle phase via
+    /// `validate_lease_and_mark_expired`, which catches the real
+    /// conflict cases (terminal, revoked, double-completion).
     fn resolve_lease_context(&self, snapshot: &ExecutionSnapshot) -> ExecutionLeaseContext {
         let lane_id = if snapshot.lane_id.as_str().is_empty() {
             LaneId::new("cairn")
@@ -105,34 +122,47 @@ impl FabricRunService {
             .as_ref()
             .map(|a| a.index)
             .unwrap_or_else(|| ff_core::types::AttemptIndex::new(0));
-        let attempt_id = snapshot
-            .current_attempt
-            .as_ref()
-            .map(|a| a.id.to_string())
-            .unwrap_or_default();
-        let (lease_id, lease_epoch, worker_instance_id) = match &snapshot.current_lease {
-            Some(l) => (
-                l.lease_id.to_string(),
-                l.epoch.0.to_string(),
-                ff_core::types::WorkerInstanceId::new(l.owner.as_str()),
-            ),
-            None => (
-                String::new(),
-                snapshot
-                    .current_lease_epoch
-                    .map(|e| e.0.to_string())
-                    .unwrap_or_else(|| "1".to_owned()),
-                ff_core::types::WorkerInstanceId::new("cairn"),
-            ),
-        };
-        ExecutionLeaseContext {
-            lane_id,
-            attempt_index,
-            lease_id,
-            lease_epoch,
-            attempt_id,
-            worker_instance_id,
+
+        match &snapshot.current_lease {
+            Some(l) => {
+                // Active lease path. attempt_id MUST come from the live
+                // lease's backing attempt; if `current_attempt` is
+                // somehow absent when a lease exists, fall back to the
+                // unfenced path rather than ship a partial triple.
+                match snapshot.current_attempt.as_ref() {
+                    Some(att) => ExecutionLeaseContext {
+                        lane_id,
+                        attempt_index,
+                        lease_id: l.lease_id.to_string(),
+                        lease_epoch: l.epoch.0.to_string(),
+                        attempt_id: att.id.to_string(),
+                        worker_instance_id: ff_core::types::WorkerInstanceId::new(l.owner.as_str()),
+                        source: String::new(),
+                    },
+                    None => unfenced_context(lane_id, attempt_index),
+                }
+            }
+            None => unfenced_context(lane_id, attempt_index),
         }
+    }
+}
+
+/// Build the unfenced (all-tokens-empty + `source="operator_override"`)
+/// lease context used when the execution has no active lease. See
+/// [`FabricRunService::resolve_lease_context`] for the fence-triple
+/// invariant this enforces.
+fn unfenced_context(
+    lane_id: LaneId,
+    attempt_index: ff_core::types::AttemptIndex,
+) -> ExecutionLeaseContext {
+    ExecutionLeaseContext {
+        lane_id,
+        attempt_index,
+        lease_id: String::new(),
+        lease_epoch: String::new(),
+        attempt_id: String::new(),
+        worker_instance_id: ff_core::types::WorkerInstanceId::new("cairn"),
+        source: "operator_override".to_owned(),
     }
 }
 

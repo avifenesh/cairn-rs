@@ -186,6 +186,26 @@ pub struct ClaimGrantOutcome {
 /// Snapshot fields a lifecycle FCALL needs (lease triple + attempt
 /// pointer + lane + worker identity). Populated by the service from
 /// an `ExecutionSnapshot` before the FCALL.
+///
+/// # Fence-triple invariant (RFC #58.5)
+///
+/// FF's terminal FCALLs (`ff_complete_execution`, `ff_fail_execution`)
+/// accept the `(lease_id, lease_epoch, attempt_id)` tokens only in two
+/// shapes:
+///
+/// * **All three set** → FF validates the caller against the stored
+///   lease. Normal happy path — claim is still live.
+/// * **All three empty** → FF resolves the fence server-side from
+///   `exec_core` and proceeds only when `source == "operator_override"`.
+///   Used when the lease has expired or the caller is the authoritative
+///   writer (cairn's orchestrator on the completion path).
+///
+/// Any *partial* triple (e.g. empty `lease_id` + set `lease_epoch`) is
+/// rejected with `partial_fence_triple`. `resolve_lease_context` in
+/// `run_service.rs` is the sole builder of this struct and enforces the
+/// invariant: either all three are populated from a live
+/// `current_lease`, or all three are cleared and `source` is set to
+/// `"operator_override"` so FF accepts the unfenced path.
 #[derive(Clone, Debug)]
 pub struct ExecutionLeaseContext {
     pub lane_id: ff_core::types::LaneId,
@@ -194,6 +214,10 @@ pub struct ExecutionLeaseContext {
     pub lease_epoch: String,
     pub attempt_id: String,
     pub worker_instance_id: ff_core::types::WorkerInstanceId,
+    /// `source` ARGV for terminal FCALLs. `"operator_override"` when the
+    /// fence triple is empty (unfenced mode); empty string when the
+    /// triple is fully populated (FF validates normally).
+    pub source: String,
 }
 
 /// Input to `create_run_execution`.
