@@ -198,19 +198,14 @@ async fn list_and_detail_agree_on_pending_state() {
 
     let (list_status, list_body) = http_get(
         router.clone(),
-        &format!(
-            "/v1/runs?tenant_id={TENANT}&workspace_id={WORKSPACE}&project_id={PROJECT}"
-        ),
+        &format!("/v1/runs?tenant_id={TENANT}&workspace_id={WORKSPACE}&project_id={PROJECT}"),
     )
     .await;
     assert_eq!(list_status, StatusCode::OK, "list 200: {list_body}");
 
     let (detail_status, detail_body) =
         http_get(router.clone(), &format!("/v1/runs/{run_id}")).await;
-    assert_eq!(
-        detail_status, StatusCode::OK,
-        "detail 200: {detail_body}"
-    );
+    assert_eq!(detail_status, StatusCode::OK, "detail 200: {detail_body}");
 
     // Pre-fix baseline: both report pending, version=1.
     let list_run = find_run(&list_body, run_id);
@@ -261,9 +256,7 @@ async fn list_and_detail_agree_through_full_lifecycle() {
 
     let (_, list_body) = http_get(
         router.clone(),
-        &format!(
-            "/v1/runs?tenant_id={TENANT}&workspace_id={WORKSPACE}&project_id={PROJECT}"
-        ),
+        &format!("/v1/runs?tenant_id={TENANT}&workspace_id={WORKSPACE}&project_id={PROJECT}"),
     )
     .await;
     let (_, detail_body) = http_get(router.clone(), &format!("/v1/runs/{run_id}")).await;
@@ -288,9 +281,7 @@ async fn list_and_detail_agree_through_full_lifecycle() {
 
     let (_, list_body) = http_get(
         router.clone(),
-        &format!(
-            "/v1/runs?tenant_id={TENANT}&workspace_id={WORKSPACE}&project_id={PROJECT}"
-        ),
+        &format!("/v1/runs?tenant_id={TENANT}&workspace_id={WORKSPACE}&project_id={PROJECT}"),
     )
     .await;
     let (_, detail_body) = http_get(router.clone(), &format!("/v1/runs/{run_id}")).await;
@@ -331,9 +322,7 @@ async fn list_and_detail_agree_on_failed_run_with_failure_class() {
 
     let (list_status, list_body) = http_get(
         router.clone(),
-        &format!(
-            "/v1/runs?tenant_id={TENANT}&workspace_id={WORKSPACE}&project_id={PROJECT}"
-        ),
+        &format!("/v1/runs?tenant_id={TENANT}&workspace_id={WORKSPACE}&project_id={PROJECT}"),
     )
     .await;
     assert_eq!(list_status, StatusCode::OK);
@@ -379,9 +368,7 @@ async fn list_and_detail_agree_on_canceled_run() {
 
     let (_, list_body) = http_get(
         router.clone(),
-        &format!(
-            "/v1/runs?tenant_id={TENANT}&workspace_id={WORKSPACE}&project_id={PROJECT}"
-        ),
+        &format!("/v1/runs?tenant_id={TENANT}&workspace_id={WORKSPACE}&project_id={PROJECT}"),
     )
     .await;
     let (_, detail_body) = http_get(router.clone(), &format!("/v1/runs/{run_id}")).await;
