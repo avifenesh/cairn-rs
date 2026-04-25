@@ -22,7 +22,7 @@
 //! The model saw the schema on every turn and still picked introspection
 //! tools. Root cause hypothesis: GLM-4.7's tool-use fine-tuning biases
 //! heavily toward research tools once the loop is running, and an
-//! agressively-worded description in the schema is not enough to
+//! aggressively-worded description in the schema is not enough to
 //! override that prior.
 //!
 //! # Fix (F38)
@@ -91,8 +91,12 @@ struct MockState {
 /// handler verifies the directive is actually present before returning
 /// a terminal response — otherwise the test would pass even if the
 /// nudge were never wired in.
-async fn spawn_mock() -> (String, Arc<AtomicUsize>, Arc<Mutex<Vec<Value>>>, Arc<Mutex<Vec<String>>>)
-{
+async fn spawn_mock() -> (
+    String,
+    Arc<AtomicUsize>,
+    Arc<Mutex<Vec<Value>>>,
+    Arc<Mutex<Vec<String>>>,
+) {
     let state = MockState {
         hits: Arc::new(AtomicUsize::new(0)),
         captured_tools: Arc::new(Mutex::new(Vec::new())),
@@ -222,7 +226,12 @@ async fn spawn_mock() -> (String, Arc<AtomicUsize>, Arc<Mutex<Vec<Value>>>, Arc<
         axum::serve(listener, app).await.unwrap();
     });
     tokio::time::sleep(std::time::Duration::from_millis(25)).await;
-    (format!("http://{addr}"), hits, captured_tools, captured_user)
+    (
+        format!("http://{addr}"),
+        hits,
+        captured_tools,
+        captured_user,
+    )
 }
 
 /// Provision credential + connection + defaults + session + run, then
@@ -531,6 +540,44 @@ fn stuck_nudge_predicate_and_wording_match_contract() {
     // At threshold but EMPTY history (e.g. resume-mid-run edge case) →
     // no nudge, because there's nothing to nudge against.
     assert!(!should_inject_stuck_nudge_for_tests(3, &[]));
+
+    // At threshold but history too short to fill the window (e.g. we
+    // jumped past `iteration = 3` via resume or checkpoint replay but
+    // the loop only appended a couple of fresh steps so far). No
+    // nudge until we have enough recent signal to confirm the
+    // introspection pattern.
+    assert!(!should_inject_stuck_nudge_for_tests(
+        3,
+        &[make_step("invoke_tool"), make_step("invoke_tool")]
+    ));
+
+    // Tail is all `compacted_summary` (RFC 018 post-compaction state)
+    // with no real tool invocations — not stuck, just context-pruned.
+    // We require at least one `invoke_tool` in the window so a
+    // compacted run doesn't falsely trip the nudge.
+    assert!(!should_inject_stuck_nudge_for_tests(
+        5,
+        &[
+            make_step("compacted_summary"),
+            make_step("compacted_summary"),
+            make_step("compacted_summary"),
+        ]
+    ));
+
+    // Introspection streak AFTER a `complete_run` somewhere in the
+    // distant past: the tail window is recent, so the earlier
+    // terminal does NOT exempt the tail. This is the long-running
+    // multi-phase-run shape — e.g. a run that completed once, was
+    // extended, and has now drifted into another stuck streak.
+    assert!(should_inject_stuck_nudge_for_tests(
+        10,
+        &[
+            make_step("complete_run"),
+            make_step("invoke_tool"),
+            make_step("invoke_tool"),
+            make_step("invoke_tool"),
+        ]
+    ));
 
     // Wording: the header must be the exact literal the integration
     // test greps for, and the suffix must urge `complete_run` by name.
