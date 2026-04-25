@@ -124,10 +124,18 @@ async fn http_get(app: Router, uri: &str) -> (StatusCode, Value) {
     // and keeps the test from DoSing itself if a handler ever regresses into
     // unbounded output.
     let bytes = to_bytes(res.into_body(), 10 * 1024 * 1024).await.unwrap();
+    // Fail loud on malformed JSON rather than silently coercing to Null —
+    // a Null-coerced body produces cryptic downstream panics
+    // ("missing items: null") that hide the real regression.
     let json = if bytes.is_empty() {
         Value::Null
     } else {
-        serde_json::from_slice(&bytes).unwrap_or(Value::Null)
+        serde_json::from_slice(&bytes).unwrap_or_else(|err| {
+            panic!(
+                "response body is not valid JSON: {err}\nbody = {}",
+                String::from_utf8_lossy(&bytes)
+            )
+        })
     };
     (status, json)
 }
