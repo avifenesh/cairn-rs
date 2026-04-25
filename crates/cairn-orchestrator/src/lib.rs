@@ -66,7 +66,10 @@ pub use execute_impl::RuntimeExecutePhase;
 /// integration tests (e.g. `cairn-app` F30 termination test) can
 /// snapshot the prompt without us having to export the builder itself.
 ///
-/// Not part of the stable public API — treat as internal.
+/// Gated behind the `test-hooks` Cargo feature so production builds do
+/// not expose internal prompt APIs as a stable surface. Test crates
+/// opt in with `cairn-orchestrator = { …, features = ["test-hooks"] }`.
+#[cfg(feature = "test-hooks")]
 #[doc(hidden)]
 pub mod decide_impl_test_hooks {
     use crate::context::{GatherOutput, OrchestrationContext};

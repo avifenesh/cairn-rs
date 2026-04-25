@@ -436,8 +436,10 @@ impl DecidePhase for LlmDecidePhase {
 /// Uses `default_roles()` to look up the canonical system-prompt fragment for
 /// the matching role.  Falls back to a generic orchestrator prompt if the role
 /// is not registered.
-/// Public wrapper for cross-crate regression tests. See
-/// `crate::decide_impl_test_hooks`. Not part of the stable API.
+/// Public wrapper for cross-crate regression tests. Gated behind the
+/// `test-hooks` Cargo feature so this symbol is absent from production
+/// builds. See `crate::decide_impl_test_hooks`.
+#[cfg(feature = "test-hooks")]
 #[doc(hidden)]
 pub fn build_system_prompt_pub(
     agent_type: &str,
@@ -447,8 +449,10 @@ pub fn build_system_prompt_pub(
     build_system_prompt(agent_type, tools, native_tools_enabled)
 }
 
-/// Public wrapper for cross-crate regression tests. See
-/// `crate::decide_impl_test_hooks`. Not part of the stable API.
+/// Public wrapper for cross-crate regression tests. Gated behind the
+/// `test-hooks` Cargo feature so this symbol is absent from production
+/// builds. See `crate::decide_impl_test_hooks`.
+#[cfg(feature = "test-hooks")]
 #[doc(hidden)]
 pub fn build_user_message_pub(
     ctx: &OrchestrationContext,
@@ -539,7 +543,10 @@ When no tool call is needed (completing, escalating, recording memory,
 spawning a sub-agent, notifying), respond with ONLY a JSON array of
 action objects — no prose, no markdown fences — with fields:
 - "action_type": one of "invoke_tool"|"complete_run"|"create_memory"|"spawn_subagent"|"send_notification"|"escalate_to_operator"
-- "description": concise explanation (for complete_run: a summary of what was accomplished)
+- "description": concise explanation for most actions; for complete_run,
+                 the FULL user-facing answer (prose, bullets, whatever the
+                 user asked for) — this is what the user sees as the run's
+                 final output.
 - "confidence": float 0.0-1.0
 - "requires_approval": boolean
 - "tool_name" (for invoke_tool/spawn_subagent): tool ID or sub-agent role
@@ -549,7 +556,9 @@ Field conventions:
 - invoke_tool:    ONLY as a text-channel fallback when native tool
                   calling is unavailable or failed; tool_name = tool ID,
                   tool_args = {...}. Prefer native tool calls.
-- complete_run:   description = summary of what was accomplished
+- complete_run:   description = the full user-facing answer. NOT a meta-
+                  summary like "answered the user's question." Write it
+                  for the user to read.
 - spawn_subagent: tool_name = role,  tool_args = {"goal": "..."}
 - create_memory:  tool_args = {"content": "..."}"#
             .to_owned()
@@ -558,7 +567,10 @@ Field conventions:
             "## Response format\n\
              Respond ONLY with a JSON array of action objects. Each object MUST have:\n\
              - \"action_type\": one of {action_types}\n\
-             - \"description\": concise explanation\n\
+             - \"description\": concise explanation for most actions; for \
+               complete_run, the FULL user-facing answer (prose, bullets, \
+               whatever the user asked for). The user sees this verbatim as \
+               the run's final output — write it for them to read.\n\
              - \"confidence\": float 0.0–1.0\n\
              - \"requires_approval\": boolean\n\
              - \"tool_name\" (for invoke_tool/spawn_subagent): tool ID or sub-agent role\n\
@@ -566,7 +578,8 @@ Field conventions:
              \n\
              Field conventions:\n\
              - invoke_tool:    tool_name = tool ID,  tool_args = {{...}}\n\
-             - complete_run:   description = summary of what was accomplished\n\
+             - complete_run:   description = the full user-facing answer \
+               (not a meta-summary like \"answered the user's question\")\n\
              - spawn_subagent: tool_name = role,  tool_args = {{\"goal\": \"...\"}}\n\
              - create_memory:  tool_args = {{\"content\": \"...\"}}\n\
              \n\

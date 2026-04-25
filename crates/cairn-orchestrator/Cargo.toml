@@ -3,6 +3,13 @@ name = "cairn-orchestrator"
 version = "0.1.0"
 edition = "2021"
 
+[features]
+# Expose the F30 regression-test hooks (`decide_impl_test_hooks`) so
+# cross-crate integration tests can reach crate-private prompt
+# builders. Never enable on production builds — see
+# `src/lib.rs::decide_impl_test_hooks` for the rationale.
+test-hooks = []
+
 [dependencies]
 cairn-domain   = { path = "../cairn-domain" }
 cairn-store    = { path = "../cairn-store" }

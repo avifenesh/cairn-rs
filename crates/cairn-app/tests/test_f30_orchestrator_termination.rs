@@ -277,7 +277,7 @@ async fn setup_and_orchestrate(
 #[tokio::test]
 async fn direct_answer_prompt_calls_complete_run_in_one_iteration() {
     let h = LiveHarness::setup().await;
-    let (mock_url, hits, _captured) = spawn_mock().await;
+    let (mock_url, hits, captured) = spawn_mock().await;
 
     let (status, body) = setup_and_orchestrate(
         &h,
@@ -343,6 +343,44 @@ async fn direct_answer_prompt_calls_complete_run_in_one_iteration() {
              so the user actually sees a response; body={body}",
         );
     }
+
+    // Review follow-up: assert on the live-wired system prompt. This is
+    // distinct from the unit-level snapshot test below — it confirms
+    // the HTTP orchestrate path threads the F30-fixed prompt all the
+    // way to the provider, not a stale cached copy from somewhere up
+    // the stack. If a refactor ever interposes a different prompt
+    // builder on the HTTP path, this guard catches it.
+    let prompts = captured.lock().unwrap_or_else(|p| p.into_inner()).clone();
+    assert!(
+        !prompts.is_empty(),
+        "mock provider must have received at least one system message",
+    );
+    let live_sys = &prompts[0];
+    for banned in [
+        "Phase 1: Understand",
+        "Phase 2: Act",
+        "Phase 3: Verify",
+        "Phase 4: Complete",
+        "You have taken action toward the goal (not just read/searched)",
+    ] {
+        assert!(
+            !live_sys.contains(banned),
+            "F30: live-wired system prompt on the HTTP orchestrate path \
+             must not contain the pre-fix phrase {banned:?}. A refactor \
+             may have reintroduced a stale prompt builder. Captured:\n{live_sys}",
+        );
+    }
+    assert!(
+        live_sys.contains("complete_run"),
+        "live-wired prompt must still mention complete_run. Captured:\n{live_sys}",
+    );
+    assert!(
+        live_sys.to_lowercase().contains("introspect"),
+        "F30: live-wired prompt must forbid calling introspection tools on \
+         THIS run — that's the prompt-layer guard that closes the loop bug \
+         while keeping the tools registered for legitimate system-aware \
+         prompts. Captured:\n{live_sys}",
+    );
 }
 
 /// F30 prompt regression: neither the system prompt NOR the user message

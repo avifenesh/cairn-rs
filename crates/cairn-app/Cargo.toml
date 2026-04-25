@@ -126,6 +126,11 @@ ff-core = { version = "0.3", optional = true }
 [dev-dependencies]
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "process", "io-util"] }
 http-body-util = "0.1"
+# Opt in to the F30 test-hook module so
+# `tests/test_f30_orchestrator_termination.rs` can reach the crate-
+# private prompt builders without those symbols leaking into the
+# production `cairn-app` binary build.
+cairn-orchestrator = { path = "../cairn-orchestrator", features = ["test-hooks"] }
 # Chaos test only: `libc::kill` to deliver SIGSTOP/SIGCONT to the live
 # cairn-app subprocess without pulling `nix`. std's `Child::kill` only
 # sends SIGKILL; a raw libc FFI call is the minimal portable shim for
