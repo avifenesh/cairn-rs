@@ -114,7 +114,8 @@ export function EventLog({
   className,
 }: EventLogProps) {
   const { events: liveEvents, status } = useEventStream({ url, token });
-  const bottomRef = useRef<HTMLDivElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const prevRowCountRef = useRef(0);
 
   // Convert initial REST events → display format
   const seedRows: NormalizedEvent[] = useMemo(() =>
@@ -152,9 +153,25 @@ export function EventLog({
   // Merge: when live events arrive, they supersede the seed.
   const rows = liveRows.length > 0 ? liveRows : seedRows;
 
-  // Auto-scroll to bottom (newest row) on every update.
+  // Auto-scroll the inner log container to its bottom when new rows
+  // arrive. Mutates `scrollTop` directly rather than using
+  // `scrollIntoView`, which walks ancestors and would scroll the whole
+  // page to bring the log into view — that caused the dashboard to
+  // jump to the bottom on mount (F33).
+  //
+  // Skip the first effect fire so the initial seed render doesn't
+  // trigger a scroll at all; only growth from live events does.
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+    const el = scrollRef.current;
+    if (!el) return;
+    if (prevRowCountRef.current === 0) {
+      prevRowCountRef.current = rows.length;
+      return;
+    }
+    if (rows.length > prevRowCountRef.current) {
+      el.scrollTop = el.scrollHeight;
+    }
+    prevRowCountRef.current = rows.length;
   }, [rows.length]);
 
   return (
@@ -176,6 +193,7 @@ export function EventLog({
 
       {/* Event list — compact Linear-style rows */}
       <div
+        ref={scrollRef}
         className="overflow-y-auto"
         style={{ maxHeight: '280px' }}
         aria-live="polite"
@@ -197,7 +215,6 @@ export function EventLog({
         ) : (
           <div className="divide-y divide-gray-200 dark:divide-zinc-800/40">
             {rows.map(ev => <EventRow key={ev.key} ev={ev} />)}
-            <div ref={bottomRef} />
           </div>
         )}
       </div>
