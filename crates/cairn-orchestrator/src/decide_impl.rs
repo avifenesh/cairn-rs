@@ -703,8 +703,7 @@ fn build_user_message(
     );
     let has_memory = !gather.memory_chunks.is_empty();
     let memory_hint = if has_memory {
-        "Memory contains relevant context above. Use it to inform your answer."
-            .to_owned()
+        "Memory contains relevant context above. Use it to inform your answer.".to_owned()
     } else {
         "No relevant memories retrieved. If the goal needs external information, \
          call a tool to fetch it; otherwise answer directly."
