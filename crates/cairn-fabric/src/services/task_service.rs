@@ -87,10 +87,15 @@ impl FabricTaskService {
     }
 
     /// Build the lease context required by lifecycle FCALLs from a
-    /// pre-read snapshot. Fills `"cairn"` defaults for lane_id /
-    /// worker_instance_id and a nil `lease_id` when the execution
-    /// hasn't been claimed — required by the cancel-while-unclaimed
-    /// path.
+    /// pre-read snapshot.
+    ///
+    /// Enforces the same fence-triple invariant as
+    /// `FabricRunService::resolve_lease_context` (RFC #58.5): either all
+    /// three fence tokens are populated from a live lease + current
+    /// attempt, or all three are cleared and `source` is set to
+    /// `"operator_override"` (unfenced authoritative-writer mode, used
+    /// by the cancel-while-unclaimed path). A partial triple would
+    /// surface as FF's opaque `partial_fence_triple` rejection (F37).
     fn resolve_lease_context(&self, snapshot: &ExecutionSnapshot) -> ExecutionLeaseContext {
         let lane_id = if snapshot.lane_id.as_str().is_empty() {
             LaneId::new("cairn")
@@ -102,37 +107,21 @@ impl FabricTaskService {
             .as_ref()
             .map(|a| a.index)
             .unwrap_or_else(|| ff_core::types::AttemptIndex::new(0));
-        let attempt_id = snapshot
-            .current_attempt
-            .as_ref()
-            .map(|a| a.id.to_string())
-            .unwrap_or_default();
-        let (lease_id, lease_epoch, worker_instance_id) = match &snapshot.current_lease {
-            Some(l) => (
-                l.lease_id.to_string(),
-                l.epoch.0.to_string(),
-                ff_core::types::WorkerInstanceId::new(l.owner.as_str()),
-            ),
-            None => (
-                String::new(),
-                snapshot
-                    .current_lease_epoch
-                    .map(|e| e.0.to_string())
-                    .unwrap_or_else(|| "1".to_owned()),
-                // Mirror FabricRunService::resolve_lease_context: no-lease
-                // placeholder is the literal "cairn" default, not the
-                // runtime's own instance id. Matches the documented
-                // "fills cairn defaults" contract on this method.
-                ff_core::types::WorkerInstanceId::new("cairn"),
-            ),
-        };
-        ExecutionLeaseContext {
-            lane_id,
-            attempt_index,
-            lease_id,
-            lease_epoch,
-            attempt_id,
-            worker_instance_id,
+
+        match (&snapshot.current_lease, snapshot.current_attempt.as_ref()) {
+            (Some(l), Some(att)) => ExecutionLeaseContext {
+                lane_id,
+                attempt_index,
+                lease_id: l.lease_id.to_string(),
+                lease_epoch: l.epoch.0.to_string(),
+                attempt_id: att.id.to_string(),
+                worker_instance_id: ff_core::types::WorkerInstanceId::new(l.owner.as_str()),
+                source: String::new(),
+            },
+            // Any other shape (no lease, or lease without attempt) → use
+            // the unfenced path. FF still validates lifecycle phase via
+            // `validate_lease_and_mark_expired`.
+            _ => ExecutionLeaseContext::unfenced(lane_id, attempt_index),
         }
     }
 

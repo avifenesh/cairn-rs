@@ -86,6 +86,9 @@ pub struct LiveHarness {
     /// would otherwise share `$TMPDIR/cairn-workspace-sandboxes` and
     /// race each other during `recover_all`'s drift sweep.
     sandbox_base_dir: PathBuf,
+    /// Extra env vars (key, value) layered onto the cairn-app subprocess
+    /// on both initial spawn and any `restart()`. Empty by default.
+    extra_env: Vec<(String, String)>,
 }
 
 impl LiveHarness {
@@ -103,7 +106,22 @@ impl LiveHarness {
         Self::setup_with_storage(HarnessStorage::Sqlite(path)).await
     }
 
+    /// Variant that plumbs additional env vars (e.g.
+    /// `CAIRN_FABRIC_LEASE_TTL_MS=1000`) into the cairn-app subprocess.
+    /// Needed by tests that pin FabricConfig values without polluting
+    /// the parent test process's env (which parallel tests share).
+    pub async fn setup_with_env(extra_env: &[(&str, &str)]) -> Self {
+        Self::setup_with_storage_and_env(HarnessStorage::InMemory, extra_env).await
+    }
+
     async fn setup_with_storage(storage: HarnessStorage) -> Self {
+        Self::setup_with_storage_and_env(storage, &[]).await
+    }
+
+    async fn setup_with_storage_and_env(
+        storage: HarnessStorage,
+        extra_env: &[(&str, &str)],
+    ) -> Self {
         // 1. Shared Valkey endpoint (first caller boots the container).
         let (valkey_host, valkey_port) = cairn_fabric::test_harness::valkey_endpoint().await;
 
@@ -124,6 +142,11 @@ impl LiveHarness {
         let seed_admin = format!("seed-admin-{suffix}-padding");
         let final_admin = format!("test-admin-{suffix}-{}", uuid::Uuid::new_v4().simple());
 
+        let extra_env: Vec<(String, String)> = extra_env
+            .iter()
+            .map(|(k, v)| ((*k).to_owned(), (*v).to_owned()))
+            .collect();
+
         // 4. Spawn the real binary on port 0 (OS-assigned).
         let child = spawn_subprocess_internal(
             0,
@@ -133,6 +156,7 @@ impl LiveHarness {
             valkey_port,
             &storage,
             &sandbox_base_dir,
+            &extra_env,
         );
         let (child, bound_url) = read_listening_banner(child).await;
 
@@ -179,6 +203,7 @@ impl LiveHarness {
             valkey_port,
             storage,
             sandbox_base_dir,
+            extra_env,
         }
     }
 
@@ -244,6 +269,7 @@ impl LiveHarness {
             self.valkey_port,
             &self.storage,
             &self.sandbox_base_dir,
+            &self.extra_env,
         );
         let (child, bound_url) = read_listening_banner(child).await;
         let base_url = bound_url.replace("0.0.0.0", "127.0.0.1");
@@ -340,6 +366,7 @@ fn spawn_subprocess_internal(
     valkey_port: u16,
     storage: &HarnessStorage,
     sandbox_base_dir: &std::path::Path,
+    extra_env: &[(String, String)],
 ) -> Child {
     let bin = env!("CARGO_BIN_EXE_cairn-app");
     let mut cmd = Command::new(bin);
@@ -388,6 +415,13 @@ fn spawn_subprocess_internal(
         })
         .stderr(Stdio::piped())
         .kill_on_drop(true);
+
+    // Caller-supplied env overrides. Applied last so a test can override
+    // any of the defaults above (e.g. CAIRN_FABRIC_LEASE_TTL_MS) without
+    // touching the parent process env (shared by parallel tests).
+    for (k, v) in extra_env {
+        cmd.env(k, v);
+    }
 
     cmd.spawn()
         .expect("failed to spawn cairn-app binary — did cargo build it?")
