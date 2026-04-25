@@ -118,21 +118,35 @@ pub(crate) const STUCK_RUN_THRESHOLD_KEY: &str = "stuck_run_threshold_ms";
 
 /// Read the system-scope `stuck_run_threshold_ms` default, if set.
 ///
-/// Returns `None` when unset or when the stored value is not a non-negative
-/// integer; callers fall back to the hard-coded default.
+/// Returns `None` when unset, when the stored value is not a non-negative
+/// whole number, OR when the projection read fails — in the last case the
+/// error is logged at `warn` and callers fall back to the hard-coded
+/// default so a transient store outage never turns `/v1/runs/stalled` into
+/// a 500. An operator-visible store outage is already surfaced by the
+/// dedicated store-health surface (`GET /v1/status`).
 pub(crate) async fn resolve_stuck_run_threshold_ms(state: &AppState) -> Option<u64> {
     use cairn_domain::Scope;
     use cairn_store::projections::DefaultsReadModel;
 
-    let record = DefaultsReadModel::get(
+    let record = match DefaultsReadModel::get(
         state.runtime.store.as_ref(),
         Scope::System,
         "system",
         STUCK_RUN_THRESHOLD_KEY,
     )
     .await
-    .ok()
-    .flatten()?;
+    {
+        Ok(Some(r)) => r,
+        Ok(None) => return None,
+        Err(err) => {
+            tracing::warn!(
+                error = %err,
+                key = STUCK_RUN_THRESHOLD_KEY,
+                "failed to read stuck-run threshold default; falling back to hard-coded value"
+            );
+            return None;
+        }
+    };
     // Accept both JSON integer and JSON float forms — validation
     // guarantees the stored number is whole and within u64 range.
     record.value.as_u64().or_else(|| {
@@ -798,11 +812,19 @@ pub(crate) async fn get_run_telemetry_handler(
     (StatusCode::OK, Json(body)).into_response()
 }
 
-/// Truncate and null-out clearly-unsafe provider error strings.
+/// Redact unsafe provider error strings for telemetry responses.
 ///
-/// Provider-layer errors already flow through `cairn_providers::redact` but
-/// be paranoid: drop anything that still mentions a bearer token, cap
-/// length at 1024 chars.
+/// Provider-layer errors already flow through `cairn_providers::redact` —
+/// this is the belt-and-suspenders guard at the API boundary:
+///
+/// - `None` input → `None` output.
+/// - String with a live-looking `bearer ... sk-...` pattern → replaced
+///   with the fixed marker `"<redacted: leaked credential pattern>"`.
+///   The returned `Option` is always `Some` here — downstream JSON
+///   callers see the marker, not `null`, so the UI can distinguish
+///   "redacted" from "no error at all".
+/// - Otherwise → pass through; if longer than 1024 chars, truncate
+///   with a trailing ellipsis.
 fn redact_provider_error(raw: Option<&str>) -> Option<String> {
     let raw = raw?;
     let lower = raw.to_ascii_lowercase();
