@@ -311,9 +311,16 @@ impl PgSyncProjection {
             // upserts succeed together or the whole event append rolls
             // back, so read-model consistency is preserved.
             RuntimeEvent::SessionCostUpdated(e) => {
+                // InMemory sources tenant from the explicit `e.tenant_id`
+                // field, not `e.project.tenant_id`, because fixtures can
+                // carry a sentinel project triple (see the budget-
+                // blocking test in cairn-runtime). Mirror that choice on
+                // the durable path so pg and InMemory agree on which
+                // tenant a cost is attributed to.
                 upsert_cost_rollups_pg(
                     tx,
                     e.session_id.as_str(),
+                    e.tenant_id.as_str(),
                     &e.project,
                     e.delta_cost_micros,
                     e.delta_tokens_in,
@@ -843,10 +850,14 @@ impl PgSyncProjection {
                 // derived event never reaches the durable log. Projecting
                 // directly here keeps the pg tables in sync with InMemory.
                 //
-                // Only successful calls with a known session contribute
-                // to session/project/workspace cost — matching how the
-                // in-memory `apply_projection` resolves an effective
-                // session_id and skips cases where none is known.
+                // Calls with a resolvable session_id contribute to
+                // session/project/workspace cost. We mirror the in-
+                // memory `apply_projection` logic: prefer the event's
+                // own session_id, fall back to the run's session_id,
+                // skip rollup when neither is available. No additional
+                // success/status filter is applied here — a zero-cost
+                // failed call still bumps `provider_calls` so the
+                // operator panel reflects actual attempt counts.
                 let effective_session_id: Option<String> = if let Some(sid) = &e.session_id {
                     Some(sid.as_str().to_owned())
                 } else if let Some(rid) = &e.run_id {
@@ -862,9 +873,13 @@ impl PgSyncProjection {
                     None
                 };
                 if let Some(sid) = effective_session_id {
+                    // ProviderCallCompleted has no top-level `tenant_id`
+                    // — the tenant is only carried by `e.project`, so
+                    // that's our source of truth here.
                     upsert_cost_rollups_pg(
                         tx,
                         &sid,
+                        e.project.tenant_id.as_str(),
                         &e.project,
                         e.cost_micros.unwrap_or(0),
                         e.input_tokens.unwrap_or(0) as u64,
@@ -936,6 +951,7 @@ fn tool_invocation_terminal_state_str(
 async fn upsert_cost_rollups_pg(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     session_id: &str,
+    tenant_id: &str,
     project: &cairn_domain::ProjectKey,
     delta_cost_micros: u64,
     delta_tokens_in: u64,
@@ -966,7 +982,7 @@ async fn upsert_cost_rollups_pg(
              updated_at_ms     = GREATEST(session_costs.updated_at_ms, EXCLUDED.updated_at_ms)",
     )
     .bind(session_id)
-    .bind(project.tenant_id.as_str())
+    .bind(tenant_id)
     .bind(project.workspace_id.as_str())
     .bind(project.project_id.as_str())
     .bind(delta_cost)
@@ -990,7 +1006,7 @@ async fn upsert_cost_rollups_pg(
              provider_calls    = project_costs.provider_calls    + 1,
              updated_at_ms     = GREATEST(project_costs.updated_at_ms, EXCLUDED.updated_at_ms)",
     )
-    .bind(project.tenant_id.as_str())
+    .bind(tenant_id)
     .bind(project.workspace_id.as_str())
     .bind(project.project_id.as_str())
     .bind(delta_cost)
@@ -1014,7 +1030,7 @@ async fn upsert_cost_rollups_pg(
              provider_calls    = workspace_costs.provider_calls    + 1,
              updated_at_ms     = GREATEST(workspace_costs.updated_at_ms, EXCLUDED.updated_at_ms)",
     )
-    .bind(project.tenant_id.as_str())
+    .bind(tenant_id)
     .bind(project.workspace_id.as_str())
     .bind(delta_cost)
     .bind(delta_in)

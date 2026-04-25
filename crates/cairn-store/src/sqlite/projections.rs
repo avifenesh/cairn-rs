@@ -342,9 +342,14 @@ impl SqliteSyncProjection {
             // F29 CD-2: see pg/projections.rs for the full contract —
             // session/project/workspace rollups update atomically.
             RuntimeEvent::SessionCostUpdated(e) => {
+                // Source tenant from the explicit `e.tenant_id` field
+                // (matches InMemory + pg). See the pg SessionCostUpdated
+                // handler for the full rationale on why this and not
+                // `project.tenant_id`.
                 upsert_cost_rollups_sqlite(
                     tx,
                     e.session_id.as_str(),
+                    e.tenant_id.as_str(),
                     &e.project,
                     e.delta_cost_micros,
                     e.delta_tokens_in,
@@ -637,6 +642,7 @@ impl SqliteSyncProjection {
                     upsert_cost_rollups_sqlite(
                         tx,
                         &sid,
+                        e.project.tenant_id.as_str(),
                         &e.project,
                         e.cost_micros.unwrap_or(0),
                         e.input_tokens.unwrap_or(0) as u64,
@@ -938,6 +944,7 @@ impl SqliteSyncProjection {
 async fn upsert_cost_rollups_sqlite(
     tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
     session_id: &str,
+    tenant_id: &str,
     project: &cairn_domain::ProjectKey,
     delta_cost_micros: u64,
     delta_tokens_in: u64,
@@ -968,7 +975,7 @@ async fn upsert_cost_rollups_sqlite(
              updated_at_ms     = MAX(updated_at_ms, excluded.updated_at_ms)",
     )
     .bind(session_id)
-    .bind(project.tenant_id.as_str())
+    .bind(tenant_id)
     .bind(project.workspace_id.as_str())
     .bind(project.project_id.as_str())
     .bind(delta_cost)
@@ -992,7 +999,7 @@ async fn upsert_cost_rollups_sqlite(
              provider_calls    = provider_calls    + 1,
              updated_at_ms     = MAX(updated_at_ms, excluded.updated_at_ms)",
     )
-    .bind(project.tenant_id.as_str())
+    .bind(tenant_id)
     .bind(project.workspace_id.as_str())
     .bind(project.project_id.as_str())
     .bind(delta_cost)
@@ -1016,7 +1023,7 @@ async fn upsert_cost_rollups_sqlite(
              provider_calls    = provider_calls    + 1,
              updated_at_ms     = MAX(updated_at_ms, excluded.updated_at_ms)",
     )
-    .bind(project.tenant_id.as_str())
+    .bind(tenant_id)
     .bind(project.workspace_id.as_str())
     .bind(delta_cost)
     .bind(delta_in)

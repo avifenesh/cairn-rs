@@ -23,7 +23,7 @@ use axum::{
 use cairn_domain::ProjectKey;
 use cairn_store::projections::ProjectCostReadModel;
 
-use crate::errors::{store_error_response, AppApiError};
+use crate::errors::{store_error_response, tenant_scope_mismatch_error, AppApiError};
 use crate::extractors::TenantScope;
 use crate::state::AppState;
 
@@ -45,7 +45,9 @@ pub(crate) struct WorkspaceCostSummary {
 }
 
 /// Reject a cross-tenant read. Mirrors the `ProjectJson` middleware
-/// check: admins bypass, everyone else must match.
+/// check: admins bypass, everyone else must match. Uses the shared
+/// `tenant_scope_mismatch_error()` so clients see the same error code
+/// (`tenant_scope_mismatch`) across every scope-filtered endpoint.
 fn enforce_tenant(scope: &TenantScope, url_tenant: &str) -> Option<AppApiError> {
     if scope.is_admin {
         return None;
@@ -53,11 +55,7 @@ fn enforce_tenant(scope: &TenantScope, url_tenant: &str) -> Option<AppApiError> 
     if scope.tenant_id().as_str() == url_tenant {
         return None;
     }
-    Some(AppApiError::new(
-        StatusCode::FORBIDDEN,
-        "forbidden",
-        "tenant scope mismatch",
-    ))
+    Some(tenant_scope_mismatch_error())
 }
 
 /// `GET /v1/projects/:tenant/:workspace/:project/costs`
