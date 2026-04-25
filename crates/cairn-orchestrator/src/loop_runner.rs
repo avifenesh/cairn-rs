@@ -1531,17 +1531,13 @@ fn build_step_summary(
         match &result.status {
             ActionStatus::Failed { reason } => {
                 let preview = truncate_for_summary(reason, 400);
-                summary.push_str(&format!(
-                    "\n  tool_result[{tool_name}] ERROR: {preview}"
-                ));
+                summary.push_str(&format!("\n  tool_result[{tool_name}] ERROR: {preview}"));
             }
             ActionStatus::Succeeded => {
                 if let Some(output) = result.tool_output.as_ref() {
                     let rendered = output.to_string();
                     let preview = truncate_for_summary(&rendered, 400);
-                    summary.push_str(&format!(
-                        "\n  tool_result[{tool_name}] ok: {preview}"
-                    ));
+                    summary.push_str(&format!("\n  tool_result[{tool_name}] ok: {preview}"));
                 }
             }
             // AwaitingApproval / SubagentSpawned have their own dedicated
@@ -1571,22 +1567,30 @@ fn build_step_summary(
 /// middle of a multi-line payload is clipped. 1 char ≈ 0.25 tokens in
 /// the decide-phase estimator.
 fn truncate_for_summary(text: &str, max_chars: usize) -> String {
+    // Gemini review feedback on PR #295: on the short-circuit path skip
+    // the char-vector allocation entirely; on the truncation path use
+    // direct slicing instead of reverse-take-reverse.
+    //
+    // Fast pre-check on the byte length — `max_chars` is a char count but
+    // `text.len()` is bytes, and bytes ≥ chars for any valid UTF-8, so
+    // `text.len() <= max_chars` is a conservative "definitely short
+    // enough" test that skips the char collection on the common case
+    // (English tool error strings). We fall through to the counted path
+    // when bytes exceed the limit in case the string was ASCII-only and
+    // actually fits.
+    if text.len() <= max_chars {
+        return text.to_owned();
+    }
     let chars: Vec<char> = text.chars().collect();
-    if chars.len() <= max_chars {
-        return chars.into_iter().collect();
+    let len = chars.len();
+    if len <= max_chars {
+        return text.to_owned();
     }
     let head = max_chars / 2;
     let tail = max_chars.saturating_sub(head);
-    let omitted = chars.len().saturating_sub(head + tail);
-    let prefix: String = chars.iter().take(head).collect();
-    let suffix: String = chars
-        .iter()
-        .rev()
-        .take(tail)
-        .collect::<Vec<_>>()
-        .into_iter()
-        .rev()
-        .collect();
+    let omitted = len.saturating_sub(head + tail);
+    let prefix: String = chars[..head].iter().collect();
+    let suffix: String = chars[len - tail..].iter().collect();
     format!("{prefix}… [{omitted} chars omitted] …{suffix}")
 }
 

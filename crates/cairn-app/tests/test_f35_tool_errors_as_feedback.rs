@@ -337,10 +337,7 @@ async fn tool_error_does_not_terminate_run() {
          never saw the error. Termination={termination}, reason={reason}, body={body}"
     );
 
-    assert_eq!(
-        status, 200,
-        "orchestrate should return 200; body={body}"
-    );
+    assert_eq!(status, 200, "orchestrate should return 200; body={body}");
 
     // The loop must have advanced past the failing tool. Pre-fix, it
     // terminated on hit #1 — so the mock only saw 1 request. Post-fix,
@@ -407,14 +404,7 @@ async fn invalid_args_tool_error_does_not_terminate_run() {
 
     let (mock_url, hits) = spawn_scripted_mock(script).await;
 
-    let (status, body) = setup_and_orchestrate(
-        &h,
-        &mock_url,
-        "Read a file.",
-        6,
-        "f35s",
-    )
-    .await;
+    let (status, body) = setup_and_orchestrate(&h, &mock_url, "Read a file.", 6, "f35s").await;
 
     let termination = body
         .get("termination")
@@ -430,8 +420,7 @@ async fn invalid_args_tool_error_does_not_terminate_run() {
     // substring to stay robust against that naming drift.
     let reason_lower = reason.to_lowercase();
     assert!(
-        !reason_lower.contains("invalid argument")
-            && !reason_lower.contains("invalid_args"),
+        !reason_lower.contains("invalid argument") && !reason_lower.contains("invalid_args"),
         "F35 regression: InvalidArgs surfaced as run-terminal reason. \
          termination={termination}, reason={reason}, body={body}"
     );
