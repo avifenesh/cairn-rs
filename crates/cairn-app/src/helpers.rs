@@ -265,68 +265,37 @@ pub(crate) async fn build_run_record_view(state: &AppState, run: RunRecord) -> R
     }
 }
 
+/// Read-path entry point for single-run lookups.
+///
+/// FIX-F31: This reads from the cairn-store `RunReadModel` projection — the
+/// **same source** `GET /v1/runs` uses via `list_runs_filtered`. Earlier we
+/// routed through `state.runtime.runs.get(run_id)` which (for the Fabric
+/// adapter) reads FF's `describe_execution` snapshot. FF's execution state
+/// is updated by explicit lifecycle FCALLs (`complete`, `fail`, `cancel`,
+/// `pause`, `resume`); any path that emits `RunStateChanged` events without
+/// calling those FCALLs leaves FF on a stale snapshot while the projection
+/// advances. The result was two read paths for the same entity disagreeing
+/// (e.g. list says `running`, detail says `pending, version=0`).
+///
+/// There is ONE canonical projection of run state: the event-sourced
+/// `RunReadModel` in cairn-store. Both `/v1/runs` and `/v1/runs/:id` now
+/// read from it. The event-log replay fallback is gone — if the projection
+/// doesn't have the run, the run doesn't exist.
 pub(crate) async fn load_run_visible_to_tenant(
     state: &AppState,
     tenant_scope: &TenantScope,
     run_id: &RunId,
 ) -> Result<Option<RunRecord>, axum::response::Response> {
-    match state.runtime.runs.get(run_id).await {
+    match RunReadModel::get(state.runtime.store.as_ref(), run_id).await {
         Ok(Some(run))
             if tenant_scope.is_admin || run.project.tenant_id == *tenant_scope.tenant_id() =>
         {
-            return Ok(Some(run));
+            Ok(Some(run))
         }
-        Ok(Some(_)) => return Ok(None),
-        Ok(None) => {}
-        Err(err) => return Err(runtime_error_response(err)),
+        Ok(Some(_)) => Ok(None),
+        Ok(None) => Ok(None),
+        Err(err) => Err(store_error_response(err)),
     }
-
-    let events = match state
-        .runtime
-        .store
-        .read_by_entity(&EntityRef::Run(run_id.clone()), None, 1_000)
-        .await
-    {
-        Ok(events) => events,
-        Err(err) => return Err(store_error_response(err)),
-    };
-
-    let mut reconstructed: Option<RunRecord> = None;
-    for stored in events {
-        match stored.envelope.payload {
-            RuntimeEvent::RunCreated(created) if created.run_id == *run_id => {
-                reconstructed = Some(RunRecord {
-                    run_id: created.run_id.clone(),
-                    session_id: created.session_id.clone(),
-                    parent_run_id: created.parent_run_id.clone(),
-                    project: created.project.clone(),
-                    state: RunState::Pending,
-                    prompt_release_id: created.prompt_release_id.clone(),
-                    agent_role_id: created.agent_role_id.clone(),
-                    failure_class: None,
-                    pause_reason: None,
-                    resume_trigger: None,
-                    version: 1,
-                    created_at: stored.stored_at,
-                    updated_at: stored.stored_at,
-                });
-            }
-            RuntimeEvent::RunStateChanged(change) if change.run_id == *run_id => {
-                if let Some(run) = reconstructed.as_mut() {
-                    run.state = change.transition.to;
-                    run.failure_class = change.failure_class;
-                    run.pause_reason = change.pause_reason;
-                    run.resume_trigger = change.resume_trigger;
-                    run.version += 1;
-                    run.updated_at = stored.stored_at;
-                }
-            }
-            _ => {}
-        }
-    }
-
-    Ok(reconstructed
-        .filter(|run| tenant_scope.is_admin || run.project.tenant_id == *tenant_scope.tenant_id()))
 }
 
 // ---------------------------------------------------------------------------
