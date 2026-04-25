@@ -909,12 +909,16 @@ impl AppState {
                 plugin_registry: plugin_registry.clone(),
             }),
         ));
-        // NOTE(F34b): production builds wire `InMemoryRetrieval` over whatever
-        // backing document store is configured (including Postgres). This is a
-        // placeholder until the external memory crate integrates. The
-        // surviving crash surface — `memory_search` with `mode=vector` when no
-        // embedder is configured — is guarded in `tool_impls::ConcreteMemorySearchTool`
-        // (F34a). Backend-selection cleanup is tracked as F34b.
+        // NOTE(F34b): retrieval here is wired over the unconditionally in-memory
+        // `InMemoryDocumentStore` created above, with no embedding provider.
+        // This entire retrieval stack is placeholder — the external memory
+        // crate (embedder + reranker + persistent store) replaces it in a
+        // future PR. The surviving crash surface — `memory_search` with
+        // `mode=vector` hitting the missing-embedder branch — is guarded at
+        // the tool layer in `tool_impls::ConcreteMemorySearchTool` (F34a).
+        // Backend-selection cleanup (swapping `InMemoryDocumentStore` for a
+        // persistent store and threading an embedder) is tracked as F34b and
+        // will likely be superseded by the external memory crate integration.
         let retrieval = Arc::new(
             InMemoryRetrieval::with_diagnostics(document_store.clone(), diagnostics.clone())
                 .with_graph(graph.clone()),

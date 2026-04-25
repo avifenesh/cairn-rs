@@ -24,6 +24,7 @@ use cairn_domain::{
     RepoAccessContext, SourceId,
 };
 use cairn_memory::{
+    in_memory::MISSING_EMBEDDER_ERROR_MESSAGE,
     ingest::{IngestRequest, IngestService, SourceType},
     retrieval::{
         RerankerStrategy, RetrievalError, RetrievalMode, RetrievalQuery, RetrievalService,
@@ -41,13 +42,18 @@ use serde_json::Value;
 ///
 /// This is a placeholder-retrieval guard: the built-in in-memory backend has
 /// no embedder in the default wiring (the real embedding stack ships with the
-/// external memory crate). Matching on the sentinel phrase lets us fall back
-/// to lexical cleanly without threading an `has_embedder()` capability through
-/// the trait — that's a larger change we explicitly do not want here.
+/// external memory crate). We match the exact sentinel string exported from
+/// `cairn-memory` ([`MISSING_EMBEDDER_ERROR_MESSAGE`]) so the two sides stay
+/// in lock-step — if `cairn-memory` rewords the error, this comparison fails
+/// to compile-or-test rather than silently re-exposing the crash.
+///
+/// A dedicated `RetrievalError::MissingEmbedder` variant would be cleaner,
+/// but the retrieval stack is being replaced by the external memory crate;
+/// a shared constant is the minimum-surface fix.
 fn is_missing_embedder_error(err: &RetrievalError) -> bool {
     matches!(
         err,
-        RetrievalError::Internal(msg) if msg.contains("VectorOnly mode requires an embedding provider")
+        RetrievalError::Internal(msg) if msg == MISSING_EMBEDDER_ERROR_MESSAGE
     )
 }
 
@@ -109,10 +115,12 @@ impl ToolHandler for ConcreteMemorySearchTool {
                 "mode": {
                     "type": "string",
                     "description": "Retrieval mode. `lexical` (keyword match) is always \
-                                    supported. `vector` (semantic) and `hybrid` require an \
-                                    embedding provider; when none is configured the tool \
-                                    clamps to `lexical` and attaches a `mode_clamped` \
-                                    diagnostic to the result.",
+                                    supported. `vector` (semantic) requires an embedding \
+                                    provider; when none is configured the tool clamps to \
+                                    `lexical` and attaches a `mode_clamped` diagnostic to \
+                                    the result. `hybrid` currently falls back to lexical \
+                                    silently inside the backend when no embedder is wired, \
+                                    without a diagnostic — prefer `lexical` explicitly.",
                     "enum": ["lexical", "vector", "hybrid"],
                     "default": "lexical"
                 }
