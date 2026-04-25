@@ -100,6 +100,8 @@ pub(crate) use handlers::auth_tokens::*;
 #[allow(unused_imports)]
 pub(crate) use handlers::bundles_handlers::*;
 #[allow(unused_imports)]
+pub(crate) use handlers::costs::*;
+#[allow(unused_imports)]
 pub(crate) use handlers::decisions::*;
 #[allow(unused_imports)]
 pub(crate) use handlers::evals::*;
@@ -111,8 +113,6 @@ pub(crate) use handlers::github::*;
 pub(crate) use handlers::graph::*;
 #[allow(unused_imports)]
 pub(crate) use handlers::health::*;
-#[allow(unused_imports)]
-pub(crate) use handlers::costs::*;
 #[allow(unused_imports)]
 pub(crate) use handlers::integrations::*;
 #[allow(unused_imports)]

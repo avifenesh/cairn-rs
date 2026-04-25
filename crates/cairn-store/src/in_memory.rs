@@ -112,13 +112,11 @@ struct State {
     /// `(tenant_id, workspace_id, project_id)`. Updated alongside
     /// `session_costs` from the `SessionCostUpdated` handler so the
     /// numbers are guaranteed consistent with the per-session totals.
-    project_costs:
-        HashMap<(String, String, String), cairn_domain::providers::ProjectCostRecord>,
+    project_costs: HashMap<(String, String, String), cairn_domain::providers::ProjectCostRecord>,
     /// F29 CD-2: lifetime workspace cost rollup, keyed by
     /// `(tenant_id, workspace_id)`. Same consistency invariant as
     /// `project_costs`.
-    workspace_costs:
-        HashMap<(String, String), cairn_domain::providers::WorkspaceCostRecord>,
+    workspace_costs: HashMap<(String, String), cairn_domain::providers::WorkspaceCostRecord>,
     /// GAP-010: LLM call trace records derived from ProviderCallCompleted events.
     llm_traces: Vec<cairn_domain::LlmCallTrace>,
     operator_profiles: HashMap<String, crate::projections::OperatorProfileRecord>,

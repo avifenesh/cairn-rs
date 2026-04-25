@@ -245,7 +245,14 @@ async fn project_cost_is_isolated_across_tenants() {
         .runtime
         .store
         .append(&[session_cost_event(
-            1, "sess_leak", TENANT, WORKSPACE, PROJECT, 9_999, 111, 222,
+            1,
+            "sess_leak",
+            TENANT,
+            WORKSPACE,
+            PROJECT,
+            9_999,
+            111,
+            222,
         )])
         .await
         .expect("append");

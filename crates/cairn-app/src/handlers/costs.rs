@@ -69,11 +69,13 @@ pub(crate) async fn get_project_costs_handler(
     if let Some(err) = enforce_tenant(&tenant_scope, &tenant_id) {
         return err.into_response();
     }
-    let project = ProjectKey::new(tenant_id.as_str(), workspace_id.as_str(), project_id.as_str());
+    let project = ProjectKey::new(
+        tenant_id.as_str(),
+        workspace_id.as_str(),
+        project_id.as_str(),
+    );
     match ProjectCostReadModel::get_project_cost(state.runtime.store.as_ref(), &project).await {
-        Ok(Some(record)) => {
-            (StatusCode::OK, Json(ProjectCostSummary { record })).into_response()
-        }
+        Ok(Some(record)) => (StatusCode::OK, Json(ProjectCostSummary { record })).into_response(),
         // Empty rollup is not an error — zero is a valid answer for a
         // project that hasn't emitted any provider calls yet. Returning
         // 200 with zeros lets the UI render the panel without special-
@@ -112,9 +114,7 @@ pub(crate) async fn get_workspace_costs_handler(
     )
     .await
     {
-        Ok(Some(record)) => {
-            (StatusCode::OK, Json(WorkspaceCostSummary { record })).into_response()
-        }
+        Ok(Some(record)) => (StatusCode::OK, Json(WorkspaceCostSummary { record })).into_response(),
         Ok(None) => {
             let zero = cairn_domain::providers::WorkspaceCostRecord {
                 tenant_id: tid,
