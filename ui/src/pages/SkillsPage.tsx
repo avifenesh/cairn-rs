@@ -5,6 +5,8 @@ import { StatCard } from "../components/StatCard";
 import { FeatureEmptyState } from "../components/FeatureEmptyState";
 import { defaultApi, ApiError } from "../lib/api";
 import { Card } from "../components/Card";
+import { EntityExplainer } from "../components/EntityExplainer";
+import { ENTITY_EXPLAINERS } from "../lib/entityExplainers";
 
 function displayName(skill: { skill_id?: string; name?: string }) {
   return skill.name?.trim() || skill.skill_id?.trim() || "Unnamed skill";
@@ -53,9 +55,7 @@ export function SkillsPage() {
         <div>
           <p className="text-[11px] text-gray-400 dark:text-zinc-500 uppercase tracking-widest">Infrastructure / Skills</p>
           <h1 className="text-[24px] font-semibold text-gray-900 dark:text-zinc-100 mt-1">Skills</h1>
-          <p className="text-[13px] text-gray-400 dark:text-zinc-500 mt-1">
-            Operator-visible inventory of installed and currently active skills.
-          </p>
+          <EntityExplainer className="mt-1">{ENTITY_EXPLAINERS.skill}</EntityExplainer>
         </div>
         <button
           onClick={() => void refetch()}

@@ -29,6 +29,8 @@ import { FormField, fieldInputMono } from '../components/FormField';
 import { StatCard } from '../components/StatCard';
 import { ds } from '../lib/design-system';
 import { useToast } from '../components/Toast';
+import { EntityExplainer } from '../components/EntityExplainer';
+import { ENTITY_EXPLAINERS } from '../lib/entityExplainers';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -537,6 +539,11 @@ export function CredentialsPage() {
           <RefreshCw size={11} className={isFetching ? 'animate-spin' : ''} />
           Refresh
         </button>
+      </div>
+
+      {/* F32 — inline entity explainer. */}
+      <div className="px-5 py-1.5 border-b border-gray-200 dark:border-zinc-800 shrink-0">
+        <EntityExplainer>{ENTITY_EXPLAINERS.credential}</EntityExplainer>
       </div>
 
       {/* Stat strip */}

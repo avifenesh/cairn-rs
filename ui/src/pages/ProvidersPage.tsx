@@ -17,6 +17,8 @@ import type { ProviderConnectionRecord, ProviderHealthEntry } from "../lib/types
 import { ModelCatalogPicker } from "../components/ModelCatalogPicker";
 import { EmptyScopeHint } from "../components/EmptyScopeHint";
 import { RoutingPreview } from "../components/RoutingPreview";
+import { EntityExplainer } from "../components/EntityExplainer";
+import { ENTITY_EXPLAINERS } from "../lib/entityExplainers";
 
 // ── Test-connection result ────────────────────────────────────────────────────
 
@@ -1502,7 +1504,8 @@ export function ProvidersPage() {
         <p className={clsx(sectionLabel, "mb-0")}>
           Providers
         </p>
-        <p className="text-[12px] text-gray-500 dark:text-zinc-400">
+        <EntityExplainer>{ENTITY_EXPLAINERS.provider}</EntityExplainer>
+        <p className="text-[11px] text-gray-400 dark:text-zinc-600">
           Only real provider connections registered for the current scope appear here.
         </p>
       </div>

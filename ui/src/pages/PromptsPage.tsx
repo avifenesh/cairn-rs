@@ -12,6 +12,8 @@ import { sectionLabel } from "../lib/design-system";
 import { useToast } from "../components/Toast";
 import { useScope } from "../hooks/useScope";
 import { EmptyScopeHint } from "../components/EmptyScopeHint";
+import { EntityExplainer } from "../components/EntityExplainer";
+import { ENTITY_EXPLAINERS } from "../lib/entityExplainers";
 import type {
   PromptAssetRecord, PromptVersionRecord, PromptReleaseRecord, PromptVersionDiff,
   PromptKind, PromptReleaseState,
@@ -894,6 +896,10 @@ export function PromptsPage() {
             {showNew ? "Cancel" : "New Prompt"}
           </button>
         </div>
+      </div>
+      {/* F32 — inline entity explainer. */}
+      <div className="px-5 py-1.5 border-b border-gray-200 dark:border-zinc-800 shrink-0">
+        <EntityExplainer>{ENTITY_EXPLAINERS.prompt}</EntityExplainer>
       </div>
 
       {/* Content */}
