@@ -169,7 +169,7 @@ impl FabricRuntime {
         let prepare_outcome = backend
             .prepare()
             .await
-            .map_err(|e| FabricError::Engine(e))?;
+            .map_err(|e| FabricError::Engine(Box::new(e)))?;
         tracing::info!(outcome = ?prepare_outcome, "backend prepared (FF#281)");
 
         // FF 0.9 (FF#280): seed the waitpoint HMAC secret via the
@@ -194,7 +194,7 @@ impl FabricRuntime {
         let seed_outcome = backend
             .seed_waitpoint_hmac_secret(SeedWaitpointHmacSecretArgs::new(kid, secret))
             .await
-            .map_err(|e| FabricError::Engine(e))?;
+            .map_err(|e| FabricError::Engine(Box::new(e)))?;
         tracing::info!(kid = %kid, outcome = ?seed_outcome, "waitpoint HMAC secret seeded (FF#280)");
 
         // FF 0.9 (FF#277): snapshot the backend's capability matrix

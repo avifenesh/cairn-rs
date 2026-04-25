@@ -10,15 +10,19 @@ pub enum FabricError {
     /// FF 0.9 typed backend-transport error (FF#277 adoption). Preferred
     /// over stringly-typed `FabricError::Valkey` for new call sites.
     /// CG-a introduces the variant + `#[from]`; existing string-based
-    /// errors stay until CH collapses the full error surface.
+    /// errors stay until CH collapses the full error surface. Boxed
+    /// because `BackendError` is ~160 bytes — inlining it triggers
+    /// clippy `result_large_err` across the 20+ functions that return
+    /// `Result<_, FabricError>`.
     #[error("backend: {0}")]
-    Backend(#[from] BackendError),
+    Backend(#[from] Box<BackendError>),
     /// FF 0.9 typed engine-layer error (FF#277 adoption). `prepare()`,
     /// `seed_waitpoint_hmac_secret`, `capabilities_matrix`, and
     /// long-term every `EngineBackend` trait method surface this
-    /// variant. CH migrates per-variant string classifiers.
+    /// variant. CH migrates per-variant string classifiers. Boxed for
+    /// the same reason as `Backend` — see above.
     #[error("engine: {0}")]
-    Engine(#[from] EngineError),
+    Engine(#[from] Box<EngineError>),
     #[error("config: {0}")]
     Config(String),
     #[error("bridge: {0}")]
