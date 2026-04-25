@@ -1252,12 +1252,18 @@ impl InMemoryStore {
             | RuntimeEvent::TaskPriorityChanged(_)
             | RuntimeEvent::ToolInvocationProgressUpdated(_) => {}
             RuntimeEvent::SessionCostUpdated(e) => {
+                // The envelope carries a top-level `tenant_id` field for
+                // backward compatibility, but `project.tenant_id` is the
+                // authoritative source — project/workspace rollups key
+                // off it and must agree with the per-session record.
+                // Using a single source eliminates the divergence risk.
+                let tenant = e.project.tenant_id.clone();
                 let rec = state
                     .session_costs
                     .entry(e.session_id.as_str().to_owned())
                     .or_insert_with(|| cairn_domain::providers::SessionCostRecord {
                         session_id: e.session_id.clone(),
-                        tenant_id: e.tenant_id.clone(),
+                        tenant_id: tenant.clone(),
                         total_cost_micros: 0,
                         total_tokens_in: 0,
                         total_tokens_out: 0,
@@ -1275,7 +1281,7 @@ impl InMemoryStore {
                 rec.updated_at_ms = now;
                 // Also accumulate into provider budget spend for the tenant.
                 for budget in state.provider_budgets.values_mut() {
-                    if budget.tenant_id == e.tenant_id {
+                    if budget.tenant_id == tenant {
                         budget.current_spend_micros = budget
                             .current_spend_micros
                             .saturating_add(e.delta_cost_micros);
