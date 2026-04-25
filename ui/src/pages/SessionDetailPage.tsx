@@ -9,7 +9,8 @@ import { CopyButton } from "../components/CopyButton";
 import { useToast } from "../components/Toast";
 import { ApiError, defaultApi } from "../lib/api";
 import { table as tablePreset } from "../lib/design-system";
-import type { RunRecord, SessionState } from "../lib/types";
+import type { RunRecord, SessionCostResponse, SessionState } from "../lib/types";
+import { formatUsd, formatTokens } from "../lib/formatters";
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -175,6 +176,19 @@ export function SessionDetailPage({ sessionId, onBack }: SessionDetailPageProps)
   });
   const traces = tracesData?.traces ?? [];
 
+  // F29 CE — Cumulative session cost. Ships against the existing
+  // `/v1/sessions/:id/cost` endpoint; real pg/sqlite persistence lands
+  // with PR CD-2, the in-memory store is already populated. The
+  // endpoint returns 404 when no cost rows exist yet, which the client
+  // normalises to `null` so this card simply hides.
+  const { data: sessionCost } = useQuery<SessionCostResponse | null>({
+    queryKey: ["session-cost", sessionId],
+    queryFn: () => defaultApi.getSessionCost(sessionId),
+    refetchInterval: 30_000,
+    staleTime: 15_000,
+    retry: false,
+  });
+
   return (
     <div className="h-full overflow-y-auto bg-gray-50 dark:bg-zinc-900">
       <div className="max-w-4xl mx-auto px-5 py-5 space-y-6">
@@ -260,6 +274,44 @@ export function SessionDetailPage({ sessionId, onBack }: SessionDetailPageProps)
             )}
           />
         </div>
+
+        {/* F29 CE — Cumulative session cost.
+            NOTE: real pg/sqlite persistence lands with PR CD-2; in the
+            interim the in-memory store already populates this endpoint
+            so the card renders useful data for local dev and the
+            integration test suite. Hidden when the endpoint returns
+            404 or when no provider calls have fired yet. */}
+        {sessionCost && sessionCost.provider_calls > 0 && (
+          <div
+            className="grid grid-cols-2 sm:grid-cols-4 gap-x-6 gap-y-3 py-3 px-4 rounded-lg border border-gray-200 dark:border-zinc-800 bg-gray-50/60 dark:bg-zinc-900/60"
+            data-testid="session-cost-card"
+          >
+            <div>
+              <p className="text-[10px] uppercase tracking-wider text-gray-400 dark:text-zinc-600">Cumulative cost</p>
+              <p className="text-[14px] font-medium text-gray-900 dark:text-zinc-100 tabular-nums">
+                {formatUsd(sessionCost.total_cost_micros)}
+              </p>
+            </div>
+            <div>
+              <p className="text-[10px] uppercase tracking-wider text-gray-400 dark:text-zinc-600">Tokens in</p>
+              <p className="text-[14px] font-medium text-gray-900 dark:text-zinc-100 tabular-nums">
+                {formatTokens(sessionCost.total_tokens_in)}
+              </p>
+            </div>
+            <div>
+              <p className="text-[10px] uppercase tracking-wider text-gray-400 dark:text-zinc-600">Tokens out</p>
+              <p className="text-[14px] font-medium text-gray-900 dark:text-zinc-100 tabular-nums">
+                {formatTokens(sessionCost.total_tokens_out)}
+              </p>
+            </div>
+            <div>
+              <p className="text-[10px] uppercase tracking-wider text-gray-400 dark:text-zinc-600">Provider calls</p>
+              <p className="text-[14px] font-medium text-gray-900 dark:text-zinc-100 tabular-nums">
+                {sessionCost.provider_calls}
+              </p>
+            </div>
+          </div>
+        )}
 
         {/* Runs table */}
         <Section title="Runs">

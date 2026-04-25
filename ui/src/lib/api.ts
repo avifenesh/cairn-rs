@@ -2188,6 +2188,101 @@ export function createApiClient(config: ApiClientConfig) {
     /** GET /v1/models/catalog/providers — unique providers with counts. */
     listCatalogProviders: (): Promise<import("./types").ModelCatalogProvidersResponse> =>
       get("/v1/models/catalog/providers"),
+
+    // ── F29 CE: Telemetry, stalled runs, settings-GET, cost rollups ─────────
+
+    /** GET /v1/sessions/:id/cost — per-session cumulative cost rollup.
+     *  Returns a flattened `SessionCostRecord` plus a per-run breakdown.
+     *  Returns `null` on 404 so call sites can render a "not available"
+     *  placeholder without crashing — real pg/sqlite data lands with
+     *  PR CD-2, the in-memory store is already populated. */
+    getSessionCost: async (
+      sessionId: string,
+    ): Promise<import("./types").SessionCostResponse | null> => {
+      try {
+        return await get<import("./types").SessionCostResponse>(
+          `/v1/sessions/${encodeURIComponent(sessionId)}/cost`,
+        );
+      } catch (e) {
+        if (e instanceof ApiError && e.status === 404) return null;
+        throw e;
+      }
+    },
+
+    /** GET /v1/runs/:id/telemetry — live-aggregated per-run telemetry
+     *  (provider calls + tool invocations + totals + stuck flag).
+     *
+     *  Consumers should poll with `refetchInterval` only while the run
+     *  is in a non-terminal state (`pending`/`running`). See the
+     *  RunTelemetryPanel for the canonical polling pattern. */
+    getRunTelemetry: (runId: string): Promise<import("./types").RunTelemetry> =>
+      get(`/v1/runs/${encodeURIComponent(runId)}/telemetry`),
+
+    /** GET /v1/runs/stalled — diagnosis reports for runs that have been
+     *  Pending or Running longer than `minutes`, default 30.
+     *
+     *  Returns `{ items, has_more }`. Scope filtering is done server-side
+     *  via the tenant scope on the auth token, so no scope query is
+     *  needed here. */
+    getStalledRuns: async (
+      opts?: { minutes?: number },
+    ): Promise<import("./types").StuckRunReport[]> => {
+      const qs = new URLSearchParams();
+      if (opts?.minutes !== undefined) qs.set("minutes", String(opts.minutes));
+      const query = qs.toString() ? `?${qs}` : "";
+      return getList(`/v1/runs/stalled${query}`);
+    },
+
+    /** GET /v1/settings/defaults/:scope/:scope_id/:key — exact-lookup for a
+     *  single stored default. Returns `null` on 404 (not set) so call sites
+     *  don't have to special-case. */
+    getSettingsDefault: async (
+      scope: import("./types").SettingsScope,
+      scopeId: string,
+      key: string,
+    ): Promise<import("./types").SettingDefault | null> => {
+      try {
+        return await get<import("./types").SettingDefault>(
+          `/v1/settings/defaults/${encodeURIComponent(scope)}/${encodeURIComponent(scopeId)}/${encodeURIComponent(key)}`,
+        );
+      } catch (e) {
+        if (e instanceof ApiError && e.status === 404) return null;
+        throw e;
+      }
+    },
+
+    /** GET /v1/projects/:tenant/:workspace/:project/costs — project-wide cost
+     *  rollup (PR CD-2). Returns `null` when the endpoint is not deployed
+     *  yet (404) or no costs have been recorded yet, so the UI can render
+     *  a "not available" placeholder without crashing. */
+    getProjectCosts: async (
+      scope: import("./scope").ProjectScope,
+    ): Promise<import("./types").ProjectCostSummary | null> => {
+      try {
+        return await get<import("./types").ProjectCostSummary>(
+          `/v1/projects/${encodeURIComponent(scope.tenant_id)}/${encodeURIComponent(scope.workspace_id)}/${encodeURIComponent(scope.project_id)}/costs`,
+        );
+      } catch (e) {
+        if (e instanceof ApiError && e.status === 404) return null;
+        throw e;
+      }
+    },
+
+    /** GET /v1/workspaces/:tenant/:workspace/costs — workspace-wide rollup
+     *  (PR CD-2). Same 404 semantics as `getProjectCosts`. */
+    getWorkspaceCosts: async (
+      tenantId: string,
+      workspaceId: string,
+    ): Promise<import("./types").WorkspaceCostSummary | null> => {
+      try {
+        return await get<import("./types").WorkspaceCostSummary>(
+          `/v1/workspaces/${encodeURIComponent(tenantId)}/${encodeURIComponent(workspaceId)}/costs`,
+        );
+      } catch (e) {
+        if (e instanceof ApiError && e.status === 404) return null;
+        throw e;
+      }
+    },
   };
 }
 

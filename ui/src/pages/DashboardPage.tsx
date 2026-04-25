@@ -23,6 +23,7 @@ import { ErrorFallback } from "../components/ErrorFallback";
 import { clsx } from "clsx";
 import { StatCard } from "../components/StatCard";
 import { Card } from "../components/Card";
+import { StuckRunsWidget } from "../components/StuckRunsWidget";
 import { sectionLabel, skeleton } from "../lib/design-system";
 import { EventLog } from "../components/EventLog";
 import { MiniChart } from "../components/MiniChart";
@@ -1292,6 +1293,10 @@ export function DashboardPage() {
         >
           {activeTab === 'Overview' && (
             <div className="space-y-6">
+              {/* F29 CE — Stalled-runs warning surfaces above the main
+                  widget row, hidden entirely when count = 0 so healthy
+                  deployments don't see dead chrome. */}
+              <StuckRunsWidget />
               {/* Live widgets row — Active Runs + Cost/Providers + Event log */}
               <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
                 <ActiveRunsWidget />

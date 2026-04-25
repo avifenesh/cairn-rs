@@ -262,6 +262,17 @@ export function ProjectDashboardPage({ projectId }: ProjectDashboardPageProps) {
     retry: false,
   });
 
+  // F29 CE — Project-scoped cost rollup (PR CD-2). Returns `null` on 404
+  // when the endpoint hasn't been deployed yet, which is how the UI
+  // degrades cleanly pre-CD-2 — the card simply doesn't render and the
+  // tenant-scoped stat cards above stay as the primary cost surface.
+  const { data: projectCostRollup } = useQuery({
+    queryKey: ["proj-costs-rollup", tenantId, workspaceId, projectId],
+    queryFn:  () => defaultApi.getProjectCosts(scope),
+    refetchInterval: 60_000,
+    retry: false,
+  });
+
   // ── Derived stats ────────────────────────────────────────────────────────────
 
   const allRuns    = runs        ?? [];
@@ -405,6 +416,38 @@ export function ProjectDashboardPage({ projectId }: ProjectDashboardPageProps) {
             loading={costsLoading}
           />
         </div>
+
+        {/* F29 CE — Project-scoped cost rollup (lands with PR CD-2). Only
+            renders when the new endpoint returns data; pre-CD-2 the
+            tenant-scoped cards above stay as the authoritative surface. */}
+        {projectCostRollup && (
+          <div
+            className="grid grid-cols-2 gap-3 lg:grid-cols-4"
+            data-testid="project-cost-rollup"
+          >
+            <StatCard
+              label="Project Spend"
+              value={fmtMicros(projectCostRollup.total_cost_micros)}
+              description="project-scoped lifetime"
+              variant="info"
+            />
+            <StatCard
+              label="Project Provider Calls"
+              value={projectCostRollup.provider_calls.toLocaleString()}
+              description="project-scoped"
+            />
+            <StatCard
+              label="Project Tokens in"
+              value={projectCostRollup.total_tokens_in.toLocaleString()}
+              description="project-scoped"
+            />
+            <StatCard
+              label="Project Tokens out"
+              value={projectCostRollup.total_tokens_out.toLocaleString()}
+              description="project-scoped"
+            />
+          </div>
+        )}
 
         {/* Run trend + task breakdown */}
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
