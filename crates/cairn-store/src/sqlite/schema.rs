@@ -454,11 +454,14 @@ CREATE TABLE IF NOT EXISTS workspace_costs (
 );
 
 -- ── F39: recovery + decision projections ────────────────────────────────
--- Mirrors the Postgres V026 migration. Each table keys on an
--- event-intrinsic identifier so projection replay is idempotent under
--- ON CONFLICT DO NOTHING. Before this, SQLite emitted a `log_stub`
--- warning for each of the five variants and left the projection state
--- empty — callers reading recovery/decision state got stale results.
+-- Each table keys on an event-intrinsic identifier (envelope event_id,
+-- decision_id, boot_id, or warmed_at) so projection replay is
+-- idempotent: appending the same event twice leaves the table at one
+-- row via ON CONFLICT DO NOTHING in the projection applier. Recovery
+-- and decision audits therefore survive restart and are queryable
+-- without rebuilding from the event_log. The `recovered` column is
+-- stored as INTEGER (0/1) because sqlx maps `bool` to INTEGER on
+-- SQLite.
 CREATE TABLE IF NOT EXISTS recovery_attempts (
     event_id        TEXT PRIMARY KEY,
     tenant_id       TEXT NOT NULL,

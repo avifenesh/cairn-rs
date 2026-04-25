@@ -362,8 +362,12 @@ impl SqliteSyncProjection {
             RuntimeEvent::SpendAlertTriggered(_) => log_stub("SpendAlertTriggered"),
             RuntimeEvent::SubagentSpawned(_) => log_stub("SubagentSpawned"),
             // F39: durable projections for RFC 002 recovery audits.
-            // See pg/projections.rs for the rationale — this mirrors that
-            // contract with SQLite bind syntax.
+            // Projection row is keyed on the envelope `event_id` and
+            // guarded by `ON CONFLICT(event_id) DO NOTHING`, so a
+            // replayed event leaves the row count unchanged. Nullable
+            // run_id / task_id / boot_id preserve the struct shape
+            // verbatim; the `has_target()` invariant is enforced at
+            // the emitter, not here.
             RuntimeEvent::RecoveryAttempted(e) => {
                 sqlx::query(
                     "INSERT INTO recovery_attempts
@@ -399,7 +403,10 @@ impl SqliteSyncProjection {
                 .bind(e.project.project_id.as_str())
                 .bind(e.run_id.as_ref().map(|r| r.as_str()))
                 .bind(e.task_id.as_ref().map(|t| t.as_str()))
-                .bind(if e.recovered { 1_i64 } else { 0_i64 })
+                // sqlx maps `bool` to SQLite INTEGER (0/1); binding the
+                // field directly keeps parity with the pg handler and
+                // avoids a manual cast.
+                .bind(e.recovered)
                 .bind(e.boot_id.as_deref())
                 .bind(now)
                 .execute(&mut **tx)
@@ -848,8 +855,13 @@ impl SqliteSyncProjection {
             RuntimeEvent::ToolRecoveryPaused(_) => log_stub("ToolRecoveryPaused"),
             // F39: RFC 019 / RFC 020 decision-cache projection. The
             // in-memory cache is still rebuilt from the event log at
-            // boot; these tables give operator tooling a queryable read
-            // model. See pg/projections.rs for full rationale.
+            // boot; these tables give operator tooling a queryable
+            // read model. `decision_id` is the projection PK; replay
+            // (a distinct envelope carrying the same decision_id) is
+            // silently absorbed by `ON CONFLICT(decision_id) DO
+            // NOTHING`. `decision_key` and the full `DecisionEvent`
+            // payload are stored as TEXT (JSON) for pg/sqlite type
+            // portability — no JSONB operators assumed.
             RuntimeEvent::DecisionRecorded(e) => {
                 let decision_key_json = serde_json::to_string(&e.decision_key)
                     .map_err(|err| StoreError::Serialization(err.to_string()))?;
@@ -880,7 +892,7 @@ impl SqliteSyncProjection {
                 .bind(e.project.project_id.as_str())
                 .bind(decision_key_json)
                 .bind(outcome_kind)
-                .bind(if e.cached { 1_i64 } else { 0_i64 })
+                .bind(e.cached)
                 .bind(expires_at)
                 .bind(decided_at)
                 .bind(&e.event_json)
@@ -903,8 +915,8 @@ impl SqliteSyncProjection {
                      ON CONFLICT(warmed_at) DO NOTHING",
                 )
                 .bind(warmed_at)
-                .bind(e.cached as i64)
-                .bind(e.expired_and_dropped as i64)
+                .bind(i64::from(e.cached))
+                .bind(i64::from(e.expired_and_dropped))
                 .execute(&mut **tx)
                 .await
                 .map_err(|err| StoreError::Internal(err.to_string()))?;
@@ -943,19 +955,21 @@ impl SqliteSyncProjection {
                 .bind(e.sentinel_project.tenant_id.as_str())
                 .bind(e.sentinel_project.workspace_id.as_str())
                 .bind(e.sentinel_project.project_id.as_str())
-                .bind(e.recovered_runs as i64)
-                .bind(e.recovered_tasks as i64)
-                .bind(e.recovered_sandboxes as i64)
-                .bind(e.preserved_sandboxes as i64)
-                .bind(e.orphaned_sandboxes_cleaned as i64)
-                .bind(e.decision_cache_entries as i64)
-                .bind(e.stale_pending_cleared as i64)
-                .bind(e.tool_result_cache_entries as i64)
-                .bind(e.memory_projection_entries as i64)
-                .bind(e.graph_nodes_recovered as i64)
-                .bind(e.graph_edges_recovered as i64)
-                .bind(e.webhook_dedup_entries as i64)
-                .bind(e.trigger_projections as i64)
+                // u32 count fields use infallible `i64::from`; see the
+                // pg handler for the symmetry rationale.
+                .bind(i64::from(e.recovered_runs))
+                .bind(i64::from(e.recovered_tasks))
+                .bind(i64::from(e.recovered_sandboxes))
+                .bind(i64::from(e.preserved_sandboxes))
+                .bind(i64::from(e.orphaned_sandboxes_cleaned))
+                .bind(i64::from(e.decision_cache_entries))
+                .bind(i64::from(e.stale_pending_cleared))
+                .bind(i64::from(e.tool_result_cache_entries))
+                .bind(i64::from(e.memory_projection_entries))
+                .bind(i64::from(e.graph_nodes_recovered))
+                .bind(i64::from(e.graph_edges_recovered))
+                .bind(i64::from(e.webhook_dedup_entries))
+                .bind(i64::from(e.trigger_projections))
                 .bind(startup_ms)
                 .bind(recorded_at)
                 .execute(&mut **tx)
@@ -1189,8 +1203,8 @@ async fn upsert_cost_rollups_sqlite(
 }
 
 /// F39: short-form outcome discriminant for `decision_records.outcome_kind`.
-/// Mirrors `pg::projections::decision_outcome_kind` so the two backends
-/// agree on the string form stored in the projection.
+/// Stable strings (`"allowed"` / `"denied"`) let operator SQL filter
+/// by outcome without parsing `decision_key_json`.
 fn decision_outcome_kind(outcome: &cairn_domain::decisions::DecisionOutcome) -> &'static str {
     match outcome {
         cairn_domain::decisions::DecisionOutcome::Allowed => "allowed",
