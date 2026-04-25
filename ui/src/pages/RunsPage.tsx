@@ -14,6 +14,8 @@ import { TimelineView, ZoomSelector } from "../components/TimelineView";
 import type { ZoomLevel } from "../components/TimelineView";
 import { useAutoRefresh, REFRESH_OPTIONS } from "../hooks/useAutoRefresh";
 import { EmptyScopeHint } from "../components/EmptyScopeHint";
+import { EntityExplainer } from "../components/EntityExplainer";
+import { ENTITY_EXPLAINERS } from "../lib/entityExplainers";
 
 function fmtTime(ms: number) {
   return new Date(ms).toLocaleString(undefined, {
@@ -405,6 +407,10 @@ export function RunsPage() {
             </button>
           </div>
         </div>
+      </div>
+      {/* F32 — inline entity explainer. */}
+      <div className="px-4 py-1.5 border-b border-gray-200 dark:border-zinc-800 shrink-0 bg-white dark:bg-zinc-950">
+        <EntityExplainer>{ENTITY_EXPLAINERS.runsList}</EntityExplainer>
       </div>
       {/* Content */}
       {viewMode === "timeline" ? (
