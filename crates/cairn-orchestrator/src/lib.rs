@@ -105,4 +105,27 @@ pub mod decide_impl_test_hooks {
     pub fn complete_run_tool_def_for_tests() -> serde_json::Value {
         crate::decide_impl::complete_run_tool_def_pub()
     }
+
+    /// F38 regression hook: decide whether the stuck-loop directive
+    /// would be appended to the user message for the given iteration
+    /// count and step history.
+    pub fn should_inject_stuck_nudge_for_tests(
+        iteration: u32,
+        step_history: &[crate::context::StepSummary],
+    ) -> bool {
+        crate::decide_impl::should_inject_stuck_nudge(iteration, step_history)
+    }
+
+    /// F38 regression hook: expose the nudge suffix string so tests can
+    /// assert (a) that it carries the load-bearing directive substring
+    /// and (b) that a future refactor can't silently rewrite it.
+    pub fn stuck_nudge_suffix_for_tests() -> &'static str {
+        crate::decide_impl::stuck_nudge_suffix()
+    }
+
+    /// F38 regression hook: iteration threshold at which the stuck-loop
+    /// nudge starts firing.
+    pub fn stuck_iteration_threshold_for_tests() -> u32 {
+        crate::decide_impl::STUCK_ITERATION_THRESHOLD
+    }
 }

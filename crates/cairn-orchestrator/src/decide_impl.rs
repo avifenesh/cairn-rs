@@ -266,11 +266,20 @@ impl DecidePhase for LlmDecidePhase {
         // terminates the run (RunService::complete → LoopSignal::Done).
         //
         // The descriptor is NOT added to `tool_descs` — it has no
-        // `ToolHandler` implementation; it's a meta-action. We append it only
-        // to `tool_defs` (the OpenAI schema array the provider sees).
-        let mut tool_defs: Vec<serde_json::Value> =
-            tool_descs.iter().map(descriptor_to_tool_def).collect();
+        // `ToolHandler` implementation; it's a meta-action. We inject it at
+        // index 0 of `tool_defs` (the OpenAI schema array the provider
+        // sees).
+        //
+        // Invariant: `complete_run` is at index 0 of the tools array,
+        // not appended at the end. Some provider samplers weight
+        // earlier tool schemas more heavily, and GLM-4.7 in particular
+        // was observed to ignore a `complete_run` schema at the tail of
+        // a 20-tool list on trivially-answerable prompts — see
+        // `test_f38_complete_run_actually_invoked.rs` for the pinned
+        // regression.
+        let mut tool_defs: Vec<serde_json::Value> = Vec::with_capacity(tool_descs.len() + 1);
         tool_defs.push(complete_run_tool_def());
+        tool_defs.extend(tool_descs.iter().map(descriptor_to_tool_def));
 
         // When we pass native tool definitions to the provider (OpenAI-style
         // `tools` array), the model emits structured `tool_calls` on its own.
@@ -280,7 +289,29 @@ impl DecidePhase for LlmDecidePhase {
         // See `build_system_prompt` for the two emitted shapes.
         let native_tools_enabled = !tool_defs.is_empty();
         let system = build_system_prompt(&ctx.agent_type, &tool_descs, native_tools_enabled);
-        let user = build_user_message(ctx, gather, self.token_budget.as_ref());
+
+        // Invariant: when the run's recent step history looks stuck on
+        // non-terminal tool calls (see `should_inject_stuck_nudge`)
+        // we append a final-turn directive that tells the model to
+        // call `complete_run` now. The nudge is gated off in
+        // `RunMode::Plan` because plan mode terminates by emitting a
+        // `<proposed_plan>` block rather than by calling
+        // `complete_run`; forcing the terminal tool there would
+        // short-circuit the planning contract. `Direct` and `Execute`
+        // are the only shapes where the pathology applies.
+        //
+        // The flag threads into `build_user_message` rather than being
+        // post-pended here so the suffix's token cost is accounted for
+        // in the fixed-cost budget and optional sections get truncated
+        // to make room. Post-pending the suffix bypassed the budget
+        // and could push the final prompt over the provider's context
+        // window on iterations that were already near the limit
+        // (Copilot review on PR #300).
+        let plan_mode = matches!(ctx.run_mode, cairn_domain::decisions::RunMode::Plan);
+        let inject_stuck_nudge =
+            !plan_mode && should_inject_stuck_nudge(ctx.iteration, &gather.step_history);
+        let user = build_user_message(ctx, gather, self.token_budget.as_ref(), inject_stuck_nudge);
+
         let messages = vec![
             serde_json::json!({ "role": "system", "content": system }),
             serde_json::json!({ "role": "user",   "content": user   }),
@@ -479,7 +510,7 @@ pub fn build_user_message_pub(
     gather: &GatherOutput,
     budget: Option<&TokenBudget>,
 ) -> String {
-    build_user_message(ctx, gather, budget)
+    build_user_message(ctx, gather, budget, false)
 }
 
 /// Public wrapper around the synthetic `complete_run` tool definition
@@ -756,6 +787,7 @@ fn build_user_message(
     ctx: &OrchestrationContext,
     gather: &GatherOutput,
     budget: Option<&TokenBudget>,
+    append_stuck_nudge: bool,
 ) -> String {
     // ── Fixed sections (never truncated) ─────────────────────────────────────
     let goal_part = format!("## Goal\n{}", ctx.goal);
@@ -789,12 +821,24 @@ fn build_user_message(
          in this prompt."
     );
 
+    // The stuck-loop nudge is part of the fixed-cost prefix when
+    // enabled: it must appear in the final prompt even if the budget
+    // is tight, so its token cost has to come out of the optional
+    // sections' budget rather than silently blowing past
+    // `available_input`. See Copilot review on PR #300.
+    let nudge_cost = if append_stuck_nudge {
+        estimate_tokens(stuck_nudge_suffix())
+    } else {
+        0
+    };
+
     // ── Compute how many tokens are available for optional content ────────────
     // When no budget is set every section is included without limit.
     let optional_token_budget: Option<usize> = budget.map(|b| {
         let fixed_cost = estimate_tokens(&goal_part)
             + estimate_tokens(&run_state_part)
             + estimate_tokens(&footer)
+            + nudge_cost
             + 20; // section separators ("\n\n" between each part)
         b.available_input.saturating_sub(fixed_cost)
     });
@@ -941,7 +985,11 @@ fn build_user_message(
         parts.push(s);
     }
     parts.push(footer);
-    parts.join("\n\n")
+    let mut msg = parts.join("\n\n");
+    if append_stuck_nudge {
+        msg.push_str(stuck_nudge_suffix());
+    }
+    msg
 }
 
 // ── Response parsing (inlined — avoids re-exporting cairn_runtime internals) ──
@@ -1025,6 +1073,124 @@ pub(crate) fn complete_run_tool_def() -> serde_json::Value {
             }
         }
     })
+}
+
+// ── F38 stuck-loop nudge ─────────────────────────────────────────────────────
+
+/// Iteration index at which we start injecting the "you are stuck" nudge.
+///
+/// The predicate uses `ctx.iteration >= STUCK_ITERATION_THRESHOLD`, so
+/// threshold = 3 means the directive suffix is eligible starting at
+/// iteration index 3 — the 4th DECIDE call, since iterations are
+/// 0-indexed. Three is the smallest value that lets a healthy
+/// multi-step run (e.g., search → read → complete) finish on its own
+/// without tripping the nudge, while still catching the dogfood-v5
+/// introspection pattern (memory_search × 4, graph_query × 1,
+/// notify_operator × 3 … with `complete_run × 0`) early enough to
+/// salvage the run.
+///
+/// # Why three and not higher
+///
+/// Gemini review on PR #300 flagged threshold=3 as aggressive against the
+/// default `max_iterations = 20` cap. Two facts make the choice safe in
+/// practice:
+///
+/// 1. **The nudge is escapable.** [`stuck_nudge_suffix`] explicitly lets
+///    the model call `complete_run` with `final_answer = "<what I still
+///    need>"` when it genuinely needs more steps. A legitimate
+///    multi-step task gets a clean exit point instead of a hard
+///    truncation; the operator sees a real answer describing the gap
+///    rather than `max_iterations_reached` and an empty summary.
+/// 2. **Passing this threshold is RARE on healthy runs.** A
+///    well-behaved orchestration that actually needs 4+ tool calls
+///    usually emits at least one `complete_run` checkpoint along the
+///    way (for example the EXECUTE-mode handoff from a plan). The
+///    predicate skips the nudge as soon as `complete_run` appears in
+///    history, so "long run with a plan" is immune.
+///
+/// If future dogfood shows legitimate multi-step runs being nudged too
+/// early, bump this to 4–5 rather than disabling the feature entirely;
+/// the fix for dogfood-v5 task-1 collapses quickly if the threshold
+/// drifts above ~6.
+pub(crate) const STUCK_ITERATION_THRESHOLD: u32 = 3;
+
+/// Decide whether to append the stuck-loop directive to this iteration's
+/// user message.
+///
+/// The predicate fires when the RUN is in the stuck-introspection shape
+/// that dogfood-v5 task-1 surfaced: several consecutive non-terminal
+/// tool calls with no `complete_run`. Specifically, the most recent
+/// `STUCK_ITERATION_THRESHOLD` steps must all be non-terminal and
+/// must include at least one tool invocation — that last clause
+/// distinguishes a genuine introspection streak from, say, a stretch
+/// of context-compaction placeholders with no real work.
+///
+/// The tail-only check matters: checking the entire history for the
+/// absence of `complete_run` would fire on every 4th+ iteration of any
+/// long-running task, because `StepSummary.action_kind` is set to the
+/// DECIDE proposal kind (normally `invoke_tool`) and a run in progress
+/// has no reason to have emitted `complete_run` yet. See the
+/// Copilot review on PR #300 for the full argument.
+///
+/// Kept as a free function so unit tests can exercise the predicate
+/// without constructing a full `LlmDecidePhase`.
+pub(crate) fn should_inject_stuck_nudge(
+    iteration: u32,
+    step_history: &[crate::context::StepSummary],
+) -> bool {
+    if iteration < STUCK_ITERATION_THRESHOLD {
+        return false;
+    }
+    let window = STUCK_ITERATION_THRESHOLD as usize;
+    if step_history.len() < window {
+        return false;
+    }
+    let tail = &step_history[step_history.len() - window..];
+    // `action_kind` is the step-kind string recorded in `StepSummary`:
+    // often a serialized `ActionType` ("invoke_tool", "complete_run",
+    // …), but it may also be a non-`ActionType` marker such as
+    // `"compacted_summary"` (from RFC 018 compaction) or other
+    // loop-runner-internal kinds. We treat ANY `complete_run` in the
+    // window as "not stuck", and require at least one `invoke_tool`
+    // to confirm the model was genuinely doing tool work (and not
+    // e.g. waiting on compactions or approvals).
+    let has_terminal = tail.iter().any(|s| s.action_kind == "complete_run");
+    let has_invoke_tool = tail.iter().any(|s| s.action_kind == "invoke_tool");
+    !has_terminal && has_invoke_tool
+}
+
+/// The directive suffix appended to the user message when
+/// `should_inject_stuck_nudge` fires.
+///
+/// Invariant: the wording must be blunt (all-caps header, "MUST" rather
+/// than "should") AND carry an explicit escape hatch so a legitimate
+/// multi-step run can emit `complete_run` with a "what's missing"
+/// answer instead of being truncated. Both properties are load-bearing
+/// and are pinned by the unit test in
+/// `test_f38_complete_run_actually_invoked.rs`.
+pub(crate) fn stuck_nudge_suffix() -> &'static str {
+    // Intentionally NOT written as an indented multi-line string literal:
+    // the line-continuation syntax (`\` at end of line + leading spaces
+    // on the next) preserves the source-code indentation in the
+    // resulting `&str`, which would render the "## STOP — FINAL
+    // DIRECTIVE" header as a five-space-indented line and read in the
+    // LLM context like a nested code block, reducing its salience
+    // (Copilot review on PR #300). Flush-left concatenation keeps the
+    // markdown heading at column 0 where providers render it as a
+    // section break.
+    concat!(
+        "\n\n",
+        "## STOP — FINAL DIRECTIVE\n",
+        "You have already spent several iterations calling tools without ",
+        "producing a user-facing answer. The user is waiting for a response. ",
+        "On THIS turn you MUST call the `complete_run` tool with the full ",
+        "answer in `final_answer`. Do NOT call any other tool. If you cannot ",
+        "produce a confident answer from training data or the context above, ",
+        "call `complete_run` anyway and explain in `final_answer` what ",
+        "information is missing and what you would do next. Any tool call ",
+        "other than `complete_run` on this turn will be treated as a ",
+        "violation of the run contract."
+    )
 }
 
 /// Convert native tool_calls from the provider response into `ActionProposal` values.
@@ -1701,7 +1867,7 @@ mod tests {
 
     #[test]
     fn user_message_contains_goal_and_run_id() {
-        let msg = build_user_message(&ctx(), &empty_gather(), None);
+        let msg = build_user_message(&ctx(), &empty_gather(), None, false);
         assert!(msg.contains("cairn-rs architecture"), "goal must appear");
         assert!(msg.contains("run_1"), "run_id must appear");
         assert!(msg.contains("orchestrator"), "agent_type must appear");
@@ -1716,7 +1882,7 @@ mod tests {
             summary: "searched for architecture docs".to_owned(),
             succeeded: true,
         }];
-        let msg = build_user_message(&ctx(), &g, None);
+        let msg = build_user_message(&ctx(), &g, None, false);
         assert!(
             msg.contains("architecture docs"),
             "step history must appear"
@@ -1933,7 +2099,7 @@ mod tests {
         // Budget of 50 tokens — can barely fit goal + run_state + footer
         let tight = TokenBudget::new(50).with_reserved_output(0);
 
-        let msg = build_user_message(&ctx(), &g, Some(&tight));
+        let msg = build_user_message(&ctx(), &g, Some(&tight), false);
 
         // Goal must always be present
         assert!(msg.contains("Goal"), "goal section must always appear");
@@ -1979,7 +2145,7 @@ mod tests {
             breakdown: Default::default(),
         }];
 
-        let msg = build_user_message(&ctx(), &g, None);
+        let msg = build_user_message(&ctx(), &g, None, false);
 
         assert!(
             msg.contains("cairn uses event sourcing"),
@@ -2030,7 +2196,7 @@ mod tests {
             .collect();
 
         // Large budget — all three included
-        let msg = build_user_message(&ctx(), &g, None);
+        let msg = build_user_message(&ctx(), &g, None, false);
         assert!(msg.contains("highly relevant"), "chunk[0] must appear");
         assert!(msg.contains("somewhat relevant"), "chunk[1] must appear");
         assert!(msg.contains("least relevant"), "chunk[2] must appear");
@@ -2388,9 +2554,12 @@ mod tests {
                 _settings: &ProviderBindingSettings,
                 tools: &[serde_json::Value],
             ) -> Result<GenerationResponse, ProviderAdapterError> {
-                // Verify tools were sent
+                // Verify tools were sent. F38 injects `complete_run` at
+                // index 0, so `grep` (the only registered tool here) sits
+                // at index 1.
                 assert!(!tools.is_empty(), "tools should be passed to generate");
-                assert_eq!(tools[0]["function"]["name"], "grep");
+                assert_eq!(tools[0]["function"]["name"], "complete_run");
+                assert_eq!(tools[1]["function"]["name"], "grep");
 
                 Ok(GenerationResponse {
                     text: String::new(), // no text — only tool_calls
