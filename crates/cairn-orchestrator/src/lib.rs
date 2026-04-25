@@ -96,4 +96,13 @@ pub mod decide_impl_test_hooks {
     ) -> String {
         crate::decide_impl::build_user_message_pub(ctx, gather, None)
     }
+
+    /// Return the synthetic `complete_run` OpenAI-format tool schema
+    /// that DECIDE injects into every provider call. F36 regression
+    /// tests in `cairn-app` assert the shape of this descriptor so a
+    /// silent edit can't regress the "model has a first-class
+    /// terminal tool" invariant.
+    pub fn complete_run_tool_def_for_tests() -> serde_json::Value {
+        crate::decide_impl::complete_run_tool_def_pub()
+    }
 }

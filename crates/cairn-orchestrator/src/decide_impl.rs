@@ -248,9 +248,29 @@ impl DecidePhase for LlmDecidePhase {
             });
         }
 
-        // Convert tool descriptors to OpenAI-format definitions for native tool calling.
-        let tool_defs: Vec<serde_json::Value> =
+        // F36 (2026-04-24): inject a synthetic `complete_run` tool descriptor
+        // so the LLM sees it alongside real tools as a first-class schema entry.
+        //
+        // Before F36, `complete_run` was ONLY reachable via the text-parsing
+        // fallback — a JSON-array meta-action. With native tool calling on, the
+        // model saw 20+ real tool schemas (memory_search, bash, search_events…)
+        // and zero schema for "done." Dogfood v4 evidence: on a trivial prompt
+        // ("Write a Fibonacci function") GLM-4.7 called memory_search × 5,
+        // search_events × 1, notify_operator × 2, never complete_run — 8
+        // iterations, 0 answers. The model picked whichever tool had the most
+        // compelling schema.
+        //
+        // Fix: publish complete_run as a proper tool. The unwrap in
+        // `tool_calls_to_proposals` converts the native tool_call into an
+        // `ActionType::CompleteRun` proposal; the loop runner's existing path
+        // terminates the run (RunService::complete → LoopSignal::Done).
+        //
+        // The descriptor is NOT added to `tool_descs` — it has no
+        // `ToolHandler` implementation; it's a meta-action. We append it only
+        // to `tool_defs` (the OpenAI schema array the provider sees).
+        let mut tool_defs: Vec<serde_json::Value> =
             tool_descs.iter().map(descriptor_to_tool_def).collect();
+        tool_defs.push(complete_run_tool_def());
 
         // When we pass native tool definitions to the provider (OpenAI-style
         // `tools` array), the model emits structured `tool_calls` on its own.
@@ -462,6 +482,16 @@ pub fn build_user_message_pub(
     build_user_message(ctx, gather, budget)
 }
 
+/// Public wrapper around the synthetic `complete_run` tool definition
+/// for cross-crate regression tests. See the F36 comment block in
+/// `build_system_prompt`'s caller for context. Gated behind the
+/// `test-hooks` Cargo feature.
+#[cfg(feature = "test-hooks")]
+#[doc(hidden)]
+pub fn complete_run_tool_def_pub() -> serde_json::Value {
+    complete_run_tool_def()
+}
+
 fn build_system_prompt(
     agent_type: &str,
     tools: &[BuiltinToolDescriptor],
@@ -537,11 +567,24 @@ fn build_system_prompt(
         // and plain text for terminal meta-actions. We still accept the
         // JSON-array fallback when the model chooses not to call a tool.
         r#"## Response format
-When you need to call a tool, emit a native tool call — the provider's
-`tool_calls` mechanism will deliver it; do not re-emit it as text.
-When no tool call is needed (completing, escalating, recording memory,
-spawning a sub-agent, notifying), respond with ONLY a JSON array of
-action objects — no prose, no markdown fences — with fields:
+When you need to call a real tool — including `complete_run` to finish
+the run — emit a native tool call using the provider's `tool_calls`
+mechanism. `complete_run` is a first-class tool in your toolbox (see
+its schema in the tools list); prefer calling it as a tool_call over
+writing a JSON action array.
+
+Orchestrator meta-actions that are NOT tools — `create_memory`,
+`send_notification`, `spawn_subagent`, `escalate_to_operator` — have
+no function schema in the tools list. DO NOT try to emit these as
+native tool_calls (doing so will be interpreted as an unknown tool
+invocation and fail at execute time). Instead, return them as a JSON
+action array, even when native tool calling is available for other
+actions.
+
+JSON action array shape (used for meta-actions above, and as the
+legacy fallback when the provider has no native tool calling): ONLY
+a JSON array of action objects — no prose, no markdown fences — with
+fields:
 - "action_type": one of "invoke_tool"|"complete_run"|"create_memory"|"spawn_subagent"|"send_notification"|"escalate_to_operator"
 - "description": concise explanation for most actions; for complete_run,
                  the FULL user-facing answer (prose, bullets, whatever the
@@ -624,18 +667,30 @@ Field conventions:
          Your first move depends on the goal:\n\
          \n\
          **If you already have the information to answer** (you know the \
-         subject, the goal is general knowledge, or relevant context is \
-         already in this prompt):\n\
-         → Call `complete_run` RIGHT NOW. Put the full user-facing answer \
-         in the `description` field. Do not call tools just to appear \
-         thorough.\n\
+         subject, the goal is general knowledge or trivia, the answer is in \
+         your training data, or relevant context is already in this prompt):\n\
+         → Call `complete_run` RIGHT NOW with the full user-facing answer in \
+         `final_answer`. Do NOT call memory_search, search_events, \
+         notify_operator, or any other tool first. Answering from training \
+         data IS the correct behaviour — calling tools \"to be thorough\" on \
+         a trivially-answerable prompt wastes iterations and the user gets \
+         nothing.\n\
+         \n\
+         Examples of direct-answer prompts (all of these should hit \
+         `complete_run` on iteration 0, zero other tool calls):\n\
+         - \"What is the capital of France?\" → `complete_run({{final_answer: \"Paris.\"}})`\n\
+         - \"Write a Python Fibonacci function with a docstring.\" → \
+         `complete_run({{final_answer: \"```python\\ndef fib(n):\\n    \\\"\\\"\\\"Return the nth Fibonacci number.\\\"\\\"\\\"\\n    …\"}})`\n\
+         - \"Explain what a Redstone repeater does in two sentences.\" → \
+         `complete_run({{final_answer: \"A Redstone repeater…\"}})`\n\
          \n\
          **If the goal needs external information you don't have** (reading \
-         a specific file, searching memory or the codebase, fetching from \
-         the web, querying the graph, looking up domain-specific state):\n\
-         → Call the appropriate read/search/fetch tool, then on the next \
-         iteration answer with `complete_run` once you have what you need. \
-         Do not loop gathering more context than the answer requires.\n\
+         a specific file in this project, searching memory or the codebase \
+         for project-specific content, fetching from the web, querying the \
+         graph, looking up domain-specific state):\n\
+         → Call the appropriate read/search/fetch tool ONCE, then on the \
+         next iteration call `complete_run` with the answer. Do not loop \
+         gathering more context than the answer requires.\n\
          \n\
          **If the goal requires producing or modifying artifacts** (writing \
          files, running commands, opening PRs, editing code, calling \
@@ -645,8 +700,16 @@ Field conventions:
          \n\
          **Never call tools to introspect THIS run itself** — the goal, \
          iteration number, prior steps, and approvals are already in this \
-         prompt. Do not look them up via introspection tools even if those \
-         tools exist in your toolbox.\n\
+         prompt. Do not call `get_run`, `list_runs`, `search_events`, \
+         `get_approvals`, `get_task`, or `wait_for_task` to look up state \
+         about the run you are currently executing, even if those tools \
+         exist in your toolbox. They are registered for OTHER legitimate \
+         system-aware goals (\"list every failed run from today\"), not for \
+         answering the current prompt.\n\
+         \n\
+         **If the last 1–2 turns were introspection-only and produced \
+         nothing useful** (e.g. memory_search returned no matches), STOP \
+         searching and answer from training data via `complete_run`.\n\
          \n\
          ## Tool usage\n\
          - Only call a tool if the answer genuinely requires information or \
@@ -662,11 +725,12 @@ Field conventions:
          - If blocked and you need human input → `escalate_to_operator`.\n\
          \n\
          ## Completion\n\
-         `complete_run` ends the run and returns your `description` to the \
-         user as the final answer. Write it for the user, not for yourself: \
-         include the actual content (the bullet list, the summary, the \
-         explanation), not a meta-description like 'answered the user's \
-         question'.\n\
+         `complete_run` ends the run and returns the text you pass in \
+         `final_answer` (tool-call mode) or `description` (JSON-array \
+         fallback mode) to the user as the final output. Write it for the \
+         user, not for yourself: include the actual content (the bullet \
+         list, the summary, the code, the explanation), not a \
+         meta-description like 'answered the user's question'.\n\
          \n\
          ## Tips\n\
          - If a tool call fails, analyse the error and try a different \
@@ -716,11 +780,13 @@ fn build_user_message(
     let footer = format!(
         "## Next step\n\
          {memory_hint}\n\
-         If you already have the answer, call complete_run now with the \
-         full answer in `description`. If you need external information, \
-         call the appropriate tool. Do not call introspection tools about \
-         this run itself.\n\
-         Return a JSON action array."
+         If you already have the answer, call the `complete_run` tool NOW \
+         with the full answer in `final_answer`. If you need external \
+         information, call the appropriate tool once and then complete_run \
+         on the next iteration. Do not call introspection tools \
+         (get_run, list_runs, search_events, get_approvals, get_task) \
+         about this run itself — the goal and step history are already \
+         in this prompt."
     );
 
     // ── Compute how many tokens are available for optional content ────────────
@@ -923,6 +989,44 @@ fn descriptor_to_tool_def(desc: &BuiltinToolDescriptor) -> serde_json::Value {
     })
 }
 
+/// Build the synthetic `complete_run` tool definition injected into every
+/// DECIDE call's tool schema list (F36).
+///
+/// `complete_run` has no `ToolHandler` — it is a terminal meta-action the
+/// orchestrator interprets directly (`RunService::complete` is invoked in the
+/// EXECUTE phase via the `ActionType::CompleteRun` branch). Publishing it as
+/// a tool schema gives the model a first-class entry to terminate the run,
+/// symmetrical with every other tool it can call.
+///
+/// The description is aggressively directive because weaker wording did not
+/// stop GLM-4.7 from preferring introspection tools (memory_search,
+/// search_events) on trivially-answerable prompts.
+pub(crate) fn complete_run_tool_def() -> serde_json::Value {
+    serde_json::json!({
+        "type": "function",
+        "function": {
+            "name": "complete_run",
+            "description": "Finish the run and return the final answer to the user. \
+    Call this IMMEDIATELY when you can answer from training data or from context \
+    already in this prompt — do not call memory_search, search_events, or any \
+    other tool first on trivially-answerable prompts. Put the full user-facing \
+    answer (prose, bullets, code — whatever the goal asks for) in `final_answer`. \
+    This ends the run; no further tool calls will run after this one.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "final_answer": {
+                        "type": "string",
+                        "description": "The complete user-facing answer. Verbatim what the user should see as the run's output. Do not write a meta-summary like 'answered the user's question' — write the actual answer."
+                    }
+                },
+                "required": ["final_answer"],
+                "additionalProperties": false
+            }
+        }
+    })
+}
+
 /// Convert native tool_calls from the provider response into `ActionProposal` values.
 ///
 /// Each tool_call becomes an `InvokeTool` proposal. The tool_name is the function name
@@ -967,6 +1071,60 @@ fn tool_calls_to_proposals(
                     tool_name: Some(name),
                     tool_args: Some(args),
                     requires_approval: false,
+                });
+            }
+
+            // F36: native `complete_run` tool call → terminal CompleteRun
+            // proposal. The `final_answer` argument becomes the proposal
+            // description so the loop runner's `LoopTermination::Completed`
+            // branch returns it verbatim to the user (see
+            // `loop_runner.rs` — the proposal description is copied into
+            // `summary`).
+            //
+            // `final_answer` is a REQUIRED field in the schema. If the
+            // model omits it entirely — including under the tolerated
+            // aliases (`description`, `answer`, `content`, `summary`),
+            // which cover known GLM/Qwen/Gemma shapes — we do NOT invent
+            // a default string. Silently returning "run completed" would
+            // both mask schema drift from upstream providers (Gemini's
+            // review guidance) and hand a useless summary back to the
+            // user. Instead we escalate to the operator with the raw
+            // arguments so a human can diagnose. This keeps the failure
+            // loud while staying in-channel (the caller is a
+            // `filter_map` returning `Vec<ActionProposal>`; we can't
+            // return a `Result` without rewriting every call site).
+            if name == "complete_run" {
+                let final_answer = args
+                    .get("final_answer")
+                    .and_then(|v| v.as_str())
+                    .map(str::to_owned)
+                    .or_else(|| {
+                        for alias in ["description", "answer", "content", "summary"] {
+                            if let Some(s) = args.get(alias).and_then(|v| v.as_str()) {
+                                return Some(s.to_owned());
+                            }
+                        }
+                        None
+                    });
+
+                return Some(match final_answer {
+                    Some(text) => ActionProposal {
+                        action_type: ActionType::CompleteRun,
+                        description: text,
+                        confidence: 0.95,
+                        tool_name: None,
+                        tool_args: None,
+                        requires_approval: false,
+                    },
+                    None => ActionProposal::escalate(
+                        format!(
+                            "Model called `complete_run` but omitted the required \
+                             `final_answer` argument (and none of the tolerated \
+                             aliases description/answer/content/summary were \
+                             present). Raw arguments: {args}"
+                        ),
+                        0.0,
+                    ),
                 });
             }
 
@@ -1452,6 +1610,76 @@ mod tests {
         assert_eq!(
             proposals[0].tool_args.as_ref().and_then(|a| a.get("goal")),
             Some(&serde_json::Value::String("summarise RFCs".to_owned())),
+        );
+    }
+
+    #[test]
+    fn complete_run_tool_call_maps_to_complete_run_proposal() {
+        // F36: a native `complete_run(final_answer: "...")` tool_call
+        // must translate to a terminal `ActionType::CompleteRun`
+        // proposal whose description carries the final_answer text
+        // verbatim (the loop runner copies that field into the run's
+        // `summary`).
+        let tool_calls = vec![serde_json::json!({
+            "type": "function",
+            "function": {
+                "name": "complete_run",
+                "arguments": { "final_answer": "Paris." }
+            }
+        })];
+        let proposals = tool_calls_to_proposals(&tool_calls, &[]);
+        assert_eq!(proposals.len(), 1);
+        assert_eq!(proposals[0].action_type, ActionType::CompleteRun);
+        assert_eq!(proposals[0].description, "Paris.");
+        assert!(proposals[0].tool_name.is_none());
+    }
+
+    #[test]
+    fn complete_run_tool_call_accepts_description_alias() {
+        // Lenient alias: some models (notably earlier GLM iterations
+        // and Qwen3 reasoning traces) key the answer under
+        // `description` instead of `final_answer`.
+        let tool_calls = vec![serde_json::json!({
+            "type": "function",
+            "function": {
+                "name": "complete_run",
+                "arguments": { "description": "Paris is the capital." }
+            }
+        })];
+        let proposals = tool_calls_to_proposals(&tool_calls, &[]);
+        assert_eq!(proposals.len(), 1);
+        assert_eq!(proposals[0].action_type, ActionType::CompleteRun);
+        assert_eq!(proposals[0].description, "Paris is the capital.");
+    }
+
+    #[test]
+    fn complete_run_tool_call_missing_final_answer_escalates() {
+        // Review follow-up (Gemini / Copilot): when the model calls
+        // `complete_run` without the required `final_answer` argument
+        // AND without any tolerated alias, do NOT silently default to
+        // a useless summary ("run completed") — that would both mask
+        // schema drift from upstream providers and hand a meaningless
+        // answer to the user. Escalate with the raw arguments so a
+        // human can diagnose what the model actually sent.
+        let tool_calls = vec![serde_json::json!({
+            "type": "function",
+            "function": {
+                "name": "complete_run",
+                "arguments": { "wrong_field": "oops" }
+            }
+        })];
+        let proposals = tool_calls_to_proposals(&tool_calls, &[]);
+        assert_eq!(proposals.len(), 1);
+        assert_eq!(proposals[0].action_type, ActionType::EscalateToOperator);
+        assert!(
+            proposals[0].description.contains("final_answer"),
+            "escalation message should name the missing field; got: {}",
+            proposals[0].description,
+        );
+        assert!(
+            proposals[0].description.contains("wrong_field"),
+            "escalation message should include the raw args for diagnosis; got: {}",
+            proposals[0].description,
         );
     }
 
