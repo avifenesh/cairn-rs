@@ -9,7 +9,7 @@ import { useTableKeyboard } from "../hooks/useTableKeyboard";
 import { useToast } from "../components/Toast";
 import { CopyButton } from "../components/CopyButton";
 import { defaultApi, ApiError } from "../lib/api";
-import type { RunRecord, RunState } from "../lib/types";
+import type { RunRecord, RunState, StuckRunReport } from "../lib/types";
 import { TimelineView, ZoomSelector } from "../components/TimelineView";
 import type { ZoomLevel } from "../components/TimelineView";
 import { useAutoRefresh, REFRESH_OPTIONS } from "../hooks/useAutoRefresh";
@@ -31,6 +31,32 @@ function fmtRelative(ms: number): string {
 function shortId(id: string) {
   return id.length > 20 ? `${id.slice(0, 8)}\u2026${id.slice(-5)}` : id;
 }
+
+/** Synthesise a minimal RunRecord from a stalled-run diagnosis report
+ *  so the Runs table can render rows whose full record lives outside
+ *  the first page of GET /v1/runs. Fields the diagnosis report does
+ *  not carry are filled with safe placeholders; clicking the row
+ *  lands on RunDetailPage which refetches the complete record. */
+function synthStalledRun(s: StuckRunReport): RunRecord {
+  const now = Date.now();
+  const createdAt = Math.max(0, now - (s.duration_ms || 0));
+  return {
+    run_id:            s.run_id,
+    session_id:        "\u2014",
+    parent_run_id:     null,
+    project:           { tenant_id: "", workspace_id: "", project_id: "" },
+    state:             s.state as RunState,
+    prompt_release_id: null,
+    agent_role_id:     null,
+    failure_class:     null,
+    pause_reason:      null,
+    resume_trigger:    null,
+    version:           0,
+    created_at:        createdAt,
+    updated_at:        s.last_event_ms > 0 ? s.last_event_ms : createdAt,
+  };
+}
+
 
 const ALL_STATES: RunState[] = [
   "pending","running","paused","waiting_approval","waiting_dependency",
@@ -213,11 +239,34 @@ export function RunsPage() {
   const [viewMode, setViewMode]     = useState<"table" | "timeline">("table");
   const [zoom, setZoom]             = useState<ZoomLevel>("6h");
   const [showBatchCreate, setShowBatchCreate] = useState(false);
+  // F29 CE — "Stalled only" toggle. Swaps the query source from
+  // `GET /v1/runs` to `GET /v1/runs/stalled`. Defaults to the URL
+  // hash query so the StuckRunsWidget "view all" link lands here
+  // with the filter already engaged.
+  const [stalledOnly, setStalledOnly] = useState<boolean>(() => {
+    if (typeof window === "undefined") return false;
+    return window.location.hash.includes("stalled=1");
+  });
   const qc = useQueryClient();
 
-  const { data, isLoading, isError, error, refetch, isFetching } = useQuery({
-    queryKey: ["runs"],
-    queryFn: () => defaultApi.getRuns({ limit: 200 }),
+  const { data, isLoading, isError, error, refetch, isFetching } = useQuery<RunRecord[]>({
+    queryKey: ["runs", stalledOnly ? "stalled" : "all"],
+    queryFn: async (): Promise<RunRecord[]> => {
+      if (!stalledOnly) return defaultApi.getRuns({ limit: 200 });
+      // Join stalled-diagnosis reports back against the normal runs list
+      // so the downstream DataTable keeps the full RunRecord shape
+      // (created_at, session_id, parent_run_id, etc.). Falls back to
+      // synthesised minimal RunRecord rows when a stalled run isn't in
+      // the first page of `/v1/runs` (long-running stuck runs past the
+      // default limit of 200).
+      const [stalled, runs] = await Promise.all([
+        defaultApi.getStalledRuns(),
+        defaultApi.getRuns({ limit: 200 }),
+      ]);
+      const byId = new Map<string, RunRecord>();
+      for (const r of runs) byId.set(r.run_id, r);
+      return stalled.map((s: StuckRunReport) => byId.get(s.run_id) ?? synthStalledRun(s));
+    },
     refetchInterval: refreshMs,
   });
 
@@ -270,6 +319,30 @@ export function RunsPage() {
           <option value="all">All states</option>
           {ALL_STATES.map(s => <option key={s} value={s}>{STATE_LABEL[s]}</option>)}
         </select>
+        {/* F29 CE — Stalled-only pill. Swaps the query source from
+            /v1/runs to /v1/runs/stalled. Syncs with the URL hash so
+            the StuckRunsWidget "view all" link lands here with the
+            filter engaged. */}
+        <button
+          type="button"
+          aria-pressed={stalledOnly}
+          data-testid="runs-stalled-toggle"
+          onClick={() => {
+            const next = !stalledOnly;
+            setStalledOnly(next);
+            const hash = window.location.hash.replace(/^#/, "").split("?")[0] || "runs";
+            window.location.hash = next ? `${hash}?stalled=1` : hash;
+          }}
+          title="Show only runs stalled for more than the system-default stuck-run threshold."
+          className={clsx(
+            "inline-flex items-center rounded border text-[12px] px-2 py-1 transition-colors",
+            stalledOnly
+              ? "border-amber-500/50 bg-amber-500/10 text-amber-500 dark:text-amber-400"
+              : "border-gray-200 dark:border-zinc-700 bg-gray-50 dark:bg-zinc-900 text-gray-500 dark:text-zinc-400 hover:text-gray-800 dark:hover:text-zinc-200 hover:border-zinc-600",
+          )}
+        >
+          Stalled only
+        </button>
         {/* View toggle */}
         <div className="flex items-center rounded border border-gray-200 dark:border-zinc-700 overflow-hidden">
           <button onClick={() => setViewMode("table")} title="Table view"

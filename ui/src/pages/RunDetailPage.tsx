@@ -11,6 +11,7 @@ import { clsx } from "clsx";
 import { StatCard } from "../components/StatCard";
 import { StateBadge } from "../components/StateBadge";
 import { GanttView } from "../components/TimelineView";
+import { RunTelemetryPanel } from "../components/RunTelemetryPanel";
 import { CopyButton } from "../components/CopyButton";
 import { Drawer } from "../components/Drawer";
 import { useToast } from "../components/Toast";
@@ -1228,6 +1229,9 @@ export function RunDetailPage({ runId, onBack }: RunDetailPageProps) {
 
         {/* Orchestration live timeline — visible when SSE events arrive */}
         <OrchestrationTimeline runId={runId} />
+
+        {/* F29 CE — Telemetry panel (provider calls, tool invocations, totals) */}
+        <RunTelemetryPanel runId={runId} />
 
         {/* Task Gantt chart */}
         {safeTasks && safeTasks.length > 0 && run && (

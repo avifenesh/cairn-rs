@@ -16,6 +16,7 @@ import { useScope } from "../hooks/useScope";
 import type { ProviderConnectionRecord, ProviderHealthEntry } from "../lib/types";
 import { ModelCatalogPicker } from "../components/ModelCatalogPicker";
 import { EmptyScopeHint } from "../components/EmptyScopeHint";
+import { RoutingPreview } from "../components/RoutingPreview";
 
 // ── Test-connection result ────────────────────────────────────────────────────
 
@@ -1505,6 +1506,12 @@ export function ProvidersPage() {
           Only real provider connections registered for the current scope appear here.
         </p>
       </div>
+
+      {/* F29 CE — Routing Preview. Shows which connection serves brain/
+          generate roles for the active tenant. Highest-priority CE
+          feature — replaces the curl-debug workflow that blocked
+          dogfood earlier. */}
+      <RoutingPreview />
 
       {/* User-created connections with Add Provider button */}
       <ConnectionsSection onAdd={() => setShowAddModal(true)} onTestResult={setTestResult} />

@@ -1627,3 +1627,78 @@ export interface RunTelemetry {
   phase_timings: Record<string, unknown>;
 }
 
+// ── F29 CD: Stuck-run diagnosis ────────────────────────────────────────────
+// Wire shape of `GET /v1/runs/stalled` list items — mirrors the Rust
+// `DiagnosisReport` struct in `crates/cairn-app/src/helpers.rs`.
+
+export interface StuckRunTaskActivity {
+  task_id: string;
+  /** TaskState variant (snake_case). */
+  state: string;
+  last_activity_ms: number;
+}
+
+export interface StuckRunReport {
+  run_id: string;
+  /** RunState variant (snake_case). */
+  state: string;
+  duration_ms: number;
+  active_tasks: StuckRunTaskActivity[];
+  stalled_tasks: string[];
+  last_event_type: string;
+  last_event_ms: number;
+  suggested_action: string;
+}
+
+// ── F29 CD: Settings-default GET ───────────────────────────────────────────
+// Wire shape of `GET /v1/settings/defaults/:scope/:scope_id/:key`.
+// The value is whatever JSON was stored — typically a string model ID
+// but numbers and booleans are also valid.
+
+export type SettingsScope = "system" | "tenant" | "workspace" | "project";
+
+export interface SettingDefault {
+  scope: SettingsScope;
+  scope_id: string;
+  key: string;
+  value: unknown;
+  /** Always equals `scope` for the exact-lookup endpoint. */
+  source: SettingsScope;
+}
+
+/** Response shape of `GET /v1/sessions/:id/cost`. The backend flattens
+ *  a `SessionCostRecord` onto the root and appends a per-run breakdown,
+ *  so consumers see every `SessionCostRecord` field directly plus
+ *  `run_breakdown: RunCostRecord[]`. */
+export interface SessionCostResponse extends SessionCostRecord {
+  run_breakdown: RunCostRecord[];
+}
+
+// ── F29 CD-2: Project / Workspace cost rollups ─────────────────────────────
+// These mirror endpoints shipped by PR CD-2
+// (`GET /v1/projects/:tenant/:workspace/:project/costs` and
+// `GET /v1/workspaces/:tenant/:workspace/costs`). CE consumes them
+// defensively — if CD-2 has not merged at runtime, the endpoints
+// return 404 and the UI falls back to the "not available yet" state.
+
+export interface ProjectCostSummary {
+  tenant_id: string;
+  workspace_id: string;
+  project_id: string;
+  total_cost_micros: number;
+  total_tokens_in: number;
+  total_tokens_out: number;
+  provider_calls: number;
+  updated_at_ms: number;
+}
+
+export interface WorkspaceCostSummary {
+  tenant_id: string;
+  workspace_id: string;
+  total_cost_micros: number;
+  total_tokens_in: number;
+  total_tokens_out: number;
+  provider_calls: number;
+  updated_at_ms: number;
+}
+
