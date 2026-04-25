@@ -11,6 +11,8 @@ import { clsx } from "clsx";
 import { sectionLabel } from "../lib/design-system";
 import { ApiError } from "../lib/api";
 import { EmptyScopeHint } from "../components/EmptyScopeHint";
+import { EntityExplainer } from "../components/EntityExplainer";
+import { ENTITY_EXPLAINERS } from "../lib/entityExplainers";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -199,7 +201,7 @@ export function DecisionsPage() {
             <p className={clsx(sectionLabel, "mb-0")}>Decisions</p>
             <HelpTooltip text="Every tool call, trigger, and plugin action is policy-checked before running. Audit the allow/deny decisions below." placement="right" />
           </div>
-          <p className="text-[11px] text-gray-500 dark:text-zinc-400">Audit tool, trigger, and plugin policy decisions across your workspace.</p>
+          <EntityExplainer>{ENTITY_EXPLAINERS.decision}</EntityExplainer>
         </div>
         <div className="flex items-center gap-2">
           {tab === "cache" && cacheEntries.length > 0 && (
