@@ -25,7 +25,7 @@ use cairn_domain::{
 };
 use cairn_memory::{
     ingest::{IngestRequest, IngestService, SourceType},
-    retrieval::{RerankerStrategy, RetrievalMode, RetrievalQuery, RetrievalService},
+    retrieval::{RerankerStrategy, RetrievalError, RetrievalMode, RetrievalQuery, RetrievalService},
 };
 use cairn_tools::builtins::{
     BuiltinToolRegistry, PermissionLevel, RetrySafety, ToolCategory, ToolEffect, ToolError,
@@ -33,6 +33,21 @@ use cairn_tools::builtins::{
 };
 use cairn_workspace::{ProjectRepoAccessService, RepoCloneCache, RepoId};
 use serde_json::Value;
+
+/// Detects the specific `RetrievalError` produced by `InMemoryRetrieval` when
+/// `VectorOnly` is requested but no embedding provider is configured.
+///
+/// This is a placeholder-retrieval guard: the built-in in-memory backend has
+/// no embedder in the default wiring (the real embedding stack ships with the
+/// external memory crate). Matching on the sentinel phrase lets us fall back
+/// to lexical cleanly without threading an `has_embedder()` capability through
+/// the trait — that's a larger change we explicitly do not want here.
+fn is_missing_embedder_error(err: &RetrievalError) -> bool {
+    matches!(
+        err,
+        RetrievalError::Internal(msg) if msg.contains("VectorOnly mode requires an embedding provider")
+    )
+}
 
 // ── ConcreteMemorySearchTool ──────────────────────────────────────────────────
 
@@ -66,7 +81,11 @@ impl ToolHandler for ConcreteMemorySearchTool {
     fn description(&self) -> &str {
         "Search the agent's memory for relevant information. \
          Returns the most relevant text chunks from previously stored knowledge. \
-         Use this before answering questions that may require prior context."
+         Use this before answering questions that may require prior context. \
+         NOTE: Only `mode=lexical` is currently guaranteed. `vector` and `hybrid` \
+         are accepted but fall back to lexical when no embedding provider is \
+         configured (the common case today). Prefer `lexical` unless you know \
+         an embedder is wired."
     }
 
     fn parameters_schema(&self) -> Value {
@@ -87,7 +106,11 @@ impl ToolHandler for ConcreteMemorySearchTool {
                 },
                 "mode": {
                     "type": "string",
-                    "description": "Retrieval mode: lexical (keyword match), vector (semantic), or hybrid",
+                    "description": "Retrieval mode. `lexical` (keyword match) is always \
+                                    supported. `vector` (semantic) and `hybrid` require an \
+                                    embedding provider; when none is configured the tool \
+                                    clamps to `lexical` and attaches a `mode_clamped` \
+                                    diagnostic to the result.",
                     "enum": ["lexical", "vector", "hybrid"],
                     "default": "lexical"
                 }
@@ -118,19 +141,19 @@ impl ToolHandler for ConcreteMemorySearchTool {
             .map(|n| (n as usize).min(20))
             .unwrap_or(5);
 
-        let mode = match args
+        let requested_mode_str = args
             .get("mode")
             .and_then(|v| v.as_str())
-            .unwrap_or("lexical")
-        {
+            .unwrap_or("lexical");
+        let requested_mode = match requested_mode_str {
             "vector" => RetrievalMode::VectorOnly,
             "hybrid" => RetrievalMode::Hybrid,
             _ => RetrievalMode::LexicalOnly,
         };
 
-        let query = RetrievalQuery {
+        let build_query = |mode: RetrievalMode| RetrievalQuery {
             project: project.clone(),
-            query_text,
+            query_text: query_text.clone(),
             mode,
             reranker: RerankerStrategy::None,
             limit,
@@ -138,29 +161,58 @@ impl ToolHandler for ConcreteMemorySearchTool {
             scoring_policy: None,
         };
 
-        match self.retrieval.query(query).await {
-            Ok(resp) => {
-                let results: Vec<Value> = resp
-                    .results
-                    .into_iter()
-                    .map(|r| {
-                        serde_json::json!({
-                            "chunk_id":    r.chunk.chunk_id.as_str(),
-                            "text":        r.chunk.text,
-                            "score":       r.score,
-                            "source_id":   r.chunk.source_id.as_str(),
-                            "document_id": r.chunk.document_id.as_str(),
-                        })
-                    })
-                    .collect();
-                let total = results.len();
-                Ok(ToolResult::ok(serde_json::json!({
-                    "results": results,
-                    "total":   total,
-                })))
+        // Retrieval attempt with a guarded clamp: if the backend rejects
+        // `VectorOnly` because no embedder is configured (the default today —
+        // real vector retrieval ships with the external memory crate), fall
+        // back to lexical so the orchestrator run survives. We surface the
+        // clamp via a `mode_clamped` diagnostic so the LLM can adapt.
+        //
+        // `Hybrid` without an embedder already degrades to lexical inside
+        // `InMemoryRetrieval`, so only `VectorOnly` needs handling here.
+        let (resp, clamped_from) = match self.retrieval.query(build_query(requested_mode)).await {
+            Ok(resp) => (resp, None),
+            Err(e) if is_missing_embedder_error(&e) && requested_mode != RetrievalMode::LexicalOnly => {
+                let original = requested_mode_str.to_owned();
+                match self
+                    .retrieval
+                    .query(build_query(RetrievalMode::LexicalOnly))
+                    .await
+                {
+                    Ok(resp) => (resp, Some(original)),
+                    Err(e2) => {
+                        return Err(ToolError::Transient(format!("retrieval failed: {e2}")));
+                    }
+                }
             }
-            Err(e) => Err(ToolError::Transient(format!("retrieval failed: {e}"))),
+            Err(e) => return Err(ToolError::Transient(format!("retrieval failed: {e}"))),
+        };
+
+        let results: Vec<Value> = resp
+            .results
+            .into_iter()
+            .map(|r| {
+                serde_json::json!({
+                    "chunk_id":    r.chunk.chunk_id.as_str(),
+                    "text":        r.chunk.text,
+                    "score":       r.score,
+                    "source_id":   r.chunk.source_id.as_str(),
+                    "document_id": r.chunk.document_id.as_str(),
+                })
+            })
+            .collect();
+        let total = results.len();
+        let mut payload = serde_json::json!({
+            "results": results,
+            "total":   total,
+        });
+        if let Some(from) = clamped_from {
+            payload["mode_clamped"] = serde_json::json!({
+                "from": from,
+                "to": "lexical",
+                "reason": "no embedding provider configured",
+            });
         }
+        Ok(ToolResult::ok(payload))
     }
 }
 
