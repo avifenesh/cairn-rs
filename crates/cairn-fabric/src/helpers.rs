@@ -84,6 +84,11 @@ pub fn parse_public_state(s: &str) -> flowfabric::core::state::PublicState {
         "cancelled" => flowfabric::core::state::PublicState::Cancelled,
         "expired" => flowfabric::core::state::PublicState::Expired,
         "skipped" => flowfabric::core::state::PublicState::Skipped,
+        // FF 0.9 (RFC-014 Stage 2) addition — transient state between
+        // Suspended and Active, serialized as "resumable". Without
+        // this arm the snapshot-decode path silently falls through to
+        // `Waiting` and misclassifies a mid-resume run as queued.
+        "resumable" => flowfabric::core::state::PublicState::Resumable,
         _ => flowfabric::core::state::PublicState::Waiting,
     }
 }
@@ -245,6 +250,10 @@ mod tests {
         assert_eq!(
             parse_public_state("skipped"),
             flowfabric::core::state::PublicState::Skipped
+        );
+        assert_eq!(
+            parse_public_state("resumable"),
+            flowfabric::core::state::PublicState::Resumable
         );
         assert_eq!(
             parse_public_state("delayed"),
