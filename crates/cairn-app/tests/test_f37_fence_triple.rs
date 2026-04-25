@@ -59,15 +59,21 @@
 //!
 //! End-to-end LiveHarness driven through real HTTP. Two assertions:
 //!
-//! * `complete_run_after_lease_expiry_succeeds` — create session + run
-//!   with `CAIRN_FABRIC_LEASE_TTL_MS=1000`, wait 1.5 s (lease expires),
-//!   then `POST /v1/runs/:id/intervene {"action":"force_complete"}`.
-//!   Pre-F37 this failed with `partial_fence_triple`. Post-F37 the
-//!   force-complete succeeds via the unfenced `operator_override` path.
+//! * `complete_run_with_live_lease_succeeds` — create session + run +
+//!   claim, then `POST /v1/runs/:id/intervene {"action":"force_complete"}`
+//!   immediately. Exercises the fully-fenced path (all three tokens
+//!   populated) so a future regression that blanks the fence
+//!   unconditionally is caught.
 //!
-//! * `complete_run_with_live_lease_succeeds` — the same flow WITHOUT
-//!   sleeping past the lease TTL. Exercises the fully-fenced path so a
-//!   future regression that blanks the fence unconditionally is caught.
+//! * `complete_run_after_lease_expiry_returns_clean_conflict` — same
+//!   setup with `CAIRN_FABRIC_LEASE_TTL_MS=1000`, sleep 3 s so FF's
+//!   expiry path fires on the next FCALL, then force-complete. Asserts
+//!   the response is NOT a 500 `fabric layer error` and does NOT leak
+//!   raw `partial_fence_triple` / `fence_required` / `fabric layer
+//!   error` text. Either a 200 (FF's scanner hadn't run — still fenced)
+//!   or a structured 4xx (`execution_not_active` / `lease_expired`
+//!   surfaced as `RuntimeError::InvalidTransition` → 409) is accepted;
+//!   what pre-F37 produced (a 500 leaking FCALL internals) is not.
 
 mod support;
 

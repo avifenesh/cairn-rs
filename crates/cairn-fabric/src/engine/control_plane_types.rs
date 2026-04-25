@@ -201,10 +201,11 @@ pub struct ClaimGrantOutcome {
 ///   writer (cairn's orchestrator on the completion path).
 ///
 /// Any *partial* triple (e.g. empty `lease_id` + set `lease_epoch`) is
-/// rejected with `partial_fence_triple`. `resolve_lease_context` in
-/// `run_service.rs` is the sole builder of this struct and enforces the
-/// invariant: either all three are populated from a live
-/// `current_lease`, or all three are cleared and `source` is set to
+/// rejected with `partial_fence_triple`. Both lease-context builders —
+/// `FabricRunService::resolve_lease_context` and
+/// `FabricTaskService::resolve_lease_context` — enforce the invariant:
+/// either all three are populated from a live `current_lease` + current
+/// attempt, or all three are cleared and `source` is set to
 /// `"operator_override"` so FF accepts the unfenced path.
 #[derive(Clone, Debug)]
 pub struct ExecutionLeaseContext {

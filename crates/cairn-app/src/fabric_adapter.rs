@@ -197,15 +197,25 @@ fn fabric_err_to_runtime(err: FabricError) -> RuntimeError {
                 .rsplit_once(": ")
                 .map(|(_, c)| c.trim().to_owned())
                 .unwrap_or_else(|| "invalid_state".to_owned());
+            // Derive the transition target from the FCALL name so the
+            // 409 body reads correctly for both complete ("→ completed")
+            // and fail ("→ failed"). Mirrors the suspend/resume handler
+            // below which picks "active" vs "suspended" the same way.
+            let to = if msg.starts_with("ff_fail_execution") {
+                "failed"
+            } else {
+                "completed"
+            };
             tracing::debug!(
                 fabric_err = %msg,
                 code = %code,
+                to = %to,
                 "fabric terminal-FCALL state conflict (409 to caller)"
             );
             RuntimeError::InvalidTransition {
                 entity: "run",
                 from: code,
-                to: "completed".to_owned(),
+                to: to.to_owned(),
             }
         }
         FabricError::Internal(ref msg) if is_suspend_state_conflict(msg) => {
