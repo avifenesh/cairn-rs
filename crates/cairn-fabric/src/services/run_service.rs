@@ -130,7 +130,9 @@ impl FabricRunService {
                 lease_id: l.lease_id.to_string(),
                 lease_epoch: l.epoch.0.to_string(),
                 attempt_id: att.id.to_string(),
-                worker_instance_id: flowfabric::core::types::WorkerInstanceId::new(l.owner.as_str()),
+                worker_instance_id: flowfabric::core::types::WorkerInstanceId::new(
+                    l.owner.as_str(),
+                ),
                 source: String::new(),
             },
             // No lease, or lease without a current attempt — use the
