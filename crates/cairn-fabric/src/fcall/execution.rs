@@ -44,7 +44,12 @@ pub fn build_create_execution(
 /// Build KEYS/ARGV for `ff_complete_execution`.
 ///
 /// ARGV layout (6 elements): `execution_id, lease_id, lease_epoch,
-/// attempt_id, result_payload, source`.
+/// attempt_id, result_payload, source`. Cairn always passes an empty
+/// `result_payload` — run result bodies live in cairn-store, not on the
+/// FF exec hash. Exposing `result_payload` as a builder parameter is a
+/// no-op today, so it stays hard-coded; if cairn ever starts storing
+/// terminal payloads in FF this is the single point to thread the
+/// argument through.
 ///
 /// RFC #58.5 fence-triple semantics are described on
 /// [`ExecutionLeaseContext`](crate::engine::ExecutionLeaseContext): the

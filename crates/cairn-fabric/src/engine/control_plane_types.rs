@@ -228,6 +228,19 @@ impl ExecutionLeaseContext {
     /// `FabricTaskService` so the invariant is enforced in exactly one
     /// place (F37). See the struct-level doc for the fence-triple
     /// contract.
+    ///
+    /// # Safe for cancel too
+    ///
+    /// `ff_cancel_execution` also takes `lease_epoch` as an ARGV, which
+    /// might look like it needs a non-empty default. It does not, as
+    /// long as `source == "operator_override"`: the Lua active-phase
+    /// branch wraps its `lease_id` / `lease_epoch` checks in
+    /// `if A.source ~= "operator_override" then …`, so the whole lease
+    /// block is skipped when the caller signals authoritative intent
+    /// (see `flowfabric.lua` around `ff_cancel_execution`'s active path,
+    /// lines 2011-2021 in ff-script 0.3.4). Cairn's `cancel` callers
+    /// all route through `resolve_lease_context`, so they get this
+    /// unfenced shape and cleanly skip the lease gate.
     pub(crate) fn unfenced(
         lane_id: ff_core::types::LaneId,
         attempt_index: ff_core::types::AttemptIndex,

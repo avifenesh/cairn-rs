@@ -57,7 +57,7 @@
 //!
 //! # This test
 //!
-//! End-to-end LiveHarness driven through real HTTP. Two assertions:
+//! End-to-end LiveHarness driven through real HTTP. Three assertions:
 //!
 //! * `complete_run_with_live_lease_succeeds` — create session + run +
 //!   claim, then `POST /v1/runs/:id/intervene {"action":"force_complete"}`
@@ -74,6 +74,15 @@
 //!   or a structured 4xx (`execution_not_active` / `lease_expired`
 //!   surfaced as `RuntimeError::InvalidTransition` → 409) is accepted;
 //!   what pre-F37 produced (a 500 leaking FCALL internals) is not.
+//!
+//! * `cancel_unclaimed_run_uses_unfenced_path` — pins the Lua-side
+//!   `source="operator_override"` bypass so a never-claimed run (no
+//!   lease present) can still be cancelled via the intervention path
+//!   without tripping a partial-fence rejection. Guards a review
+//!   concern that clearing `lease_epoch` in
+//!   `ExecutionLeaseContext::unfenced` might regress cancel — it
+//!   doesn't, because cancel's lease gate is wrapped in the
+//!   `source != "operator_override"` check.
 
 mod support;
 
@@ -233,6 +242,92 @@ async fn complete_run_after_lease_expiry_returns_clean_conflict() {
     assert!(
         !body_str.contains("fabric layer error"),
         "F37: response must not leak `fabric layer error`; body={body_str}"
+    );
+}
+
+/// Cancel-while-unclaimed guardrail: `ff_cancel_execution` also takes
+/// `lease_epoch` as an ARGV, which raised a review concern that
+/// `ExecutionLeaseContext::unfenced`'s empty-epoch could regress
+/// cancel on never-claimed runs. It doesn't, because cancel's active
+/// path skips the whole lease block when `source == "operator_override"`
+/// (see `flowfabric.lua` around line 2013 in ff-script 0.3.4). This
+/// test pins that behaviour end-to-end: create a run, do NOT claim, and
+/// assert that the cancel intervention still completes cleanly instead
+/// of surfacing `partial_fence_triple` or `fence_required`.
+#[tokio::test]
+async fn cancel_unclaimed_run_uses_unfenced_path() {
+    let h = LiveHarness::setup().await;
+
+    let suffix = h.project.clone();
+    let session_id = format!("sess_f37c_{suffix}");
+    let run_id = format!("run_f37c_{suffix}");
+
+    let r = h
+        .client()
+        .post(format!("{}/v1/sessions", h.base_url))
+        .bearer_auth(&h.admin_token)
+        .json(&json!({
+            "tenant_id": h.tenant,
+            "workspace_id": h.workspace,
+            "project_id": h.project,
+            "session_id": session_id,
+        }))
+        .send()
+        .await
+        .expect("session request reaches server");
+    assert_eq!(r.status().as_u16(), 201);
+
+    let r = h
+        .client()
+        .post(format!("{}/v1/runs", h.base_url))
+        .bearer_auth(&h.admin_token)
+        .json(&json!({
+            "tenant_id": h.tenant,
+            "workspace_id": h.workspace,
+            "project_id": h.project,
+            "session_id": session_id,
+            "run_id": run_id,
+        }))
+        .send()
+        .await
+        .expect("run request reaches server");
+    assert_eq!(r.status().as_u16(), 201);
+
+    // Intentionally NO claim: the execution is `pending` with no lease.
+    // Pre-F37 this path sent a partial fence triple and either
+    // rejected via `partial_fence_triple` or collapsed to a 500. The
+    // fix must make cancel here either succeed (operator_override
+    // bypasses the lease check) or return a clean structured error —
+    // never a 500 "fabric layer error".
+    let r = h
+        .client()
+        .post(format!("{}/v1/runs/{}/intervene", h.base_url, run_id))
+        .bearer_auth(&h.admin_token)
+        .json(&json!({
+            "action": "force_fail",
+            "reason": "f37 cancel-unclaimed regression test",
+        }))
+        .send()
+        .await
+        .expect("intervene request reaches server");
+    let status = r.status().as_u16();
+    let body = r.text().await.unwrap_or_default();
+
+    assert_ne!(
+        status, 500,
+        "F37: cancel-unclaimed must not surface as 500; status={status}, body={body}"
+    );
+    assert!(
+        !body.contains("partial_fence_triple"),
+        "F37: body must not leak partial_fence_triple; body={body}"
+    );
+    assert!(
+        !body.contains("fence_required"),
+        "F37: body must not leak fence_required; body={body}"
+    );
+    assert!(
+        !body.contains("fabric layer error"),
+        "F37: body must not leak `fabric layer error`; body={body}"
     );
 }
 
