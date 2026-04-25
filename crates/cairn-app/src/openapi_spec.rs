@@ -536,6 +536,39 @@ pub const OPENAPI_JSON: &str = r##"{
         }
       }
     },
+    "/v1/projects/{tenant}/{workspace}/{project}/costs": {
+      "get": {
+        "tags": ["Costs", "Observability"],
+        "summary": "Lifetime cost rollup for a project (F29 CD-2)",
+        "description": "Returns the lifetime cost, token, and provider-call totals for every session under the given (tenant, workspace, project) triple. Zeros are returned when the project has not emitted any provider calls yet. Time-range slicing is a follow-up; v1 is lifetime-total.",
+        "operationId": "getProjectCosts",
+        "parameters": [
+          { "name": "tenant",    "in": "path", "required": true, "schema": { "type": "string" } },
+          { "name": "workspace", "in": "path", "required": true, "schema": { "type": "string" } },
+          { "name": "project",   "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": { "description": "Project cost summary" },
+          "403": { "description": "Tenant scope mismatch" }
+        }
+      }
+    },
+    "/v1/workspaces/{tenant}/{workspace}/costs": {
+      "get": {
+        "tags": ["Costs", "Observability"],
+        "summary": "Lifetime cost rollup for a workspace (F29 CD-2)",
+        "description": "Returns the lifetime cost, token, and provider-call totals aggregated across every project in the given (tenant, workspace). Zeros are returned when the workspace has not emitted any provider calls yet.",
+        "operationId": "getWorkspaceCosts",
+        "parameters": [
+          { "name": "tenant",    "in": "path", "required": true, "schema": { "type": "string" } },
+          { "name": "workspace", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": { "description": "Workspace cost summary" },
+          "403": { "description": "Tenant scope mismatch" }
+        }
+      }
+    },
     "/v1/runs/{id}/tool-invocations": {
       "get": {
         "tags": ["Runs"],

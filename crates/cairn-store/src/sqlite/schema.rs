@@ -404,4 +404,52 @@ CREATE INDEX IF NOT EXISTS idx_route_policies_tenant
     ON route_policies (tenant_id, created_at, policy_id);
 CREATE INDEX IF NOT EXISTS idx_route_policies_tenant_enabled
     ON route_policies (tenant_id, enabled, created_at);
+
+-- ── F29 CD-2: cost rollup projections ───────────────────────────────────
+-- Mirrors the Postgres V025 migration. Session, project, and workspace
+-- totals are upserted together in the SessionCostUpdated handler so the
+-- three tables are guaranteed consistent — project_costs.total_cost_micros
+-- equals the sum of session_costs.total_cost_micros for the same
+-- (tenant_id, workspace_id, project_id).
+
+CREATE TABLE IF NOT EXISTS session_costs (
+    session_id         TEXT PRIMARY KEY,
+    tenant_id          TEXT NOT NULL,
+    workspace_id       TEXT NOT NULL,
+    project_id         TEXT NOT NULL,
+    total_cost_micros  INTEGER NOT NULL DEFAULT 0,
+    total_tokens_in    INTEGER NOT NULL DEFAULT 0,
+    total_tokens_out   INTEGER NOT NULL DEFAULT 0,
+    provider_calls     INTEGER NOT NULL DEFAULT 0,
+    updated_at_ms      INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_session_costs_project
+    ON session_costs (tenant_id, workspace_id, project_id);
+CREATE INDEX IF NOT EXISTS idx_session_costs_tenant
+    ON session_costs (tenant_id, updated_at_ms);
+
+CREATE TABLE IF NOT EXISTS project_costs (
+    tenant_id          TEXT NOT NULL,
+    workspace_id       TEXT NOT NULL,
+    project_id         TEXT NOT NULL,
+    total_cost_micros  INTEGER NOT NULL DEFAULT 0,
+    total_tokens_in    INTEGER NOT NULL DEFAULT 0,
+    total_tokens_out   INTEGER NOT NULL DEFAULT 0,
+    provider_calls     INTEGER NOT NULL DEFAULT 0,
+    updated_at_ms      INTEGER NOT NULL,
+    PRIMARY KEY (tenant_id, workspace_id, project_id)
+);
+CREATE INDEX IF NOT EXISTS idx_project_costs_workspace
+    ON project_costs (tenant_id, workspace_id);
+
+CREATE TABLE IF NOT EXISTS workspace_costs (
+    tenant_id          TEXT NOT NULL,
+    workspace_id       TEXT NOT NULL,
+    total_cost_micros  INTEGER NOT NULL DEFAULT 0,
+    total_tokens_in    INTEGER NOT NULL DEFAULT 0,
+    total_tokens_out   INTEGER NOT NULL DEFAULT 0,
+    provider_calls     INTEGER NOT NULL DEFAULT 0,
+    updated_at_ms      INTEGER NOT NULL,
+    PRIMARY KEY (tenant_id, workspace_id)
+);
 "#;

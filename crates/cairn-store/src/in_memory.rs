@@ -108,6 +108,15 @@ struct State {
     session_costs: HashMap<String, cairn_domain::providers::SessionCostRecord>,
     /// Run-level accumulated costs keyed by run_id.
     run_costs: HashMap<String, cairn_domain::providers::RunCostRecord>,
+    /// F29 CD-2: lifetime project cost rollup, keyed by
+    /// `(tenant_id, workspace_id, project_id)`. Updated alongside
+    /// `session_costs` from the `SessionCostUpdated` handler so the
+    /// numbers are guaranteed consistent with the per-session totals.
+    project_costs: HashMap<(String, String, String), cairn_domain::providers::ProjectCostRecord>,
+    /// F29 CD-2: lifetime workspace cost rollup, keyed by
+    /// `(tenant_id, workspace_id)`. Same consistency invariant as
+    /// `project_costs`.
+    workspace_costs: HashMap<(String, String), cairn_domain::providers::WorkspaceCostRecord>,
     /// GAP-010: LLM call trace records derived from ProviderCallCompleted events.
     llm_traces: Vec<cairn_domain::LlmCallTrace>,
     operator_profiles: HashMap<String, crate::projections::OperatorProfileRecord>,
@@ -208,6 +217,8 @@ impl InMemoryStore {
                 external_workers: HashMap::new(),
                 session_costs: HashMap::new(),
                 run_costs: HashMap::new(),
+                project_costs: HashMap::new(),
+                workspace_costs: HashMap::new(),
                 llm_traces: Vec::new(),
                 operator_profiles: HashMap::new(),
                 full_operator_profiles: HashMap::new(),
@@ -1241,12 +1252,26 @@ impl InMemoryStore {
             | RuntimeEvent::TaskPriorityChanged(_)
             | RuntimeEvent::ToolInvocationProgressUpdated(_) => {}
             RuntimeEvent::SessionCostUpdated(e) => {
+                // The envelope carries a top-level `tenant_id` AND a
+                // `project.tenant_id` — two redundant fields that can
+                // drift. Some fixtures (see
+                // `crates/cairn-runtime/src/services/budget_impl.rs`'s
+                // budget-blocking test) intentionally leave `project`
+                // as a sentinel triple when only tenant-scoped effects
+                // matter. We bind one `tenant` local from the explicit
+                // field and use it for both the per-session record and
+                // the provider-budget loop so the redundant source
+                // divergence cannot make `session_costs` and
+                // `provider_budgets` disagree with each other. The
+                // project/workspace rollups still key off `e.project.*`
+                // for the workspace_id / project_id sub-keys.
+                let tenant = e.tenant_id.clone();
                 let rec = state
                     .session_costs
                     .entry(e.session_id.as_str().to_owned())
                     .or_insert_with(|| cairn_domain::providers::SessionCostRecord {
                         session_id: e.session_id.clone(),
-                        tenant_id: e.tenant_id.clone(),
+                        tenant_id: tenant.clone(),
                         total_cost_micros: 0,
                         total_tokens_in: 0,
                         total_tokens_out: 0,
@@ -1264,13 +1289,63 @@ impl InMemoryStore {
                 rec.updated_at_ms = now;
                 // Also accumulate into provider budget spend for the tenant.
                 for budget in state.provider_budgets.values_mut() {
-                    if budget.tenant_id == e.tenant_id {
+                    if budget.tenant_id == tenant {
                         budget.current_spend_micros = budget
                             .current_spend_micros
                             .saturating_add(e.delta_cost_micros);
                         budget.updated_at = now;
                     }
                 }
+                // F29 CD-2: fold the same delta into the project + workspace
+                // rollups so ProjectCostReadModel stays consistent with
+                // SessionCostReadModel without a separate aggregator.
+                let proj_key = (
+                    tenant.as_str().to_owned(),
+                    e.project.workspace_id.as_str().to_owned(),
+                    e.project.project_id.as_str().to_owned(),
+                );
+                let proj = state.project_costs.entry(proj_key).or_insert_with(|| {
+                    cairn_domain::providers::ProjectCostRecord {
+                        tenant_id: tenant.clone(),
+                        workspace_id: e.project.workspace_id.as_str().to_owned(),
+                        project_id: e.project.project_id.as_str().to_owned(),
+                        total_cost_micros: 0,
+                        total_tokens_in: 0,
+                        total_tokens_out: 0,
+                        provider_calls: 0,
+                        updated_at_ms: now,
+                    }
+                });
+                proj.total_cost_micros =
+                    proj.total_cost_micros.saturating_add(e.delta_cost_micros);
+                proj.total_tokens_in =
+                    proj.total_tokens_in.saturating_add(e.delta_tokens_in);
+                proj.total_tokens_out =
+                    proj.total_tokens_out.saturating_add(e.delta_tokens_out);
+                proj.provider_calls = proj.provider_calls.saturating_add(1);
+                proj.updated_at_ms = now;
+
+                let ws_key = (
+                    tenant.as_str().to_owned(),
+                    e.project.workspace_id.as_str().to_owned(),
+                );
+                let ws = state.workspace_costs.entry(ws_key).or_insert_with(|| {
+                    cairn_domain::providers::WorkspaceCostRecord {
+                        tenant_id: tenant.clone(),
+                        workspace_id: e.project.workspace_id.as_str().to_owned(),
+                        total_cost_micros: 0,
+                        total_tokens_in: 0,
+                        total_tokens_out: 0,
+                        provider_calls: 0,
+                        updated_at_ms: now,
+                    }
+                });
+                ws.total_cost_micros =
+                    ws.total_cost_micros.saturating_add(e.delta_cost_micros);
+                ws.total_tokens_in = ws.total_tokens_in.saturating_add(e.delta_tokens_in);
+                ws.total_tokens_out = ws.total_tokens_out.saturating_add(e.delta_tokens_out);
+                ws.provider_calls = ws.provider_calls.saturating_add(1);
+                ws.updated_at_ms = now;
             }
             // RFC 005: link child task to parent run/task on subagent spawn.
             RuntimeEvent::SubagentSpawned(e) => {
@@ -1546,6 +1621,54 @@ impl InMemoryStore {
                     rec.token_in = rec.total_tokens_in;
                     rec.token_out = rec.total_tokens_out;
                     rec.updated_at_ms = event.stored_at;
+                    // F29 CD-2: project + workspace rollup. Kept in lock-step
+                    // with `session_costs` so `ProjectCostReadModel` matches
+                    // the sum of `SessionCostReadModel::list_by_tenant` over
+                    // the same (tenant, workspace, project).
+                    let proj_key = (
+                        e.project.tenant_id.as_str().to_owned(),
+                        e.project.workspace_id.as_str().to_owned(),
+                        e.project.project_id.as_str().to_owned(),
+                    );
+                    let proj = state.project_costs.entry(proj_key).or_insert_with(|| {
+                        cairn_domain::providers::ProjectCostRecord {
+                            tenant_id: cairn_domain::TenantId::new(e.project.tenant_id.as_str()),
+                            workspace_id: e.project.workspace_id.as_str().to_owned(),
+                            project_id: e.project.project_id.as_str().to_owned(),
+                            total_cost_micros: 0,
+                            total_tokens_in: 0,
+                            total_tokens_out: 0,
+                            provider_calls: 0,
+                            updated_at_ms: event.stored_at,
+                        }
+                    });
+                    proj.total_cost_micros =
+                        proj.total_cost_micros.saturating_add(delta_cost);
+                    proj.total_tokens_in = proj.total_tokens_in.saturating_add(delta_in);
+                    proj.total_tokens_out = proj.total_tokens_out.saturating_add(delta_out);
+                    proj.provider_calls = proj.provider_calls.saturating_add(1);
+                    proj.updated_at_ms = event.stored_at;
+
+                    let ws_key = (
+                        e.project.tenant_id.as_str().to_owned(),
+                        e.project.workspace_id.as_str().to_owned(),
+                    );
+                    let ws = state.workspace_costs.entry(ws_key).or_insert_with(|| {
+                        cairn_domain::providers::WorkspaceCostRecord {
+                            tenant_id: cairn_domain::TenantId::new(e.project.tenant_id.as_str()),
+                            workspace_id: e.project.workspace_id.as_str().to_owned(),
+                            total_cost_micros: 0,
+                            total_tokens_in: 0,
+                            total_tokens_out: 0,
+                            provider_calls: 0,
+                            updated_at_ms: event.stored_at,
+                        }
+                    });
+                    ws.total_cost_micros = ws.total_cost_micros.saturating_add(delta_cost);
+                    ws.total_tokens_in = ws.total_tokens_in.saturating_add(delta_in);
+                    ws.total_tokens_out = ws.total_tokens_out.saturating_add(delta_out);
+                    ws.provider_calls = ws.provider_calls.saturating_add(1);
+                    ws.updated_at_ms = event.stored_at;
                     // Emit SessionCostUpdated event into the log for traceability.
                     let sc_pos = EventPosition(state.next_position);
                     state.next_position += 1;
@@ -2214,6 +2337,34 @@ impl crate::projections::SessionCostReadModel for InMemoryStore {
             .collect();
         results.sort_by_key(|r| r.updated_at_ms);
         Ok(results)
+    }
+}
+
+// -- ProjectCostReadModel (F29 CD-2) --
+
+#[async_trait]
+impl crate::projections::ProjectCostReadModel for InMemoryStore {
+    async fn get_project_cost(
+        &self,
+        project: &cairn_domain::ProjectKey,
+    ) -> Result<Option<cairn_domain::providers::ProjectCostRecord>, StoreError> {
+        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        let key = (
+            project.tenant_id.as_str().to_owned(),
+            project.workspace_id.as_str().to_owned(),
+            project.project_id.as_str().to_owned(),
+        );
+        Ok(state.project_costs.get(&key).cloned())
+    }
+
+    async fn get_workspace_cost(
+        &self,
+        tenant_id: &cairn_domain::TenantId,
+        workspace_id: &str,
+    ) -> Result<Option<cairn_domain::providers::WorkspaceCostRecord>, StoreError> {
+        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        let key = (tenant_id.as_str().to_owned(), workspace_id.to_owned());
+        Ok(state.workspace_costs.get(&key).cloned())
     }
 }
 

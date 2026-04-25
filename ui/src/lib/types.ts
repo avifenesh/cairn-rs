@@ -595,6 +595,35 @@ export interface SessionCostRecord {
   token_out?: number;
 }
 
+/** F29 CD-2: lifetime cost rollup for a project. Returned by
+ *  `GET /v1/projects/:tenant/:workspace/:project/costs`. Zero totals are
+ *  returned for projects that have not emitted any provider calls yet —
+ *  the UI can render the card without special-casing a 404. Shape
+ *  mirrors the Rust `ProjectCostRecord`. */
+export interface ProjectCostSummary {
+  tenant_id: string;
+  workspace_id: string;
+  project_id: string;
+  total_cost_micros: number;
+  total_tokens_in: number;
+  total_tokens_out: number;
+  provider_calls: number;
+  updated_at_ms: number;
+}
+
+/** F29 CD-2: lifetime cost rollup for a workspace. Returned by
+ *  `GET /v1/workspaces/:tenant/:workspace/costs`. Same zero-fallback
+ *  semantics as `ProjectCostSummary`. Mirrors Rust `WorkspaceCostRecord`. */
+export interface WorkspaceCostSummary {
+  tenant_id: string;
+  workspace_id: string;
+  total_cost_micros: number;
+  total_tokens_in: number;
+  total_tokens_out: number;
+  provider_calls: number;
+  updated_at_ms: number;
+}
+
 /** GET /v1/costs response shape — `{ items, hasMore }` list.
  *  The backend's `ListResponse<T>` serialises with
  *  `#[serde(rename_all = "camelCase")]`, so the pagination flag lands

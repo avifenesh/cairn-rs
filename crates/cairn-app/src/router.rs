@@ -998,6 +998,15 @@ impl AppBootstrap {
             )
             .route("/v1/sessions/:id", get(get_session_handler))
             .route("/v1/sessions/:id/cost", get(get_session_cost_handler))
+            // F29 CD-2: project / workspace cost rollups for the observability panel.
+            .route(
+                "/v1/projects/:tenant/:workspace/:project/costs",
+                get(get_project_costs_handler),
+            )
+            .route(
+                "/v1/workspaces/:tenant/:workspace/costs",
+                get(get_workspace_costs_handler),
+            )
             .route(
                 "/v1/sessions/:id/activity",
                 get(get_session_activity_handler),

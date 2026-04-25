@@ -151,6 +151,7 @@ GET	/v1/plugins/:id/tools	preserve	-	-
 GET	/v1/plugins/catalog	preserve	-	-
 GET	/v1/plugins/tools/search	preserve	-	-
 GET	/v1/policies/decisions	preserve	query: limit?	{ items }
+GET	/v1/projects/:tenant/:workspace/:project/costs	preserve	-	{ total_cost_micros, total_tokens_in, total_tokens_out, provider_calls }
 GET	/v1/projects/:project/repos	preserve	-	-
 GET	/v1/projects/:project/repos/:owner/:repo	preserve	-	-
 GET	/v1/projects/:project/run-templates	preserve	-	-
@@ -252,6 +253,7 @@ GET	/v1/webhooks/github/actions	preserve	-	-
 GET	/v1/webhooks/github/installations	preserve	-	-
 GET	/v1/webhooks/github/queue	preserve	-	-
 GET	/v1/workers	preserve	-	-
+GET	/v1/workspaces/:tenant/:workspace/costs	preserve	-	{ total_cost_micros, total_tokens_in, total_tokens_out, provider_calls }
 GET	/v1/workers/:id	preserve	-	-
 GET	/v1/ws	preserve	-	-
 GET	/version	preserve	-	-

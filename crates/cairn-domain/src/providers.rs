@@ -444,6 +444,36 @@ pub struct SessionCostRecord {
     pub token_out: u64,
 }
 
+/// F29 CD-2: project-scoped cost rollup record.
+///
+/// Aggregates every `SessionCostUpdated` delta that falls under the same
+/// (tenant, workspace, project) triple. Maintained lifetime-total in v1 —
+/// time-range slicing is a follow-up once a daily-buckets table lands.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProjectCostRecord {
+    pub tenant_id: TenantId,
+    pub workspace_id: String,
+    pub project_id: String,
+    /// Lifetime cost accumulated across every session in the project, µUSD.
+    pub total_cost_micros: u64,
+    pub total_tokens_in: u64,
+    pub total_tokens_out: u64,
+    pub provider_calls: u64,
+    pub updated_at_ms: u64,
+}
+
+/// F29 CD-2: workspace-scoped cost rollup record.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorkspaceCostRecord {
+    pub tenant_id: TenantId,
+    pub workspace_id: String,
+    pub total_cost_micros: u64,
+    pub total_tokens_in: u64,
+    pub total_tokens_out: u64,
+    pub provider_calls: u64,
+    pub updated_at_ms: u64,
+}
+
 /// Tenant-level LLM spend alert record.
 ///
 /// A `SpendAlert` is created when session cost for a tenant crosses the
