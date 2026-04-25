@@ -18,6 +18,21 @@ use crate::retrieval::{
     RetrievalQuery, RetrievalResponse, RetrievalResult, RetrievalService, ScoringBreakdown,
 };
 
+/// Sentinel message used by [`InMemoryRetrieval`] when `VectorOnly` is
+/// requested but no embedding provider is configured.
+///
+/// Exported so callers that want to recover (rather than propagate) from this
+/// specific failure mode can match the error text without string-duplicating
+/// the phrase. See `cairn-app::tool_impls::is_missing_embedder_error`.
+///
+/// This is a stop-gap shared constant rather than a dedicated
+/// `RetrievalError::MissingEmbedder` variant because the retrieval stack is
+/// placeholder — the external memory crate replaces it in a future PR, at
+/// which point a proper typed variant is cheap to add.
+pub const MISSING_EMBEDDER_ERROR_MESSAGE: &str =
+    "VectorOnly mode requires an embedding provider on InMemoryRetrieval. \
+     Use LexicalOnly or configure an embedder with with_embedder().";
+
 /// In-memory document store for testing.
 /// A document record suitable for export operations.
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
@@ -538,9 +553,7 @@ impl RetrievalService for InMemoryRetrieval {
                 }
                 None if query.mode == RetrievalMode::VectorOnly => {
                     return Err(RetrievalError::Internal(
-                        "VectorOnly mode requires an embedding provider on InMemoryRetrieval. \
-                         Use LexicalOnly or configure an embedder with with_embedder()."
-                            .to_owned(),
+                        MISSING_EMBEDDER_ERROR_MESSAGE.to_owned(),
                     ));
                 }
                 None => None, // Hybrid without embedder → lexical fallback
