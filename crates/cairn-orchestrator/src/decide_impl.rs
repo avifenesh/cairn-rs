@@ -567,14 +567,24 @@ fn build_system_prompt(
         // and plain text for terminal meta-actions. We still accept the
         // JSON-array fallback when the model chooses not to call a tool.
         r#"## Response format
-When you need to call a tool — including `complete_run` to finish the
-run — emit a native tool call using the provider's `tool_calls`
+When you need to call a real tool — including `complete_run` to finish
+the run — emit a native tool call using the provider's `tool_calls`
 mechanism. `complete_run` is a first-class tool in your toolbox (see
 its schema in the tools list); prefer calling it as a tool_call over
 writing a JSON action array.
-When a tool_call is unavailable (legacy fallback path only), respond
-with ONLY a JSON array of action objects — no prose, no markdown
-fences — with fields:
+
+Orchestrator meta-actions that are NOT tools — `create_memory`,
+`send_notification`, `spawn_subagent`, `escalate_to_operator` — have
+no function schema in the tools list. DO NOT try to emit these as
+native tool_calls (doing so will be interpreted as an unknown tool
+invocation and fail at execute time). Instead, return them as a JSON
+action array, even when native tool calling is available for other
+actions.
+
+JSON action array shape (used for meta-actions above, and as the
+legacy fallback when the provider has no native tool calling): ONLY
+a JSON array of action objects — no prose, no markdown fences — with
+fields:
 - "action_type": one of "invoke_tool"|"complete_run"|"create_memory"|"spawn_subagent"|"send_notification"|"escalate_to_operator"
 - "description": concise explanation for most actions; for complete_run,
                  the FULL user-facing answer (prose, bullets, whatever the
@@ -1069,31 +1079,52 @@ fn tool_calls_to_proposals(
             // description so the loop runner's `LoopTermination::Completed`
             // branch returns it verbatim to the user (see
             // `loop_runner.rs` — the proposal description is copied into
-            // `summary`). Falls back to the raw args as a string if the
-            // model forgot the `final_answer` field.
+            // `summary`).
+            //
+            // `final_answer` is a REQUIRED field in the schema. If the
+            // model omits it entirely — including under the tolerated
+            // aliases (`description`, `answer`, `content`, `summary`),
+            // which cover known GLM/Qwen/Gemma shapes — we do NOT invent
+            // a default string. Silently returning "run completed" would
+            // both mask schema drift from upstream providers (Gemini's
+            // review guidance) and hand a useless summary back to the
+            // user. Instead we escalate to the operator with the raw
+            // arguments so a human can diagnose. This keeps the failure
+            // loud while staying in-channel (the caller is a
+            // `filter_map` returning `Vec<ActionProposal>`; we can't
+            // return a `Result` without rewriting every call site).
             if name == "complete_run" {
                 let final_answer = args
                     .get("final_answer")
                     .and_then(|v| v.as_str())
                     .map(str::to_owned)
                     .or_else(|| {
-                        // Lenient alias: some models use `description`,
-                        // `answer`, or `content` instead of `final_answer`.
                         for alias in ["description", "answer", "content", "summary"] {
                             if let Some(s) = args.get(alias).and_then(|v| v.as_str()) {
                                 return Some(s.to_owned());
                             }
                         }
                         None
-                    })
-                    .unwrap_or_else(|| "run completed".to_owned());
-                return Some(ActionProposal {
-                    action_type: ActionType::CompleteRun,
-                    description: final_answer,
-                    confidence: 0.95,
-                    tool_name: None,
-                    tool_args: None,
-                    requires_approval: false,
+                    });
+
+                return Some(match final_answer {
+                    Some(text) => ActionProposal {
+                        action_type: ActionType::CompleteRun,
+                        description: text,
+                        confidence: 0.95,
+                        tool_name: None,
+                        tool_args: None,
+                        requires_approval: false,
+                    },
+                    None => ActionProposal::escalate(
+                        format!(
+                            "Model called `complete_run` but omitted the required \
+                             `final_answer` argument (and none of the tolerated \
+                             aliases description/answer/content/summary were \
+                             present). Raw arguments: {args}"
+                        ),
+                        0.0,
+                    ),
                 });
             }
 
@@ -1579,6 +1610,76 @@ mod tests {
         assert_eq!(
             proposals[0].tool_args.as_ref().and_then(|a| a.get("goal")),
             Some(&serde_json::Value::String("summarise RFCs".to_owned())),
+        );
+    }
+
+    #[test]
+    fn complete_run_tool_call_maps_to_complete_run_proposal() {
+        // F36: a native `complete_run(final_answer: "...")` tool_call
+        // must translate to a terminal `ActionType::CompleteRun`
+        // proposal whose description carries the final_answer text
+        // verbatim (the loop runner copies that field into the run's
+        // `summary`).
+        let tool_calls = vec![serde_json::json!({
+            "type": "function",
+            "function": {
+                "name": "complete_run",
+                "arguments": { "final_answer": "Paris." }
+            }
+        })];
+        let proposals = tool_calls_to_proposals(&tool_calls, &[]);
+        assert_eq!(proposals.len(), 1);
+        assert_eq!(proposals[0].action_type, ActionType::CompleteRun);
+        assert_eq!(proposals[0].description, "Paris.");
+        assert!(proposals[0].tool_name.is_none());
+    }
+
+    #[test]
+    fn complete_run_tool_call_accepts_description_alias() {
+        // Lenient alias: some models (notably earlier GLM iterations
+        // and Qwen3 reasoning traces) key the answer under
+        // `description` instead of `final_answer`.
+        let tool_calls = vec![serde_json::json!({
+            "type": "function",
+            "function": {
+                "name": "complete_run",
+                "arguments": { "description": "Paris is the capital." }
+            }
+        })];
+        let proposals = tool_calls_to_proposals(&tool_calls, &[]);
+        assert_eq!(proposals.len(), 1);
+        assert_eq!(proposals[0].action_type, ActionType::CompleteRun);
+        assert_eq!(proposals[0].description, "Paris is the capital.");
+    }
+
+    #[test]
+    fn complete_run_tool_call_missing_final_answer_escalates() {
+        // Review follow-up (Gemini / Copilot): when the model calls
+        // `complete_run` without the required `final_answer` argument
+        // AND without any tolerated alias, do NOT silently default to
+        // a useless summary ("run completed") — that would both mask
+        // schema drift from upstream providers and hand a meaningless
+        // answer to the user. Escalate with the raw arguments so a
+        // human can diagnose what the model actually sent.
+        let tool_calls = vec![serde_json::json!({
+            "type": "function",
+            "function": {
+                "name": "complete_run",
+                "arguments": { "wrong_field": "oops" }
+            }
+        })];
+        let proposals = tool_calls_to_proposals(&tool_calls, &[]);
+        assert_eq!(proposals.len(), 1);
+        assert_eq!(proposals[0].action_type, ActionType::EscalateToOperator);
+        assert!(
+            proposals[0].description.contains("final_answer"),
+            "escalation message should name the missing field; got: {}",
+            proposals[0].description,
+        );
+        assert!(
+            proposals[0].description.contains("wrong_field"),
+            "escalation message should include the raw args for diagnosis; got: {}",
+            proposals[0].description,
         );
     }
 
