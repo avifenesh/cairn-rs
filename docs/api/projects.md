@@ -4,11 +4,12 @@ Project-scoped sub-resources: repos, run-templates, triggers (enable/disable/res
 
 Source of truth: [`tests/compat/http_routes.tsv`](../../tests/compat/http_routes.tsv). Drift from this table against the live router is enforced by `cargo test -p cairn-api --test compat_catalog_sync`.
 
-**Routes: 18**
+**Routes: 19**
 
 | Method | Path | Classification | Notes |
 |---|---|---|---|
 | `DELETE` | `/v1/projects/:proj/plugins/:id` | Preserve |  |
+| `GET` | `/v1/projects/:tenant/:workspace/:project/costs` | Preserve | F29 CD-2: lifetime cost rollup (µUSD + tokens + provider calls). Zeros for never-billed projects. |
 | `POST` | `/v1/projects/:proj/plugins/:id` | Preserve |  |
 | `DELETE` | `/v1/projects/:project/local-paths` | Preserve | Detach a `host=local_fs` repo; body `{path}`. |
 | `GET` | `/v1/projects/:project/repos` | Preserve |  |

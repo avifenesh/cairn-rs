@@ -339,7 +339,89 @@ impl SqliteSyncProjection {
             RuntimeEvent::ExternalWorkerReactivated(_) => log_stub("ExternalWorkerReactivated"),
             RuntimeEvent::SoulPatchProposed(_) => log_stub("SoulPatchProposed"),
             RuntimeEvent::SoulPatchApplied(_) => log_stub("SoulPatchApplied"),
-            RuntimeEvent::SessionCostUpdated(_) => log_stub("SessionCostUpdated"),
+            // F29 CD-2: upsert the per-session record + fold into the
+            // project/workspace rollups in the same transaction. SQLite
+            // UPSERT (`ON CONFLICT(...) DO UPDATE SET`) mirrors the Postgres
+            // path in `pg/projections.rs` — see that comment for the
+            // consistency contract.
+            RuntimeEvent::SessionCostUpdated(e) => {
+                let delta_cost = e.delta_cost_micros as i64;
+                let delta_in = e.delta_tokens_in as i64;
+                let delta_out = e.delta_tokens_out as i64;
+                let updated_at = e.updated_at_ms as i64;
+
+                sqlx::query(
+                    "INSERT INTO session_costs
+                         (session_id, tenant_id, workspace_id, project_id,
+                          total_cost_micros, total_tokens_in, total_tokens_out,
+                          provider_calls, updated_at_ms)
+                     VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?)
+                     ON CONFLICT(session_id) DO UPDATE SET
+                         total_cost_micros = total_cost_micros + excluded.total_cost_micros,
+                         total_tokens_in   = total_tokens_in   + excluded.total_tokens_in,
+                         total_tokens_out  = total_tokens_out  + excluded.total_tokens_out,
+                         provider_calls    = provider_calls    + 1,
+                         updated_at_ms     = excluded.updated_at_ms",
+                )
+                .bind(e.session_id.as_str())
+                .bind(e.project.tenant_id.as_str())
+                .bind(e.project.workspace_id.as_str())
+                .bind(e.project.project_id.as_str())
+                .bind(delta_cost)
+                .bind(delta_in)
+                .bind(delta_out)
+                .bind(updated_at)
+                .execute(&mut **tx)
+                .await
+                .map_err(|err| StoreError::Internal(err.to_string()))?;
+
+                sqlx::query(
+                    "INSERT INTO project_costs
+                         (tenant_id, workspace_id, project_id,
+                          total_cost_micros, total_tokens_in, total_tokens_out,
+                          provider_calls, updated_at_ms)
+                     VALUES (?, ?, ?, ?, ?, ?, 1, ?)
+                     ON CONFLICT(tenant_id, workspace_id, project_id) DO UPDATE SET
+                         total_cost_micros = total_cost_micros + excluded.total_cost_micros,
+                         total_tokens_in   = total_tokens_in   + excluded.total_tokens_in,
+                         total_tokens_out  = total_tokens_out  + excluded.total_tokens_out,
+                         provider_calls    = provider_calls    + 1,
+                         updated_at_ms     = excluded.updated_at_ms",
+                )
+                .bind(e.project.tenant_id.as_str())
+                .bind(e.project.workspace_id.as_str())
+                .bind(e.project.project_id.as_str())
+                .bind(delta_cost)
+                .bind(delta_in)
+                .bind(delta_out)
+                .bind(updated_at)
+                .execute(&mut **tx)
+                .await
+                .map_err(|err| StoreError::Internal(err.to_string()))?;
+
+                sqlx::query(
+                    "INSERT INTO workspace_costs
+                         (tenant_id, workspace_id,
+                          total_cost_micros, total_tokens_in, total_tokens_out,
+                          provider_calls, updated_at_ms)
+                     VALUES (?, ?, ?, ?, ?, 1, ?)
+                     ON CONFLICT(tenant_id, workspace_id) DO UPDATE SET
+                         total_cost_micros = total_cost_micros + excluded.total_cost_micros,
+                         total_tokens_in   = total_tokens_in   + excluded.total_tokens_in,
+                         total_tokens_out  = total_tokens_out  + excluded.total_tokens_out,
+                         provider_calls    = provider_calls    + 1,
+                         updated_at_ms     = excluded.updated_at_ms",
+                )
+                .bind(e.project.tenant_id.as_str())
+                .bind(e.project.workspace_id.as_str())
+                .bind(delta_cost)
+                .bind(delta_in)
+                .bind(delta_out)
+                .bind(updated_at)
+                .execute(&mut **tx)
+                .await
+                .map_err(|err| StoreError::Internal(err.to_string()))?;
+            }
             RuntimeEvent::RunCostUpdated(_) => log_stub("RunCostUpdated"),
             RuntimeEvent::SpendAlertTriggered(_) => log_stub("SpendAlertTriggered"),
             RuntimeEvent::SubagentSpawned(_) => log_stub("SubagentSpawned"),

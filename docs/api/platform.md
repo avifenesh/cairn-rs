@@ -61,5 +61,6 @@ Source of truth: [`tests/compat/http_routes.tsv`](../../tests/compat/http_routes
 | `GET` | `/v1/templates/:id` | Preserve |  |
 | `POST` | `/v1/templates/:id/apply` | Preserve |  |
 | `POST` | `/v1/test/webhook` | Preserve |  |
+| `GET` | `/v1/workspaces/:tenant/:workspace/costs` | Preserve | F29 CD-2: lifetime cost rollup across every project in the workspace. |
 
 <!-- TODO: contract bodies (tracked as follow-up) -->

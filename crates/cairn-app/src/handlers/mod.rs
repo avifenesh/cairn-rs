@@ -1,5 +1,6 @@
 pub(crate) mod admin;
 pub(crate) mod approvals;
+pub(crate) mod costs;
 pub(crate) mod auth_tokens;
 pub(crate) mod bundles_handlers;
 #[cfg(feature = "debug-endpoints")]

@@ -1,9 +1,9 @@
 use async_trait::async_trait;
 use cairn_domain::providers::{
-    OperationKind, ProviderBindingCostStats, ProviderBindingRecord, ProviderBudget,
-    ProviderBudgetPeriod, ProviderConnectionPool, ProviderConnectionRecord, ProviderHealthRecord,
-    ProviderHealthSchedule, ProviderModelCapability, RoutePolicy, RunCostAlert, RunCostRecord,
-    SessionCostRecord,
+    OperationKind, ProjectCostRecord, ProviderBindingCostStats, ProviderBindingRecord,
+    ProviderBudget, ProviderBudgetPeriod, ProviderConnectionPool, ProviderConnectionRecord,
+    ProviderHealthRecord, ProviderHealthSchedule, ProviderModelCapability, RoutePolicy,
+    RunCostAlert, RunCostRecord, SessionCostRecord, WorkspaceCostRecord,
 };
 use cairn_domain::{
     ProjectKey, ProviderBindingId, ProviderConnectionId, RunId, SessionId, TenantId,
@@ -93,6 +93,30 @@ pub trait SessionCostReadModel: Send + Sync {
         tenant_id: &TenantId,
         since_ms: u64,
     ) -> Result<Vec<SessionCostRecord>, StoreError>;
+}
+
+/// F29 CD-2: lifetime cost rollups at the project and workspace level.
+///
+/// Fed by the same `SessionCostUpdated` handler that updates
+/// `SessionCostReadModel` — project and workspace totals stay consistent
+/// with the per-session breakdown because all three upserts run in the
+/// same transaction on Postgres / SQLite.
+///
+/// Time-range queries (daily buckets) are out of scope for v1 — records
+/// are always lifetime-total. Callers that need a time-range fall back
+/// to the per-session list + client-side filter on `updated_at_ms`.
+#[async_trait]
+pub trait ProjectCostReadModel: Send + Sync {
+    async fn get_project_cost(
+        &self,
+        project: &ProjectKey,
+    ) -> Result<Option<ProjectCostRecord>, StoreError>;
+
+    async fn get_workspace_cost(
+        &self,
+        tenant_id: &TenantId,
+        workspace_id: &str,
+    ) -> Result<Option<WorkspaceCostRecord>, StoreError>;
 }
 
 #[async_trait]
