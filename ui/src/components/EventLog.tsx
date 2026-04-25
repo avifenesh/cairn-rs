@@ -115,7 +115,7 @@ export function EventLog({
 }: EventLogProps) {
   const { events: liveEvents, status } = useEventStream({ url, token });
   const scrollRef = useRef<HTMLDivElement>(null);
-  const prevRowCountRef = useRef(0);
+  const initialMountRef = useRef(true);
 
   // Convert initial REST events → display format
   const seedRows: NormalizedEvent[] = useMemo(() =>
@@ -153,26 +153,27 @@ export function EventLog({
   // Merge: when live events arrive, they supersede the seed.
   const rows = liveRows.length > 0 ? liveRows : seedRows;
 
-  // Auto-scroll the inner log container to its bottom when new rows
-  // arrive. Mutates `scrollTop` directly rather than using
-  // `scrollIntoView`, which walks ancestors and would scroll the whole
-  // page to bring the log into view — that caused the dashboard to
-  // jump to the bottom on mount (F33).
+  // Auto-scroll the inner log container to its bottom when rows
+  // change. Mutates `scrollTop` directly rather than using
+  // `scrollIntoView`, which walks ancestors and would scroll the
+  // whole page to bring the log into view — that caused the
+  // dashboard to jump to the bottom on mount (F33).
   //
-  // Skip the first effect fire so the initial seed render doesn't
-  // trigger a scroll at all; only growth from live events does.
+  // `initialMountRef` is an explicit boolean (not `rows.length === 0`)
+  // so we skip scrolling on the first render regardless of whether
+  // the log starts empty or with seed events. After mount, every
+  // change to the rows array — including replacements at the
+  // maxEvents cap where `rows.length` is constant — triggers a
+  // scroll to keep the newest row visible.
   useEffect(() => {
-    const el = scrollRef.current;
-    if (!el) return;
-    if (prevRowCountRef.current === 0) {
-      prevRowCountRef.current = rows.length;
+    if (initialMountRef.current) {
+      initialMountRef.current = false;
       return;
     }
-    if (rows.length > prevRowCountRef.current) {
-      el.scrollTop = el.scrollHeight;
-    }
-    prevRowCountRef.current = rows.length;
-  }, [rows.length]);
+    const el = scrollRef.current;
+    if (!el) return;
+    el.scrollTop = el.scrollHeight;
+  }, [rows]);
 
   return (
     <div className={clsx(

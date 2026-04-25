@@ -15,10 +15,12 @@
 import { render, screen } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
-// useEventStream is imported by EventLog — stub it out so tests don't
-// try to open an EventSource.
+// useEventStream is imported by EventLog. The hook returns a live
+// event array; tests drive it via this stub so re-renders are
+// controllable from outside.
+let mockLiveEvents: unknown[] = [];
 vi.mock("../../hooks/useEventStream", () => ({
-  useEventStream: () => ({ events: [], status: "connected" }),
+  useEventStream: () => ({ events: mockLiveEvents, status: "connected" }),
 }));
 
 import { EventLog } from "../EventLog";
@@ -27,6 +29,7 @@ import type { RecentEvent } from "../../lib/types";
 const origScrollIntoView = HTMLElement.prototype.scrollIntoView;
 
 beforeEach(() => {
+  mockLiveEvents = [];
   // Any call to scrollIntoView anywhere in the component tree fails
   // the test. This is how we prove the dashboard jump can't recur.
   HTMLElement.prototype.scrollIntoView = vi.fn(() => {
@@ -67,5 +70,16 @@ describe("EventLog — F33 (no document scroll)", () => {
     // someone reintroduces a `scrollIntoView` on a sentinel child, the
     // `scrollIntoView` stub above will fire and fail the test.
     expect(container.className).toContain("overflow-y-auto");
+  });
+
+  it("skips scroll on first mount even when rows are non-empty", () => {
+    // First render: seed events present, no prior state. The initial
+    // mount guard must prevent any scroll — even if the seed array
+    // has content that would otherwise trigger the effect.
+    const events = Array.from({ length: 5 }, (_, i) => makeEvent(i));
+    const { container } = render(<EventLog initialEvents={events} />);
+    const log = container.querySelector('[role="log"]') as HTMLElement;
+    // scrollTop stayed at 0 because the initial effect is skipped.
+    expect(log.scrollTop).toBe(0);
   });
 });
