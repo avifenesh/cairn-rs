@@ -221,6 +221,29 @@ pub struct ExecutionLeaseContext {
     pub source: String,
 }
 
+impl ExecutionLeaseContext {
+    /// Build the unfenced (all-fence-tokens-empty +
+    /// `source="operator_override"`) shape used when an execution has no
+    /// active lease. Shared between `FabricRunService` and
+    /// `FabricTaskService` so the invariant is enforced in exactly one
+    /// place (F37). See the struct-level doc for the fence-triple
+    /// contract.
+    pub(crate) fn unfenced(
+        lane_id: ff_core::types::LaneId,
+        attempt_index: ff_core::types::AttemptIndex,
+    ) -> Self {
+        Self {
+            lane_id,
+            attempt_index,
+            lease_id: String::new(),
+            lease_epoch: String::new(),
+            attempt_id: String::new(),
+            worker_instance_id: ff_core::types::WorkerInstanceId::new("cairn"),
+            source: "operator_override".to_owned(),
+        }
+    }
+}
+
 /// Input to `create_run_execution`.
 #[derive(Clone, Debug)]
 pub struct CreateRunExecutionInput {

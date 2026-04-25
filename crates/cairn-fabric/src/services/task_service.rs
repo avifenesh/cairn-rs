@@ -108,7 +108,7 @@ impl FabricTaskService {
             .map(|a| a.index)
             .unwrap_or_else(|| ff_core::types::AttemptIndex::new(0));
 
-        match (&snapshot.current_lease, &snapshot.current_attempt) {
+        match (&snapshot.current_lease, snapshot.current_attempt.as_ref()) {
             (Some(l), Some(att)) => ExecutionLeaseContext {
                 lane_id,
                 attempt_index,
@@ -121,15 +121,7 @@ impl FabricTaskService {
             // Any other shape (no lease, or lease without attempt) → use
             // the unfenced path. FF still validates lifecycle phase via
             // `validate_lease_and_mark_expired`.
-            _ => ExecutionLeaseContext {
-                lane_id,
-                attempt_index,
-                lease_id: String::new(),
-                lease_epoch: String::new(),
-                attempt_id: String::new(),
-                worker_instance_id: ff_core::types::WorkerInstanceId::new("cairn"),
-                source: "operator_override".to_owned(),
-            },
+            _ => ExecutionLeaseContext::unfenced(lane_id, attempt_index),
         }
     }
 
