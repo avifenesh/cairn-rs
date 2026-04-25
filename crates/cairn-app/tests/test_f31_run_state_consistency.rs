@@ -25,8 +25,6 @@
 
 mod support;
 
-use std::sync::Arc;
-
 use axum::{
     body::{to_bytes, Body},
     http::{Request, StatusCode},
@@ -38,7 +36,7 @@ use cairn_app::AppState;
 use cairn_domain::tenancy::TenantKey;
 use cairn_domain::{
     EventEnvelope, EventId, EventSource, FailureClass, ProjectKey, RunCreated, RunId, RunState,
-    RunStateChanged, RuntimeEvent, SessionCreated, SessionId, StateTransition, TenantId,
+    RunStateChanged, RuntimeEvent, SessionCreated, SessionId, StateTransition,
 };
 use cairn_store::event_log::EventLog;
 use serde_json::Value;
@@ -122,7 +120,10 @@ async fn http_get(app: Router, uri: &str) -> (StatusCode, Value) {
         .unwrap();
     let res = tower::ServiceExt::oneshot(app, req).await.unwrap();
     let status = res.status();
-    let bytes = to_bytes(res.into_body(), usize::MAX).await.unwrap();
+    // 10 MB body cap — well above any realistic run-detail / run-list response
+    // and keeps the test from DoSing itself if a handler ever regresses into
+    // unbounded output.
+    let bytes = to_bytes(res.into_body(), 10 * 1024 * 1024).await.unwrap();
     let json = if bytes.is_empty() {
         Value::Null
     } else {
@@ -415,7 +416,3 @@ async fn detail_404s_for_cross_tenant_access() {
         "cross-tenant detail must 404, not leak"
     );
 }
-
-// The unused imports are tolerated because the support module needs both.
-#[allow(dead_code)]
-fn _unused(_: Arc<AppState>, _: TenantId) {}

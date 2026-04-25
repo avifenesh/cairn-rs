@@ -292,8 +292,7 @@ pub(crate) async fn load_run_visible_to_tenant(
         {
             Ok(Some(run))
         }
-        Ok(Some(_)) => Ok(None),
-        Ok(None) => Ok(None),
+        Ok(_) => Ok(None),
         Err(err) => Err(store_error_response(err)),
     }
 }
