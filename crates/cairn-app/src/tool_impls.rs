@@ -25,7 +25,9 @@ use cairn_domain::{
 };
 use cairn_memory::{
     ingest::{IngestRequest, IngestService, SourceType},
-    retrieval::{RerankerStrategy, RetrievalError, RetrievalMode, RetrievalQuery, RetrievalService},
+    retrieval::{
+        RerankerStrategy, RetrievalError, RetrievalMode, RetrievalQuery, RetrievalService,
+    },
 };
 use cairn_tools::builtins::{
     BuiltinToolRegistry, PermissionLevel, RetrySafety, ToolCategory, ToolEffect, ToolError,
@@ -171,7 +173,10 @@ impl ToolHandler for ConcreteMemorySearchTool {
         // `InMemoryRetrieval`, so only `VectorOnly` needs handling here.
         let (resp, clamped_from) = match self.retrieval.query(build_query(requested_mode)).await {
             Ok(resp) => (resp, None),
-            Err(e) if is_missing_embedder_error(&e) && requested_mode != RetrievalMode::LexicalOnly => {
+            Err(e)
+                if is_missing_embedder_error(&e)
+                    && requested_mode != RetrievalMode::LexicalOnly =>
+            {
                 let original = requested_mode_str.to_owned();
                 match self
                     .retrieval
