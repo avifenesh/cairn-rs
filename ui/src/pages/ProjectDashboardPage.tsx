@@ -23,6 +23,8 @@ import { EventLog } from "../components/EventLog";
 import { StatCard } from "../components/StatCard";
 import { MiniChart } from "../components/MiniChart";
 import type { RunRecord, RunState, TaskRecord } from "../lib/types";
+import { EntityExplainer } from "../components/EntityExplainer";
+import { ENTITY_EXPLAINERS } from "../lib/entityExplainers";
 import { useScope } from "../hooks/useScope";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -327,6 +329,7 @@ export function ProjectDashboardPage({ projectId }: ProjectDashboardPageProps) {
               <p className="text-[12px] text-gray-400 dark:text-zinc-500 mt-1 font-mono">
                 {tenantId} / {workspaceId} / {projectId}
               </p>
+              <EntityExplainer className="mt-1">{ENTITY_EXPLAINERS.project}</EntityExplainer>
             </div>
             <div className="flex items-center gap-2 shrink-0">
               <button

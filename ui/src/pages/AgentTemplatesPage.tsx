@@ -9,6 +9,8 @@ import { defaultApi } from "../lib/api";
 import { useToast } from "../components/Toast";
 import type { AgentTemplate } from "../lib/types";
 import { EmptyScopeHint } from "../components/EmptyScopeHint";
+import { EntityExplainer } from "../components/EntityExplainer";
+import { ENTITY_EXPLAINERS } from "../lib/entityExplainers";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -250,6 +252,10 @@ export function AgentTemplatesPage() {
         <span className="text-[11px] text-gray-400 dark:text-zinc-600">
           Pre-configured agents ready to instantiate
         </span>
+      </div>
+      {/* F32 — inline entity explainer. */}
+      <div className="px-5 py-1.5 border-b border-gray-200 dark:border-zinc-800 shrink-0">
+        <EntityExplainer>{ENTITY_EXPLAINERS.agentTemplate}</EntityExplainer>
       </div>
 
       {/* Content */}

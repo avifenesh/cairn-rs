@@ -13,6 +13,8 @@ import { ErrorFallback } from "../components/ErrorFallback";
 import { defaultApi } from "../lib/api";
 import type { AuditOutcome } from "../lib/types";
 import { ds } from "../lib/design-system";
+import { EntityExplainer } from "../components/EntityExplainer";
+import { ENTITY_EXPLAINERS } from "../lib/entityExplainers";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -264,6 +266,10 @@ export function AuditLogPage() {
           <RefreshCw size={11} className={clsx(isFetching && "animate-spin")} />
           Refresh
         </button>
+      </div>
+      {/* F32 — inline entity explainer. */}
+      <div className={clsx("px-4 py-1.5 border-b border-gray-200 dark:border-zinc-800 shrink-0", ds.surface.elevated)}>
+        <EntityExplainer>{ENTITY_EXPLAINERS.auditLog}</EntityExplainer>
       </div>
 
       {/* Table */}

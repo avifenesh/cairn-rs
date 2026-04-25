@@ -17,6 +17,8 @@ import { useScope, DEFAULT_SCOPE } from '../hooks/useScope';
 import { ErrorFallback } from '../components/ErrorFallback';
 import { EmptyScopeHint } from '../components/EmptyScopeHint';
 import { useToast } from '../components/Toast';
+import { EntityExplainer } from '../components/EntityExplainer';
+import { ENTITY_EXPLAINERS } from '../lib/entityExplainers';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -403,6 +405,7 @@ export function WorkspacesPage() {
                 Tenant: <code className="text-gray-500 dark:text-zinc-400 font-mono">{scope.tenant_id}</code>
                 {' · '}Active: <code className="text-indigo-400 font-mono">{scope.workspace_id}</code>
               </p>
+              <EntityExplainer className="mt-1">{ENTITY_EXPLAINERS.workspace}</EntityExplainer>
             </div>
           </div>
 

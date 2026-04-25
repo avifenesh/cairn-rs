@@ -11,6 +11,8 @@ import { ApiError, defaultApi } from "../lib/api";
 import { table as tablePreset } from "../lib/design-system";
 import type { RunRecord, SessionCostResponse, SessionState } from "../lib/types";
 import { formatUsd, formatTokens } from "../lib/formatters";
+import { EntityExplainer } from "../components/EntityExplainer";
+import { ENTITY_EXPLAINERS } from "../lib/entityExplainers";
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -209,6 +211,7 @@ export function SessionDetailPage({ sessionId, onBack }: SessionDetailPageProps)
                 {sessionId}
                 <CopyButton text={sessionId} label="Copy session ID" size={12} />
               </p>
+              <EntityExplainer className="mt-1">{ENTITY_EXPLAINERS.session}</EntityExplainer>
               {session && (
                 <p className="text-[12px] text-gray-400 dark:text-zinc-500 mt-1 font-mono">
                   {session.project.tenant_id}

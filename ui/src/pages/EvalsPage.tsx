@@ -22,6 +22,8 @@ import { BarChart } from "../components/BarChart";
 import { defaultApi } from "../lib/api";
 import { useScope } from "../hooks/useScope";
 import type { EvalRunRecord, EvalRunStatus } from "../lib/types";
+import { EntityExplainer } from "../components/EntityExplainer";
+import { ENTITY_EXPLAINERS } from "../lib/entityExplainers";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -598,6 +600,10 @@ export function EvalsPage() {
           <RefreshCw size={11} className={clsx(isFetching && "animate-spin")} />
           Refresh
         </button>
+      </div>
+      {/* F32 — inline entity explainer. */}
+      <div className="px-4 py-1.5 border-b border-gray-200 dark:border-zinc-800 shrink-0 bg-white dark:bg-zinc-950">
+        <EntityExplainer>{ENTITY_EXPLAINERS.eval}</EntityExplainer>
       </div>
 
       {/* Compare selection banner */}

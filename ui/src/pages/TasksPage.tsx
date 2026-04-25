@@ -17,6 +17,8 @@ import { card as cardPreset } from "../lib/design-system";
 import type { TaskRecord, TaskState } from "../lib/types";
 import { useAutoRefresh, REFRESH_OPTIONS } from "../hooks/useAutoRefresh";
 import { EmptyScopeHint } from "../components/EmptyScopeHint";
+import { EntityExplainer } from "../components/EntityExplainer";
+import { ENTITY_EXPLAINERS } from "../lib/entityExplainers";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -739,6 +741,11 @@ export function TasksPage() {
             <span className="hidden sm:inline">Refresh</span>
           </button>
         </div>
+      </div>
+
+      {/* F32 — inline entity explainer. */}
+      <div className="px-4 py-1.5 border-b border-gray-200 dark:border-zinc-800 shrink-0 bg-gray-50 dark:bg-zinc-900">
+        <EntityExplainer>{ENTITY_EXPLAINERS.task}</EntityExplainer>
       </div>
 
       {/* Lifecycle diagram */}

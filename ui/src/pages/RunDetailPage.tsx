@@ -24,6 +24,8 @@ import {
 } from "../lib/runStateErrors";
 import { useEventStream } from "../hooks/useEventStream";
 import { table as tablePreset } from "../lib/design-system";
+import { EntityExplainer } from "../components/EntityExplainer";
+import { ENTITY_EXPLAINERS } from "../lib/entityExplainers";
 import type {
   RunRecord, InterveneRequest, InterventionAction,
 } from "../lib/types";
@@ -1126,6 +1128,7 @@ export function RunDetailPage({ runId, onBack }: RunDetailPageProps) {
                 {runId}
                 <CopyButton text={runId} label="Copy run ID" size={12} />
               </p>
+              <EntityExplainer className="mt-1">{ENTITY_EXPLAINERS.run}</EntityExplainer>
               {run && (
                 <p className="text-[12px] text-gray-400 dark:text-zinc-500 mt-1 font-mono">
                   {run.project.project_id} · {fmtTime(run.created_at)}

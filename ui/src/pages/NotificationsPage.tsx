@@ -29,6 +29,8 @@ import { ErrorFallback } from '../components/ErrorFallback';
 import type { NotificationChannel, NotificationRecord } from '../lib/types';
 import { useScope } from '../hooks/useScope';
 import { DEFAULT_SCOPE } from '../lib/scope';
+import { EntityExplainer } from '../components/EntityExplainer';
+import { ENTITY_EXPLAINERS } from '../lib/entityExplainers';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -717,6 +719,10 @@ export function NotificationsPage() {
           <RefreshCw size={11} className={prefsQuery.isFetching ? 'animate-spin' : ''} />
           Refresh
         </button>
+      </div>
+      {/* F32 — inline entity explainer. */}
+      <div className="px-4 py-1.5 border-b border-gray-200 dark:border-zinc-800 shrink-0 bg-gray-50 dark:bg-zinc-900">
+        <EntityExplainer>{ENTITY_EXPLAINERS.notification}</EntityExplainer>
       </div>
 
       {/* Stat strip */}

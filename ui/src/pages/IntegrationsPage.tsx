@@ -13,6 +13,7 @@ import { surface, border, text } from "../lib/design-system";
 import { PageHeader } from "../components/PageHeader";
 import { StatCard } from "../components/StatCard";
 import { useEventStream } from "../hooks/useEventStream";
+import { ENTITY_EXPLAINERS } from "../lib/entityExplainers";
 
 // ── Status helpers ──────────────────────────────────────────────────────────
 
@@ -536,7 +537,7 @@ export function IntegrationsPage() {
     <div className={clsx("min-h-full p-6", surface.page)}>
       <PageHeader
         title="Integrations"
-        subtitle="Connect external services and manage automated workflows"
+        subtitle={ENTITY_EXPLAINERS.integration}
       />
 
       {/* GitHub Integration Card */}

@@ -11,6 +11,8 @@ import { useToast } from '../components/Toast';
 import { useScope } from '../hooks/useScope';
 import { useFocusTrap } from '../hooks/useFocusTrap';
 import { ds } from '../lib/design-system';
+import { EntityExplainer } from '../components/EntityExplainer';
+import { ENTITY_EXPLAINERS } from '../lib/entityExplainers';
 import type {
   SourceRecord, SourceQualityRecord, SourceChunkView, RefreshScheduleResponse,
 } from '../lib/types';
@@ -624,6 +626,10 @@ export function SourcesPage() {
           <RefreshCw size={11} className={isFetching ? 'animate-spin' : ''} />
           Refresh
         </button>
+      </div>
+      {/* F32 — inline entity explainer. */}
+      <div className="px-4 py-1.5 border-b border-gray-200 dark:border-zinc-800 shrink-0 bg-gray-50 dark:bg-zinc-900">
+        <EntityExplainer>{ENTITY_EXPLAINERS.source}</EntityExplainer>
       </div>
 
       {/* Stat strip */}
