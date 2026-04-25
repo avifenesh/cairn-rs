@@ -24,8 +24,8 @@ use cairn_fabric::test_harness::valkey_endpoint;
 use cairn_fabric::{id_map, CairnWorker, FabricConfig, FabricServices};
 use cairn_store::projections::{FfLeaseHistoryCursorStore, TaskReadModel};
 use cairn_store::InMemoryStore;
-use ff_core::keys::{ExecKeyContext, IndexKeys};
-use ff_core::partition::execution_partition;
+use flowfabric::core::keys::{ExecKeyContext, IndexKeys};
+use flowfabric::core::partition::execution_partition;
 
 /// Spin one FabricServices instance with its own in-memory event log
 /// and cursor store. `instance_suffix` differentiates each instance's
@@ -60,11 +60,13 @@ async fn spawn_instance(instance_suffix: &str) -> TestInstance {
         tls: false,
         cluster: false,
         lane_id,
-        worker_id: ff_core::types::WorkerId::new(format!("w-{instance_suffix}-{suffix}")),
-        worker_instance_id: ff_core::types::WorkerInstanceId::new(format!(
+        worker_id: flowfabric::core::types::WorkerId::new(format!("w-{instance_suffix}-{suffix}")),
+        worker_instance_id: flowfabric::core::types::WorkerInstanceId::new(format!(
             "instance-{instance_suffix}-{suffix}"
         )),
-        namespace: ff_core::types::Namespace::new(format!("ns-{instance_suffix}-{suffix}")),
+        namespace: flowfabric::core::types::Namespace::new(format!(
+            "ns-{instance_suffix}-{suffix}"
+        )),
         lease_ttl_ms: 30_000,
         grant_ttl_ms: 5_000,
         max_concurrent_tasks: 4,

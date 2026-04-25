@@ -4,7 +4,7 @@
 //! `FabricBudgetService`, `FabricQuotaService`, and
 //! `FabricRotationService`. Those services now delegate to this impl
 //! through the [`ControlPlaneBackend`] trait; the FF imports
-//! (`ff_core::keys`, `ff_core::partition`, `ff_core::contracts`) live
+//! (`flowfabric::core::keys`, `flowfabric::core::partition`, `flowfabric::core::contracts`) live
 //! here only.
 //!
 //! When FF 0.3 ships `describe_*` + control-plane primitives upstream
@@ -15,20 +15,20 @@
 use std::collections::HashMap;
 
 use async_trait::async_trait;
-use ff_core::contracts::ReportUsageResult;
-use ff_core::keys::{
+use flowfabric::core::contracts::ReportUsageResult;
+use flowfabric::core::keys::{
     budget_policies_index, budget_resets_key, quota_policies_index, usage_dedup_key,
     BudgetKeyContext, ExecKeyContext, FlowIndexKeys, FlowKeyContext, IndexKeys, QuotaKeyContext,
 };
-use ff_core::partition::{
+use flowfabric::core::partition::{
     budget_partition, execution_partition, flow_partition, quota_partition, Partition,
     PartitionFamily,
 };
-use ff_core::types::{
+use flowfabric::core::types::{
     AttemptId, AttemptIndex, BudgetId, ExecutionId, LeaseId, QuotaPolicyId, SignalId, SuspensionId,
     TimestampMs, WaitpointId,
 };
-use ff_sdk::task::parse_report_usage_result;
+use flowfabric::sdk::task::parse_report_usage_result;
 
 use crate::error::FabricError;
 use crate::fcall;
@@ -1236,7 +1236,7 @@ impl ValkeyEngine {
         ctx: &ExecKeyContext,
         idx: &IndexKeys,
         eid: &ExecutionId,
-        lane_id: &ff_core::types::LaneId,
+        lane_id: &flowfabric::core::types::LaneId,
         lease_duration_ms: u64,
     ) -> Result<ClaimGrantOutcome, FabricError> {
         // FF requires the existing attempt_hash as KEYS[6]; re-read the
@@ -1309,15 +1309,15 @@ impl ValkeyEngine {
 /// machinery.
 fn parse_claim_lease_epoch(
     raw: &ferriskey::Value,
-) -> Result<ff_core::types::LeaseEpoch, FabricError> {
+) -> Result<flowfabric::core::types::LeaseEpoch, FabricError> {
     if let ferriskey::Value::Array(arr) = raw {
         if let Some(Ok(ferriskey::Value::BulkString(b))) = arr.get(3) {
             if let Ok(n) = String::from_utf8_lossy(b).parse::<u64>() {
-                return Ok(ff_core::types::LeaseEpoch::new(n));
+                return Ok(flowfabric::core::types::LeaseEpoch::new(n));
             }
         }
         if let Some(Ok(ferriskey::Value::Int(n))) = arr.get(3) {
-            return Ok(ff_core::types::LeaseEpoch::new(*n as u64));
+            return Ok(flowfabric::core::types::LeaseEpoch::new(*n as u64));
         }
     }
     Err(FabricError::Internal(
@@ -1349,6 +1349,11 @@ fn map_report_usage_result(r: ReportUsageResult) -> BudgetSpendOutcome {
             current_usage,
             hard_limit,
         },
+        // `ReportUsageResult` is `#[non_exhaustive]`. All known FF 0.9
+        // variants are handled above; a new variant added upstream
+        // (e.g. RFC-015 quota-scoped breach) should fail loud so cairn
+        // audits the mapping rather than silently dropping the result.
+        other => panic!("unhandled ReportUsageResult variant (post-FF-0.9 addition): {other:?}"),
     }
 }
 

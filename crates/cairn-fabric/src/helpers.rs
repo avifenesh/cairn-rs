@@ -71,20 +71,25 @@ pub fn fcall_error_code(raw: &ferriskey::Value) -> Option<String> {
     }
 }
 
-pub fn parse_public_state(s: &str) -> ff_core::state::PublicState {
+pub fn parse_public_state(s: &str) -> flowfabric::core::state::PublicState {
     match s {
-        "waiting" => ff_core::state::PublicState::Waiting,
-        "delayed" => ff_core::state::PublicState::Delayed,
-        "rate_limited" => ff_core::state::PublicState::RateLimited,
-        "waiting_children" => ff_core::state::PublicState::WaitingChildren,
-        "active" => ff_core::state::PublicState::Active,
-        "suspended" => ff_core::state::PublicState::Suspended,
-        "completed" => ff_core::state::PublicState::Completed,
-        "failed" => ff_core::state::PublicState::Failed,
-        "cancelled" => ff_core::state::PublicState::Cancelled,
-        "expired" => ff_core::state::PublicState::Expired,
-        "skipped" => ff_core::state::PublicState::Skipped,
-        _ => ff_core::state::PublicState::Waiting,
+        "waiting" => flowfabric::core::state::PublicState::Waiting,
+        "delayed" => flowfabric::core::state::PublicState::Delayed,
+        "rate_limited" => flowfabric::core::state::PublicState::RateLimited,
+        "waiting_children" => flowfabric::core::state::PublicState::WaitingChildren,
+        "active" => flowfabric::core::state::PublicState::Active,
+        "suspended" => flowfabric::core::state::PublicState::Suspended,
+        "completed" => flowfabric::core::state::PublicState::Completed,
+        "failed" => flowfabric::core::state::PublicState::Failed,
+        "cancelled" => flowfabric::core::state::PublicState::Cancelled,
+        "expired" => flowfabric::core::state::PublicState::Expired,
+        "skipped" => flowfabric::core::state::PublicState::Skipped,
+        // FF 0.9 (RFC-014 Stage 2) addition — transient state between
+        // Suspended and Active, serialized as "resumable". Without
+        // this arm the snapshot-decode path silently falls through to
+        // `Waiting` and misclassifies a mid-resume run as queued.
+        "resumable" => flowfabric::core::state::PublicState::Resumable,
+        _ => flowfabric::core::state::PublicState::Waiting,
     }
 }
 
@@ -216,51 +221,55 @@ mod tests {
     fn parse_public_state_all_variants() {
         assert_eq!(
             parse_public_state("waiting"),
-            ff_core::state::PublicState::Waiting
+            flowfabric::core::state::PublicState::Waiting
         );
         assert_eq!(
             parse_public_state("active"),
-            ff_core::state::PublicState::Active
+            flowfabric::core::state::PublicState::Active
         );
         assert_eq!(
             parse_public_state("completed"),
-            ff_core::state::PublicState::Completed
+            flowfabric::core::state::PublicState::Completed
         );
         assert_eq!(
             parse_public_state("failed"),
-            ff_core::state::PublicState::Failed
+            flowfabric::core::state::PublicState::Failed
         );
         assert_eq!(
             parse_public_state("cancelled"),
-            ff_core::state::PublicState::Cancelled
+            flowfabric::core::state::PublicState::Cancelled
         );
         assert_eq!(
             parse_public_state("suspended"),
-            ff_core::state::PublicState::Suspended
+            flowfabric::core::state::PublicState::Suspended
         );
         assert_eq!(
             parse_public_state("expired"),
-            ff_core::state::PublicState::Expired
+            flowfabric::core::state::PublicState::Expired
         );
         assert_eq!(
             parse_public_state("skipped"),
-            ff_core::state::PublicState::Skipped
+            flowfabric::core::state::PublicState::Skipped
+        );
+        assert_eq!(
+            parse_public_state("resumable"),
+            flowfabric::core::state::PublicState::Resumable
         );
         assert_eq!(
             parse_public_state("delayed"),
-            ff_core::state::PublicState::Delayed
+            flowfabric::core::state::PublicState::Delayed
         );
         assert_eq!(
             parse_public_state("rate_limited"),
-            ff_core::state::PublicState::RateLimited
+            flowfabric::core::state::PublicState::RateLimited
         );
         assert_eq!(
             parse_public_state("waiting_children"),
-            ff_core::state::PublicState::WaitingChildren
+            flowfabric::core::state::PublicState::WaitingChildren
         );
         assert_eq!(
             parse_public_state("garbage"),
-            ff_core::state::PublicState::Waiting
+            flowfabric::core::state::PublicState::Waiting
         );
     }
 

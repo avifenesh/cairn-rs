@@ -24,7 +24,7 @@ use cairn_fabric::engine::{
     CreateFlowInput, EligibilityResult, FlowCancelOutcome, QuotaAdmission,
     StageDependencyEdgeInput, StageDependencyOutcome, SubmitTaskInput,
 };
-use ff_core::types::{
+use flowfabric::core::types::{
     BudgetId, EdgeId, ExecutionId, FlowId, LaneId, Namespace, WorkerId, WorkerInstanceId,
 };
 

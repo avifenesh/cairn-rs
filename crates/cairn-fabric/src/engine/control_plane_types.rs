@@ -1,7 +1,7 @@
 //! Cairn-native mirror types for the [`ControlPlaneBackend`] trait.
 //!
 //! These mirror the FF wire types that budget/quota/rotation/worker
-//! services used to surface directly from FF (`ff_core::contracts::*`).
+//! services used to surface directly from FF (`flowfabric::core::contracts::*`).
 //! They exist so the [`ControlPlaneBackend`] trait boundary does not
 //! leak FF-specific enums through to cairn services; when FF renames a
 //! variant or reshapes the wire format, the mirror absorbs the change
@@ -9,7 +9,7 @@
 //!
 //! Phase D PR 1 introduces these alongside the trait. A small
 //! conversion in `ValkeyControlPlane` translates FF's enum variants
-//! (`ff_core::contracts::ReportUsageResult`, etc.) into the mirrors.
+//! (`flowfabric::core::contracts::ReportUsageResult`, etc.) into the mirrors.
 //!
 //! [`ControlPlaneBackend`]: super::control_plane::ControlPlaneBackend
 use std::collections::HashMap;
@@ -17,7 +17,7 @@ use std::collections::HashMap;
 /// Result of a budget spend via
 /// [`ControlPlaneBackend::record_spend`](super::control_plane::ControlPlaneBackend::record_spend).
 ///
-/// Mirror of `ff_core::contracts::ReportUsageResult` with cairn-native
+/// Mirror of `flowfabric::core::contracts::ReportUsageResult` with cairn-native
 /// variant names. `SoftBreach` and `HardBreach` distinguish whether
 /// the increment applied (`Soft` = applied + warning; `Hard` =
 /// rejected).
@@ -114,8 +114,8 @@ pub struct RotationFailure {
 /// caller can log or surface it without re-reading.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct WorkerRegistration {
-    pub worker_id: ff_core::types::WorkerId,
-    pub instance_id: ff_core::types::WorkerInstanceId,
+    pub worker_id: flowfabric::core::types::WorkerId,
+    pub instance_id: flowfabric::core::types::WorkerInstanceId,
     pub capabilities: Vec<String>,
     pub registered_at_ms: u64,
 }
@@ -171,9 +171,9 @@ pub enum FlowCancelOutcome {
 /// tests / debug logs only.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ClaimGrantOutcome {
-    pub lease_id: ff_core::types::LeaseId,
-    pub lease_epoch: ff_core::types::LeaseEpoch,
-    pub attempt_index: ff_core::types::AttemptIndex,
+    pub lease_id: flowfabric::core::types::LeaseId,
+    pub lease_epoch: flowfabric::core::types::LeaseEpoch,
+    pub attempt_index: flowfabric::core::types::AttemptIndex,
 }
 
 // ── Input structs ───────────────────────────────────────────────────────
@@ -209,12 +209,12 @@ pub struct ClaimGrantOutcome {
 /// `"operator_override"` so FF accepts the unfenced path.
 #[derive(Clone, Debug)]
 pub struct ExecutionLeaseContext {
-    pub lane_id: ff_core::types::LaneId,
-    pub attempt_index: ff_core::types::AttemptIndex,
+    pub lane_id: flowfabric::core::types::LaneId,
+    pub attempt_index: flowfabric::core::types::AttemptIndex,
     pub lease_id: String,
     pub lease_epoch: String,
     pub attempt_id: String,
-    pub worker_instance_id: ff_core::types::WorkerInstanceId,
+    pub worker_instance_id: flowfabric::core::types::WorkerInstanceId,
     /// `source` ARGV for terminal FCALLs. `"operator_override"` when the
     /// fence triple is empty (unfenced mode); empty string when the
     /// triple is fully populated (FF validates normally).
@@ -242,8 +242,8 @@ impl ExecutionLeaseContext {
     /// all route through `resolve_lease_context`, so they get this
     /// unfenced shape and cleanly skip the lease gate.
     pub(crate) fn unfenced(
-        lane_id: ff_core::types::LaneId,
-        attempt_index: ff_core::types::AttemptIndex,
+        lane_id: flowfabric::core::types::LaneId,
+        attempt_index: flowfabric::core::types::AttemptIndex,
     ) -> Self {
         Self {
             lane_id,
@@ -251,7 +251,7 @@ impl ExecutionLeaseContext {
             lease_id: String::new(),
             lease_epoch: String::new(),
             attempt_id: String::new(),
-            worker_instance_id: ff_core::types::WorkerInstanceId::new("cairn"),
+            worker_instance_id: flowfabric::core::types::WorkerInstanceId::new("cairn"),
             source: "operator_override".to_owned(),
         }
     }
@@ -260,9 +260,9 @@ impl ExecutionLeaseContext {
 /// Input to `create_run_execution`.
 #[derive(Clone, Debug)]
 pub struct CreateRunExecutionInput {
-    pub execution_id: ff_core::types::ExecutionId,
-    pub namespace: ff_core::types::Namespace,
-    pub lane_id: ff_core::types::LaneId,
+    pub execution_id: flowfabric::core::types::ExecutionId,
+    pub namespace: flowfabric::core::types::Namespace,
+    pub lane_id: flowfabric::core::types::LaneId,
     /// `cairn.*` tags to stamp on `exec_tags`. Caller owns the full
     /// set (run_id / session_id / project / instance_id / optional
     /// parent + correlation).
@@ -274,24 +274,24 @@ pub struct CreateRunExecutionInput {
 /// Input to `complete_run_execution`.
 #[derive(Clone, Debug)]
 pub struct CompleteRunInput {
-    pub execution_id: ff_core::types::ExecutionId,
+    pub execution_id: flowfabric::core::types::ExecutionId,
     pub lease: ExecutionLeaseContext,
 }
 
 /// Input to `cancel_run_execution`.
 #[derive(Clone, Debug)]
 pub struct CancelRunInput {
-    pub execution_id: ff_core::types::ExecutionId,
+    pub execution_id: flowfabric::core::types::ExecutionId,
     pub lease: ExecutionLeaseContext,
     /// Current waitpoint id on the execution, if any. Empty means no
     /// active waitpoint (FF's cancel tolerates a default/empty id).
-    pub current_waitpoint: Option<ff_core::types::WaitpointId>,
+    pub current_waitpoint: Option<flowfabric::core::types::WaitpointId>,
 }
 
 /// Input to `fail_run_execution`.
 #[derive(Clone, Debug)]
 pub struct FailRunInput {
-    pub execution_id: ff_core::types::ExecutionId,
+    pub execution_id: flowfabric::core::types::ExecutionId,
     pub lease: ExecutionLeaseContext,
     pub reason: String,
     pub category: String,
@@ -307,7 +307,7 @@ pub struct FailRunInput {
 /// `ff_suspend_execution` KEYS/ARGV layout.
 #[derive(Clone, Debug)]
 pub struct SuspendRunInput {
-    pub execution_id: ff_core::types::ExecutionId,
+    pub execution_id: flowfabric::core::types::ExecutionId,
     pub lease: ExecutionLeaseContext,
     pub reason_code: String,
     pub timeout_at: String,
@@ -319,18 +319,18 @@ pub struct SuspendRunInput {
 /// Input to `resume_run_execution`.
 #[derive(Clone, Debug)]
 pub struct ResumeRunInput {
-    pub execution_id: ff_core::types::ExecutionId,
-    pub lane_id: ff_core::types::LaneId,
-    pub waitpoint_id: Option<ff_core::types::WaitpointId>,
+    pub execution_id: flowfabric::core::types::ExecutionId,
+    pub lane_id: flowfabric::core::types::LaneId,
+    pub waitpoint_id: Option<flowfabric::core::types::WaitpointId>,
     pub resume_source: String,
 }
 
 /// Input to `deliver_approval_signal`.
 #[derive(Clone, Debug)]
 pub struct DeliverApprovalSignalInput {
-    pub execution_id: ff_core::types::ExecutionId,
-    pub lane_id: ff_core::types::LaneId,
-    pub waitpoint_id: ff_core::types::WaitpointId,
+    pub execution_id: flowfabric::core::types::ExecutionId,
+    pub lane_id: flowfabric::core::types::LaneId,
+    pub waitpoint_id: flowfabric::core::types::WaitpointId,
     pub signal_name: String,
     pub idempotency_suffix: String,
     pub signal_dedup_ttl_ms: u64,
@@ -341,15 +341,15 @@ pub struct DeliverApprovalSignalInput {
 /// Input to `create_flow`.
 #[derive(Clone, Debug)]
 pub struct CreateFlowInput {
-    pub flow_id: ff_core::types::FlowId,
+    pub flow_id: flowfabric::core::types::FlowId,
     pub flow_kind: String,
-    pub namespace: ff_core::types::Namespace,
+    pub namespace: flowfabric::core::types::Namespace,
 }
 
 /// Input to `cancel_flow`.
 #[derive(Clone, Debug)]
 pub struct CancelFlowInput {
-    pub flow_id: ff_core::types::FlowId,
+    pub flow_id: flowfabric::core::types::FlowId,
     pub reason: String,
     pub cancel_mode: String,
 }
@@ -357,8 +357,8 @@ pub struct CancelFlowInput {
 /// Input to `issue_grant_and_claim`.
 #[derive(Clone, Debug)]
 pub struct IssueGrantAndClaimInput {
-    pub execution_id: ff_core::types::ExecutionId,
-    pub lane_id: ff_core::types::LaneId,
+    pub execution_id: flowfabric::core::types::ExecutionId,
+    pub lane_id: flowfabric::core::types::LaneId,
     pub lease_duration_ms: u64,
 }
 
@@ -376,9 +376,9 @@ pub struct IssueGrantAndClaimInput {
 /// the policy per-tenant later without trait churn.
 #[derive(Clone, Debug)]
 pub struct SubmitTaskInput {
-    pub execution_id: ff_core::types::ExecutionId,
-    pub namespace: ff_core::types::Namespace,
-    pub lane_id: ff_core::types::LaneId,
+    pub execution_id: flowfabric::core::types::ExecutionId,
+    pub namespace: flowfabric::core::types::Namespace,
+    pub lane_id: flowfabric::core::types::LaneId,
     pub priority: u32,
     /// `cairn.*` tags. Caller supplies the full set
     /// (`cairn.task_id`, `cairn.project`, `cairn.instance_id`, and
@@ -397,9 +397,9 @@ pub struct SubmitTaskInput {
 /// the key-building.
 #[derive(Clone, Debug)]
 pub struct AddExecutionToFlowInput {
-    pub flow_id: ff_core::types::FlowId,
-    pub execution_id: ff_core::types::ExecutionId,
-    pub namespace: ff_core::types::Namespace,
+    pub flow_id: flowfabric::core::types::FlowId,
+    pub execution_id: flowfabric::core::types::ExecutionId,
+    pub namespace: flowfabric::core::types::Namespace,
     /// Flow kind stamped by the create step. Cairn uses
     /// `"cairn_session"`.
     pub flow_kind: String,
@@ -408,10 +408,10 @@ pub struct AddExecutionToFlowInput {
 /// Input to `stage_dependency_edge`.
 #[derive(Clone, Debug)]
 pub struct StageDependencyEdgeInput {
-    pub flow_id: ff_core::types::FlowId,
-    pub edge_id: ff_core::types::EdgeId,
-    pub upstream_execution_id: ff_core::types::ExecutionId,
-    pub downstream_execution_id: ff_core::types::ExecutionId,
+    pub flow_id: flowfabric::core::types::FlowId,
+    pub edge_id: flowfabric::core::types::EdgeId,
+    pub upstream_execution_id: flowfabric::core::types::ExecutionId,
+    pub downstream_execution_id: flowfabric::core::types::ExecutionId,
     /// FF edge kind. Currently always `"success_only"`.
     pub dependency_kind: String,
     /// Caller-supplied opaque ref. Empty means "no data passing ref".
@@ -457,11 +457,11 @@ pub enum StageDependencyOutcome {
 /// Input to `apply_dependency_to_child`.
 #[derive(Clone, Debug)]
 pub struct ApplyDependencyToChildInput {
-    pub downstream_execution_id: ff_core::types::ExecutionId,
-    pub flow_id: ff_core::types::FlowId,
-    pub upstream_execution_id: ff_core::types::ExecutionId,
-    pub edge_id: ff_core::types::EdgeId,
-    pub lane_id: ff_core::types::LaneId,
+    pub downstream_execution_id: flowfabric::core::types::ExecutionId,
+    pub flow_id: flowfabric::core::types::FlowId,
+    pub upstream_execution_id: flowfabric::core::types::ExecutionId,
+    pub edge_id: flowfabric::core::types::EdgeId,
+    pub lane_id: flowfabric::core::types::LaneId,
     pub graph_revision: u64,
     pub dependency_kind: String,
     pub data_passing_ref: String,
@@ -484,7 +484,7 @@ pub enum EligibilityResult {
 /// Input to `renew_task_lease`.
 #[derive(Clone, Debug)]
 pub struct RenewLeaseInput {
-    pub execution_id: ff_core::types::ExecutionId,
+    pub execution_id: flowfabric::core::types::ExecutionId,
     pub lease: ExecutionLeaseContext,
     pub lease_extension_ms: u64,
 }
@@ -496,6 +496,6 @@ pub struct RenewLeaseInput {
 /// lease_expiry scanner handles reclaim server-side).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ExpiredLease {
-    pub execution_id: ff_core::types::ExecutionId,
+    pub execution_id: flowfabric::core::types::ExecutionId,
     pub expires_at_ms: u64,
 }

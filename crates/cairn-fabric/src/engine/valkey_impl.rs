@@ -15,9 +15,9 @@ use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use ff_core::keys::{self, ExecKeyContext, FlowKeyContext};
-use ff_core::partition::{execution_partition, flow_partition};
-use ff_core::types::{
+use flowfabric::core::keys::{self, ExecKeyContext, FlowKeyContext};
+use flowfabric::core::partition::{execution_partition, flow_partition};
+use flowfabric::core::types::{
     AttemptId, AttemptIndex, EdgeId, ExecutionId, FlowId, LeaseEpoch, LeaseId, Namespace,
     TimestampMs, WaitpointId, WorkerId, WorkerInstanceId,
 };
@@ -396,8 +396,8 @@ impl Engine for ValkeyEngine {
         now_ms: u64,
         limit: usize,
     ) -> Result<Vec<super::control_plane_types::ExpiredLease>, FabricError> {
-        use ff_core::keys::IndexKeys;
-        use ff_core::partition::{Partition, PartitionFamily};
+        use flowfabric::core::keys::IndexKeys;
+        use flowfabric::core::partition::{Partition, PartitionFamily};
 
         // Exec and flow share a slot under the `num_flow_partitions`
         // budget post-RFC-011; the execution lease_expiry index is
@@ -534,8 +534,8 @@ fn parse_execution_snapshot(
     let lane_id = core
         .get("lane_id")
         .filter(|s| !s.is_empty())
-        .map(ff_core::types::LaneId::new)
-        .unwrap_or_else(|| ff_core::types::LaneId::new("cairn"));
+        .map(flowfabric::core::types::LaneId::new)
+        .unwrap_or_else(|| flowfabric::core::types::LaneId::new("cairn"));
     let namespace = core
         .get("namespace")
         .filter(|s| !s.is_empty())

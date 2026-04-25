@@ -1,6 +1,20 @@
-use ff_sdk::task::{ConditionMatcher, TimeoutBehavior};
+use flowfabric::sdk::task::TimeoutBehavior;
 
 use crate::helpers::sanitize_signal_component;
+
+/// Local cairn-side signal matcher descriptor.
+///
+/// FF 0.9 replaced `ff_sdk::task::ConditionMatcher` with the richer
+/// `SignalMatcher`/`ResumeCondition` shape (RFC-014 composite resume
+/// conditions). CG-a keeps cairn's existing behavior — single-signal
+/// ByName matchers — by defining a local type with the same field
+/// surface. CG-b migrates cairn's callers to the typed upstream
+/// `ResumeCondition::Single { matcher: SignalMatcher::ByName(..) }`
+/// pattern.
+#[derive(Clone, Debug)]
+pub struct ConditionMatcher {
+    pub signal_name: String,
+}
 
 #[derive(Clone, Debug)]
 pub struct SuspensionParams {

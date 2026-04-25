@@ -47,8 +47,8 @@ async fn test_start_with_correlation_tags_exec_core() {
         &run_id,
         h.partition_config(),
     );
-    let partition = ff_core::partition::execution_partition(&eid, h.partition_config());
-    let ctx = ff_core::keys::ExecKeyContext::new(&partition, &eid);
+    let partition = flowfabric::core::partition::execution_partition(&eid, h.partition_config());
+    let ctx = flowfabric::core::keys::ExecKeyContext::new(&partition, &eid);
     let tags: HashMap<String, String> = h
         .fabric
         .runtime

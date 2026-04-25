@@ -62,7 +62,7 @@ metrics-otel = ["dep:opentelemetry-proto", "dep:prost"]
 #
 # Default: OFF. CI integration tests build with this feature; release
 # artefacts do not. See SECURITY.md for the full threat-model summary.
-debug-endpoints = ["dep:ff-core"]
+debug-endpoints = ["dep:flowfabric"]
 
 [dependencies]
 cairn-api = { path = "../cairn-api" }
@@ -119,9 +119,9 @@ opentelemetry-proto = { version = "0.31", features = ["gen-tonic-messages", "tra
 prost = { version = "0.14", optional = true }
 # Optional: only compiled when `debug-endpoints` feature is enabled.
 # Used by the RFC-011 debug endpoint to compute partition placement.
-# Must track cairn-fabric's ff-core version so debug.rs's types match
+# Must track cairn-fabric's flowfabric version so debug.rs's types match
 # FabricServices.runtime.partition_config.
-ff-core = { version = "0.3", optional = true }
+flowfabric = { version = "0.9", optional = true }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "process", "io-util"] }

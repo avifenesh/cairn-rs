@@ -21,8 +21,8 @@
 //! FCALLs are CROSSSLOT-safe as long as both endpoints belong to the
 //! same flow.
 
-use ff_core::keys::{ExecKeyContext, FlowIndexKeys, FlowKeyContext};
-use ff_core::types::{EdgeId, ExecutionId, FlowId};
+use flowfabric::core::keys::{ExecKeyContext, FlowIndexKeys, FlowKeyContext};
+use flowfabric::core::types::{EdgeId, ExecutionId, FlowId};
 
 // ── ff_add_execution_to_flow ────────────────────────────────────────────────
 
@@ -144,7 +144,7 @@ pub fn build_evaluate_flow_eligibility(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ff_core::partition::{Partition, PartitionFamily};
+    use flowfabric::core::partition::{Partition, PartitionFamily};
 
     fn test_partition() -> Partition {
         Partition {

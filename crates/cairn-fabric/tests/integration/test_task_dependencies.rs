@@ -262,18 +262,19 @@ async fn failed_prereq_auto_skips_dependent() {
         "A should be terminal Failed"
     );
 
-    // B should transition to Failed/DependencyFailed (FF's "skipped"
-    // public state maps to this shape via state_map, since cairn
-    // TaskState has no dedicated Skipped variant). Push listener
-    // dispatches synchronously under normal operation; the 20s
-    // budget is generous enough to also tolerate a reconciler-
-    // fallback path (15s interval default) on CI machines where
-    // pubsub subscription setup can lag on cold RESP3 connections.
-    let final_b = wait_for_task_state(&h, &session_id, &task_b, TaskState::Failed, 20_000).await;
+    // B should transition to Canceled/CanceledByOperator. CG-a
+    // remapped FF's "skipped" public state onto cairn's Canceled
+    // bucket (state_map.rs) — previously Skipped rolled up to
+    // Failed/DependencyFailed. Push listener dispatches synchronously
+    // under normal operation; the 20s budget is generous enough to
+    // also tolerate a reconciler-fallback path (15s interval default)
+    // on CI machines where pubsub subscription setup can lag on cold
+    // RESP3 connections.
+    let final_b = wait_for_task_state(&h, &session_id, &task_b, TaskState::Canceled, 20_000).await;
     assert_eq!(
         final_b,
-        TaskState::Failed,
-        "expected B Failed (skipped via dep), got {final_b:?}"
+        TaskState::Canceled,
+        "expected B Canceled (skipped via dep), got {final_b:?}"
     );
     let rec_b = h
         .fabric
@@ -284,8 +285,8 @@ async fn failed_prereq_auto_skips_dependent() {
         .expect("B not found");
     assert_eq!(
         rec_b.failure_class,
-        Some(FailureClass::DependencyFailed),
-        "expected B's failure_class = DependencyFailed"
+        Some(FailureClass::CanceledByOperator),
+        "expected B's failure_class = CanceledByOperator (CG-a remap)"
     );
 
     h.teardown().await;

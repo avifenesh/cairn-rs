@@ -21,8 +21,8 @@ use std::sync::Arc;
 use cairn_domain::{FailureClass, TaskState};
 use cairn_fabric::{id_map, CairnWorker, FabricServices};
 use cairn_store::projections::{FfLeaseHistoryCursorStore, TaskReadModel};
-use ff_core::keys::ExecKeyContext;
-use ff_core::partition::execution_partition;
+use flowfabric::core::keys::ExecKeyContext;
+use flowfabric::core::partition::execution_partition;
 
 use crate::TestHarness;
 
@@ -46,7 +46,7 @@ async fn subscriber_emits_retryable_failed_on_lease_expiry() {
     let mut config: cairn_fabric::FabricConfig = (*harness.fabric.runtime.config).clone();
     // Per-test-unique namespace prevents collision if multiple tests
     // spin up their own FabricServices against the same container.
-    config.namespace = ff_core::types::Namespace::new(format!(
+    config.namespace = flowfabric::core::types::Namespace::new(format!(
         "lease_hist_subscriber_test_{}",
         uuid::Uuid::new_v4()
     ));
@@ -121,7 +121,7 @@ async fn subscriber_emits_retryable_failed_on_lease_expiry() {
     // Fire the expiry FCALL. Signature per lua/lease.lua:
     //   KEYS (4): exec_core, lease_current, lease_expiry_zset, lease_history
     //   ARGV (1): execution_id
-    let index = ff_core::keys::IndexKeys::new(&partition);
+    let index = flowfabric::core::keys::IndexKeys::new(&partition);
     let _: ferriskey::Value = subscriber_fabric
         .runtime
         .client

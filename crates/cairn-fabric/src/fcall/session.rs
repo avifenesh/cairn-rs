@@ -1,6 +1,6 @@
-use ff_core::keys::{FlowIndexKeys, FlowKeyContext};
-use ff_core::partition::Partition;
-use ff_core::types::{FlowId, Namespace, TimestampMs};
+use flowfabric::core::keys::{FlowIndexKeys, FlowKeyContext};
+use flowfabric::core::partition::Partition;
+use flowfabric::core::types::{FlowId, Namespace, TimestampMs};
 
 pub fn build_create_flow(
     fctx: &FlowKeyContext,
@@ -49,7 +49,7 @@ pub const CANCEL_FLOW_ARGS: usize = 4;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ff_core::partition::{flow_partition, PartitionConfig};
+    use flowfabric::core::partition::{flow_partition, PartitionConfig};
 
     #[test]
     fn create_flow_counts() {

@@ -15,7 +15,7 @@
 //! projection. See `docs/design/bridge-event-audit.md` §2.7.
 use std::sync::Arc;
 
-use ff_core::types::{ExecutionId, QuotaPolicyId};
+use flowfabric::core::types::{ExecutionId, QuotaPolicyId};
 
 use crate::boot::FabricRuntime;
 use crate::engine::control_plane::ControlPlaneBackend;

@@ -4,7 +4,7 @@
 // (one container per `cargo test` invocation, shared across every test in
 // the binary through a `tokio::sync::OnceCell`). `FabricServices::start`
 // runs against the container's host:port, and FF's Lua library is loaded
-// on first boot via `ff_script::loader::ensure_library`.
+// on first boot via `flowfabric::script::loader::ensure_library`.
 //
 // **Parallel-safe key isolation.** There is NO `FLUSHDB` between tests.
 // Running `FLUSHDB` on a shared container concurrently is destructive —
@@ -91,11 +91,11 @@ impl TestHarness {
             tls: false,
             cluster: false,
             lane_id,
-            worker_id: ff_core::types::WorkerId::new("test-worker"),
-            worker_instance_id: ff_core::types::WorkerInstanceId::new(
+            worker_id: flowfabric::core::types::WorkerId::new("test-worker"),
+            worker_instance_id: flowfabric::core::types::WorkerInstanceId::new(
                 uuid::Uuid::new_v4().to_string(),
             ),
-            namespace: ff_core::types::Namespace::new("test"),
+            namespace: flowfabric::core::types::Namespace::new("test"),
             lease_ttl_ms: 30_000,
             grant_ttl_ms: 5_000,
             max_concurrent_tasks: 4,
@@ -154,7 +154,7 @@ impl TestHarness {
     /// etc., so every ExecutionId minted inside a test lands in the same
     /// partition scheme the runtime enforces (see id_map.rs's
     /// partition-count stability contract).
-    pub fn partition_config(&self) -> &ff_core::partition::PartitionConfig {
+    pub fn partition_config(&self) -> &flowfabric::core::partition::PartitionConfig {
         &self.fabric.runtime.partition_config
     }
 

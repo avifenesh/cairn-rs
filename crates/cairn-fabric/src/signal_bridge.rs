@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
-use ff_core::keys::ExecKeyContext;
-use ff_core::types::{ExecutionId, SignalId, TimestampMs, WaitpointId, WaitpointToken};
-use ff_sdk::task::{Signal, SignalOutcome};
+use flowfabric::core::keys::ExecKeyContext;
+use flowfabric::core::types::{ExecutionId, SignalId, TimestampMs, WaitpointId, WaitpointToken};
+use flowfabric::sdk::task::{Signal, SignalOutcome};
 
 use crate::boot::FabricRuntime;
 use crate::error::FabricError;
@@ -74,8 +74,10 @@ impl SignalBridge {
             .into_bytes()
         });
 
-        let partition =
-            ff_core::partition::execution_partition(execution_id, &self.runtime.partition_config);
+        let partition = flowfabric::core::partition::execution_partition(
+            execution_id,
+            &self.runtime.partition_config,
+        );
         let ctx = ExecKeyContext::new(&partition, execution_id);
         let waitpoint_token =
             read_waitpoint_token(&self.runtime.client, &ctx, waitpoint_id).await?;
@@ -109,7 +111,7 @@ impl SignalBridge {
         .into_bytes();
 
         let safe_id = sanitize_signal_component(child_task_id);
-        let partition = ff_core::partition::execution_partition(
+        let partition = flowfabric::core::partition::execution_partition(
             parent_execution_id,
             &self.runtime.partition_config,
         );
@@ -139,8 +141,10 @@ impl SignalBridge {
         result_payload: Option<Vec<u8>>,
     ) -> Result<SignalOutcome, FabricError> {
         let safe_id = sanitize_signal_component(invocation_id);
-        let partition =
-            ff_core::partition::execution_partition(execution_id, &self.runtime.partition_config);
+        let partition = flowfabric::core::partition::execution_partition(
+            execution_id,
+            &self.runtime.partition_config,
+        );
         let ctx = ExecKeyContext::new(&partition, execution_id);
         let waitpoint_token =
             read_waitpoint_token(&self.runtime.client, &ctx, waitpoint_id).await?;
@@ -165,10 +169,12 @@ impl SignalBridge {
         waitpoint_id: &WaitpointId,
         signal: Signal,
     ) -> Result<SignalOutcome, FabricError> {
-        let partition =
-            ff_core::partition::execution_partition(execution_id, &self.runtime.partition_config);
-        let ctx = ff_core::keys::ExecKeyContext::new(&partition, execution_id);
-        let idx = ff_core::keys::IndexKeys::new(&partition);
+        let partition = flowfabric::core::partition::execution_partition(
+            execution_id,
+            &self.runtime.partition_config,
+        );
+        let ctx = flowfabric::core::keys::ExecKeyContext::new(&partition, execution_id);
+        let idx = flowfabric::core::keys::IndexKeys::new(&partition);
 
         let signal_id = SignalId::new();
         let now = TimestampMs::now();
@@ -179,7 +185,7 @@ impl SignalBridge {
             .hget(&ctx.core(), "lane_id")
             .await
             .map_err(|e| FabricError::Valkey(format!("HGET lane_id: {e}")))?;
-        let lane_id = ff_core::types::LaneId::new(lane_str.as_deref().unwrap_or("cairn"));
+        let lane_id = flowfabric::core::types::LaneId::new(lane_str.as_deref().unwrap_or("cairn"));
 
         let derived_idem = format!("{}:{}:{}", execution_id, signal.signal_name, waitpoint_id);
         let effective_idem = signal
@@ -256,7 +262,7 @@ fn parse_signal_result(raw: &ferriskey::Value) -> Result<SignalOutcome, FabricEr
 
     let signal_id_str = extract_str(arr, 2).unwrap_or_default();
     let effect = extract_str(arr, 3).unwrap_or_default();
-    let signal_id = ff_core::types::SignalId::parse(&signal_id_str)
+    let signal_id = flowfabric::core::types::SignalId::parse(&signal_id_str)
         .map_err(|e| FabricError::Bridge(format!("bad signal_id in response: {e}")))?;
 
     if effect == "resume_condition_satisfied" {

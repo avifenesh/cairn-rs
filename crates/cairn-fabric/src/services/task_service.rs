@@ -13,7 +13,7 @@ use crate::engine::{
 use crate::error::FabricError;
 use crate::event_bridge::{BridgeEvent, EventBridge};
 use crate::helpers::{parse_public_state, try_parse_project_key};
-use ff_core::types::{ExecutionId, LaneId};
+use flowfabric::core::types::{ExecutionId, LaneId};
 
 use crate::boot::FabricRuntime;
 use crate::id_map;
@@ -106,7 +106,7 @@ impl FabricTaskService {
             .current_attempt
             .as_ref()
             .map(|a| a.index)
-            .unwrap_or_else(|| ff_core::types::AttemptIndex::new(0));
+            .unwrap_or_else(|| flowfabric::core::types::AttemptIndex::new(0));
 
         match (&snapshot.current_lease, snapshot.current_attempt.as_ref()) {
             (Some(l), Some(att)) => ExecutionLeaseContext {
@@ -115,7 +115,9 @@ impl FabricTaskService {
                 lease_id: l.lease_id.to_string(),
                 lease_epoch: l.epoch.0.to_string(),
                 attempt_id: att.id.to_string(),
-                worker_instance_id: ff_core::types::WorkerInstanceId::new(l.owner.as_str()),
+                worker_instance_id: flowfabric::core::types::WorkerInstanceId::new(
+                    l.owner.as_str(),
+                ),
                 source: String::new(),
             },
             // Any other shape (no lease, or lease without attempt) → use
@@ -513,8 +515,8 @@ impl FabricTaskService {
     #[allow(clippy::too_many_arguments)]
     async fn reconcile_existing_dependency_edge(
         &self,
-        flow_id: &ff_core::types::FlowId,
-        edge_id: &ff_core::types::EdgeId,
+        flow_id: &flowfabric::core::types::FlowId,
+        edge_id: &flowfabric::core::types::EdgeId,
         project: &ProjectKey,
         dependent_task_id: &TaskId,
         prerequisite_task_id: &TaskId,
@@ -890,22 +892,22 @@ impl FabricTaskService {
                     })?;
                 crate::suspension::SuspensionParams {
                     reason_code: "waiting_for_signal".into(),
-                    condition_matchers: vec![ff_sdk::task::ConditionMatcher {
+                    condition_matchers: vec![crate::suspension::ConditionMatcher {
                         signal_name: signal_name.to_owned(),
                     }],
                     timeout_ms: reason.resume_after_ms,
-                    timeout_behavior: ff_sdk::task::TimeoutBehavior::Fail,
+                    timeout_behavior: flowfabric::sdk::task::TimeoutBehavior::Fail,
                 }
             }
             PauseReasonKind::PolicyHold => {
                 let detail = reason.detail.as_deref().unwrap_or("policy");
                 crate::suspension::SuspensionParams {
                     reason_code: "paused_by_policy".into(),
-                    condition_matchers: vec![ff_sdk::task::ConditionMatcher {
+                    condition_matchers: vec![crate::suspension::ConditionMatcher {
                         signal_name: format!("policy_resolved:{detail}"),
                     }],
                     timeout_ms: reason.resume_after_ms,
-                    timeout_behavior: ff_sdk::task::TimeoutBehavior::Fail,
+                    timeout_behavior: flowfabric::sdk::task::TimeoutBehavior::Fail,
                 }
             }
         };
@@ -1072,13 +1074,12 @@ fn build_suspend_input(
     params: &crate::suspension::SuspensionParams,
     match_mode: &'static str,
 ) -> SuspendRunInput {
-    let timeout_behavior_str = match params.timeout_behavior {
-        ff_sdk::task::TimeoutBehavior::Fail => "fail",
-        ff_sdk::task::TimeoutBehavior::Cancel => "cancel",
-        ff_sdk::task::TimeoutBehavior::Expire => "expire",
-        ff_sdk::task::TimeoutBehavior::AutoResume => "auto_resume_with_timeout_signal",
-        ff_sdk::task::TimeoutBehavior::Escalate => "escalate",
-    };
+    // FF 0.9 (RFC-013) added `TimeoutBehavior::as_wire_str()`; cairn's
+    // Lua FCALL args consume this wire form directly. This also
+    // handles the `#[non_exhaustive]` enum contract — a new variant
+    // added upstream routes through `as_wire_str` without a cairn
+    // code change.
+    let timeout_behavior_str = params.timeout_behavior.as_wire_str();
 
     let required_names: Vec<&str> = params
         .condition_matchers
@@ -1107,7 +1108,7 @@ fn build_suspend_input(
     let timeout_at = params
         .timeout_ms
         .map(|ms| {
-            let now = ff_core::types::TimestampMs::now().0;
+            let now = flowfabric::core::types::TimestampMs::now().0;
             now.saturating_add(ms as i64).to_string()
         })
         .unwrap_or_default();

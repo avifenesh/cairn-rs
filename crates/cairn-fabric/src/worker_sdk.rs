@@ -1,4 +1,4 @@
-//! Thin worker wrapper over `ff_sdk::FlowFabricWorker`.
+//! Thin worker wrapper over `flowfabric::sdk::FlowFabricWorker`.
 //!
 //! Cairn claims run through the in-process scheduler: callers ask
 //! [`FabricSchedulerService::claim_for_worker`] for a `ClaimGrant`
@@ -19,9 +19,13 @@ use std::sync::Arc;
 use cairn_domain::ids::{RunId, SessionId};
 use cairn_domain::lifecycle::{FailureClass, RunState};
 use cairn_domain::tenancy::ProjectKey;
-use ff_core::contracts::ClaimGrant;
-use ff_sdk::task::{ClaimedTask, FailOutcome, ResumeSignal, SuspendOutcome};
-use ff_sdk::{FlowFabricWorker, WorkerConfig};
+use flowfabric::core::contracts::{
+    ClaimGrant, CompositeBody, CountKind, ResumeCondition, ResumePolicy, SignalMatcher,
+    SuspendOutcome, SuspensionReasonCode,
+};
+use flowfabric::core::types::TimestampMs;
+use flowfabric::sdk::task::{ClaimedTask, FailOutcome, ResumeSignal};
+use flowfabric::sdk::{FlowFabricWorker, WorkerConfig};
 
 use crate::config::FabricConfig;
 use crate::error::FabricError;
@@ -45,11 +49,23 @@ impl CairnWorker {
         // Collecting preserves that order on the wire.
         let capabilities: Vec<String> = config.worker_capabilities.iter().cloned().collect();
 
+        // FF 0.4 reshape: flat `host / port / tls / cluster` collapsed
+        // into nested `backend: BackendConfig`. Build via
+        // `BackendConfig::valkey` then override tls/cluster on the
+        // embedded `ValkeyConnection` (the only parameters cairn
+        // exposes at the config layer).
+        let mut backend = flowfabric::core::backend::BackendConfig::valkey(
+            config.valkey_host.clone(),
+            config.valkey_port,
+        );
+        if let flowfabric::core::backend::BackendConnection::Valkey(ref mut vk) = backend.connection
+        {
+            vk.tls = config.tls;
+            vk.cluster = config.cluster;
+        }
+
         let worker_config = WorkerConfig {
-            host: config.valkey_host.clone(),
-            port: config.valkey_port,
-            tls: config.tls,
-            cluster: config.cluster,
+            backend,
             worker_id: config.worker_id.clone(),
             worker_instance_id: config.worker_instance_id.clone(),
             namespace: config.namespace.clone(),
@@ -75,7 +91,7 @@ impl CairnWorker {
     /// [`FabricSchedulerService::claim_for_worker`]: crate::services::scheduler_service::FabricSchedulerService::claim_for_worker
     pub async fn claim_from_grant(
         &self,
-        lane: ff_core::types::LaneId,
+        lane: flowfabric::core::types::LaneId,
         grant: ClaimGrant,
     ) -> Result<CairnTask, FabricError> {
         let task = self
@@ -372,13 +388,15 @@ impl CairnTask {
         let params = suspension::for_approval(approval_id, timeout_ms);
         let (task, bridge, run_id, project) = self.take_task();
 
-        let outcome = task
-            .suspend(
-                &params.reason_code,
-                &params.condition_matchers,
-                params.timeout_ms,
-                params.timeout_behavior,
-            )
+        // Approval uses two distinct signals: `approval_granted:<id>`
+        // and `approval_rejected:<id>`. Either fires a resume. Build
+        // the composite n=1 `DistinctWaitpoints` condition so either
+        // waitpoint satisfies; this matches cairn's pre-0.9
+        // "resume-on-any" semantics. CG-b follow-up: add per-branch
+        // bridge events so Rejected surfaces as a distinct state
+        // transition — for CG-a both branches still land under
+        // `RunState::WaitingApproval` and the worker polls on resume.
+        let outcome = cg_a_suspend(task, &params)
             .await
             .map_err(|e| FabricError::Bridge(format!("suspend_for_approval: {e}")))?;
 
@@ -406,13 +424,7 @@ impl CairnTask {
         let params = suspension::for_subagent(child_task_id, deadline_ms);
         let (task, bridge, run_id, project) = self.take_task();
 
-        let outcome = task
-            .suspend(
-                &params.reason_code,
-                &params.condition_matchers,
-                params.timeout_ms,
-                params.timeout_behavior,
-            )
+        let outcome = cg_a_suspend(task, &params)
             .await
             .map_err(|e| FabricError::Bridge(format!("suspend_for_subagent: {e}")))?;
 
@@ -442,13 +454,7 @@ impl CairnTask {
         let params = suspension::for_tool_result(invocation_id, timeout_ms);
         let (task, bridge, run_id, project) = self.take_task();
 
-        let outcome = task
-            .suspend(
-                &params.reason_code,
-                &params.condition_matchers,
-                params.timeout_ms,
-                params.timeout_behavior,
-            )
+        let outcome = cg_a_suspend(task, &params)
             .await
             .map_err(|e| FabricError::Bridge(format!("suspend_for_tool_result: {e}")))?;
 
@@ -470,6 +476,104 @@ impl CairnTask {
         }
 
         Ok(outcome)
+    }
+}
+
+/// CG-a transitional suspend helper.
+///
+/// FF 0.9 (RFC-013 Stage 1d) moved `ClaimedTask::suspend` to a typed
+/// shape: `(SuspensionReasonCode, ResumeCondition, Option<(TimestampMs,
+/// TimeoutBehavior)>, ResumePolicy)`. The strict form returns a
+/// `SuspendedHandle`; cairn's public worker API still exposes the older
+/// `SuspendOutcome` shape. Wrap the handle back into
+/// `SuspendOutcome::Suspended { details, handle }` so external callers
+/// observe no behaviour change.
+///
+/// Mapping from `suspension::SuspensionParams.condition_matchers` to a
+/// `ResumeCondition`:
+///   - one matcher     → `ResumeCondition::Single { waitpoint_key, ByName }`
+///   - two-plus matchers → `ResumeCondition::Composite(Count { n: 1,
+///     DistinctWaitpoints, matcher: None, waitpoints: [..] })` so any
+///     single fired signal resumes. Matches cairn's pre-0.9
+///     "resume-on-any-matcher" semantics for approval (granted |
+///     rejected) without needing the full CG-b redesign.
+///   - zero matchers   → `ResumeCondition::OperatorOnly` (no worker
+///     can signal a resume; only an explicit operator resume closes
+///     the waitpoint). Mirrors cairn's pre-0.9 behaviour when callers
+///     forgot to supply matchers.
+///
+/// `ResumePolicy::normal()` matches cairn's pre-0.9 default
+/// (consume matched signals, close waitpoint on resume).
+///
+/// Timeout arithmetic uses `saturating_add` via `.saturating_add` on
+/// `i64` so a very large `timeout_ms` cannot wrap to a negative
+/// past-deadline (would immediately trip FF's timeout path) or panic
+/// in debug. `u64 → i64` conversion saturates to `i64::MAX` via
+/// `.min(i64::MAX as u64) as i64`.
+async fn cg_a_suspend(
+    task: ClaimedTask,
+    params: &suspension::SuspensionParams,
+) -> Result<SuspendOutcome, flowfabric::sdk::SdkError> {
+    let reason_code = parse_reason(&params.reason_code);
+    let resume_condition = build_resume_condition(&params.condition_matchers);
+    let timeout = params.timeout_ms.map(|ms| {
+        // Saturating path: clamp `ms` into i64 range then saturating-
+        // add to now. Both stages are panic- and wrap-free.
+        let ms_i64 = ms.min(i64::MAX as u64) as i64;
+        let deadline = TimestampMs::now().0.saturating_add(ms_i64);
+        (TimestampMs::from_millis(deadline), params.timeout_behavior)
+    });
+    let handle = task
+        .suspend(
+            reason_code,
+            resume_condition,
+            timeout,
+            ResumePolicy::normal(),
+        )
+        .await?;
+    Ok(SuspendOutcome::Suspended {
+        details: handle.details,
+        handle: handle.handle,
+    })
+}
+
+/// Fold a cairn `ConditionMatcher` slice into an FF 0.9
+/// `ResumeCondition`. See `cg_a_suspend` for the semantics rationale.
+fn build_resume_condition(matchers: &[suspension::ConditionMatcher]) -> ResumeCondition {
+    match matchers {
+        [] => ResumeCondition::OperatorOnly,
+        [single] => ResumeCondition::Single {
+            waitpoint_key: single.signal_name.clone(),
+            matcher: SignalMatcher::ByName(single.signal_name.clone()),
+        },
+        many => {
+            // n=1, DistinctWaitpoints → any single fired waitpoint
+            // satisfies. `matcher: None` lets any signal on any listed
+            // waitpoint count (cairn's pre-0.9 behaviour — resume on
+            // any delivery to any member waitpoint).
+            let waitpoints: Vec<String> = many.iter().map(|m| m.signal_name.clone()).collect();
+            ResumeCondition::Composite(CompositeBody::count(
+                1,
+                CountKind::DistinctWaitpoints,
+                None,
+                waitpoints,
+            ))
+        }
+    }
+}
+
+/// Map the cairn `SuspensionParams::reason_code` string form to the
+/// typed upstream enum. CG-a keeps the string form on cairn side for
+/// constants-table stability; CG-b moves the params struct to typed.
+fn parse_reason(s: &str) -> SuspensionReasonCode {
+    match s {
+        "waiting_for_approval" => SuspensionReasonCode::WaitingForApproval,
+        "waiting_for_children" => SuspensionReasonCode::WaitingForSignal,
+        "waiting_for_tool_result" => SuspensionReasonCode::WaitingForToolResult,
+        "operator_hold" => SuspensionReasonCode::WaitingForOperatorReview,
+        // `#[non_exhaustive]` fallback — unknown reasons default to the
+        // generic signal-wait category. CG-b audits the full set.
+        _ => SuspensionReasonCode::WaitingForSignal,
     }
 }
 

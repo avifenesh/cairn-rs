@@ -19,9 +19,9 @@ use cairn_domain::lifecycle::{
 use cairn_domain::policy::ApprovalDecision;
 use cairn_domain::RuntimeEvent;
 use cairn_store::event_log::EventLog;
-use ff_core::keys::ExecKeyContext;
-use ff_core::partition::execution_partition;
-use ff_sdk::task::SignalOutcome;
+use flowfabric::core::keys::ExecKeyContext;
+use flowfabric::core::partition::execution_partition;
+use flowfabric::sdk::task::SignalOutcome;
 
 use crate::TestHarness;
 
@@ -328,7 +328,8 @@ async fn test_signal_delivery_is_idempotent() {
         .cloned()
         .filter(|s| !s.is_empty())
         .expect("current_waitpoint_id must be set after enter_waiting_approval");
-    let wp_id = ff_core::types::WaitpointId::parse(&wp_id_str).expect("waitpoint_id must parse");
+    let wp_id =
+        flowfabric::core::types::WaitpointId::parse(&wp_id_str).expect("waitpoint_id must parse");
     let eid = cairn_fabric::id_map::session_run_to_execution_id(
         &h.project,
         &session_id,

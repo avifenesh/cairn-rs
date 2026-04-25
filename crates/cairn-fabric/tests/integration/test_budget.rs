@@ -1,7 +1,7 @@
 use cairn_domain::RunId;
 
 use cairn_fabric::engine::BudgetSpendOutcome;
-use ff_core::types::{ExecutionId, LaneId};
+use flowfabric::core::types::{ExecutionId, LaneId};
 
 use crate::TestHarness;
 

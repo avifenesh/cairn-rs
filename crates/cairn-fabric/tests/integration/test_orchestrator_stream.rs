@@ -30,7 +30,7 @@ use cairn_orchestrator::{
     DecidePhase, ExecutePhase, GatherPhase, LoopConfig, OrchestrationContext, OrchestratorError,
     OrchestratorLoop, TaskFrameSink,
 };
-use ff_core::contracts::StreamFrame;
+use flowfabric::core::contracts::StreamFrame;
 
 use crate::TestHarness;
 
@@ -207,10 +207,9 @@ async fn orchestrator_loop_emits_four_frames_in_per_iteration_order() {
         h.partition_config(),
     );
     let frames: Vec<StreamFrame> = cairn_fabric::stream::restore_frames(
-        &h.fabric.runtime.client,
-        h.partition_config(),
+        h.fabric.runtime.backend.as_ref(),
         &eid,
-        ff_core::types::AttemptIndex::new(0),
+        flowfabric::core::types::AttemptIndex::new(0),
         100,
     )
     .await
@@ -342,8 +341,10 @@ fn worker_config_from(h: &TestHarness) -> FabricConfig {
         tls: h.fabric.runtime.config.tls,
         cluster: h.fabric.runtime.config.cluster,
         lane_id: h.fabric.runtime.config.lane_id.clone(),
-        worker_id: ff_core::types::WorkerId::new("orchestrator-stream-worker"),
-        worker_instance_id: ff_core::types::WorkerInstanceId::new(uuid::Uuid::new_v4().to_string()),
+        worker_id: flowfabric::core::types::WorkerId::new("orchestrator-stream-worker"),
+        worker_instance_id: flowfabric::core::types::WorkerInstanceId::new(
+            uuid::Uuid::new_v4().to_string(),
+        ),
         namespace: h.fabric.runtime.config.namespace.clone(),
         lease_ttl_ms: h.fabric.runtime.config.lease_ttl_ms,
         grant_ttl_ms: h.fabric.runtime.config.grant_ttl_ms,

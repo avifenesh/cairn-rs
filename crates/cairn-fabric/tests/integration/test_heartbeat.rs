@@ -20,9 +20,9 @@
 
 use cairn_domain::lifecycle::TaskState;
 use cairn_fabric::fcall::{claim::build_renew_lease, names::FF_RENEW_LEASE};
-use ff_core::keys::{ExecKeyContext, IndexKeys};
-use ff_core::partition::execution_partition;
-use ff_core::types::AttemptIndex;
+use flowfabric::core::keys::{ExecKeyContext, IndexKeys};
+use flowfabric::core::partition::execution_partition;
+use flowfabric::core::types::AttemptIndex;
 
 use crate::TestHarness;
 

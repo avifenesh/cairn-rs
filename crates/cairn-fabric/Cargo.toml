@@ -14,34 +14,31 @@ default = []
 test-harness = ["dep:testcontainers", "dep:url"]
 
 [dependencies]
-# FlowFabric crates — consumed from crates.io at 0.3.2 family.
-# RFC-012 Stage 1a: EngineBackend trait + EngineError crate-move from
-# ff-sdk to ff-core. ScannerFilter { namespace, instance_tag } added for
-# cross-instance isolation (FF#122). `ScriptError` is `#[non_exhaustive]`;
-# cairn never matches exhaustively. Edition bumped to 2024 in FF; cairn
-# builds under edition 2021 unaffected. Bumping the minor version across
-# all FF crates requires lockstep updates here — they share internal API
-# surface.
-ff-core = "0.3"
-ff-sdk = "0.3"
-ff-engine = "0.3"
-ff-scheduler = "0.3"
-ff-script = "0.3"
-ff-backend-valkey = "0.3"
+# FlowFabric umbrella crate — CG-a (2026-04-25) collapsed the six
+# `ff-*` direct pins into a single `flowfabric = "0.9"` pin (FF#279).
+# `valkey` is default; `engine` + `scheduler-internals` expose direct
+# access to `ff_engine` / `ff_scheduler` internals that cairn still
+# uses (Engine::start_with_completions, ClaimPolicy/ClaimGrant). The
+# `ff-observability` pin stays direct because the umbrella does not
+# re-export it — `Engine::start_with_completions` takes an
+# `Arc<ff_observability::Metrics>` and cairn wires that type through.
+flowfabric = { version = "0.9", features = ["engine", "scheduler-internals"] }
 # Needed for `Engine::start_with_completions` which takes an
-# `Arc<ff_observability::Metrics>`. ff-engine does NOT re-export the
-# type; pulled in at the same version to stay lock-step with FF's
-# internal minor-version churn.
+# `Arc<ff_observability::Metrics>`. The flowfabric umbrella does not
+# re-export ff-observability.
 #
 # `enabled` turns on the real OTEL → Prometheus exporter. Without
 # this feature `Metrics::render()` returns an empty string (shim),
 # and no FF metrics surface on cairn-app's `/metrics` endpoint. The
 # shim exists for no-observability embedded builds; cairn is never
-# that, so we always want the real backend. See PR #117 follow-up.
-ff-observability = { version = "0.3", features = ["enabled"] }
-# ferriskey 0.3 ships alongside FF 0.3 family. Must share a single
-# version with FF crates to avoid duplicate-crate type mismatches.
-ferriskey = "0.3"
+# that, so we always want the real backend.
+ff-observability = { version = "0.9", features = ["enabled"] }
+# ferriskey 0.9 ships alongside FF 0.9 family. Still a direct pin in
+# CG-a because `lease_history_subscriber.rs` uses `ferriskey::Client`
+# directly for the raw XREAD loop. CG-b adopts
+# `EngineBackend::subscribe_lease_history` (FF#282) and drops this
+# pin entirely — do not rely on `ferriskey` in new CG-a code.
+ferriskey = "0.9"
 
 # Cairn crates
 cairn-domain = { path = "../cairn-domain" }
