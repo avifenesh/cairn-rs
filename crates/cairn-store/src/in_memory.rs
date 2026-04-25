@@ -1252,12 +1252,20 @@ impl InMemoryStore {
             | RuntimeEvent::TaskPriorityChanged(_)
             | RuntimeEvent::ToolInvocationProgressUpdated(_) => {}
             RuntimeEvent::SessionCostUpdated(e) => {
-                // The envelope carries a top-level `tenant_id` field for
-                // backward compatibility, but `project.tenant_id` is the
-                // authoritative source — project/workspace rollups key
-                // off it and must agree with the per-session record.
-                // Using a single source eliminates the divergence risk.
-                let tenant = e.project.tenant_id.clone();
+                // The envelope carries a top-level `tenant_id` AND a
+                // `project.tenant_id` — two redundant fields that can
+                // drift. Some fixtures (see
+                // `crates/cairn-runtime/src/services/budget_impl.rs`'s
+                // budget-blocking test) intentionally leave `project`
+                // as a sentinel triple when only tenant-scoped effects
+                // matter. We bind one `tenant` local from the explicit
+                // field and use it for both the per-session record and
+                // the provider-budget loop so the redundant source
+                // divergence cannot make `session_costs` and
+                // `provider_budgets` disagree with each other. The
+                // project/workspace rollups still key off `e.project.*`
+                // for the workspace_id / project_id sub-keys.
+                let tenant = e.tenant_id.clone();
                 let rec = state
                     .session_costs
                     .entry(e.session_id.as_str().to_owned())
@@ -1292,13 +1300,13 @@ impl InMemoryStore {
                 // rollups so ProjectCostReadModel stays consistent with
                 // SessionCostReadModel without a separate aggregator.
                 let proj_key = (
-                    e.project.tenant_id.as_str().to_owned(),
+                    tenant.as_str().to_owned(),
                     e.project.workspace_id.as_str().to_owned(),
                     e.project.project_id.as_str().to_owned(),
                 );
                 let proj = state.project_costs.entry(proj_key).or_insert_with(|| {
                     cairn_domain::providers::ProjectCostRecord {
-                        tenant_id: e.project.tenant_id.clone(),
+                        tenant_id: tenant.clone(),
                         workspace_id: e.project.workspace_id.as_str().to_owned(),
                         project_id: e.project.project_id.as_str().to_owned(),
                         total_cost_micros: 0,
@@ -1318,12 +1326,12 @@ impl InMemoryStore {
                 proj.updated_at_ms = now;
 
                 let ws_key = (
-                    e.project.tenant_id.as_str().to_owned(),
+                    tenant.as_str().to_owned(),
                     e.project.workspace_id.as_str().to_owned(),
                 );
                 let ws = state.workspace_costs.entry(ws_key).or_insert_with(|| {
                     cairn_domain::providers::WorkspaceCostRecord {
-                        tenant_id: e.project.tenant_id.clone(),
+                        tenant_id: tenant.clone(),
                         workspace_id: e.project.workspace_id.as_str().to_owned(),
                         total_cost_micros: 0,
                         total_tokens_in: 0,
