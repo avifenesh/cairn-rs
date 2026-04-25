@@ -1499,12 +1499,74 @@ fn build_step_summary(
         })
         .unwrap_or_else(|| "no_op".to_owned());
 
-    let summary = decide
+    let description = decide
         .proposals
         .first()
         .map(|p| p.description.clone())
         .unwrap_or_else(|| format!("iteration {} complete", ctx.iteration));
 
+    // F35: threading tool errors back into the next DECIDE turn.
+    //
+    // The orchestrator does not maintain a multi-turn assistant/tool
+    // message history (each DECIDE is a fresh `system`+`user` call with
+    // the step history embedded). So the only channel that carries a
+    // failed tool result's error text into the next LLM turn is the
+    // per-step `summary` string. Pre-F35 this only carried the proposal
+    // `description` ("read the design document"), so even once we stop
+    // terminating on tool errors the LLM would still be blind to *what*
+    // failed — it would just see `ok=false` with no explanation and
+    // repeat the same broken call.
+    //
+    // Fix: for InvokeTool proposals whose status is `Failed`, append the
+    // concrete error text. For successful tool calls, append a short
+    // output preview so the LLM doesn't have to guess what came back.
+    // Both are truncated so a massive payload doesn't dominate the step
+    // history budget on later iterations.
+    // Cursor Bugbot + Copilot review feedback on PR #295: iterate
+    // `execute.results` directly rather than zipping against
+    // `decide.proposals`. `ExecuteOutcome::results` is flattened in
+    // `execute_impl.rs` (`results.into_iter().flatten().collect()`) to
+    // drop None slots for proposals that a terminal short-circuit
+    // prevented from running — for example when Phase 1 sets
+    // `WaitApproval` on an InvokeTool at index N, any non-InvokeTool
+    // proposal at indices < N that had not yet been dispatched by Phase
+    // 2 will be `None` and removed by `flatten()`. Zipping against
+    // `decide.proposals` after that would shift results left and pair
+    // each result with the wrong proposal, silently misattributing tool
+    // error / success text.
+    //
+    // Each `ActionResult` already carries its own `proposal`, so the
+    // correct iteration is over `execute.results` using
+    // `result.proposal` as the source of truth.
+    let mut summary = description;
+    for result in execute.results.iter() {
+        if result.proposal.action_type != cairn_domain::ActionType::InvokeTool {
+            continue;
+        }
+        let tool_name = result.proposal.tool_name.as_deref().unwrap_or("<unknown>");
+        match &result.status {
+            ActionStatus::Failed { reason } => {
+                let preview = truncate_for_summary(reason, 400);
+                summary.push_str(&format!("\n  tool_result[{tool_name}] ERROR: {preview}"));
+            }
+            ActionStatus::Succeeded => {
+                if let Some(output) = result.tool_output.as_ref() {
+                    let rendered = output.to_string();
+                    let preview = truncate_for_summary(&rendered, 400);
+                    summary.push_str(&format!("\n  tool_result[{tool_name}] ok: {preview}"));
+                }
+            }
+            // AwaitingApproval / SubagentSpawned have their own dedicated
+            // step-kinds — no inline note needed.
+            _ => {}
+        }
+    }
+
+    // A step counts as failed only when the loop itself failed — i.e. a
+    // non-InvokeTool terminal error. InvokeTool failures are recoverable
+    // feedback (F35) and must not mark the step as failed, otherwise the
+    // LLM sees `ok=false` and a terminal "run failed" signal in the
+    // prompt even though execution is continuing.
     let succeeded = !matches!(execute.loop_signal, LoopSignal::Failed { .. });
 
     StepSummary {
@@ -1513,6 +1575,61 @@ fn build_step_summary(
         summary,
         succeeded,
     }
+}
+
+/// Truncate a string for inclusion in a step history `summary`. Keeps
+/// head + tail so both the error kind prefix (e.g. `Error [NOT_FOUND]:`)
+/// and the tail (usually the path or detail) survive even when the
+/// middle of a multi-line payload is clipped. 1 char ≈ 0.25 tokens in
+/// the decide-phase estimator.
+fn truncate_for_summary(text: &str, max_chars: usize) -> String {
+    // Review feedback on PR #295 (Gemini + Copilot):
+    //   * Short-circuit path: fast byte-length pre-check so ASCII-only
+    //     strings never touch the char iterator — `text.len()` is bytes
+    //     but `bytes >= chars` for any valid UTF-8, so a `len <= max`
+    //     byte test is a safe "definitely fits" fast path.
+    //   * Truncation path: stream the prefix directly off
+    //     `text.chars()` (bounded-size Vec) instead of collecting the
+    //     whole input, so a 10 MB tool output doesn't materialise a
+    //     10 MB `Vec<char>` just to keep 400 chars. The tail uses a
+    //     bounded ring-buffer (`VecDeque` capacity `tail`) so the
+    //     allocation stays O(max_chars) regardless of input size.
+    if text.len() <= max_chars {
+        return text.to_owned();
+    }
+
+    let head_cap = max_chars / 2;
+    let tail_cap = max_chars.saturating_sub(head_cap);
+
+    let mut prefix = String::with_capacity(head_cap * 4);
+    let mut tail_buf: std::collections::VecDeque<char> =
+        std::collections::VecDeque::with_capacity(tail_cap);
+    let mut total = 0usize;
+
+    for (i, c) in text.chars().enumerate() {
+        total = i + 1;
+        if i < head_cap {
+            prefix.push(c);
+        } else if tail_cap > 0 {
+            if tail_buf.len() == tail_cap {
+                tail_buf.pop_front();
+            }
+            tail_buf.push_back(c);
+        }
+    }
+
+    // Final char-count check: if the input turned out to be short (bytes
+    // > max_chars but chars ≤ max_chars — possible with multi-byte
+    // characters), don't synthesise the truncation marker. Rebuild
+    // verbatim from the streamed buffers.
+    if total <= max_chars {
+        prefix.extend(tail_buf);
+        return prefix;
+    }
+
+    let omitted = total.saturating_sub(head_cap + tail_cap);
+    let suffix: String = tail_buf.into_iter().collect();
+    format!("{prefix}… [{omitted} chars omitted] …{suffix}")
 }
 
 fn now_millis() -> u64 {
@@ -2206,6 +2323,112 @@ mod tests {
         assert_eq!(summary.action_kind, "invoke_tool");
         assert!(summary.succeeded);
         assert!(summary.summary.contains("search"));
+    }
+
+    /// F35 regression on the Cursor Bugbot finding (PR #295). When the
+    /// execute phase produces fewer `results` than `decide.proposals`
+    /// (because a terminal short-circuit left some proposal slots
+    /// `None` and `flatten()` dropped them), the step-summary builder
+    /// must still attribute each recorded result to its own
+    /// `ActionProposal` — it cannot zip positionally against
+    /// `decide.proposals` because the indices no longer line up.
+    ///
+    /// Setup: two proposals, the second an `InvokeTool` that failed
+    /// with a recognisable error. The first proposal has NO
+    /// corresponding `ActionResult` (as if it were a non-InvokeTool
+    /// skipped by a Phase-1 terminal signal). Post-fix, the summary
+    /// must still include the `ERROR:` enrichment for the failing
+    /// tool. Pre-fix (positional zip), the zip would have paired the
+    /// InvokeTool result with the wrong proposal — failing silently.
+    #[tokio::test]
+    async fn build_step_summary_handles_flattened_results_without_misalignment() {
+        let context = ctx();
+
+        // Two proposals — typical of an `[CompleteRun, invoke_tool]`
+        // batch where CompleteRun terminates Phase 2 and the tool
+        // actually ran in Phase 1. The `results` vector has a single
+        // entry because the non-InvokeTool was never dispatched.
+        let cr_proposal = ActionProposal {
+            action_type: ActionType::CompleteRun,
+            description: "skipped".to_owned(),
+            confidence: 0.9,
+            tool_name: None,
+            tool_args: None,
+            requires_approval: false,
+        };
+        let tool_proposal = ActionProposal {
+            action_type: ActionType::InvokeTool,
+            description: "call read".to_owned(),
+            confidence: 0.9,
+            tool_name: Some("read".to_owned()),
+            tool_args: Some(serde_json::json!({"path": "/nope"})),
+            requires_approval: false,
+        };
+        let decide = DecideOutput {
+            raw_response: "[]".to_owned(),
+            proposals: vec![cr_proposal, tool_proposal.clone()],
+            calibrated_confidence: 0.9,
+            requires_approval: false,
+            model_id: "test-model".to_owned(),
+            latency_ms: 10,
+            input_tokens: None,
+            output_tokens: None,
+        };
+
+        // Only the InvokeTool result was recorded; the CompleteRun
+        // proposal was skipped and its `None` slot was dropped by
+        // `flatten()` in execute_impl.
+        let exec = ExecuteOutcome {
+            results: vec![ActionResult {
+                proposal: tool_proposal,
+                status: ActionStatus::Failed {
+                    reason: "Error [NOT_FOUND]: File not found: /nope".to_owned(),
+                },
+                tool_output: None,
+                invocation_id: None,
+                duration_ms: 0,
+            }],
+            loop_signal: LoopSignal::Continue,
+        };
+
+        let summary = build_step_summary(&context, &decide, &exec);
+        assert!(
+            summary.summary.contains("tool_result[read] ERROR:")
+                && summary.summary.contains("NOT_FOUND"),
+            "summary must attribute the NOT_FOUND error to the `read` tool even \
+             when `decide.proposals` has more entries than `execute.results`. \
+             Got:\n{}",
+            summary.summary
+        );
+        // Loop-level succeeded flag still true because LoopSignal is
+        // Continue — InvokeTool errors are recoverable feedback (F35).
+        assert!(summary.succeeded);
+    }
+
+    /// `truncate_for_summary` must stream: a 100k-char input should
+    /// keep only ~head+tail chars internally (bounded deque) rather
+    /// than materialising the whole `Vec<char>`. We cannot assert on
+    /// allocation size directly, but we can pin the contract that the
+    /// *output* is bounded and contains the expected sentinel.
+    #[test]
+    fn truncate_for_summary_bounded_output_on_large_input() {
+        let big = "x".repeat(100_000);
+        let out = super::truncate_for_summary(&big, 400);
+        assert!(out.contains("chars omitted"), "output: {out}");
+        // Bounded to roughly max_chars + the marker string; give a
+        // generous headroom for the marker.
+        assert!(
+            out.len() < 600,
+            "truncated output should stay bounded; got {} chars",
+            out.len()
+        );
+    }
+
+    /// Short inputs must survive verbatim without the truncation marker.
+    #[test]
+    fn truncate_for_summary_preserves_short_input() {
+        let input = "hello world";
+        assert_eq!(super::truncate_for_summary(input, 400), input);
     }
 
     // ── tool_search discovery injection ──────────────────────────────────────
