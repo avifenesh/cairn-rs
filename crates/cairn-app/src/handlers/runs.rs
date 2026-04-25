@@ -892,14 +892,15 @@ pub(crate) async fn get_run_audit_trail_handler(
 ) -> impl IntoResponse {
     let run_id = RunId::new(id.clone());
 
-    // Validate run exists and belongs to tenant
-    match state.runtime.runs.get(&run_id).await {
-        Ok(Some(run)) if run.project.tenant_id == *tenant_scope.tenant_id() => {}
-        Ok(Some(_)) | Ok(None) => {
+    // Validate run exists and belongs to tenant — same projection path
+    // the rest of the run-read handlers use (F31 fix).
+    match load_run_visible_to_tenant(state.as_ref(), &tenant_scope, &run_id).await {
+        Ok(Some(_)) => {}
+        Ok(None) => {
             return AppApiError::new(StatusCode::NOT_FOUND, "not_found", "run not found")
                 .into_response();
         }
-        Err(err) => return runtime_error_response(err),
+        Err(response) => return response,
     }
 
     // Read all events for this run from the event log
@@ -1036,13 +1037,13 @@ pub(crate) async fn replay_run_handler(
     Query(query): Query<RunReplayQuery>,
 ) -> impl IntoResponse {
     let run_id = RunId::new(id);
-    let run = match state.runtime.runs.get(&run_id).await {
-        Ok(Some(run)) if run.project.tenant_id == *tenant_scope.tenant_id() => run,
-        Ok(Some(_)) | Ok(None) => {
+    let run = match load_run_visible_to_tenant(state.as_ref(), &tenant_scope, &run_id).await {
+        Ok(Some(run)) => run,
+        Ok(None) => {
             return AppApiError::new(StatusCode::NOT_FOUND, "not_found", "run not found")
                 .into_response();
         }
-        Err(err) => return runtime_error_response(err),
+        Err(response) => return response,
     };
 
     if let (Some(from), Some(to)) = (query.from_position, query.to_position) {
@@ -1071,17 +1072,13 @@ pub(crate) async fn replay_run_to_checkpoint_handler(
     Query(query): Query<ReplayToCheckpointQuery>,
 ) -> impl IntoResponse {
     let run_id = RunId::new(id);
-    let run = match state.runtime.runs.get(&run_id).await {
-        Ok(Some(run))
-            if tenant_scope.is_admin || run.project.tenant_id == *tenant_scope.tenant_id() =>
-        {
-            run
-        }
-        Ok(Some(_)) | Ok(None) => {
+    let run = match load_run_visible_to_tenant(state.as_ref(), &tenant_scope, &run_id).await {
+        Ok(Some(run)) => run,
+        Ok(None) => {
             return AppApiError::new(StatusCode::NOT_FOUND, "not_found", "run not found")
                 .into_response();
         }
-        Err(err) => return runtime_error_response(err),
+        Err(response) => return response,
     };
 
     let checkpoint_id = CheckpointId::new(query.checkpoint_id);
@@ -1138,13 +1135,13 @@ pub(crate) async fn list_run_interventions_handler(
     Query(query): Query<PaginationQuery>,
 ) -> impl IntoResponse {
     let run_id = RunId::new(id);
-    match state.runtime.runs.get(&run_id).await {
-        Ok(Some(run)) if run.project.tenant_id == *tenant_scope.tenant_id() => {}
-        Ok(Some(_)) | Ok(None) => {
+    match load_run_visible_to_tenant(state.as_ref(), &tenant_scope, &run_id).await {
+        Ok(Some(_)) => {}
+        Ok(None) => {
             return AppApiError::new(StatusCode::NOT_FOUND, "not_found", "run not found")
                 .into_response();
         }
-        Err(err) => return runtime_error_response(err),
+        Err(response) => return response,
     }
 
     match OperatorInterventionReadModel::list_by_run(
@@ -1917,14 +1914,15 @@ pub(crate) async fn list_child_runs_handler(
     Query(query): Query<PaginationQuery>,
 ) -> impl IntoResponse {
     let parent_run_id = RunId::new(id);
-    let parent_run = match state.runtime.runs.get(&parent_run_id).await {
-        Ok(Some(run)) if run.project.tenant_id == *tenant_scope.tenant_id() => run,
-        Ok(Some(_)) | Ok(None) => {
-            return AppApiError::new(StatusCode::NOT_FOUND, "not_found", "run not found")
-                .into_response();
-        }
-        Err(err) => return runtime_error_response(err),
-    };
+    let parent_run =
+        match load_run_visible_to_tenant(state.as_ref(), &tenant_scope, &parent_run_id).await {
+            Ok(Some(run)) => run,
+            Ok(None) => {
+                return AppApiError::new(StatusCode::NOT_FOUND, "not_found", "run not found")
+                    .into_response();
+            }
+            Err(response) => return response,
+        };
 
     match state
         .runtime
@@ -2918,16 +2916,17 @@ async fn submit_all_providers_exhausted_proposal(
 /// don't break. Scheduled for removal in v2.
 pub(crate) async fn recover_run_handler(
     State(state): State<Arc<AppState>>,
+    tenant_scope: TenantScope,
     Path(id): Path<String>,
 ) -> impl IntoResponse {
     let run_id = RunId::new(id);
-    match state.runtime.runs.get(&run_id).await {
+    match load_run_visible_to_tenant(state.as_ref(), &tenant_scope, &run_id).await {
         Ok(Some(_)) => {}
         Ok(None) => {
             return AppApiError::new(StatusCode::NOT_FOUND, "not_found", "run not found")
                 .into_response()
         }
-        Err(err) => return runtime_error_response(err),
+        Err(response) => return response,
     }
 
     (
