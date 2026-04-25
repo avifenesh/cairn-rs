@@ -188,6 +188,39 @@ fn fabric_err_to_runtime(err: FabricError) -> RuntimeError {
         // path's perspective (you're asking to pause a terminal run).
         // Disambiguate on the FCALL name prefix so suspend/resume
         // rejections can't be misclassified as retriable claim contention.
+        // F37: terminal FCALL (`ff_complete_execution` /
+        // `ff_fail_execution`) state conflicts. Ordered BEFORE
+        // `is_claim_contention` because `execution_not_active` appears
+        // in both — fence on the FCALL name prefix to disambiguate.
+        FabricError::Internal(ref msg) if is_terminal_state_conflict(msg) => {
+            let code = msg
+                .rsplit_once(": ")
+                .map(|(_, c)| c.trim().to_owned())
+                .unwrap_or_else(|| "invalid_state".to_owned());
+            // Derive the transition target from the FCALL name so the
+            // 409 body reads correctly for each terminal op: complete
+            // → "completed", fail → "failed", cancel → "cancelled".
+            // Mirrors the suspend/resume handler below which picks
+            // "active" vs "suspended" the same way.
+            let to = if msg.starts_with("ff_fail_execution") {
+                "failed"
+            } else if msg.starts_with("ff_cancel_execution") {
+                "cancelled"
+            } else {
+                "completed"
+            };
+            tracing::debug!(
+                fabric_err = %msg,
+                code = %code,
+                to = %to,
+                "fabric terminal-FCALL state conflict (409 to caller)"
+            );
+            RuntimeError::InvalidTransition {
+                entity: "run",
+                from: code,
+                to: to.to_owned(),
+            }
+        }
         FabricError::Internal(ref msg) if is_suspend_state_conflict(msg) => {
             let code = msg
                 .rsplit_once(": ")
@@ -247,6 +280,54 @@ fn fabric_err_to_runtime(err: FabricError) -> RuntimeError {
 ///
 /// The codes come from `ff-script::flowfabric.lua` — see
 /// `ff_suspend_execution` and `validate_lease_and_mark_expired`.
+/// FF typed error codes emitted by the terminal FCALLs
+/// (`ff_complete_execution`, `ff_fail_execution`, `ff_cancel_execution`)
+/// when the transition is rejected because the execution is not in a
+/// state that can accept it. These are operator-visible state
+/// conflicts, not server faults — map them to
+/// [`RuntimeError::InvalidTransition`] → HTTP 409 so the caller gets a
+/// structured response instead of an opaque 500 "fabric layer error"
+/// leaking FF internals (F37).
+///
+/// Codes come from `ff-script::flowfabric.lua` —
+/// `validate_lease_and_mark_expired` + `resolve_lease_fence`.
+fn is_terminal_state_conflict(msg: &str) -> bool {
+    const STATE_CODES: &[&str] = &[
+        // Already terminal / non-active: the scanner moved the exec
+        // before the orchestrator's terminal FCALL landed.
+        "execution_not_active",
+        // Lease expired while we were computing the terminal write.
+        // validate_lease_and_mark_expired gates on lease_expires_at
+        // before accepting even the operator_override path.
+        "lease_expired",
+        // Lease was revoked by an operator before complete landed.
+        "lease_revoked",
+        // Caller passed a fence but the stored lease moved on.
+        "stale_lease",
+        // Unfenced path rejected because source != "operator_override".
+        // In cairn's current code this is a programming bug (we always
+        // pass operator_override on unfenced) — surface as 409 for
+        // debuggability rather than collapsing to 500.
+        "fence_required",
+        // Partial fence triple is the F37 bug itself. It should be
+        // unreachable post-fix; classifying it here means a regression
+        // reintroducing it surfaces as 409 with a specific code,
+        // instead of disappearing into the generic "fabric layer error"
+        // 500 that hid it for weeks.
+        "partial_fence_triple",
+    ];
+    if !msg.starts_with("ff_complete_execution")
+        && !msg.starts_with("ff_fail_execution")
+        && !msg.starts_with("ff_cancel_execution")
+    {
+        return false;
+    }
+    let Some((_, code)) = msg.rsplit_once(": ") else {
+        return false;
+    };
+    STATE_CODES.contains(&code.trim())
+}
+
 fn is_suspend_state_conflict(msg: &str) -> bool {
     const STATE_CODES: &[&str] = &[
         // No lease / partial fence triple — run has not been claimed
@@ -1278,6 +1359,68 @@ mod tests {
             }
             other => panic!("expected Validation pass-through, got {other:?}"),
         }
+    }
+
+    /// F37: terminal FCALL state conflicts must map to
+    /// `RuntimeError::InvalidTransition` with a target derived from the
+    /// FCALL name — not the opaque 500 "fabric layer error" that hid
+    /// `partial_fence_triple` in production for weeks.
+    #[test]
+    fn terminal_state_conflict_maps_to_invalid_transition_per_fcall() {
+        for (msg, expected_from, expected_to) in [
+            (
+                "ff_complete_execution rejected: partial_fence_triple",
+                "partial_fence_triple",
+                "completed",
+            ),
+            (
+                "ff_complete_execution rejected: lease_expired",
+                "lease_expired",
+                "completed",
+            ),
+            (
+                "ff_complete_execution rejected: execution_not_active",
+                "execution_not_active",
+                "completed",
+            ),
+            (
+                "ff_fail_execution rejected: stale_lease",
+                "stale_lease",
+                "failed",
+            ),
+            (
+                "ff_cancel_execution rejected: lease_revoked",
+                "lease_revoked",
+                "cancelled",
+            ),
+        ] {
+            let err = FabricError::Internal(msg.to_owned());
+            match fabric_err_to_runtime(err) {
+                RuntimeError::InvalidTransition { entity, from, to } => {
+                    assert_eq!(entity, "run", "msg={msg}");
+                    assert_eq!(from, expected_from, "msg={msg}");
+                    assert_eq!(to, expected_to, "msg={msg}");
+                }
+                other => {
+                    panic!("expected InvalidTransition for {msg:?}, got {other:?}")
+                }
+            }
+        }
+    }
+
+    /// Terminal state codes must ONLY classify when prefixed by a
+    /// recognized terminal FCALL. A code that leaked from an unrelated
+    /// call (e.g. a generic "valkey: lease_expired" string) must keep
+    /// falling through to the generic internal-error path.
+    #[test]
+    fn terminal_state_conflict_gates_on_fcall_name_prefix() {
+        assert!(!is_terminal_state_conflict("valkey: lease_expired"));
+        assert!(!is_terminal_state_conflict(
+            "ff_suspend_execution rejected: lease_expired"
+        ));
+        assert!(!is_terminal_state_conflict(
+            "ff_renew_lease rejected: stale_lease"
+        ));
     }
 
     fn test_project() -> ProjectKey {

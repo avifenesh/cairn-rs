@@ -452,4 +452,108 @@ CREATE TABLE IF NOT EXISTS workspace_costs (
     updated_at_ms      INTEGER NOT NULL,
     PRIMARY KEY (tenant_id, workspace_id)
 );
+
+-- ── F39: recovery + decision projections ────────────────────────────────
+-- Each table keys on an event-intrinsic identifier (envelope event_id,
+-- decision_id, boot_id, or warmed_at) so projection replay is
+-- idempotent: appending the same event twice leaves the table at one
+-- row via ON CONFLICT DO NOTHING in the projection applier. Recovery
+-- and decision audits therefore survive restart and are queryable
+-- without rebuilding from the event_log. The `recovered` column is
+-- stored as INTEGER (0/1) because sqlx maps `bool` to INTEGER on
+-- SQLite.
+CREATE TABLE IF NOT EXISTS recovery_attempts (
+    event_id        TEXT PRIMARY KEY,
+    tenant_id       TEXT NOT NULL,
+    workspace_id    TEXT NOT NULL,
+    project_id      TEXT NOT NULL,
+    run_id          TEXT,
+    task_id         TEXT,
+    reason          TEXT NOT NULL,
+    boot_id         TEXT,
+    recorded_at_ms  INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_recovery_attempts_project
+    ON recovery_attempts (tenant_id, workspace_id, project_id, recorded_at_ms);
+CREATE INDEX IF NOT EXISTS idx_recovery_attempts_boot
+    ON recovery_attempts (boot_id)
+    WHERE boot_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_recovery_attempts_run
+    ON recovery_attempts (run_id)
+    WHERE run_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_recovery_attempts_task
+    ON recovery_attempts (task_id)
+    WHERE task_id IS NOT NULL;
+
+CREATE TABLE IF NOT EXISTS recovery_completions (
+    event_id        TEXT PRIMARY KEY,
+    tenant_id       TEXT NOT NULL,
+    workspace_id    TEXT NOT NULL,
+    project_id      TEXT NOT NULL,
+    run_id          TEXT,
+    task_id         TEXT,
+    recovered       INTEGER NOT NULL,
+    boot_id         TEXT,
+    recorded_at_ms  INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_recovery_completions_project
+    ON recovery_completions (tenant_id, workspace_id, project_id, recorded_at_ms);
+CREATE INDEX IF NOT EXISTS idx_recovery_completions_boot
+    ON recovery_completions (boot_id)
+    WHERE boot_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_recovery_completions_run
+    ON recovery_completions (run_id)
+    WHERE run_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_recovery_completions_task
+    ON recovery_completions (task_id)
+    WHERE task_id IS NOT NULL;
+
+CREATE TABLE IF NOT EXISTS recovery_summaries (
+    boot_id                     TEXT PRIMARY KEY,
+    tenant_id                   TEXT NOT NULL,
+    workspace_id                TEXT NOT NULL,
+    project_id                  TEXT NOT NULL,
+    recovered_runs              INTEGER NOT NULL,
+    recovered_tasks             INTEGER NOT NULL,
+    recovered_sandboxes         INTEGER NOT NULL,
+    preserved_sandboxes         INTEGER NOT NULL,
+    orphaned_sandboxes_cleaned  INTEGER NOT NULL,
+    decision_cache_entries      INTEGER NOT NULL,
+    stale_pending_cleared       INTEGER NOT NULL,
+    tool_result_cache_entries   INTEGER NOT NULL,
+    memory_projection_entries   INTEGER NOT NULL,
+    graph_nodes_recovered       INTEGER NOT NULL,
+    graph_edges_recovered       INTEGER NOT NULL,
+    webhook_dedup_entries       INTEGER NOT NULL,
+    trigger_projections         INTEGER NOT NULL,
+    startup_ms                  INTEGER NOT NULL,
+    summary_at_ms               INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_recovery_summaries_tenant
+    ON recovery_summaries (tenant_id, summary_at_ms);
+
+CREATE TABLE IF NOT EXISTS decision_records (
+    decision_id        TEXT PRIMARY KEY,
+    tenant_id          TEXT NOT NULL,
+    workspace_id       TEXT NOT NULL,
+    project_id         TEXT NOT NULL,
+    decision_key_json  TEXT NOT NULL,
+    outcome_kind       TEXT NOT NULL,
+    cached             INTEGER NOT NULL,
+    expires_at         INTEGER NOT NULL,
+    decided_at         INTEGER NOT NULL,
+    event_json         TEXT NOT NULL,
+    recorded_at_ms     INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_decision_records_project
+    ON decision_records (tenant_id, workspace_id, project_id, decided_at);
+CREATE INDEX IF NOT EXISTS idx_decision_records_cached
+    ON decision_records (cached, expires_at)
+    WHERE cached = 1;
+
+CREATE TABLE IF NOT EXISTS decision_cache_warmups (
+    warmed_at            INTEGER PRIMARY KEY,
+    cached               INTEGER NOT NULL,
+    expired_and_dropped  INTEGER NOT NULL
+);
 "#;

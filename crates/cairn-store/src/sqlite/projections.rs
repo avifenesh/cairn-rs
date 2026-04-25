@@ -361,8 +361,58 @@ impl SqliteSyncProjection {
             RuntimeEvent::RunCostUpdated(_) => log_stub("RunCostUpdated"),
             RuntimeEvent::SpendAlertTriggered(_) => log_stub("SpendAlertTriggered"),
             RuntimeEvent::SubagentSpawned(_) => log_stub("SubagentSpawned"),
-            RuntimeEvent::RecoveryAttempted(_) => log_stub("RecoveryAttempted"),
-            RuntimeEvent::RecoveryCompleted(_) => log_stub("RecoveryCompleted"),
+            // F39: durable projections for RFC 002 recovery audits.
+            // Projection row is keyed on the envelope `event_id` and
+            // guarded by `ON CONFLICT(event_id) DO NOTHING`, so a
+            // replayed event leaves the row count unchanged. Nullable
+            // run_id / task_id / boot_id preserve the struct shape
+            // verbatim; the `has_target()` invariant is enforced at
+            // the emitter, not here.
+            RuntimeEvent::RecoveryAttempted(e) => {
+                sqlx::query(
+                    "INSERT INTO recovery_attempts
+                         (event_id, tenant_id, workspace_id, project_id,
+                          run_id, task_id, reason, boot_id, recorded_at_ms)
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     ON CONFLICT(event_id) DO NOTHING",
+                )
+                .bind(event.envelope.event_id.as_str())
+                .bind(e.project.tenant_id.as_str())
+                .bind(e.project.workspace_id.as_str())
+                .bind(e.project.project_id.as_str())
+                .bind(e.run_id.as_ref().map(|r| r.as_str()))
+                .bind(e.task_id.as_ref().map(|t| t.as_str()))
+                .bind(&e.reason)
+                .bind(e.boot_id.as_deref())
+                .bind(now)
+                .execute(&mut **tx)
+                .await
+                .map_err(|err| StoreError::Internal(err.to_string()))?;
+            }
+            RuntimeEvent::RecoveryCompleted(e) => {
+                sqlx::query(
+                    "INSERT INTO recovery_completions
+                         (event_id, tenant_id, workspace_id, project_id,
+                          run_id, task_id, recovered, boot_id, recorded_at_ms)
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     ON CONFLICT(event_id) DO NOTHING",
+                )
+                .bind(event.envelope.event_id.as_str())
+                .bind(e.project.tenant_id.as_str())
+                .bind(e.project.workspace_id.as_str())
+                .bind(e.project.project_id.as_str())
+                .bind(e.run_id.as_ref().map(|r| r.as_str()))
+                .bind(e.task_id.as_ref().map(|t| t.as_str()))
+                // sqlx maps `bool` to SQLite INTEGER (0/1); binding the
+                // field directly keeps parity with the pg handler and
+                // avoids a manual cast.
+                .bind(e.recovered)
+                .bind(e.boot_id.as_deref())
+                .bind(now)
+                .execute(&mut **tx)
+                .await
+                .map_err(|err| StoreError::Internal(err.to_string()))?;
+            }
             RuntimeEvent::SignalIngested(_) => log_stub("SignalIngested"),
             RuntimeEvent::UserMessageAppended(_) => log_stub("UserMessageAppended"),
             RuntimeEvent::IngestJobStarted(_) => log_stub("IngestJobStarted"),
@@ -803,13 +853,129 @@ impl SqliteSyncProjection {
             // RFC 020 Track 3: audit-only events; no projection update needed.
             RuntimeEvent::ToolInvocationCacheHit(_) => log_stub("ToolInvocationCacheHit"),
             RuntimeEvent::ToolRecoveryPaused(_) => log_stub("ToolRecoveryPaused"),
-            // RFC 020 decision-cache survival (PR #85): no projection
-            // table; cairn-app rebuilds the in-memory cache from the
-            // event log on startup.
-            RuntimeEvent::DecisionRecorded(_) => log_stub("DecisionRecorded"),
-            RuntimeEvent::DecisionCacheWarmup(_) => log_stub("DecisionCacheWarmup"),
-            // RFC 020 Track 4: boot-level recovery audit event.
-            RuntimeEvent::RecoverySummaryEmitted(_) => log_stub("RecoverySummaryEmitted"),
+            // F39: RFC 019 / RFC 020 decision-cache projection. The
+            // in-memory cache is still rebuilt from the event log at
+            // boot; these tables give operator tooling a queryable
+            // read model. `decision_id` is the projection PK; replay
+            // (a distinct envelope carrying the same decision_id) is
+            // silently absorbed by `ON CONFLICT(decision_id) DO
+            // NOTHING`. `decision_key` and the full `DecisionEvent`
+            // payload are stored as TEXT (JSON) for pg/sqlite type
+            // portability — no JSONB operators assumed.
+            RuntimeEvent::DecisionRecorded(e) => {
+                let decision_key_json = serde_json::to_string(&e.decision_key)
+                    .map_err(|err| StoreError::Serialization(err.to_string()))?;
+                let outcome_kind = decision_outcome_kind(&e.outcome);
+                let expires_at = i64::try_from(e.expires_at).map_err(|_| {
+                    StoreError::Internal(format!(
+                        "DecisionRecorded.expires_at {} exceeds i64::MAX",
+                        e.expires_at
+                    ))
+                })?;
+                let decided_at = i64::try_from(e.decided_at).map_err(|_| {
+                    StoreError::Internal(format!(
+                        "DecisionRecorded.decided_at {} exceeds i64::MAX",
+                        e.decided_at
+                    ))
+                })?;
+                sqlx::query(
+                    "INSERT INTO decision_records
+                         (decision_id, tenant_id, workspace_id, project_id,
+                          decision_key_json, outcome_kind, cached,
+                          expires_at, decided_at, event_json, recorded_at_ms)
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     ON CONFLICT(decision_id) DO NOTHING",
+                )
+                .bind(e.decision_id.as_str())
+                .bind(e.project.tenant_id.as_str())
+                .bind(e.project.workspace_id.as_str())
+                .bind(e.project.project_id.as_str())
+                .bind(decision_key_json)
+                .bind(outcome_kind)
+                .bind(e.cached)
+                .bind(expires_at)
+                .bind(decided_at)
+                .bind(&e.event_json)
+                .bind(now)
+                .execute(&mut **tx)
+                .await
+                .map_err(|err| StoreError::Internal(err.to_string()))?;
+            }
+            RuntimeEvent::DecisionCacheWarmup(e) => {
+                let warmed_at = i64::try_from(e.warmed_at).map_err(|_| {
+                    StoreError::Internal(format!(
+                        "DecisionCacheWarmup.warmed_at {} exceeds i64::MAX",
+                        e.warmed_at
+                    ))
+                })?;
+                sqlx::query(
+                    "INSERT INTO decision_cache_warmups
+                         (warmed_at, cached, expired_and_dropped)
+                     VALUES (?, ?, ?)
+                     ON CONFLICT(warmed_at) DO NOTHING",
+                )
+                .bind(warmed_at)
+                .bind(i64::from(e.cached))
+                .bind(i64::from(e.expired_and_dropped))
+                .execute(&mut **tx)
+                .await
+                .map_err(|err| StoreError::Internal(err.to_string()))?;
+            }
+            // F39: RFC 020 Track 4 boot-level recovery audit summary.
+            // One row per boot_id; ON CONFLICT DO NOTHING preserves the
+            // first summary if replay re-projects the same event.
+            RuntimeEvent::RecoverySummaryEmitted(e) => {
+                let recorded_at = i64::try_from(e.summary_at_ms).map_err(|_| {
+                    StoreError::Internal(format!(
+                        "RecoverySummaryEmitted.summary_at_ms {} exceeds i64::MAX",
+                        e.summary_at_ms
+                    ))
+                })?;
+                let startup_ms = i64::try_from(e.startup_ms).map_err(|_| {
+                    StoreError::Internal(format!(
+                        "RecoverySummaryEmitted.startup_ms {} exceeds i64::MAX",
+                        e.startup_ms
+                    ))
+                })?;
+                sqlx::query(
+                    "INSERT INTO recovery_summaries
+                         (boot_id, tenant_id, workspace_id, project_id,
+                          recovered_runs, recovered_tasks, recovered_sandboxes,
+                          preserved_sandboxes, orphaned_sandboxes_cleaned,
+                          decision_cache_entries, stale_pending_cleared,
+                          tool_result_cache_entries, memory_projection_entries,
+                          graph_nodes_recovered, graph_edges_recovered,
+                          webhook_dedup_entries, trigger_projections,
+                          startup_ms, summary_at_ms)
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                             ?, ?, ?, ?, ?, ?, ?, ?)
+                     ON CONFLICT(boot_id) DO NOTHING",
+                )
+                .bind(&e.boot_id)
+                .bind(e.sentinel_project.tenant_id.as_str())
+                .bind(e.sentinel_project.workspace_id.as_str())
+                .bind(e.sentinel_project.project_id.as_str())
+                // u32 count fields use infallible `i64::from`; see the
+                // pg handler for the symmetry rationale.
+                .bind(i64::from(e.recovered_runs))
+                .bind(i64::from(e.recovered_tasks))
+                .bind(i64::from(e.recovered_sandboxes))
+                .bind(i64::from(e.preserved_sandboxes))
+                .bind(i64::from(e.orphaned_sandboxes_cleaned))
+                .bind(i64::from(e.decision_cache_entries))
+                .bind(i64::from(e.stale_pending_cleared))
+                .bind(i64::from(e.tool_result_cache_entries))
+                .bind(i64::from(e.memory_projection_entries))
+                .bind(i64::from(e.graph_nodes_recovered))
+                .bind(i64::from(e.graph_edges_recovered))
+                .bind(i64::from(e.webhook_dedup_entries))
+                .bind(i64::from(e.trigger_projections))
+                .bind(startup_ms)
+                .bind(recorded_at)
+                .execute(&mut **tx)
+                .await
+                .map_err(|err| StoreError::Internal(err.to_string()))?;
+            }
 
             // PR BP-1: tool-call approval foundation events — no
             // projection table yet; a later PR in the wave wires these
@@ -1034,6 +1200,16 @@ async fn upsert_cost_rollups_sqlite(
     .map_err(|err| StoreError::Internal(err.to_string()))?;
 
     Ok(())
+}
+
+/// F39: short-form outcome discriminant for `decision_records.outcome_kind`.
+/// Stable strings (`"allowed"` / `"denied"`) let operator SQL filter
+/// by outcome without parsing `decision_key_json`.
+fn decision_outcome_kind(outcome: &cairn_domain::decisions::DecisionOutcome) -> &'static str {
+    match outcome {
+        cairn_domain::decisions::DecisionOutcome::Allowed => "allowed",
+        cairn_domain::decisions::DecisionOutcome::Denied { .. } => "denied",
+    }
 }
 
 fn enum_to_str<T: serde::Serialize>(val: &T) -> Result<String, StoreError> {

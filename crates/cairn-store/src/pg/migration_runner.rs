@@ -140,6 +140,11 @@ const MIGRATIONS: &[(u32, &str, &str)] = &[
         "create_cost_projections",
         include_str!("migrations/V025__create_cost_projections.sql"),
     ),
+    (
+        26,
+        "create_recovery_and_decision_projections",
+        include_str!("migrations/V026__create_recovery_and_decision_projections.sql"),
+    ),
 ];
 
 /// Return the compile-time migration registry as (version, name, sql) triples.
