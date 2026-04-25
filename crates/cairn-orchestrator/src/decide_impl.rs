@@ -266,11 +266,22 @@ impl DecidePhase for LlmDecidePhase {
         // terminates the run (RunService::complete → LoopSignal::Done).
         //
         // The descriptor is NOT added to `tool_descs` — it has no
-        // `ToolHandler` implementation; it's a meta-action. We append it only
-        // to `tool_defs` (the OpenAI schema array the provider sees).
-        let mut tool_defs: Vec<serde_json::Value> =
-            tool_descs.iter().map(descriptor_to_tool_def).collect();
+        // `ToolHandler` implementation; it's a meta-action. We inject it at
+        // index 0 of `tool_defs` (the OpenAI schema array the provider
+        // sees).
+        //
+        // F38 (2026-04-24): `complete_run` sits FIRST, not last. Empirical
+        // evidence from dogfood v5 task-1 (2026-04-25, GLM-4.7) showed the
+        // schema injection from F36 was on the wire but still ignored: the
+        // model called memory_search × 4, graph_query × 1, notify_operator ×
+        // 3, glob × 1, grep × 1, complete_run × 0 across 8 iterations on
+        // "Summarize Minecraft creative mode in three bullets" — a prompt
+        // answerable verbatim from training data. Repositioning is cheap,
+        // reversible, and targets one known provider bias (some decoders
+        // weight earlier tool schemas more heavily during sampling).
+        let mut tool_defs: Vec<serde_json::Value> = Vec::with_capacity(tool_descs.len() + 1);
         tool_defs.push(complete_run_tool_def());
+        tool_defs.extend(tool_descs.iter().map(descriptor_to_tool_def));
 
         // When we pass native tool definitions to the provider (OpenAI-style
         // `tools` array), the model emits structured `tool_calls` on its own.
@@ -280,7 +291,27 @@ impl DecidePhase for LlmDecidePhase {
         // See `build_system_prompt` for the two emitted shapes.
         let native_tools_enabled = !tool_defs.is_empty();
         let system = build_system_prompt(&ctx.agent_type, &tool_descs, native_tools_enabled);
-        let user = build_user_message(ctx, gather, self.token_budget.as_ref());
+        let mut user = build_user_message(ctx, gather, self.token_budget.as_ref());
+
+        // F38 (2026-04-24): when the run has already spent
+        // `STUCK_ITERATION_THRESHOLD` iterations on non-terminal tool calls
+        // without any `complete_run`, append a synthetic final directive to
+        // the user message. Dogfood v5 task-1 showed GLM-4.7 will chain
+        // memory_search / notify_operator / graph_query indefinitely even
+        // after F36 exposed the `complete_run` schema and F30 rewrote the
+        // system prompt. The model's fine-tuning biases it toward
+        // research-style tools once the loop is running. A fresh,
+        // loud, user-turn directive right before the next DECIDE breaks the
+        // momentum — the provider-side "recency" weighting on messages
+        // beats the frozen system prompt by the time iteration 4 runs.
+        //
+        // We gate on the step history (not just iteration count) so that a
+        // healthy multi-step run that DID call `complete_run` won't trip
+        // this nudge on a later side-effect iteration.
+        if should_inject_stuck_nudge(ctx.iteration, &gather.step_history) {
+            user.push_str(stuck_nudge_suffix());
+        }
+
         let messages = vec![
             serde_json::json!({ "role": "system", "content": system }),
             serde_json::json!({ "role": "user",   "content": user   }),
@@ -1025,6 +1056,77 @@ pub(crate) fn complete_run_tool_def() -> serde_json::Value {
             }
         }
     })
+}
+
+// ── F38 stuck-loop nudge ─────────────────────────────────────────────────────
+
+/// Iteration index at which we start injecting the "you are stuck" nudge.
+///
+/// F38: threshold = 3 means iteration 4 onwards (0-indexed `ctx.iteration >=
+/// 3`) will receive the directive suffix when the loop has only seen
+/// non-terminal tool calls. Three is the smallest value that lets a healthy
+/// multi-step run (e.g., search → read → complete) finish on its own
+/// without tripping the nudge, while still catching the dogfood-v5 pattern
+/// (memory_search × 4, graph_query × 1, notify_operator × 3 … with
+/// `complete_run × 0`) early enough to salvage the run.
+pub(crate) const STUCK_ITERATION_THRESHOLD: u32 = 3;
+
+/// Decide whether to append the stuck-loop directive to this iteration's
+/// user message.
+///
+/// Returns true when:
+///   1. `iteration >= STUCK_ITERATION_THRESHOLD` (we've given the model at
+///      least three tries to finish on its own); AND
+///   2. the step history contains NO `complete_run` entry (so we don't
+///      re-prompt after a run that already terminated is replayed in some
+///      exotic edge case); AND
+///   3. the step history has at least one non-complete_run step (otherwise
+///      there is nothing to nudge against — e.g. a run that started at
+///      iteration >= 3 via resume).
+///
+/// Kept as a free function so unit tests can exercise the predicate
+/// without constructing a full `LlmDecidePhase`.
+pub(crate) fn should_inject_stuck_nudge(
+    iteration: u32,
+    step_history: &[crate::context::StepSummary],
+) -> bool {
+    if iteration < STUCK_ITERATION_THRESHOLD {
+        return false;
+    }
+    let mut saw_non_complete_step = false;
+    for step in step_history {
+        // `action_kind` is the serialized `ActionType` ("invoke_tool",
+        // "complete_run", …). The completed case terminates the run so it
+        // would not normally appear here, but guarding against it keeps
+        // the predicate total.
+        if step.action_kind == "complete_run" {
+            return false;
+        }
+        saw_non_complete_step = true;
+    }
+    saw_non_complete_step
+}
+
+/// The directive suffix appended to the user message when
+/// `should_inject_stuck_nudge` fires.
+///
+/// Wording is intentionally blunt: the prior softer variants (F30 system
+/// prompt + F36 tool description) did not break GLM-4.7 out of its
+/// introspection loop. An all-caps final-turn user directive maximizes
+/// recency weighting at sampling time and removes the ambiguity about
+/// whether the model is "allowed" to answer from training data.
+pub(crate) fn stuck_nudge_suffix() -> &'static str {
+    "\n\n\
+     ## STOP — FINAL DIRECTIVE\n\
+     You have already spent several iterations calling tools without \
+     producing a user-facing answer. The user is waiting for a response. \
+     On THIS turn you MUST call the `complete_run` tool with the full \
+     answer in `final_answer`. Do NOT call any other tool. If you cannot \
+     produce a confident answer from training data or the context above, \
+     call `complete_run` anyway and explain in `final_answer` what \
+     information is missing and what you would do next. Any tool call \
+     other than `complete_run` on this turn will be treated as a \
+     violation of the run contract."
 }
 
 /// Convert native tool_calls from the provider response into `ActionProposal` values.
@@ -2388,9 +2490,12 @@ mod tests {
                 _settings: &ProviderBindingSettings,
                 tools: &[serde_json::Value],
             ) -> Result<GenerationResponse, ProviderAdapterError> {
-                // Verify tools were sent
+                // Verify tools were sent. F38 injects `complete_run` at
+                // index 0, so `grep` (the only registered tool here) sits
+                // at index 1.
                 assert!(!tools.is_empty(), "tools should be passed to generate");
-                assert_eq!(tools[0]["function"]["name"], "grep");
+                assert_eq!(tools[0]["function"]["name"], "complete_run");
+                assert_eq!(tools[1]["function"]["name"], "grep");
 
                 Ok(GenerationResponse {
                     text: String::new(), // no text — only tool_calls
