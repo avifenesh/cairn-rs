@@ -1,4 +1,4 @@
-use ff_sdk::task::{ConditionMatcher, TimeoutBehavior};
+use flowfabric::sdk::task::{ConditionMatcher, TimeoutBehavior};
 
 use crate::helpers::sanitize_signal_component;
 

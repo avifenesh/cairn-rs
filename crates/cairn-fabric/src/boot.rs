@@ -1,12 +1,12 @@
 use std::sync::Arc;
 
 use ferriskey::Client;
-use ff_backend_valkey::ValkeyBackend;
-use ff_core::backend::{ScannerFilter, ValkeyConnection};
-use ff_core::completion_backend::CompletionBackend;
-use ff_core::keys::IndexKeys;
-use ff_core::partition::{Partition, PartitionConfig, PartitionFamily};
-use ff_engine::{Engine, EngineConfig};
+use flowfabric::valkey::ValkeyBackend;
+use flowfabric::core::backend::{ScannerFilter, ValkeyConnection};
+use flowfabric::core::completion_backend::CompletionBackend;
+use flowfabric::core::keys::IndexKeys;
+use flowfabric::core::partition::{Partition, PartitionConfig, PartitionFamily};
+use flowfabric::engine::{Engine, EngineConfig};
 
 use crate::config::FabricConfig;
 use crate::error::FabricError;
@@ -77,7 +77,7 @@ impl FabricRuntime {
 
         let mut lib_loaded = false;
         for attempt in 0..CONNECT_MAX_ATTEMPTS {
-            match ff_script::loader::ensure_library(&client).await {
+            match flowfabric::script::loader::ensure_library(&client).await {
                 Ok(()) => {
                     lib_loaded = true;
                     break;

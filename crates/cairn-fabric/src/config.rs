@@ -1,7 +1,7 @@
 use std::collections::BTreeSet;
 
 use crate::error::FabricError;
-use ff_core::types::{LaneId, Namespace, WorkerId, WorkerInstanceId};
+use flowfabric::core::types::{LaneId, Namespace, WorkerId, WorkerInstanceId};
 
 #[derive(Clone, Debug)]
 pub struct FabricConfig {
@@ -19,7 +19,7 @@ pub struct FabricConfig {
     pub signal_dedup_ttl_ms: u64,
     pub fcall_timeout_ms: u64,
     /// Capabilities this worker advertises. Threaded into FF's
-    /// `ff_issue_claim_grant` via `ff_scheduler::Scheduler::claim_for_worker`;
+    /// `ff_issue_claim_grant` via `flowfabric::scheduler::Scheduler::claim_for_worker`;
     /// FF skips executions whose `required_capabilities` are not a subset.
     /// BTreeSet guarantees the CSV FF builds is deterministically ordered.
     /// Empty set = "no capabilities advertised" (FF accepts, matches only
@@ -106,7 +106,7 @@ impl FabricConfig {
         // Comma-separated capability tokens. Empty / unset = no capabilities.
         // FF validates tokens server-side (no commas, no whitespace/control,
         // CAPS_MAX_TOKENS cap); fail-loud validation lives in
-        // ff_scheduler::Scheduler::claim_for_worker.
+        // flowfabric::scheduler::Scheduler::claim_for_worker.
         let worker_capabilities: BTreeSet<String> =
             std::env::var("CAIRN_FABRIC_WORKER_CAPABILITIES")
                 .ok()

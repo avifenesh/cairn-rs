@@ -40,12 +40,12 @@ use cairn_fabric::test_harness::valkey_endpoint;
 use cairn_fabric::{id_map, FabricConfig, FabricServices};
 use cairn_store::projections::FfLeaseHistoryCursorStore;
 use cairn_store::InMemoryStore;
-use ff_backend_valkey::{ValkeyBackend, COMPLETION_CHANNEL};
-use ff_core::backend::{ScannerFilter, ValkeyConnection};
-use ff_core::completion_backend::CompletionBackend;
-use ff_core::keys::ExecKeyContext;
-use ff_core::partition::{execution_partition, PartitionConfig};
-use ff_core::types::FlowId;
+use flowfabric::valkey::{ValkeyBackend, COMPLETION_CHANNEL};
+use flowfabric::core::backend::{ScannerFilter, ValkeyConnection};
+use flowfabric::core::completion_backend::CompletionBackend;
+use flowfabric::core::keys::ExecKeyContext;
+use flowfabric::core::partition::{execution_partition, PartitionConfig};
+use flowfabric::core::types::FlowId;
 use futures::StreamExt;
 use std::sync::Arc;
 
@@ -98,7 +98,7 @@ async fn publish(client: &ferriskey::Client, eid: &str, flow_id: &str) {
 /// execution-id strings seen. Used to assert each filtered stream
 /// only sees its own instance's frames.
 async fn drain(
-    stream: &mut ff_core::completion_backend::CompletionStream,
+    stream: &mut flowfabric::core::completion_backend::CompletionStream,
     timeout: Duration,
 ) -> Vec<String> {
     let mut seen = Vec::new();
@@ -224,7 +224,7 @@ async fn engine_config_scanner_filter_is_wired() {
     let project = ProjectKey::new(tenant.as_str(), workspace.as_str(), project_id.as_str());
     let lane_id = id_map::project_to_lane(&project);
     let worker_instance_id =
-        ff_core::types::WorkerInstanceId::new(format!("inst-upstream-{suffix}"));
+        flowfabric::core::types::WorkerInstanceId::new(format!("inst-upstream-{suffix}"));
 
     let config = FabricConfig {
         valkey_host: host,
@@ -232,9 +232,9 @@ async fn engine_config_scanner_filter_is_wired() {
         tls: false,
         cluster: false,
         lane_id,
-        worker_id: ff_core::types::WorkerId::new(format!("w-upstream-{suffix}")),
+        worker_id: flowfabric::core::types::WorkerId::new(format!("w-upstream-{suffix}")),
         worker_instance_id: worker_instance_id.clone(),
-        namespace: ff_core::types::Namespace::new(format!("ns-upstream-{suffix}")),
+        namespace: flowfabric::core::types::Namespace::new(format!("ns-upstream-{suffix}")),
         lease_ttl_ms: 30_000,
         grant_ttl_ms: 5_000,
         max_concurrent_tasks: 4,

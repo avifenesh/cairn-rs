@@ -1,7 +1,7 @@
-use ff_core::contracts::StreamFrame;
-use ff_core::partition::PartitionConfig;
-use ff_core::types::{AttemptIndex, ExecutionId};
-use ff_sdk::task::{read_stream, AppendFrameOutcome, ClaimedTask, StreamCursor};
+use flowfabric::core::contracts::StreamFrame;
+use flowfabric::core::partition::PartitionConfig;
+use flowfabric::core::types::{AttemptIndex, ExecutionId};
+use flowfabric::sdk::task::{read_stream, AppendFrameOutcome, ClaimedTask, StreamCursor};
 
 use crate::error::FabricError;
 use crate::helpers::now_ms;
@@ -13,7 +13,7 @@ pub const FRAME_CHECKPOINT: &str = "checkpoint";
 
 /// Restore an attempt's frame log from FF.
 ///
-/// Thin pass-through to `ff_sdk::read_stream` (backed by
+/// Thin pass-through to `flowfabric::sdk::read_stream` (backed by
 /// `ff_read_attempt_stream`). Returns the full frame sequence in XRANGE order.
 ///
 /// Cairn does NOT cache frames — FF's Valkey stream is the sole source of
@@ -29,7 +29,7 @@ pub const FRAME_CHECKPOINT: &str = "checkpoint";
 /// # Head-of-line warning
 ///
 /// The client passed here should not also be the one the caller uses for
-/// FCALLs if the read is large — see the `ff_sdk::read_stream` doc for the
+/// FCALLs if the read is large — see the `flowfabric::sdk::read_stream` doc for the
 /// tail_client split the REST server uses. In cairn-fabric today we use a
 /// single shared client; restore paths are expected to be operator-triggered
 /// (recovery, replay) and infrequent enough that the head-of-line cost is
@@ -216,7 +216,7 @@ mod tests {
         // Pin that we re-export FF's ceiling — if FF bumps the cap, we pick it
         // up automatically and callers size reads against the current ff-core
         // constant. No cairn-side duplication.
-        const { assert!(ff_sdk::task::STREAM_READ_HARD_CAP >= 1) };
+        const { assert!(flowfabric::sdk::task::STREAM_READ_HARD_CAP >= 1) };
     }
 
     #[test]

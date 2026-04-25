@@ -1,5 +1,5 @@
-use ff_core::keys::{ExecKeyContext, IndexKeys};
-use ff_core::types::{
+use flowfabric::core::keys::{ExecKeyContext, IndexKeys};
+use flowfabric::core::types::{
     AttemptIndex, ExecutionId, LaneId, SignalId, SuspensionId, TimestampMs, WaitpointId,
     WorkerInstanceId,
 };
@@ -178,8 +178,8 @@ pub const DELIVER_SIGNAL_ARGS: usize = 18;
 mod tests {
     use super::*;
     use crate::test_support::test_eid;
-    use ff_core::partition::{execution_partition, PartitionConfig};
-    use ff_core::types::LaneId;
+    use flowfabric::core::partition::{execution_partition, PartitionConfig};
+    use flowfabric::core::types::LaneId;
 
     fn test_ctx() -> (ExecKeyContext, IndexKeys, ExecutionId) {
         let eid = test_eid("suspension");

@@ -1,4 +1,4 @@
-use ff_script::ScriptError;
+use flowfabric::script::ScriptError;
 
 #[derive(Debug, thiserror::Error)]
 pub enum FabricError {

@@ -24,8 +24,8 @@
 
 use cairn_domain::tenancy::ProjectKey;
 use cairn_domain::{RunId, SessionId, TaskId, TenantId};
-use ff_core::partition::PartitionConfig;
-use ff_core::types::{EdgeId, ExecutionId, FlowId, LaneId, Namespace};
+use flowfabric::core::partition::PartitionConfig;
+use flowfabric::core::types::{EdgeId, ExecutionId, FlowId, LaneId, Namespace};
 use uuid::Uuid;
 
 // Stable namespace UUID for all cairn→FF ID mappings (UUID v5).
@@ -664,7 +664,7 @@ mod tests {
     /// partition with every other execution of the same flow.
     #[test]
     fn same_session_runs_and_tasks_same_partition() {
-        use ff_core::partition::execution_partition;
+        use flowfabric::core::partition::execution_partition;
         let p = test_project();
         let cfg = PartitionConfig::default();
         let sid = SessionId::new("sess_colocate");

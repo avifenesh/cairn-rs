@@ -43,9 +43,9 @@ use std::time::Duration;
 use cairn_domain::{FailureClass, ProjectKey, RunId, TaskId, TaskState};
 use cairn_store::projections::{FfLeaseHistoryCursor, FfLeaseHistoryCursorStore};
 use ferriskey::{Client, Value};
-use ff_core::keys::{ExecKeyContext, IndexKeys};
-use ff_core::partition::{Partition, PartitionFamily};
-use ff_core::types::ExecutionId;
+use flowfabric::core::keys::{ExecKeyContext, IndexKeys};
+use flowfabric::core::partition::{Partition, PartitionFamily};
+use flowfabric::core::types::ExecutionId;
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 

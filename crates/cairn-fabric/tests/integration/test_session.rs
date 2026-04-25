@@ -14,8 +14,8 @@ use std::collections::HashMap;
 
 use cairn_domain::lifecycle::SessionState;
 use cairn_domain::SessionId;
-use ff_core::keys::FlowKeyContext;
-use ff_core::partition::flow_partition;
+use flowfabric::core::keys::FlowKeyContext;
+use flowfabric::core::partition::flow_partition;
 
 use crate::TestHarness;
 

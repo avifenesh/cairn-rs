@@ -10,7 +10,7 @@
 //! See `docs/design/bridge-event-audit.md` §2.5.
 use std::sync::Arc;
 
-use ff_core::types::{WorkerId, WorkerInstanceId};
+use flowfabric::core::types::{WorkerId, WorkerInstanceId};
 
 use crate::engine::control_plane_types::WorkerRegistration as EngineWorkerRegistration;
 use crate::engine::Engine;
@@ -58,7 +58,7 @@ impl FabricWorkerService {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ff_core::types::{WorkerId, WorkerInstanceId};
+    use flowfabric::core::types::{WorkerId, WorkerInstanceId};
 
     #[test]
     fn worker_registration_fields() {

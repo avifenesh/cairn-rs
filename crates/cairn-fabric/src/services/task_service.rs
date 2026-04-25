@@ -13,7 +13,7 @@ use crate::engine::{
 use crate::error::FabricError;
 use crate::event_bridge::{BridgeEvent, EventBridge};
 use crate::helpers::{parse_public_state, try_parse_project_key};
-use ff_core::types::{ExecutionId, LaneId};
+use flowfabric::core::types::{ExecutionId, LaneId};
 
 use crate::boot::FabricRuntime;
 use crate::id_map;
@@ -101,7 +101,7 @@ impl FabricTaskService {
             .current_attempt
             .as_ref()
             .map(|a| a.index)
-            .unwrap_or_else(|| ff_core::types::AttemptIndex::new(0));
+            .unwrap_or_else(|| flowfabric::core::types::AttemptIndex::new(0));
         let attempt_id = snapshot
             .current_attempt
             .as_ref()
@@ -111,7 +111,7 @@ impl FabricTaskService {
             Some(l) => (
                 l.lease_id.to_string(),
                 l.epoch.0.to_string(),
-                ff_core::types::WorkerInstanceId::new(l.owner.as_str()),
+                flowfabric::core::types::WorkerInstanceId::new(l.owner.as_str()),
             ),
             None => (
                 String::new(),
@@ -123,7 +123,7 @@ impl FabricTaskService {
                 // placeholder is the literal "cairn" default, not the
                 // runtime's own instance id. Matches the documented
                 // "fills cairn defaults" contract on this method.
-                ff_core::types::WorkerInstanceId::new("cairn"),
+                flowfabric::core::types::WorkerInstanceId::new("cairn"),
             ),
         };
         ExecutionLeaseContext {
@@ -524,8 +524,8 @@ impl FabricTaskService {
     #[allow(clippy::too_many_arguments)]
     async fn reconcile_existing_dependency_edge(
         &self,
-        flow_id: &ff_core::types::FlowId,
-        edge_id: &ff_core::types::EdgeId,
+        flow_id: &flowfabric::core::types::FlowId,
+        edge_id: &flowfabric::core::types::EdgeId,
         project: &ProjectKey,
         dependent_task_id: &TaskId,
         prerequisite_task_id: &TaskId,
@@ -901,22 +901,22 @@ impl FabricTaskService {
                     })?;
                 crate::suspension::SuspensionParams {
                     reason_code: "waiting_for_signal".into(),
-                    condition_matchers: vec![ff_sdk::task::ConditionMatcher {
+                    condition_matchers: vec![flowfabric::sdk::task::ConditionMatcher {
                         signal_name: signal_name.to_owned(),
                     }],
                     timeout_ms: reason.resume_after_ms,
-                    timeout_behavior: ff_sdk::task::TimeoutBehavior::Fail,
+                    timeout_behavior: flowfabric::sdk::task::TimeoutBehavior::Fail,
                 }
             }
             PauseReasonKind::PolicyHold => {
                 let detail = reason.detail.as_deref().unwrap_or("policy");
                 crate::suspension::SuspensionParams {
                     reason_code: "paused_by_policy".into(),
-                    condition_matchers: vec![ff_sdk::task::ConditionMatcher {
+                    condition_matchers: vec![flowfabric::sdk::task::ConditionMatcher {
                         signal_name: format!("policy_resolved:{detail}"),
                     }],
                     timeout_ms: reason.resume_after_ms,
-                    timeout_behavior: ff_sdk::task::TimeoutBehavior::Fail,
+                    timeout_behavior: flowfabric::sdk::task::TimeoutBehavior::Fail,
                 }
             }
         };
@@ -1084,11 +1084,11 @@ fn build_suspend_input(
     match_mode: &'static str,
 ) -> SuspendRunInput {
     let timeout_behavior_str = match params.timeout_behavior {
-        ff_sdk::task::TimeoutBehavior::Fail => "fail",
-        ff_sdk::task::TimeoutBehavior::Cancel => "cancel",
-        ff_sdk::task::TimeoutBehavior::Expire => "expire",
-        ff_sdk::task::TimeoutBehavior::AutoResume => "auto_resume_with_timeout_signal",
-        ff_sdk::task::TimeoutBehavior::Escalate => "escalate",
+        flowfabric::sdk::task::TimeoutBehavior::Fail => "fail",
+        flowfabric::sdk::task::TimeoutBehavior::Cancel => "cancel",
+        flowfabric::sdk::task::TimeoutBehavior::Expire => "expire",
+        flowfabric::sdk::task::TimeoutBehavior::AutoResume => "auto_resume_with_timeout_signal",
+        flowfabric::sdk::task::TimeoutBehavior::Escalate => "escalate",
     };
 
     let required_names: Vec<&str> = params
@@ -1118,7 +1118,7 @@ fn build_suspend_input(
     let timeout_at = params
         .timeout_ms
         .map(|ms| {
-            let now = ff_core::types::TimestampMs::now().0;
+            let now = flowfabric::core::types::TimestampMs::now().0;
             now.saturating_add(ms as i64).to_string()
         })
         .unwrap_or_default();

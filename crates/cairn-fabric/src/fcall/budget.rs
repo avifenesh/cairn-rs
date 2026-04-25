@@ -1,5 +1,5 @@
-use ff_core::keys::BudgetKeyContext;
-use ff_core::types::{BudgetId, TimestampMs};
+use flowfabric::core::keys::BudgetKeyContext;
+use flowfabric::core::types::{BudgetId, TimestampMs};
 
 #[allow(clippy::too_many_arguments)]
 pub fn build_create_budget(
@@ -57,7 +57,7 @@ pub fn build_create_budget(
 /// `dedup_key` is REQUIRED. FF reads `ARGV[2 * dim_count + 3]`; if the slot is
 /// empty or missing, server-side dedup is silently disabled and a double-submit
 /// will double-decrement the budget. Callers must pass a caller-prefixed key
-/// via `ff_core::keys::usage_dedup_key(budget_ctx.hash_tag(), &idempotency_uuid)`
+/// via `flowfabric::core::keys::usage_dedup_key(budget_ctx.hash_tag(), &idempotency_uuid)`
 /// so FF's SET lands on the same slot as the budget itself. Pass `""` only
 /// when you explicitly want to disable dedup (integration tests, one-off admin
 /// spends) — never for production run-service spend paths.
@@ -93,8 +93,8 @@ pub const REPORT_USAGE_FIXED_ARGS: usize = 3;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ff_core::keys::usage_dedup_key;
-    use ff_core::partition::{budget_partition, PartitionConfig};
+    use flowfabric::core::keys::usage_dedup_key;
+    use flowfabric::core::partition::{budget_partition, PartitionConfig};
 
     #[test]
     fn create_budget_counts() {

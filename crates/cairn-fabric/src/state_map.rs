@@ -1,5 +1,5 @@
 use cairn_domain::lifecycle::{FailureClass, RunState, TaskState};
-use ff_core::state::PublicState;
+use flowfabric::core::state::PublicState;
 
 use crate::constants::BLOCKING_WAITING_FOR_APPROVAL;
 

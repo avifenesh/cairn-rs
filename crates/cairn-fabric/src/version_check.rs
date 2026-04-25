@@ -26,7 +26,7 @@
 //!   node.
 //! - Retryable ferriskey transport errors — connection refused,
 //!   `BusyLoadingError`, `ClusterDown`, etc., classified via
-//!   `ff_script::retry::is_retryable_kind`.
+//!   `flowfabric::script::retry::is_retryable_kind`.
 //! - Missing/unparsable version field — treated as transient (fresh-boot
 //!   server may not have the INFO fields populated yet).
 //!
@@ -167,7 +167,7 @@ async fn query_valkey_version(client: &Client) -> Result<u32, VersionCheckError>
         .execute()
         .await
         .map_err(|e| VersionCheckError::Transport {
-            retryable: ff_script::retry::is_retryable_kind(e.kind()),
+            retryable: flowfabric::script::retry::is_retryable_kind(e.kind()),
             error: format!("INFO server: {e}"),
         })?;
     let bodies = collect_info_bodies(&raw).map_err(VersionCheckError::Parse)?;

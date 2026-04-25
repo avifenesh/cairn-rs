@@ -1,5 +1,5 @@
-use ff_core::keys::QuotaKeyContext;
-use ff_core::types::{ExecutionId, QuotaPolicyId, TimestampMs};
+use flowfabric::core::keys::QuotaKeyContext;
+use flowfabric::core::types::{ExecutionId, QuotaPolicyId, TimestampMs};
 
 pub fn build_create_quota_policy(
     ctx: &QuotaKeyContext,
@@ -64,7 +64,7 @@ pub const CHECK_ADMISSION_ARGS: usize = 6;
 mod tests {
     use super::*;
     use crate::test_support::test_eid;
-    use ff_core::partition::{quota_partition, PartitionConfig};
+    use flowfabric::core::partition::{quota_partition, PartitionConfig};
 
     #[test]
     fn create_quota_policy_counts() {

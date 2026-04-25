@@ -59,7 +59,7 @@ pub mod valkey_impl;
 use std::collections::BTreeMap;
 
 use async_trait::async_trait;
-use ff_core::types::{EdgeId, ExecutionId, FlowId, WorkerId, WorkerInstanceId};
+use flowfabric::core::types::{EdgeId, ExecutionId, FlowId, WorkerId, WorkerInstanceId};
 
 use crate::error::FabricError;
 

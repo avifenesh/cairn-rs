@@ -40,7 +40,7 @@
 //!
 //! [`control_plane_types`]: super::control_plane_types
 use async_trait::async_trait;
-use ff_core::types::{BudgetId, ExecutionId, QuotaPolicyId};
+use flowfabric::core::types::{BudgetId, ExecutionId, QuotaPolicyId};
 
 use crate::error::FabricError;
 

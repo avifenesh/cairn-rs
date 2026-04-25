@@ -28,7 +28,7 @@ use axum::{
     response::IntoResponse,
     Json,
 };
-use ff_core::partition::execution_partition;
+use flowfabric::core::partition::execution_partition;
 
 use cairn_domain::{ProjectKey, RunId, TaskId};
 use cairn_fabric::id_map;

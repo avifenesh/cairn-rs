@@ -19,7 +19,7 @@
 //! The function returns the previous kid (or empty) and a GC count for
 //! expired kids removed during the same call.
 
-use ff_core::keys::IndexKeys;
+use flowfabric::core::keys::IndexKeys;
 
 /// Number of KEYS expected by `ff_rotate_waitpoint_hmac_secret`. Matches
 /// the Lua contract (KEYS(1): `hmac_secrets`).
@@ -50,7 +50,7 @@ pub fn build_rotate_waitpoint_hmac_secret(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ff_core::partition::{Partition, PartitionFamily};
+    use flowfabric::core::partition::{Partition, PartitionFamily};
 
     fn test_idx() -> IndexKeys {
         let partition = Partition {

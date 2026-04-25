@@ -12,11 +12,11 @@
 
 use cairn_fabric::id_map;
 use cairn_fabric::stream::{restore_frames, FRAME_CHECKPOINT, FRAME_TOOL_CALL, FRAME_TOOL_RESULT};
-use ff_core::contracts::{AppendFrameArgs, AppendFrameResult, STREAM_READ_HARD_CAP};
-use ff_core::keys::ExecKeyContext;
-use ff_core::partition::execution_partition;
-use ff_core::types::{AttemptId, AttemptIndex, ExecutionId, LeaseEpoch, LeaseId, TimestampMs};
-use ff_script::functions::stream::{ff_append_frame, StreamOpKeys};
+use flowfabric::core::contracts::{AppendFrameArgs, AppendFrameResult, STREAM_READ_HARD_CAP};
+use flowfabric::core::keys::ExecKeyContext;
+use flowfabric::core::partition::execution_partition;
+use flowfabric::core::types::{AttemptId, AttemptIndex, ExecutionId, LeaseEpoch, LeaseId, TimestampMs};
+use flowfabric::script::functions::stream::{ff_append_frame, StreamOpKeys};
 
 use crate::TestHarness;
 

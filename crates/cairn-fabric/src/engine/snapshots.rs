@@ -24,7 +24,7 @@
 
 use std::collections::BTreeMap;
 
-use ff_core::types::{
+use flowfabric::core::types::{
     AttemptId, AttemptIndex, EdgeId, ExecutionId, FlowId, LaneId, LeaseEpoch, LeaseId, Namespace,
     TimestampMs, WaitpointId,
 };

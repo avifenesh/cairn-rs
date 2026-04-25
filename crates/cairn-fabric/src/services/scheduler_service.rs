@@ -3,7 +3,7 @@
 //! # Phase D PR 2a exception
 //!
 //! Unlike `run_service`, `session_service`, `task_service`, and
-//! `claim_common`, this service still imports `ff_scheduler::claim::
+//! `claim_common`, this service still imports `flowfabric::scheduler::claim::
 //! {Scheduler, ClaimGrant}` directly. That's intentional.
 //!
 //! `ClaimGrant` is a wire-contract type shared with ff-sdk workers:
@@ -25,9 +25,9 @@
 use std::collections::BTreeSet;
 use std::sync::Arc;
 
-use ff_core::partition::PartitionConfig;
-use ff_core::types::{LaneId, WorkerId, WorkerInstanceId};
-use ff_scheduler::claim::{ClaimGrant, Scheduler};
+use flowfabric::core::partition::PartitionConfig;
+use flowfabric::core::types::{LaneId, WorkerId, WorkerInstanceId};
+use flowfabric::scheduler::claim::{ClaimGrant, Scheduler};
 
 use crate::boot::FabricRuntime;
 use crate::error::FabricError;
@@ -210,10 +210,10 @@ mod tests {
             valkey_port: 6379,
             tls: false,
             cluster: false,
-            lane_id: ff_core::types::LaneId::new("test"),
-            worker_id: ff_core::types::WorkerId::new("w"),
-            worker_instance_id: ff_core::types::WorkerInstanceId::new("i"),
-            namespace: ff_core::types::Namespace::new("ns"),
+            lane_id: flowfabric::core::types::LaneId::new("test"),
+            worker_id: flowfabric::core::types::WorkerId::new("w"),
+            worker_instance_id: flowfabric::core::types::WorkerInstanceId::new("i"),
+            namespace: flowfabric::core::types::Namespace::new("ns"),
             lease_ttl_ms: 30_000,
             grant_ttl_ms: 5_000,
             max_concurrent_tasks: 1,

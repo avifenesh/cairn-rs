@@ -21,7 +21,7 @@
 //! §2.6 for the full rationale.
 use std::sync::Arc;
 
-use ff_core::types::{BudgetId, ExecutionId};
+use flowfabric::core::types::{BudgetId, ExecutionId};
 use uuid::Uuid;
 
 use crate::engine::control_plane::ControlPlaneBackend;

@@ -5,7 +5,7 @@ use cairn_domain::lifecycle::SessionState;
 use cairn_domain::tenancy::ProjectKey;
 use cairn_domain::SessionId;
 use cairn_store::projections::SessionRecord;
-use ff_core::types::{FlowId, Namespace, TimestampMs};
+use flowfabric::core::types::{FlowId, Namespace, TimestampMs};
 
 use crate::boot::FabricRuntime;
 use crate::engine::ControlPlaneBackend;

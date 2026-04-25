@@ -1,5 +1,5 @@
-use ff_core::keys::{ExecKeyContext, IndexKeys};
-use ff_core::types::{
+use flowfabric::core::keys::{ExecKeyContext, IndexKeys};
+use flowfabric::core::types::{
     AttemptId, AttemptIndex, ExecutionId, LaneId, LeaseId, WorkerId, WorkerInstanceId,
 };
 
@@ -111,7 +111,7 @@ pub const RENEW_LEASE_ARGS: usize = 7;
 mod tests {
     use super::*;
     use crate::test_support::test_eid;
-    use ff_core::partition::{execution_partition, PartitionConfig};
+    use flowfabric::core::partition::{execution_partition, PartitionConfig};
 
     fn test_ctx() -> (ExecKeyContext, IndexKeys, ExecutionId) {
         let eid = test_eid("claim");

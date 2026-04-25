@@ -9,14 +9,14 @@
 //! name and the docstring above the call continues to describe the
 //! two-step protocol.
 //!
-//! **No FF-state-plane imports live here.** The `ff_core::keys` /
-//! `ff_core::partition` machinery moved into the backend impl
+//! **No FF-state-plane imports live here.** The `flowfabric::core::keys` /
+//! `flowfabric::core::partition` machinery moved into the backend impl
 //! (`engine/valkey_control_plane_impl.rs`). This file owns nothing
 //! except the delegate.
 
 use std::sync::Arc;
 
-use ff_core::types::{ExecutionId, LaneId};
+use flowfabric::core::types::{ExecutionId, LaneId};
 
 use crate::engine::{ClaimGrantOutcome, ControlPlaneBackend, IssueGrantAndClaimInput};
 use crate::error::FabricError;

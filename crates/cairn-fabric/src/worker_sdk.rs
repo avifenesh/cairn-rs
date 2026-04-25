@@ -1,4 +1,4 @@
-//! Thin worker wrapper over `ff_sdk::FlowFabricWorker`.
+//! Thin worker wrapper over `flowfabric::sdk::FlowFabricWorker`.
 //!
 //! Cairn claims run through the in-process scheduler: callers ask
 //! [`FabricSchedulerService::claim_for_worker`] for a `ClaimGrant`
@@ -19,9 +19,9 @@ use std::sync::Arc;
 use cairn_domain::ids::{RunId, SessionId};
 use cairn_domain::lifecycle::{FailureClass, RunState};
 use cairn_domain::tenancy::ProjectKey;
-use ff_core::contracts::ClaimGrant;
-use ff_sdk::task::{ClaimedTask, FailOutcome, ResumeSignal, SuspendOutcome};
-use ff_sdk::{FlowFabricWorker, WorkerConfig};
+use flowfabric::core::contracts::ClaimGrant;
+use flowfabric::sdk::task::{ClaimedTask, FailOutcome, ResumeSignal, SuspendOutcome};
+use flowfabric::sdk::{FlowFabricWorker, WorkerConfig};
 
 use crate::config::FabricConfig;
 use crate::error::FabricError;
@@ -75,7 +75,7 @@ impl CairnWorker {
     /// [`FabricSchedulerService::claim_for_worker`]: crate::services::scheduler_service::FabricSchedulerService::claim_for_worker
     pub async fn claim_from_grant(
         &self,
-        lane: ff_core::types::LaneId,
+        lane: flowfabric::core::types::LaneId,
         grant: ClaimGrant,
     ) -> Result<CairnTask, FabricError> {
         let task = self

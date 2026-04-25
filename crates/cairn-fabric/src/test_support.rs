@@ -7,8 +7,8 @@
 //! typically one that accepts `&TestHarness` so it threads the
 //! cluster-wide `partition_config()` through.
 
-use ff_core::partition::PartitionConfig;
-use ff_core::types::{ExecutionId, LaneId};
+use flowfabric::core::partition::PartitionConfig;
+use flowfabric::core::types::{ExecutionId, LaneId};
 use uuid::Uuid;
 
 /// Mint a deterministic-but-distinct `ExecutionId` for tests.
