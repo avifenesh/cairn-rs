@@ -1079,13 +1079,15 @@ pub(crate) fn complete_run_tool_def() -> serde_json::Value {
 
 /// Iteration index at which we start injecting the "you are stuck" nudge.
 ///
-/// F38: threshold = 3 means iteration 4 onwards (0-indexed `ctx.iteration >=
-/// 3`) will receive the directive suffix when the loop has only seen
-/// non-terminal tool calls. Three is the smallest value that lets a healthy
+/// The predicate uses `ctx.iteration >= STUCK_ITERATION_THRESHOLD`, so
+/// threshold = 3 means the directive suffix is eligible starting at
+/// iteration index 3 — the 4th DECIDE call, since iterations are
+/// 0-indexed. Three is the smallest value that lets a healthy
 /// multi-step run (e.g., search → read → complete) finish on its own
-/// without tripping the nudge, while still catching the dogfood-v5 pattern
-/// (memory_search × 4, graph_query × 1, notify_operator × 3 … with
-/// `complete_run × 0`) early enough to salvage the run.
+/// without tripping the nudge, while still catching the dogfood-v5
+/// introspection pattern (memory_search × 4, graph_query × 1,
+/// notify_operator × 3 … with `complete_run × 0`) early enough to
+/// salvage the run.
 ///
 /// # Why three and not higher
 ///
@@ -1167,17 +1169,28 @@ pub(crate) fn should_inject_stuck_nudge(
 /// and are pinned by the unit test in
 /// `test_f38_complete_run_actually_invoked.rs`.
 pub(crate) fn stuck_nudge_suffix() -> &'static str {
-    "\n\n\
-     ## STOP — FINAL DIRECTIVE\n\
-     You have already spent several iterations calling tools without \
-     producing a user-facing answer. The user is waiting for a response. \
-     On THIS turn you MUST call the `complete_run` tool with the full \
-     answer in `final_answer`. Do NOT call any other tool. If you cannot \
-     produce a confident answer from training data or the context above, \
-     call `complete_run` anyway and explain in `final_answer` what \
-     information is missing and what you would do next. Any tool call \
-     other than `complete_run` on this turn will be treated as a \
-     violation of the run contract."
+    // Intentionally NOT written as an indented multi-line string literal:
+    // the line-continuation syntax (`\` at end of line + leading spaces
+    // on the next) preserves the source-code indentation in the
+    // resulting `&str`, which would render the "## STOP — FINAL
+    // DIRECTIVE" header as a five-space-indented line and read in the
+    // LLM context like a nested code block, reducing its salience
+    // (Copilot review on PR #300). Flush-left concatenation keeps the
+    // markdown heading at column 0 where providers render it as a
+    // section break.
+    concat!(
+        "\n\n",
+        "## STOP — FINAL DIRECTIVE\n",
+        "You have already spent several iterations calling tools without ",
+        "producing a user-facing answer. The user is waiting for a response. ",
+        "On THIS turn you MUST call the `complete_run` tool with the full ",
+        "answer in `final_answer`. Do NOT call any other tool. If you cannot ",
+        "produce a confident answer from training data or the context above, ",
+        "call `complete_run` anyway and explain in `final_answer` what ",
+        "information is missing and what you would do next. Any tool call ",
+        "other than `complete_run` on this turn will be treated as a ",
+        "violation of the run contract."
+    )
 }
 
 /// Convert native tool_calls from the provider response into `ActionProposal` values.

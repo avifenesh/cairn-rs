@@ -612,6 +612,24 @@ fn stuck_nudge_predicate_and_wording_match_contract() {
          multi-step runs can explain the gap instead of being truncated: \
          {suffix}"
     );
+
+    // Copilot review on #300: the `## STOP — FINAL DIRECTIVE` header
+    // must appear flush-left so providers render it as a section
+    // break. A prior multi-line string literal with line-continuation
+    // baked in five leading spaces per line, rendering the header as
+    // a code-block fragment and reducing its salience. Regression
+    // guard: find the header and require no leading whitespace on its
+    // own line.
+    let header_line = suffix
+        .lines()
+        .find(|l| l.contains(EXPECTED_DIRECTIVE_HEADER))
+        .expect("suffix must contain the directive header line");
+    assert_eq!(
+        header_line, EXPECTED_DIRECTIVE_HEADER,
+        "F38: the directive header MUST be flush-left (no leading \
+         whitespace from source-code indentation). Got: {:?}",
+        header_line
+    );
 }
 
 /// F38 Plan-mode guard (Gemini PR #300 HIGH). Plan mode terminates by
