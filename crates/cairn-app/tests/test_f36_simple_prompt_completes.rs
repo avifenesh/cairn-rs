@@ -414,9 +414,7 @@ fn complete_run_tool_def_has_required_shape() {
         .as_array()
         .expect("required must be an array");
     assert!(
-        required
-            .iter()
-            .any(|v| v.as_str() == Some("final_answer")),
+        required.iter().any(|v| v.as_str() == Some("final_answer")),
         "final_answer must be a required parameter"
     );
 }

@@ -997,11 +997,11 @@ pub(crate) fn complete_run_tool_def() -> serde_json::Value {
         "function": {
             "name": "complete_run",
             "description": "Finish the run and return the final answer to the user. \
-Call this IMMEDIATELY when you can answer from training data or from context \
-already in this prompt — do not call memory_search, search_events, or any \
-other tool first on trivially-answerable prompts. Put the full user-facing \
-answer (prose, bullets, code — whatever the goal asks for) in `final_answer`. \
-This ends the run; no further tool calls will run after this one.",
+    Call this IMMEDIATELY when you can answer from training data or from context \
+    already in this prompt — do not call memory_search, search_events, or any \
+    other tool first on trivially-answerable prompts. Put the full user-facing \
+    answer (prose, bullets, code — whatever the goal asks for) in `final_answer`. \
+    This ends the run; no further tool calls will run after this one.",
             "parameters": {
                 "type": "object",
                 "properties": {
