@@ -1499,12 +1499,62 @@ fn build_step_summary(
         })
         .unwrap_or_else(|| "no_op".to_owned());
 
-    let summary = decide
+    let description = decide
         .proposals
         .first()
         .map(|p| p.description.clone())
         .unwrap_or_else(|| format!("iteration {} complete", ctx.iteration));
 
+    // F35: threading tool errors back into the next DECIDE turn.
+    //
+    // The orchestrator does not maintain a multi-turn assistant/tool
+    // message history (each DECIDE is a fresh `system`+`user` call with
+    // the step history embedded). So the only channel that carries a
+    // failed tool result's error text into the next LLM turn is the
+    // per-step `summary` string. Pre-F35 this only carried the proposal
+    // `description` ("read the design document"), so even once we stop
+    // terminating on tool errors the LLM would still be blind to *what*
+    // failed — it would just see `ok=false` with no explanation and
+    // repeat the same broken call.
+    //
+    // Fix: for InvokeTool proposals whose status is `Failed`, append the
+    // concrete error text. For successful tool calls, append a short
+    // output preview so the LLM doesn't have to guess what came back.
+    // Both are truncated so a massive payload doesn't dominate the step
+    // history budget on later iterations.
+    let mut summary = description;
+    for (proposal, result) in decide.proposals.iter().zip(execute.results.iter()) {
+        if proposal.action_type != cairn_domain::ActionType::InvokeTool {
+            continue;
+        }
+        let tool_name = proposal.tool_name.as_deref().unwrap_or("<unknown>");
+        match &result.status {
+            ActionStatus::Failed { reason } => {
+                let preview = truncate_for_summary(reason, 400);
+                summary.push_str(&format!(
+                    "\n  tool_result[{tool_name}] ERROR: {preview}"
+                ));
+            }
+            ActionStatus::Succeeded => {
+                if let Some(output) = result.tool_output.as_ref() {
+                    let rendered = output.to_string();
+                    let preview = truncate_for_summary(&rendered, 400);
+                    summary.push_str(&format!(
+                        "\n  tool_result[{tool_name}] ok: {preview}"
+                    ));
+                }
+            }
+            // AwaitingApproval / SubagentSpawned have their own dedicated
+            // step-kinds — no inline note needed.
+            _ => {}
+        }
+    }
+
+    // A step counts as failed only when the loop itself failed — i.e. a
+    // non-InvokeTool terminal error. InvokeTool failures are recoverable
+    // feedback (F35) and must not mark the step as failed, otherwise the
+    // LLM sees `ok=false` and a terminal "run failed" signal in the
+    // prompt even though execution is continuing.
     let succeeded = !matches!(execute.loop_signal, LoopSignal::Failed { .. });
 
     StepSummary {
@@ -1513,6 +1563,31 @@ fn build_step_summary(
         summary,
         succeeded,
     }
+}
+
+/// Truncate a string for inclusion in a step history `summary`. Keeps
+/// head + tail so both the error kind prefix (e.g. `Error [NOT_FOUND]:`)
+/// and the tail (usually the path or detail) survive even when the
+/// middle of a multi-line payload is clipped. 1 char ≈ 0.25 tokens in
+/// the decide-phase estimator.
+fn truncate_for_summary(text: &str, max_chars: usize) -> String {
+    let chars: Vec<char> = text.chars().collect();
+    if chars.len() <= max_chars {
+        return chars.into_iter().collect();
+    }
+    let head = max_chars / 2;
+    let tail = max_chars.saturating_sub(head);
+    let omitted = chars.len().saturating_sub(head + tail);
+    let prefix: String = chars.iter().take(head).collect();
+    let suffix: String = chars
+        .iter()
+        .rev()
+        .take(tail)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect();
+    format!("{prefix}… [{omitted} chars omitted] …{suffix}")
 }
 
 fn now_millis() -> u64 {

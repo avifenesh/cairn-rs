@@ -380,14 +380,31 @@ impl ExecutePhase for RuntimeExecutePhase {
         // sequential `break` also stopped adding results to the vec.
         let results: Vec<ActionResult> = results.into_iter().flatten().collect();
 
-        // Re-check loop signal against parallel results: an InvokeTool
-        // failure shouldn't carry a terminal signal, but any Failed status
-        // should surface if no stronger signal is present.
-        if matches!(loop_signal, LoopSignal::Continue) {
-            if let Some(reason) = first_failure_reason(&results) {
-                loop_signal = LoopSignal::Failed { reason };
-            }
-        }
+        // F35: a failed InvokeTool (NOT_FOUND, InvalidArgs, PermissionDenied,
+        // Timeout, etc.) is *feedback* for the LLM, not a run-terminal
+        // condition. The error text lives on the `ActionResult` and flows
+        // back into `build_step_summary` below, which threads it into the
+        // next iteration's DECIDE prompt so the LLM can adapt
+        // ("that file doesn't exist, let me try a different path").
+        //
+        // Pre-F35 this block promoted *any* `Failed` status to
+        // `LoopSignal::Failed` via `first_failure_reason`, which surfaced
+        // as `LoopTermination::Failed { reason: "Error [NOT_FOUND]: …" }`
+        // and killed the run on the first tool miss. See dogfood v4
+        // evidence in PR body.
+        //
+        // Non-InvokeTool failures (CompleteRun / SpawnSubagent /
+        // SendNotification / EscalateToOperator service errors) are still
+        // terminal — they represent orchestrator-level bookkeeping that
+        // the LLM cannot recover from by picking a different path. Those
+        // continue to flow through `derive_signal` inside Phase 2.
+        //
+        // Panic-class failures (state corruption) are NOT handled here
+        // either: a real Rust panic during tool dispatch unwinds past
+        // this match and terminates the task, which is the correct
+        // behavior for corrupted state. Recoverable `ToolError` variants
+        // are stringified via `e.to_string()` upstream and land as
+        // `ActionStatus::Failed { reason }` — that's the feedback path.
 
         Ok(ExecuteOutcome {
             results,
@@ -1521,6 +1538,22 @@ async fn legacy_approval_gate_result(
 /// Derive the `LoopSignal` from a freshly executed `ActionResult`.
 ///
 /// Returns the existing signal if it is already terminal.
+///
+/// **F35 contract.** A failed `InvokeTool` (NOT_FOUND, InvalidArgs,
+/// PermissionDenied, Timeout, tool-registry miss, decision-denied) is
+/// *feedback* for the LLM, not a run-terminal condition. Those statuses
+/// map to `LoopSignal::Continue` so the loop runner advances to the next
+/// iteration, where the next DECIDE sees the error text via step history
+/// and can adapt ("that file doesn't exist; retry with a different
+/// path"). Pre-F35 this promoted tool failures to `LoopSignal::Failed`
+/// and terminated the run on the first tool miss (dogfood v4 evidence
+/// in PR #295).
+///
+/// Non-InvokeTool failures (CompleteRun / SpawnSubagent /
+/// SendNotification / EscalateToOperator / CreateMemory service errors)
+/// remain terminal — they represent orchestrator-level bookkeeping that
+/// the LLM cannot recover from by picking a different action, so
+/// promoting them to `LoopSignal::Failed` is the correct short-circuit.
 fn derive_signal(result: &ActionResult, current: &LoopSignal) -> LoopSignal {
     if !matches!(current, LoopSignal::Continue) {
         return current.clone();
@@ -1540,20 +1573,19 @@ fn derive_signal(result: &ActionResult, current: &LoopSignal) -> LoopSignal {
         ActionStatus::AwaitingApproval { approval_id } => LoopSignal::WaitApproval {
             approval_id: approval_id.clone(),
         },
-        ActionStatus::Failed { reason } => LoopSignal::Failed {
-            reason: reason.clone(),
-        },
-    }
-}
-
-fn first_failure_reason(results: &[ActionResult]) -> Option<String> {
-    results.iter().find_map(|r| {
-        if let ActionStatus::Failed { reason } = &r.status {
-            Some(reason.clone())
-        } else {
-            None
+        // F35: InvokeTool failures surface to the LLM as tool_result
+        // feedback; the loop continues. Non-InvokeTool failures are
+        // orchestrator-level and remain terminal.
+        ActionStatus::Failed { reason } => {
+            if result.proposal.action_type == ActionType::InvokeTool {
+                LoopSignal::Continue
+            } else {
+                LoopSignal::Failed {
+                    reason: reason.clone(),
+                }
+            }
         }
-    })
+    }
 }
 
 // ── ID generation ─────────────────────────────────────────────────────────────
