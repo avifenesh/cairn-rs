@@ -23,6 +23,8 @@ import { StatCard } from "../components/StatCard";
 import { Drawer } from "../components/Drawer";
 import { EmptyScopeHint } from "../components/EmptyScopeHint";
 import { ds } from "../lib/design-system";
+import { EntityExplainer } from "../components/EntityExplainer";
+import { ENTITY_EXPLAINERS } from "../lib/entityExplainers";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -466,6 +468,10 @@ export function TracesPage() {
             <span className="hidden sm:inline">Refresh</span>
           </button>
         </div>
+      </div>
+      {/* F32 — inline entity explainer. */}
+      <div className={clsx("px-4 py-1.5 border-b border-gray-200 dark:border-zinc-800 shrink-0", ds.surface.pageDense)}>
+        <EntityExplainer>{ENTITY_EXPLAINERS.trace}</EntityExplainer>
       </div>
 
       {/* Stat strip */}

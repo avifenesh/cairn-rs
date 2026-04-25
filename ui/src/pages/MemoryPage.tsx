@@ -9,6 +9,8 @@ import { useScope } from '../hooks/useScope';
 import { useToast } from '../components/Toast';
 import type { MemoryChunkResult, SourceRecord } from '../lib/types';
 import { EmptyScopeHint } from '../components/EmptyScopeHint';
+import { EntityExplainer } from '../components/EntityExplainer';
+import { ENTITY_EXPLAINERS } from '../lib/entityExplainers';
 
 // ── source_type enum ──────────────────────────────────────────────────────────
 //
@@ -337,6 +339,9 @@ export function MemoryPage() {
 
   return (
     <div className="p-6 space-y-5">
+      {/* F32 — inline entity explainer. */}
+      <EntityExplainer>{ENTITY_EXPLAINERS.memory}</EntityExplainer>
+
       {/* ── Search bar ──────────────────────────────────────────────────── */}
       <form onSubmit={handleSearch} className="flex gap-2">
         {/* Hint label */}

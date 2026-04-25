@@ -13,6 +13,8 @@ import { sectionLabel } from '../lib/design-system';
 import { useFocusTrap } from '../hooks/useFocusTrap';
 import { useScope } from '../hooks/useScope';
 import type { PluginManifest, PluginCapability, PluginDetailResponse, CatalogEntry } from '../lib/types';
+import { EntityExplainer } from '../components/EntityExplainer';
+import { ENTITY_EXPLAINERS } from '../lib/entityExplainers';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -605,7 +607,7 @@ export function PluginsPage() {
     <div className="flex flex-col h-full bg-gray-50 dark:bg-zinc-900">
       <div className="px-4 pt-4 pb-2 border-b border-gray-200 dark:border-zinc-800 shrink-0 bg-gray-50 dark:bg-zinc-900">
         <p className={`${sectionLabel} mb-0`}>Plugins</p>
-        <p className="mt-1 text-[11px] text-gray-500 dark:text-zinc-400">Implements RFC 015 — Plugin Marketplace &amp; Lifecycle.</p>
+        <EntityExplainer className="mt-1">{ENTITY_EXPLAINERS.plugin}</EntityExplainer>
       </div>
 
       {/* Toolbar */}

@@ -29,6 +29,8 @@ import { ErrorFallback } from '../components/ErrorFallback';
 import { useToast } from '../components/Toast';
 import type { Channel } from '../lib/types';
 import { useScope } from '../hooks/useScope';
+import { EntityExplainer } from '../components/EntityExplainer';
+import { ENTITY_EXPLAINERS } from '../lib/entityExplainers';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -440,6 +442,10 @@ export function ChannelsPage() {
           <RefreshCw size={11} className={listQuery.isFetching ? 'animate-spin' : ''} />
           Refresh
         </button>
+      </div>
+      {/* F32 — inline entity explainer. */}
+      <div className="px-4 py-1.5 border-b border-gray-200 dark:border-zinc-800 shrink-0 bg-gray-50 dark:bg-zinc-900">
+        <EntityExplainer>{ENTITY_EXPLAINERS.channel}</EntityExplainer>
       </div>
 
       {/* Stat strip */}
