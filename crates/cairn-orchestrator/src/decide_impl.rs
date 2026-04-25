@@ -436,6 +436,17 @@ impl DecidePhase for LlmDecidePhase {
 /// Uses `default_roles()` to look up the canonical system-prompt fragment for
 /// the matching role.  Falls back to a generic orchestrator prompt if the role
 /// is not registered.
+/// Public wrapper for cross-crate regression tests. See
+/// `crate::decide_impl_test_hooks`. Not part of the stable API.
+#[doc(hidden)]
+pub fn build_system_prompt_pub(
+    agent_type: &str,
+    tools: &[BuiltinToolDescriptor],
+    native_tools_enabled: bool,
+) -> String {
+    build_system_prompt(agent_type, tools, native_tools_enabled)
+}
+
 fn build_system_prompt(
     agent_type: &str,
     tools: &[BuiltinToolDescriptor],
@@ -553,56 +564,81 @@ Field conventions:
         )
     };
 
+    // Prompt design note (F30 fix, 2026-04-24):
+    //
+    // The previous prompt forced every run through a four-phase
+    // Understand → Act → Verify → Complete workflow and explicitly required
+    // "You have taken action toward the goal (not just read/searched)"
+    // before the model was allowed to call `complete_run`. For prose /
+    // analysis / Q&A prompts (the dogfood run 1 baseline: "Summarise
+    // Minecraft creative mode in three bullets") there IS no artifact to
+    // produce — the direct answer IS the deliverable. The old prompt
+    // therefore pushed the model into an 8-iteration introspection loop:
+    // it kept calling read-only tools looking for "action to take" that
+    // never existed, hit `max_iterations_reached`, and returned no output.
+    //
+    // The replacement prompt splits tasks into two modes:
+    //
+    //   - Direct-answer tasks (Q&A, summaries, explanations, analysis):
+    //     call `complete_run` IMMEDIATELY with the full answer as
+    //     `description`. No tools required. Do not "gather context" first
+    //     by default.
+    //
+    //   - Artifact tasks (produce code, edit files, open PRs, run
+    //     commands): use tools, verify, then `complete_run`.
+    //
+    // If you ever reintroduce a "gather context first" instruction, make
+    // sure the F30 regression test
+    // (`test_f30_orchestrator_termination::direct_answer_prompt_calls_complete_run_in_one_iteration`)
+    // still passes — it asserts the loop terminates on iteration 0 for a
+    // trivially-answerable prompt.
     format!(
         "{role_prompt}\
          {tools_section}\n\
          \n\
-         ## Workflow\n\
-         Follow these phases in order:\n\
+         ## How to decide what to do\n\
+         Your first move depends on the goal:\n\
          \n\
-         ### Phase 1: Understand\n\
-         Read the goal carefully. Use tools to gather context — search memory, \
-         read files, explore the codebase. Identify what needs to happen.\n\
+         **If the goal is a direct question, summary, explanation, or \
+         analysis** (anything whose deliverable is prose the user can read \
+         as the final answer):\n\
+         → Call `complete_run` RIGHT NOW. Put the full user-facing answer \
+         in the `description` field. Do NOT call any tools first. Do NOT \
+         call tools to 'gather context' about yourself, the run, or the \
+         system — you already have the goal, just answer it.\n\
          \n\
-         ### Phase 2: Act\n\
-         Take concrete actions toward the goal. Write files, run commands, \
-         make API calls — whatever the task requires. Reading and analysing \
-         alone is not sufficient if the goal requires producing artifacts.\n\
-         \n\
-         ### Phase 3: Verify\n\
-         Check that your actions achieved the goal. Run tests, read the \
-         output, confirm the result. If something failed, fix it before \
-         moving on.\n\
-         \n\
-         ### Phase 4: Complete\n\
-         Only after you have taken action and verified the result, call \
-         complete_run with a summary of what you accomplished.\n\
+         **If the goal requires producing or modifying artifacts** (writing \
+         files, running commands, opening PRs, editing code, calling \
+         external APIs that change state):\n\
+         → Use tools to do the work. Then call `complete_run` with a \
+         summary of what you produced.\n\
          \n\
          ## Tool usage\n\
-         - Prefer read/search/fetch tools before writes.\n\
-         - For JSON-fallback actions you emit as text, set \
-           requires_approval=false for read/search/fetch-only operations.\n\
-         - Set requires_approval=true for writes, code execution, sending \
-           messages, or any destructive action. If unsure whether an \
-           action is sensitive, set requires_approval=true.\n\
-         - Store key findings with create_memory so they persist.\n\
-         - Use spawn_subagent only when the task is genuinely multi-part \
+         - Only call a tool if the answer genuinely requires information or \
+           side effects you don't already have. Don't call read-only tools \
+           just to appear thorough.\n\
+         - Never call the same tool with the same arguments twice. If a \
+           tool returned what you needed, use it; don't re-query.\n\
+         - Set `requires_approval=false` for read/search/fetch-only \
+           operations. Set `requires_approval=true` for writes, code \
+           execution, sending messages, or any destructive action.\n\
+         - Use `spawn_subagent` only when the task is genuinely multi-part \
            and benefits from parallel execution.\n\
-         - If blocked and need human input → escalate_to_operator.\n\
+         - If blocked and you need human input → `escalate_to_operator`.\n\
          \n\
-         ## Completion criteria\n\
-         Before calling complete_run, verify:\n\
-         - You have taken action toward the goal (not just read/searched).\n\
-         - If the goal requires artifacts (code, files, PRs), they exist.\n\
-         - You have verified the result where possible.\n\
-         If any criterion is not met, continue working.\n\
+         ## Completion\n\
+         `complete_run` ends the run and returns your `description` to the \
+         user as the final answer. Write it for the user, not for yourself: \
+         include the actual content (the bullet list, the summary, the \
+         explanation), not a meta-description like 'answered the user's \
+         question'.\n\
          \n\
          ## Tips\n\
-         - If a tool call fails, analyse the error and try a different approach. \
-           Do not retry the same failing call.\n\
+         - If a tool call fails, analyse the error and try a different \
+           approach. Do not retry the same failing call.\n\
          - When reading large outputs, focus on the relevant sections.\n\
-         - If stuck, search for similar patterns or ask for help via \
-           escalate_to_operator.\n\
+         - If you already answered the goal in a previous iteration (check \
+           step history), call `complete_run` now — don't re-do the work.\n\
          \n\
          {response_format}",
     )
