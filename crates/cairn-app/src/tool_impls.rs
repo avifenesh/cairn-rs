@@ -42,14 +42,22 @@ use serde_json::Value;
 ///
 /// This is a placeholder-retrieval guard: the built-in in-memory backend has
 /// no embedder in the default wiring (the real embedding stack ships with the
-/// external memory crate). We match the exact sentinel string exported from
-/// `cairn-memory` ([`MISSING_EMBEDDER_ERROR_MESSAGE`]) so the two sides stay
-/// in lock-step — if `cairn-memory` rewords the error, this comparison fails
-/// to compile-or-test rather than silently re-exposing the crash.
+/// external memory crate). We compare against the exact sentinel string
+/// exported from `cairn-memory` ([`MISSING_EMBEDDER_ERROR_MESSAGE`]), so both
+/// sides share a single source of truth. The coupling surface this creates:
 ///
-/// A dedicated `RetrievalError::MissingEmbedder` variant would be cleaner,
-/// but the retrieval stack is being replaced by the external memory crate;
-/// a shared constant is the minimum-surface fix.
+/// - Reword the error text without renaming the constant → still works
+///   (both sides dereference the same `pub const`).
+/// - Rename or remove the constant → compile error here, which is the
+///   intended break-glass.
+/// - Stop using the constant inside `InMemoryRetrieval` (emit a different
+///   error there) → this check silently returns `false` and the crash
+///   would reappear. The hybrid/backward-compat integration test guards
+///   against that regression.
+///
+/// A dedicated `RetrievalError::MissingEmbedder` variant would be cleaner
+/// still, but the retrieval stack is being replaced by the external memory
+/// crate; a shared constant is the minimum-surface fix.
 fn is_missing_embedder_error(err: &RetrievalError) -> bool {
     matches!(
         err,

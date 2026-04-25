@@ -16,8 +16,10 @@ use std::sync::Arc;
 use cairn_app::tool_impls::ConcreteMemorySearchTool;
 use cairn_domain::ProjectKey;
 use cairn_memory::{
-    in_memory::{InMemoryDocumentStore, InMemoryRetrieval},
-    retrieval::RetrievalService,
+    in_memory::{InMemoryDocumentStore, InMemoryRetrieval, MISSING_EMBEDDER_ERROR_MESSAGE},
+    retrieval::{
+        RerankerStrategy, RetrievalError, RetrievalMode, RetrievalQuery, RetrievalService,
+    },
 };
 use cairn_tools::builtins::{ToolHandler, ToolResult};
 
@@ -119,6 +121,39 @@ async fn mode_hybrid_succeeds_via_backend_fallback() {
         "hybrid currently falls back inside the backend; update this test \
          if the backend starts erroring on hybrid-without-embedder: {value}"
     );
+}
+
+/// Regression-pin: `InMemoryRetrieval` must emit the exact
+/// `MISSING_EMBEDDER_ERROR_MESSAGE` constant when `VectorOnly` is requested
+/// without an embedder. If the backend switches to a different error payload
+/// the tool-layer clamp would silently stop firing and the orchestrator
+/// crash would reappear. This test locks the contract at the type/string
+/// level so the break is loud.
+#[tokio::test]
+async fn in_memory_retrieval_emits_shared_sentinel_constant() {
+    let store = Arc::new(InMemoryDocumentStore::new());
+    let retrieval = InMemoryRetrieval::new(store);
+    let err = retrieval
+        .query(RetrievalQuery {
+            project: project(),
+            query_text: "anything".to_owned(),
+            mode: RetrievalMode::VectorOnly,
+            reranker: RerankerStrategy::None,
+            limit: 1,
+            metadata_filters: vec![],
+            scoring_policy: None,
+        })
+        .await
+        .expect_err("VectorOnly without embedder must error");
+
+    match err {
+        RetrievalError::Internal(msg) => assert_eq!(
+            msg, MISSING_EMBEDDER_ERROR_MESSAGE,
+            "backend must use the shared sentinel constant; the tool-layer \
+             clamp in cairn-app::tool_impls relies on exact equality"
+        ),
+        other => panic!("expected RetrievalError::Internal, got {other:?}"),
+    }
 }
 
 #[tokio::test]
