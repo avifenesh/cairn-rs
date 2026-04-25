@@ -308,7 +308,16 @@ impl DecidePhase for LlmDecidePhase {
         // We gate on the step history (not just iteration count) so that a
         // healthy multi-step run that DID call `complete_run` won't trip
         // this nudge on a later side-effect iteration.
-        if should_inject_stuck_nudge(ctx.iteration, &gather.step_history) {
+        //
+        // The nudge is also gated OFF in `RunMode::Plan`: plan mode
+        // terminates by emitting a `<proposed_plan>` block, not by
+        // calling `complete_run`. Forcing `complete_run` here would
+        // short-circuit the planning contract and land a truncated
+        // answer instead of a plan. `Direct` and `Execute` modes are
+        // the only shapes where the stuck-loop pathology from
+        // dogfood-v5 can fire.
+        let plan_mode = matches!(ctx.run_mode, cairn_domain::decisions::RunMode::Plan);
+        if !plan_mode && should_inject_stuck_nudge(ctx.iteration, &gather.step_history) {
             user.push_str(stuck_nudge_suffix());
         }
 
@@ -1069,6 +1078,30 @@ pub(crate) fn complete_run_tool_def() -> serde_json::Value {
 /// without tripping the nudge, while still catching the dogfood-v5 pattern
 /// (memory_search × 4, graph_query × 1, notify_operator × 3 … with
 /// `complete_run × 0`) early enough to salvage the run.
+///
+/// # Why three and not higher
+///
+/// Gemini review on PR #300 flagged threshold=3 as aggressive against the
+/// default `max_iterations = 20` cap. Two facts make the choice safe in
+/// practice:
+///
+/// 1. **The nudge is escapable.** [`stuck_nudge_suffix`] explicitly lets
+///    the model call `complete_run` with `final_answer = "<what I still
+///    need>"` when it genuinely needs more steps. A legitimate
+///    multi-step task gets a clean exit point instead of a hard
+///    truncation; the operator sees a real answer describing the gap
+///    rather than `max_iterations_reached` and an empty summary.
+/// 2. **Passing this threshold is RARE on healthy runs.** A
+///    well-behaved orchestration that actually needs 4+ tool calls
+///    usually emits at least one `complete_run` checkpoint along the
+///    way (for example the EXECUTE-mode handoff from a plan). The
+///    predicate skips the nudge as soon as `complete_run` appears in
+///    history, so "long run with a plan" is immune.
+///
+/// If future dogfood shows legitimate multi-step runs being nudged too
+/// early, bump this to 4–5 rather than disabling the feature entirely;
+/// the fix for dogfood-v5 task-1 collapses quickly if the threshold
+/// drifts above ~6.
 pub(crate) const STUCK_ITERATION_THRESHOLD: u32 = 3;
 
 /// Decide whether to append the stuck-loop directive to this iteration's
@@ -1093,18 +1126,15 @@ pub(crate) fn should_inject_stuck_nudge(
     if iteration < STUCK_ITERATION_THRESHOLD {
         return false;
     }
-    let mut saw_non_complete_step = false;
-    for step in step_history {
-        // `action_kind` is the serialized `ActionType` ("invoke_tool",
-        // "complete_run", …). The completed case terminates the run so it
-        // would not normally appear here, but guarding against it keeps
-        // the predicate total.
-        if step.action_kind == "complete_run" {
-            return false;
-        }
-        saw_non_complete_step = true;
-    }
-    saw_non_complete_step
+    // `action_kind` is the serialized `ActionType` ("invoke_tool",
+    // "complete_run", …). A run that already terminated via
+    // `complete_run` should never hit DECIDE again, but guarding on
+    // the history keeps the predicate total and immune to exotic
+    // replay/resume paths.
+    !step_history.is_empty()
+        && step_history
+            .iter()
+            .all(|s| s.action_kind != "complete_run")
 }
 
 /// The directive suffix appended to the user message when

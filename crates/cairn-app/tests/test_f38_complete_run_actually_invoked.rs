@@ -552,4 +552,119 @@ fn stuck_nudge_predicate_and_wording_match_contract() {
         "F38: suffix MUST retain the uppercase imperative — softer \
          wording did not stop the dogfood-v5 failure: {suffix}"
     );
+
+    // Gemini review on #300 flagged that threshold=3 might nudge
+    // legitimate multi-step runs early. The mitigation is the
+    // "call complete_run with what's missing" escape hatch — guard
+    // that wording stays put so a future soft rewrite can't remove
+    // the pressure valve and turn the nudge into a hard trap.
+    let lower = suffix.to_lowercase();
+    assert!(
+        lower.contains("information is missing") || lower.contains("what is missing"),
+        "F38: suffix MUST retain the escape-hatch wording so legitimate \
+         multi-step runs can explain the gap instead of being truncated: \
+         {suffix}"
+    );
+}
+
+/// F38 Plan-mode guard (Gemini PR #300 HIGH). Plan mode terminates by
+/// emitting a `<proposed_plan>` block, not by calling `complete_run`.
+/// Forcing `complete_run` via the stuck-loop nudge would short-circuit
+/// the planning contract. The decide phase must gate the nudge off in
+/// `RunMode::Plan` regardless of iteration count or step history.
+#[tokio::test]
+async fn plan_mode_never_receives_stuck_nudge() {
+    use cairn_domain::providers::{
+        GenerationProvider, GenerationResponse, ProviderAdapterError, ProviderBindingSettings,
+    };
+    use cairn_orchestrator::context::{GatherOutput, OrchestrationContext, StepSummary};
+    use cairn_orchestrator::{DecidePhase, LlmDecidePhase};
+    use std::path::PathBuf;
+
+    // Capture the user-role message the orchestrator sends on a Plan
+    // mode iteration well past the stuck-loop threshold. If the guard
+    // from the Gemini review holds, the directive must not appear.
+    struct CapturingProvider {
+        captured: Arc<Mutex<String>>,
+    }
+    #[async_trait::async_trait]
+    impl GenerationProvider for CapturingProvider {
+        async fn generate(
+            &self,
+            _model: &str,
+            messages: Vec<Value>,
+            _settings: &ProviderBindingSettings,
+            _tools: &[Value],
+        ) -> Result<GenerationResponse, ProviderAdapterError> {
+            let user = messages
+                .iter()
+                .rev()
+                .find_map(|m| {
+                    if m.get("role").and_then(|r| r.as_str()) == Some("user") {
+                        m.get("content").and_then(|c| c.as_str()).map(str::to_owned)
+                    } else {
+                        None
+                    }
+                })
+                .unwrap_or_default();
+            *self.captured.lock().unwrap_or_else(|p| p.into_inner()) = user;
+            Ok(GenerationResponse {
+                text: "[]".to_owned(),
+                input_tokens: Some(10),
+                output_tokens: Some(2),
+                model_id: "test-model".to_owned(),
+                tool_calls: vec![],
+                finish_reason: Some("stop".to_owned()),
+            })
+        }
+    }
+
+    let captured = Arc::new(Mutex::new(String::new()));
+    let phase = LlmDecidePhase::new(
+        Arc::new(CapturingProvider {
+            captured: captured.clone(),
+        }),
+        "test-model",
+    );
+
+    // Construct a Plan-mode context deep past the stuck threshold
+    // with a history of non-`complete_run` steps — exactly the shape
+    // that would trip the nudge in Direct/Execute modes.
+    let ctx = OrchestrationContext {
+        project: cairn_domain::ProjectKey::new("t", "w", "p"),
+        session_id: cairn_domain::SessionId::new("sess-f38-plan"),
+        run_id: cairn_domain::RunId::new("run-f38-plan"),
+        task_id: None,
+        iteration: 5,
+        goal: "Propose a plan for X".to_owned(),
+        agent_type: "planner".to_owned(),
+        run_started_at_ms: 0,
+        working_dir: PathBuf::from("/tmp"),
+        run_mode: cairn_domain::decisions::RunMode::Plan,
+        discovered_tool_names: vec![],
+        step_history: (0..5)
+            .map(|i| StepSummary {
+                iteration: i,
+                action_kind: "invoke_tool".to_owned(),
+                summary: format!("introspect {i}"),
+                succeeded: true,
+            })
+            .collect(),
+        is_recovery: false,
+        approval_timeout: None,
+    };
+    let gather = GatherOutput {
+        step_history: ctx.step_history.clone(),
+        ..Default::default()
+    };
+
+    phase.decide(&ctx, &gather).await.expect("decide ok");
+
+    let user = captured.lock().unwrap_or_else(|p| p.into_inner()).clone();
+    assert!(
+        !user.contains(EXPECTED_DIRECTIVE_HEADER),
+        "F38 Plan-mode guard: directive must NOT appear in Plan runs \
+         even when iteration + history would otherwise trigger the \
+         nudge. Got user message:\n{user}"
+    );
 }
