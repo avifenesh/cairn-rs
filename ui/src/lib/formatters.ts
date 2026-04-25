@@ -7,14 +7,22 @@
  * new panels in CE use these.
  */
 
-/** Format micros (1 USD = 1_000_000) as "$x.yyyyyy". Zero renders as "—". */
+/** Format micros (1 USD = 1_000_000) as "$x.yyyyyy".
+ *
+ *  Zero is a LEGITIMATE value (free-model calls render $0.00), not
+ *  missing data. Call sites that need a "no data" sentinel should
+ *  check upstream (e.g. "provider_calls === 0") and render "—"
+ *  themselves — see the RunDetailPage stat card for the canonical
+ *  pattern. Earlier revisions conflated the two and hid free-model
+ *  costs behind the em-dash (Cursor Bugbot catch). */
 export function formatUsd(costMicros: number): string {
-  if (!Number.isFinite(costMicros) || costMicros === 0) return "—";
+  if (!Number.isFinite(costMicros)) return "—";
   // Six fractional digits covers provider-level per-call precision
   // (observed per-call costs fall in the $0.000002–$0.12 range). We
   // intentionally DO NOT round harshly at small values — operators
   // debugging model-switch regressions need to see the fourth and
-  // fifth decimal.
+  // fifth decimal. Zero prints as "$0.000000" so a free call is
+  // visibly zero rather than "missing".
   return `$${(costMicros / 1_000_000).toFixed(6)}`;
 }
 

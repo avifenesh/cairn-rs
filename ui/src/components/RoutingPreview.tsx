@@ -41,6 +41,12 @@ interface RoutingRow {
   modelId: string | null;
   /** First active connection advertising `modelId`, or `null`. */
   connection: ProviderConnectionRecord | null;
+  /** Non-null when the settings-fetch failed with a non-404 status.
+   *  "Not configured" would be misleading — the default may well be
+   *  set, we just couldn't read it. Surfaced as its own row status
+   *  so the operator sees a transient backend issue rather than a
+   *  silent misconfiguration claim. */
+  fetchError: Error | null;
 }
 
 /** Match a model ID against a connection's `supported_models`. Strict
@@ -93,12 +99,14 @@ export function RoutingPreview() {
 
   const anyLoading = settingsQueries.some(q => q.isLoading);
   const rows: RoutingRow[] = ROUTING_ROLES.map((role, i) => {
-    const setting = settingsQueries[i]?.data as SettingDefault | null | undefined;
+    const q = settingsQueries[i];
+    const setting = q?.data as SettingDefault | null | undefined;
     const modelId = setting ? coerceModelId(setting.value) : null;
     return {
       role,
       modelId,
       connection: modelId ? findConnection(modelId, connections) : null,
+      fetchError: q?.isError ? (q.error instanceof Error ? q.error : new Error(String(q.error))) : null,
     };
   });
 
@@ -120,13 +128,16 @@ export function RoutingPreview() {
 }
 
 function RoutingRowView({ row, loading }: { row: RoutingRow; loading: boolean }) {
-  const { role, modelId, connection } = row;
+  const { role, modelId, connection, fetchError } = row;
 
-  // Three terminal states: (1) not configured, (2) configured but no
-  // advertising connection, (3) fully wired. The third is the common
-  // dogfood case — show connection ID + model on one line, no warning.
-  let status: "unset" | "unwired" | "ok";
-  if (!modelId) status = "unset";
+  // Four terminal states: (1) fetch failed (surface error — "not
+  // configured" would be misleading when we just couldn't read the
+  // default), (2) not configured, (3) configured but no advertising
+  // connection, (4) fully wired. The fourth is the common dogfood
+  // case — show connection ID + model on one line, no warning.
+  let status: "error" | "unset" | "unwired" | "ok";
+  if (fetchError) status = "error";
+  else if (!modelId) status = "unset";
   else if (!connection) status = "unwired";
   else status = "ok";
 
@@ -135,6 +146,7 @@ function RoutingRowView({ row, loading }: { row: RoutingRow; loading: boolean })
       className={clsx(
         "flex items-center gap-3 px-3 py-2",
         status === "unwired" && "bg-amber-500/5",
+        status === "error"   && "bg-red-500/5",
       )}
       data-testid={`routing-row-${role.key}`}
       data-status={status}
@@ -144,7 +156,15 @@ function RoutingRowView({ row, loading }: { row: RoutingRow; loading: boolean })
         <p className="text-[10px] text-gray-400 dark:text-zinc-600">{role.blurb}</p>
       </div>
       <div className="flex-1 min-w-0 flex items-center gap-2 font-mono text-[12px]">
-        {status === "unset" ? (
+        {status === "error" ? (
+          <span
+            className="inline-flex items-center gap-1 text-red-500 dark:text-red-400 text-[11px]"
+            data-testid={`routing-error-${role.key}`}
+            title={fetchError!.message}
+          >
+            <AlertTriangle size={11} /> failed to read default ({fetchError!.message})
+          </span>
+        ) : status === "unset" ? (
           <span
             className="text-gray-400 dark:text-zinc-600"
             data-testid={`routing-unset-${role.key}`}

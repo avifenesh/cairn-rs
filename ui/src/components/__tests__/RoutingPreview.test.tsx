@@ -130,6 +130,27 @@ describe("<RoutingPreview />", () => {
     await waitFor(() => expect(brain.dataset.status).toBe("unwired"));
   });
 
+  it("surfaces error status (not 'not configured') when settings fetch fails", async () => {
+    // Bugbot-flagged regression: a non-404 settings error used to hide
+    // behind the "unset" placeholder, misleading operators whose
+    // default was in fact persisted but temporarily unreadable.
+    listProviderConnections.mockResolvedValue({ items: [], has_more: false });
+    getSettingsDefault.mockImplementation(async (_scope: string, _scopeId: string, key: string) => {
+      if (key === "brain_model") throw new Error("500 internal error");
+      return null;
+    });
+
+    renderPreview();
+
+    await waitFor(() => {
+      const brain = screen.getByTestId("routing-row-brain_model");
+      expect(brain.dataset.status).toBe("error");
+    });
+    expect(screen.getByTestId("routing-error-brain_model")).toHaveTextContent(
+      "failed to read default",
+    );
+  });
+
   it("shows placeholder when no default is set", async () => {
     listProviderConnections.mockResolvedValue({ items: [], has_more: false });
     getSettingsDefault.mockResolvedValue(null);
