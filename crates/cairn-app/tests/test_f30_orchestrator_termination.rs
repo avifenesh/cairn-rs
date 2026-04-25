@@ -345,48 +345,118 @@ async fn direct_answer_prompt_calls_complete_run_in_one_iteration() {
     }
 }
 
-/// F30 prompt regression: the system prompt must NOT reintroduce the
-/// "Phase 1: Understand / Phase 2: Act / Phase 3: Verify / Phase 4:
-/// Complete" gating that caused the introspection loop. Snapshot-style
-/// assertion so a future prompt edit reviewer sees the failure and
-/// rechecks F30 before shipping.
+/// F30 prompt regression: neither the system prompt NOR the user message
+/// footer may reintroduce the "Phase 1: Understand / Phase 2: Act /
+/// Phase 3: Verify / Phase 4: Complete" gating that caused the
+/// introspection loop. Snapshot-style assertion so a future prompt edit
+/// reviewer sees the failure and rechecks F30 before shipping.
+///
+/// Before this test covered the user message, the system prompt could
+/// be cleaned up while the footer (`build_user_message`) continued to
+/// instruct the LLM to "Decide your next action based on the workflow
+/// phases: Understand → Act → Verify → Complete" — a contradiction
+/// that would leave the LLM receiving stale instructions on every
+/// iteration. This assertion guards both channels.
 #[tokio::test]
 async fn system_prompt_does_not_gate_complete_run_behind_forced_action() {
-    use cairn_orchestrator::decide_impl_test_hooks::build_system_prompt_for_tests;
+    use cairn_orchestrator::decide_impl_test_hooks::{
+        build_system_prompt_for_tests, build_user_message_for_tests,
+    };
 
+    // Shared list of pre-F30 phrases. Any of these returning in either
+    // channel (system prompt or user message) is a regression.
+    let banned = [
+        "Phase 1: Understand",
+        "Phase 2: Act",
+        "Phase 3: Verify",
+        "Phase 4: Complete",
+        "You have taken action toward the goal (not just read/searched)",
+        "Reading and analysing alone is not sufficient",
+        "workflow phases: Understand",
+    ];
+
+    // ── System prompt ────────────────────────────────────────────────
     for native in [false, true] {
         let sys = build_system_prompt_for_tests("orchestrator", &[], native);
-
-        // These are the literal phrases from the pre-F30 prompt that
-        // pushed the LLM into "gather context first" mode. None may
-        // return without an accompanying F30 review.
-        for banned in [
-            "Phase 1: Understand",
-            "Phase 2: Act",
-            "Phase 3: Verify",
-            "Phase 4: Complete",
-            "You have taken action toward the goal (not just read/searched)",
-            "Reading and analysing alone is not sufficient",
-        ] {
+        for phrase in banned {
             assert!(
-                !sys.contains(banned),
-                "F30: system prompt must not contain the pre-fix gating phrase {banned:?}. \
-                 Reintroducing it risks regressing the direct-answer loop — see \
-                 `decide_impl.rs::build_system_prompt` comment block. \
+                !sys.contains(phrase),
+                "F30: system prompt must not contain the pre-fix gating phrase \
+                 {phrase:?}. Reintroducing it risks regressing the direct-answer \
+                 loop — see `decide_impl.rs::build_system_prompt` comment block. \
                  (native_tools_enabled={native})",
             );
         }
 
-        // Positive assertion: the new prompt must tell the model that
-        // direct answers terminate the loop via complete_run.
         assert!(
             sys.contains("complete_run"),
             "prompt must still mention complete_run (native={native})",
         );
+        // Gemini review follow-up: the prompt must accommodate RAG-style
+        // goals (e.g. "summarize the README") where tools ARE required
+        // before answering. The new wording talks about "external
+        // information" instead of "no tools first".
         assert!(
-            sys.to_lowercase().contains("direct question")
-                || sys.to_lowercase().contains("direct-answer"),
-            "prompt must advertise the direct-answer path (native={native}). Got:\n{sys}",
+            sys.contains("external information"),
+            "F30 prompt must explicitly acknowledge the RAG path — tools are \
+             OK when the goal needs external information. Got:\n{sys}",
+        );
+        // Must still forbid introspection-of-self to close the original
+        // bug even though the tools themselves are kept registered for
+        // legitimate system-aware prompts.
+        assert!(
+            sys.to_lowercase().contains("introspect")
+                || sys.to_lowercase().contains("introspection"),
+            "F30 prompt must forbid calling introspection tools on THIS run. \
+             Got:\n{sys}",
         );
     }
+
+    // ── User message footer ──────────────────────────────────────────
+    // Exercise `build_user_message` with a representative context so
+    // the whole footer (which wraps the memory hint and the next-step
+    // block) is covered — not just the static template strings.
+    use cairn_orchestrator::{GatherOutput, OrchestrationContext};
+    use std::path::PathBuf;
+    let ctx = OrchestrationContext {
+        project: cairn_domain::ProjectKey {
+            tenant_id: cairn_domain::TenantId::new("t"),
+            workspace_id: cairn_domain::WorkspaceId::new("w"),
+            project_id: cairn_domain::ProjectId::new("p"),
+        },
+        session_id: cairn_domain::SessionId::new("s"),
+        run_id: cairn_domain::RunId::new("r"),
+        task_id: None,
+        iteration: 0,
+        goal: "Summarize X in three bullets.".to_owned(),
+        agent_type: "orchestrator".to_owned(),
+        run_started_at_ms: 0,
+        working_dir: PathBuf::from("/tmp"),
+        run_mode: Default::default(),
+        discovered_tool_names: vec![],
+        step_history: vec![],
+        is_recovery: false,
+        approval_timeout: None,
+    };
+    // Empty gather: exercises the "no memory retrieved" footer branch.
+    // With memory, the only difference is the `memory_hint` prefix —
+    // the banned-phrase assertions are orthogonal to that. Keeping
+    // this focused on the footer avoids cross-crate churn constructing
+    // a full `RetrievalResult` just to exercise a code path that
+    // shares the same footer template.
+    let user = build_user_message_for_tests(&ctx, &GatherOutput::default());
+    for phrase in banned {
+        assert!(
+            !user.contains(phrase),
+            "F30: user message must not contain pre-fix gating phrase \
+             {phrase:?}. `build_user_message`'s footer is the counterpart \
+             to the system prompt — they must not contradict each other. \
+             Got:\n{user}",
+        );
+    }
+    assert!(
+        user.contains("complete_run"),
+        "user message footer should direct the model to complete_run when \
+         it has the answer. Got:\n{user}",
+    );
 }

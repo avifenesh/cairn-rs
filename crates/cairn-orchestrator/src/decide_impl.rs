@@ -447,6 +447,17 @@ pub fn build_system_prompt_pub(
     build_system_prompt(agent_type, tools, native_tools_enabled)
 }
 
+/// Public wrapper for cross-crate regression tests. See
+/// `crate::decide_impl_test_hooks`. Not part of the stable API.
+#[doc(hidden)]
+pub fn build_user_message_pub(
+    ctx: &OrchestrationContext,
+    gather: &GatherOutput,
+    budget: Option<&TokenBudget>,
+) -> String {
+    build_user_message(ctx, gather, budget)
+}
+
 fn build_system_prompt(
     agent_type: &str,
     tools: &[BuiltinToolDescriptor],
@@ -599,19 +610,30 @@ Field conventions:
          ## How to decide what to do\n\
          Your first move depends on the goal:\n\
          \n\
-         **If the goal is a direct question, summary, explanation, or \
-         analysis** (anything whose deliverable is prose the user can read \
-         as the final answer):\n\
+         **If you already have the information to answer** (you know the \
+         subject, the goal is general knowledge, or relevant context is \
+         already in this prompt):\n\
          → Call `complete_run` RIGHT NOW. Put the full user-facing answer \
-         in the `description` field. Do NOT call any tools first. Do NOT \
-         call tools to 'gather context' about yourself, the run, or the \
-         system — you already have the goal, just answer it.\n\
+         in the `description` field. Do not call tools just to appear \
+         thorough.\n\
+         \n\
+         **If the goal needs external information you don't have** (reading \
+         a specific file, searching memory or the codebase, fetching from \
+         the web, querying the graph, looking up domain-specific state):\n\
+         → Call the appropriate read/search/fetch tool, then on the next \
+         iteration answer with `complete_run` once you have what you need. \
+         Do not loop gathering more context than the answer requires.\n\
          \n\
          **If the goal requires producing or modifying artifacts** (writing \
          files, running commands, opening PRs, editing code, calling \
          external APIs that change state):\n\
-         → Use tools to do the work. Then call `complete_run` with a \
-         summary of what you produced.\n\
+         → Use tools to do the work, verify the result, then call \
+         `complete_run` with a summary of what you produced.\n\
+         \n\
+         **Never call tools to introspect THIS run itself** — the goal, \
+         iteration number, prior steps, and approvals are already in this \
+         prompt. Do not look them up via introspection tools even if those \
+         tools exist in your toolbox.\n\
          \n\
          ## Tool usage\n\
          - Only call a tool if the answer genuinely requires information or \
@@ -668,15 +690,24 @@ fn build_user_message(
     );
     let has_memory = !gather.memory_chunks.is_empty();
     let memory_hint = if has_memory {
-        "Memory contains relevant context above. Use it to inform your next action.".to_owned()
+        "Memory contains relevant context above. Use it to inform your answer."
+            .to_owned()
     } else {
-        "No relevant memories found. Use other available tools to gather what you need.".to_owned()
+        "No relevant memories retrieved. If the goal needs external information, \
+         call a tool to fetch it; otherwise answer directly."
+            .to_owned()
     };
+    // F30: footer must not reintroduce the pre-fix four-phase workflow
+    // (see `build_system_prompt`'s design note). The decision rule is
+    // restated concisely so the user message echoes the system prompt
+    // instead of contradicting it.
     let footer = format!(
         "## Next step\n\
          {memory_hint}\n\
-         Decide your next action based on the workflow phases: \
-         Understand → Act → Verify → Complete.\n\
+         If you already have the answer, call complete_run now with the \
+         full answer in `description`. If you need external information, \
+         call the appropriate tool. Do not call introspection tools about \
+         this run itself.\n\
          Return a JSON action array."
     );
 

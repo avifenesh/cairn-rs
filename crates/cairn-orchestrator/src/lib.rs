@@ -69,6 +69,7 @@ pub use execute_impl::RuntimeExecutePhase;
 /// Not part of the stable public API — treat as internal.
 #[doc(hidden)]
 pub mod decide_impl_test_hooks {
+    use crate::context::{GatherOutput, OrchestrationContext};
     use cairn_tools::builtins::BuiltinToolDescriptor;
 
     /// Build the DECIDE phase system prompt. Forwards to
@@ -79,5 +80,17 @@ pub mod decide_impl_test_hooks {
         native_tools_enabled: bool,
     ) -> String {
         crate::decide_impl::build_system_prompt_pub(agent_type, tools, native_tools_enabled)
+    }
+
+    /// Build the DECIDE phase user message. Forwards to
+    /// `decide_impl::build_user_message` (which is crate-private).
+    ///
+    /// F30 uses this to assert the footer no longer reintroduces the
+    /// pre-fix four-phase workflow.
+    pub fn build_user_message_for_tests(
+        ctx: &OrchestrationContext,
+        gather: &GatherOutput,
+    ) -> String {
+        crate::decide_impl::build_user_message_pub(ctx, gather, None)
     }
 }

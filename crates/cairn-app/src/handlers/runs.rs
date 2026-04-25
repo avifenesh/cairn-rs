@@ -1965,22 +1965,28 @@ pub(crate) async fn orchestrate_run_handler(
     use cairn_runtime::services::{
         ApprovalServiceImpl, CheckpointServiceImpl, MailboxServiceImpl, ToolInvocationServiceImpl,
     };
-    // F30 (2026-04-24): dropped introspection-of-self tools
-    // (`GetRunTool`, `GetTaskTool`, `GetApprovalsTool`, `ListRunsTool`,
-    // `SearchEventsTool`, `WaitForTaskTool`) from the orchestrate tool
-    // registry. These are operator-chat tools; inside an agent loop they
-    // are an attractive nuisance — the LLM kept calling them to "gather
-    // context about the run it is currently executing" and never
-    // produced the final answer. Dogfood run 1 evidence: 15 tool
-    // invocations per prompt, every single one an introspection call,
-    // zero productive work, loop exhausted `max_iterations`. They are
-    // still registered on chat / operator entry points where the user
-    // is legitimately asking about run state.
+    // F30 (2026-04-24): introspection tools (`GetRunTool`, `GetTaskTool`,
+    // `GetApprovalsTool`, `ListRunsTool`, `SearchEventsTool`,
+    // `WaitForTaskTool`) are kept registered — they serve legitimate
+    // agent-task goals like "list every failed run from today" or "check
+    // the status of task I created earlier." Removing them outright
+    // would cripple system-aware prompts.
+    //
+    // The loop-exhaustion bug (dogfood run 1 evidence: 15 introspection
+    // calls per trivial prose prompt) is instead closed at the prompt
+    // layer: the system prompt now explicitly forbids calling
+    // introspection tools on THIS run itself (the goal, iteration
+    // number, and step history are already in the prompt), while still
+    // allowing them for genuinely system-aware tasks where the user's
+    // goal is to look at OTHER runs / tasks / approvals. See the F30
+    // design note in
+    // `crates/cairn-orchestrator/src/decide_impl.rs::build_system_prompt`.
     use cairn_tools::{
-        BuiltinToolRegistry, CalculateTool, CancelTaskTool, CreateTaskTool, GraphQueryTool,
-        HttpRequestTool, JsonExtractTool, MemorySearchTool, MemoryStoreTool, NotificationSink,
-        NotifyOperatorTool, ResolveApprovalTool, ScheduleTaskTool, ScratchPadTool,
-        SummarizeTextTool, ToolSearchTool,
+        BuiltinToolRegistry, CalculateTool, CancelTaskTool, CreateTaskTool, GetApprovalsTool,
+        GetRunTool, GetTaskTool, GraphQueryTool, HttpRequestTool, JsonExtractTool, ListRunsTool,
+        MemorySearchTool, MemoryStoreTool, NotificationSink, NotifyOperatorTool,
+        ResolveApprovalTool, ScheduleTaskTool, ScratchPadTool, SearchEventsTool, SummarizeTextTool,
+        ToolSearchTool, WaitForTaskTool,
     };
 
     let run_id = RunId::new(run_id_str);
@@ -2235,10 +2241,18 @@ pub(crate) async fn orchestrate_run_handler(
             std::sync::Arc::new(CalculateTool);
         let graph_query: std::sync::Arc<dyn cairn_tools::ToolHandler> =
             std::sync::Arc::new(GraphQueryTool::new(state.graph.clone()));
-        // F30: introspection-of-self tools (get_run, get_task,
-        // get_approvals, list_runs, search_events, wait_for_task)
-        // intentionally NOT registered here. See the `use` block above
-        // for the full rationale.
+        let get_run: std::sync::Arc<dyn cairn_tools::ToolHandler> =
+            std::sync::Arc::new(GetRunTool::new(store_ref.clone()));
+        let get_task: std::sync::Arc<dyn cairn_tools::ToolHandler> =
+            std::sync::Arc::new(GetTaskTool::new(store_ref.clone()));
+        let get_approvals: std::sync::Arc<dyn cairn_tools::ToolHandler> =
+            std::sync::Arc::new(GetApprovalsTool::new(store_ref.clone()));
+        let list_runs: std::sync::Arc<dyn cairn_tools::ToolHandler> =
+            std::sync::Arc::new(ListRunsTool::new(store_ref.clone()));
+        let search_events: std::sync::Arc<dyn cairn_tools::ToolHandler> =
+            std::sync::Arc::new(SearchEventsTool::new(store_ref.clone()));
+        let wait_for_task: std::sync::Arc<dyn cairn_tools::ToolHandler> =
+            std::sync::Arc::new(WaitForTaskTool::new(store_ref.clone()));
 
         // ── Internal tools ──────────────────────────────────────────────────
         let scratch_pad: std::sync::Arc<dyn cairn_tools::ToolHandler> =
@@ -2290,7 +2304,12 @@ pub(crate) async fn orchestrate_run_handler(
                 .register(json_extract.clone())
                 .register(calculate.clone())
                 .register(graph_query.clone())
-                // F30: introspection-of-self tools intentionally omitted.
+                .register(get_run.clone())
+                .register(get_task.clone())
+                .register(get_approvals.clone())
+                .register(list_runs.clone())
+                .register(search_events.clone())
+                .register(wait_for_task.clone())
                 // Internal
                 .register(scratch_pad.clone())
                 .register(skill_tool.clone())
