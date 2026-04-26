@@ -2801,14 +2801,18 @@ pub(crate) async fn orchestrate_run_handler(
             // Checked conversion (Copilot review on #313): `as_millis()`
             // returns `u128` and `as u64` would silently truncate past
             // year 584 million. `unwrap_or_default()` mapped pre-epoch
-            // clocks to `0`. Saturating to `u64::MAX` is the right
-            // failure mode: a broken clock produces an obviously-
-            // nonsensical timestamp that operators can spot, rather
-            // than a silent zero or wrapped value. Pre-epoch
-            // (`duration_since` error) clamps to `0` explicitly.
+            // clocks to `0`. Clamp to `i64::MAX` ms (year 292 million)
+            // rather than `u64::MAX` because the pg / sqlite
+            // projection appliers `try_from::<i64>` the value — a
+            // `u64::MAX` clamp would trip the projection error path
+            // and block the annotation from persisting at all. An
+            // `i64::MAX` clamp still produces an obviously-broken
+            // timestamp operators can spot AND lands in the durable
+            // projection. Pre-epoch (`duration_since` error) explicitly
+            // clamps to `0`.
             let occurred_at_ms = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX))
+                .map(|d| u64::try_from(d.as_millis().min(i64::MAX as u128)).unwrap_or(0))
                 .unwrap_or(0);
             let annotation = make_envelope(RuntimeEvent::RunCompletionAnnotated(
                 RunCompletionAnnotated {

@@ -29,20 +29,36 @@ pub struct RunRecord {
     /// `None` until the run terminates via the normal completion path;
     /// also `None` for records projected from pre-F47-PR2 event logs
     /// (no `RunCompletionAnnotated` ever landed).
-    #[serde(default)]
+    ///
+    /// `skip_serializing_if`: the public run surface exposes completion
+    /// only via the top-level `completion: RunCompletion` object on
+    /// `GET /v1/runs/:id` (F47 PR2). Emitting `completion_summary: null`
+    /// on `RunRecord` / `RunRecordView` would double-publish the same
+    /// data and leak an internal field name into every list/detail
+    /// response — Copilot review on #313 flagged this. Keep the
+    /// projection field so the store roundtrips correctly, but omit
+    /// it from wire responses unless populated.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub completion_summary: Option<String>,
     /// F47 PR2: extractor-produced evidence from tool_results observed
     /// during the run. Paired with `completion_summary`; both populate
     /// on `RunCompletionAnnotated`. `None` mirrors the summary —
     /// post-completion annotation has not (yet) been projected.
-    #[serde(default)]
+    ///
+    /// `skip_serializing_if`: see `completion_summary` above — the
+    /// top-level `completion` REST object is the intended public
+    /// surface; the projection field stays but is omitted from the
+    /// wire unless populated.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub completion_verification: Option<CompletionVerification>,
     /// F47 PR2: wall-clock ms when `RunCompletionAnnotated` was emitted.
     /// Distinct from `updated_at` because `updated_at` is set by the
     /// projection applier to the current wall-clock on every event it
     /// handles; `completion_annotated_at_ms` is the domain-time the
     /// orchestrator recorded the completion.
-    #[serde(default)]
+    ///
+    /// `skip_serializing_if`: see `completion_summary` above.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub completion_annotated_at_ms: Option<u64>,
 }
 
