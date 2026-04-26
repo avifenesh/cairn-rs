@@ -182,7 +182,9 @@ async fn f44_pending_approval_is_listed_by_project_inbox_as_admin() {
     assert_eq!(status, StatusCode::OK, "inbox must return 200: {body}");
     let items = body["items"].as_array().expect("items");
     assert!(
-        items.iter().any(|r| r["call_id"] == proposal.call_id.as_str()),
+        items
+            .iter()
+            .any(|r| r["call_id"] == proposal.call_id.as_str()),
         "project inbox must include the pending proposal: {body}"
     );
 }
@@ -208,7 +210,9 @@ async fn f44_admin_inbox_without_scope_params_defaults_to_canonical_project() {
     );
     let items = body["items"].as_array().expect("items");
     assert!(
-        items.iter().any(|r| r["call_id"] == proposal.call_id.as_str()),
+        items
+            .iter()
+            .any(|r| r["call_id"] == proposal.call_id.as_str()),
         "admin inbox without explicit scope must surface default_tenant \
          approvals (the canonical cell where orchestrate + UI write): {body}"
     );
@@ -312,7 +316,11 @@ async fn f44_approve_moves_record_between_state_buckets() {
     .await;
     assert_eq!(status, StatusCode::OK);
     let items = body["items"].as_array().unwrap();
-    assert_eq!(items.len(), 1, "approved list must contain the record: {body}");
+    assert_eq!(
+        items.len(),
+        1,
+        "approved list must contain the record: {body}"
+    );
     assert_eq!(items[0]["call_id"], "tc_f44_flow");
     assert_eq!(items[0]["state"], "approved");
 }
