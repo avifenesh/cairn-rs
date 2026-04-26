@@ -132,13 +132,24 @@ pub(crate) async fn publish_runtime_frames_since(
     let _ = projector.project_events(&events).await;
 
     for stored in events {
-        if let cairn_domain::RuntimeEvent::ProviderConnectionRegistered(connection) =
-            &stored.envelope.payload
-        {
-            state
-                .runtime
-                .provider_registry
-                .invalidate(&connection.provider_connection_id);
+        // Invalidate the provider_registry cache on any provider-connection
+        // mutation so subsequent routes don't hit a stale entry. F40: the
+        // old DELETE path masqueraded as a `Registered` event so a single
+        // match arm sufficed; the new `Deleted` variant must invalidate too.
+        match &stored.envelope.payload {
+            cairn_domain::RuntimeEvent::ProviderConnectionRegistered(connection) => {
+                state
+                    .runtime
+                    .provider_registry
+                    .invalidate(&connection.provider_connection_id);
+            }
+            cairn_domain::RuntimeEvent::ProviderConnectionDeleted(connection) => {
+                state
+                    .runtime
+                    .provider_registry
+                    .invalidate(&connection.provider_connection_id);
+            }
+            _ => {}
         }
 
         // OTLP export (RFC 021): send each event to the exporter.

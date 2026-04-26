@@ -551,8 +551,9 @@ pub(crate) fn static_provider_registry_catalog() -> Vec<serde_json::Value> {
     request_body = CreateProviderConnectionRequest,
     responses(
         (status = 201, description = "Provider connection created", body = crate::ProviderConnectionRecordDoc),
-        (status = 400, description = "Invalid request", body = ApiError),
         (status = 401, description = "Unauthorized", body = ApiError),
+        (status = 404, description = "Tenant not found", body = ApiError),
+        (status = 409, description = "Provider connection ID already exists", body = ApiError),
         (status = 422, description = "Unprocessable entity", body = ApiError),
         (status = 500, description = "Internal server error", body = ApiError)
     )
