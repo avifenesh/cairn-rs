@@ -30,8 +30,8 @@ fn v1_handle_compat_decode_round_trips() {
         .expect("execution id fixture parses");
     let attempt_id = AttemptId::parse("22222222-2222-4222-8222-222222222222")
         .expect("attempt id fixture parses");
-    let lease_id = LeaseId::parse("33333333-3333-4333-8333-333333333333")
-        .expect("lease id fixture parses");
+    let lease_id =
+        LeaseId::parse("33333333-3333-4333-8333-333333333333").expect("lease id fixture parses");
 
     let payload = HandlePayload::new(
         execution_id.clone(),

@@ -23,8 +23,7 @@ use flowfabric::core::contracts::{
     SuspensionReasonCode, SuspensionRequester, TimeoutBehavior, WaitpointBinding,
 };
 use flowfabric::core::types::{
-    AttemptId, ExecutionId, LeaseEpoch, LeaseFence, LeaseId, SuspensionId, TimestampMs,
-    WaitpointId,
+    AttemptId, ExecutionId, LeaseEpoch, LeaseFence, LeaseId, SuspensionId, TimestampMs, WaitpointId,
 };
 
 use crate::engine::ExecutionLeaseContext;
@@ -353,9 +352,7 @@ pub(crate) fn build_suspend_args(case: SuspendCase<'_>) -> SuspendArgs {
 /// asking FF to suspend an execution whose current lease is gone
 /// (never claimed, terminal, or reclaimed); the right thing is to
 /// read-and-retry or reject at the API layer.
-pub(crate) fn build_lease_fence(
-    lease: &ExecutionLeaseContext,
-) -> Result<LeaseFence, FabricError> {
+pub(crate) fn build_lease_fence(lease: &ExecutionLeaseContext) -> Result<LeaseFence, FabricError> {
     if lease.source == "operator_override"
         || lease.lease_id.is_empty()
         || lease.lease_epoch.is_empty()
@@ -380,10 +377,15 @@ pub(crate) fn build_lease_fence(
         ));
     }
     let lease_id = LeaseId::parse(&lease.lease_id).map_err(|e| FabricError::Validation {
-        reason: format!("suspend_by_triple: malformed lease_id {:?}: {e}", lease.lease_id),
+        reason: format!(
+            "suspend_by_triple: malformed lease_id {:?}: {e}",
+            lease.lease_id
+        ),
     })?;
-    let lease_epoch_u64: u64 =
-        lease.lease_epoch.parse().map_err(|e| FabricError::Validation {
+    let lease_epoch_u64: u64 = lease
+        .lease_epoch
+        .parse()
+        .map_err(|e| FabricError::Validation {
             reason: format!(
                 "suspend_by_triple: malformed lease_epoch {:?}: {e}",
                 lease.lease_epoch
@@ -513,7 +515,10 @@ mod tests {
     fn service_operator_pause_is_operator_only() {
         let args = build_suspend_args(SuspendCase::OperatorPause);
         assert_eq!(args.reason_code, SuspensionReasonCode::ManualPause);
-        assert!(matches!(args.resume_condition, ResumeCondition::OperatorOnly));
+        assert!(matches!(
+            args.resume_condition,
+            ResumeCondition::OperatorOnly
+        ));
         assert!(args.timeout_at.is_none(), "operator holds never expire");
         assert_eq!(args.requested_by, SuspensionRequester::Operator);
     }
@@ -537,7 +542,10 @@ mod tests {
         assert_eq!(args.reason_code, SuspensionReasonCode::WaitingForToolResult);
         let wp = bound_wp_key(&args);
         match &args.resume_condition {
-            ResumeCondition::Single { waitpoint_key, matcher } => {
+            ResumeCondition::Single {
+                waitpoint_key,
+                matcher,
+            } => {
                 assert_eq!(waitpoint_key, &wp);
                 match matcher {
                     SignalMatcher::ByName(name) => assert_eq!(name, "tool_result:inv_7"),
@@ -558,7 +566,10 @@ mod tests {
         assert_eq!(args.reason_code, SuspensionReasonCode::WaitingForSignal);
         let wp = bound_wp_key(&args);
         match &args.resume_condition {
-            ResumeCondition::Single { waitpoint_key, matcher } => {
+            ResumeCondition::Single {
+                waitpoint_key,
+                matcher,
+            } => {
                 assert_eq!(waitpoint_key, &wp);
                 assert!(matches!(matcher, SignalMatcher::ByName(n) if n == "my_signal"));
             }
@@ -576,9 +587,14 @@ mod tests {
         assert_eq!(args.reason_code, SuspensionReasonCode::PausedByPolicy);
         let wp = bound_wp_key(&args);
         match &args.resume_condition {
-            ResumeCondition::Single { waitpoint_key, matcher } => {
+            ResumeCondition::Single {
+                waitpoint_key,
+                matcher,
+            } => {
                 assert_eq!(waitpoint_key, &wp);
-                assert!(matches!(matcher, SignalMatcher::ByName(n) if n == "policy_resolved:budget"));
+                assert!(
+                    matches!(matcher, SignalMatcher::ByName(n) if n == "policy_resolved:budget")
+                );
             }
             other => panic!("expected Single, got {other:?}"),
         }
@@ -593,7 +609,10 @@ mod tests {
         assert_eq!(args.reason_code, SuspensionReasonCode::WaitingForApproval);
         let wp = bound_wp_key(&args);
         match &args.resume_condition {
-            ResumeCondition::Single { waitpoint_key, matcher } => {
+            ResumeCondition::Single {
+                waitpoint_key,
+                matcher,
+            } => {
                 assert_eq!(waitpoint_key, &wp);
                 assert!(matches!(matcher, SignalMatcher::Wildcard));
             }

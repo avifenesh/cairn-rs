@@ -167,12 +167,18 @@ impl Worker {
             if self.cancel.is_cancelled() {
                 break;
             }
-            let mut stream = match self.backend.subscribe_lease_history(cursor.clone(), &filter).await {
+            let mut stream = match self
+                .backend
+                .subscribe_lease_history(cursor.clone(), &filter)
+                .await
+            {
                 Ok(s) => {
                     reconnect_attempts = 0;
                     s
                 }
-                Err(EngineError::StreamDisconnected { cursor: resume_cursor }) => {
+                Err(EngineError::StreamDisconnected {
+                    cursor: resume_cursor,
+                }) => {
                     // Backend refused the initial subscribe — treat
                     // like a mid-stream disconnect: backoff and retry.
                     cursor = resume_cursor;
@@ -278,9 +284,8 @@ impl Worker {
                 if row.last_stream_id.is_empty() {
                     return Ok(None);
                 }
-                let bytes = base64_decode(&row.last_stream_id).map_err(|e| {
-                    format!("lease-history cursor base64 decode failed: {e}")
-                })?;
+                let bytes = base64_decode(&row.last_stream_id)
+                    .map_err(|e| format!("lease-history cursor base64 decode failed: {e}"))?;
                 Ok(Some(StreamCursor::new(bytes)))
             }
             Ok(None) => Ok(None),
@@ -392,10 +397,13 @@ impl Worker {
                     .unwrap_or(0),
             })
         } else {
-            snapshot.tags.get("cairn.run_id").map(|run_id| EntityContext::Run {
-                project,
-                run_id: RunId::new(run_id.clone()),
-            })
+            snapshot
+                .tags
+                .get("cairn.run_id")
+                .map(|run_id| EntityContext::Run {
+                    project,
+                    run_id: RunId::new(run_id.clone()),
+                })
         }
     }
 
@@ -450,9 +458,7 @@ impl Worker {
         else {
             return;
         };
-        let lease_owner = new_owner
-            .map(|w| w.as_str().to_owned())
-            .unwrap_or_default();
+        let lease_owner = new_owner.map(|w| w.as_str().to_owned()).unwrap_or_default();
         self.bridge
             .emit(BridgeEvent::TaskLeaseClaimed {
                 task_id,
@@ -508,8 +514,7 @@ fn now_ms() -> u64 {
 /// the crate graph lean. URL-safe avoids any collation-sensitive
 /// column treatment on future store backends.
 fn base64_encode(bytes: &[u8]) -> String {
-    const ALPHABET: &[u8; 64] =
-        b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+    const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
     let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
     let mut i = 0;
     while i + 3 <= bytes.len() {

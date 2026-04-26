@@ -194,10 +194,7 @@ async fn create_and_expire_task_lease(inst: &TestInstance) -> (SessionId, TaskId
         family: flowfabric::core::partition::PartitionFamily::Flow,
         index: 0,
     };
-    let partition_stream_key = format!(
-        "ff:part:{}:lease_history",
-        flow_partition_0.hash_tag()
-    );
+    let partition_stream_key = format!("ff:part:{}:lease_history", flow_partition_0.hash_tag());
     let _: ferriskey::Value = inst
         .fabric
         .runtime
@@ -433,8 +430,7 @@ async fn backfill_restores_visibility_for_pre_upgrade_execs() {
         family: flowfabric::core::partition::PartitionFamily::Flow,
         index: 0,
     };
-    let partition_stream_key =
-        format!("ff:part:{}:lease_history", flow_partition_0.hash_tag());
+    let partition_stream_key = format!("ff:part:{}:lease_history", flow_partition_0.hash_tag());
     let _: ferriskey::Value = inst
         .fabric
         .runtime

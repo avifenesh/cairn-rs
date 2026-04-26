@@ -157,10 +157,7 @@ async fn subscriber_emits_retryable_failed_on_lease_expiry() {
         family: flowfabric::core::partition::PartitionFamily::Flow,
         index: 0,
     };
-    let partition_stream_key = format!(
-        "ff:part:{}:lease_history",
-        flow_partition_0.hash_tag()
-    );
+    let partition_stream_key = format!("ff:part:{}:lease_history", flow_partition_0.hash_tag());
     let _: ferriskey::Value = subscriber_fabric
         .runtime
         .client

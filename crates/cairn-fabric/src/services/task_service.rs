@@ -1045,4 +1045,3 @@ impl FabricTaskService {
         self.read_task_record(project, session_id, task_id).await
     }
 }
-
