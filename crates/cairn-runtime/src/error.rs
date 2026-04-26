@@ -256,7 +256,10 @@ mod tests {
             to: "completed".to_owned(),
         };
         let msg = err.to_string();
-        assert_eq!(msg, "invalid task transition: totally_novel_code -> completed");
+        assert_eq!(
+            msg,
+            "invalid task transition: totally_novel_code -> completed"
+        );
     }
 
     #[test]
