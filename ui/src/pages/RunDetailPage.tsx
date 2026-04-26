@@ -131,7 +131,12 @@ function orchSummary(type: string, p: Record<string, unknown>): string {
     }
     case "orchestrate_finished": {
       const term = typeof p.termination === "string" ? p.termination : "unknown";
-      const summary = typeof p.summary === "string" ? ` — ${p.summary.slice(0, 60)}` : "";
+      // Wire field is `detail` (see OrchestratorEvent::Finished); the older
+      // `summary` key is kept as a fallback for any replayed legacy payloads.
+      const raw = typeof p.detail === "string"
+        ? p.detail
+        : typeof p.summary === "string" ? p.summary : "";
+      const summary = raw ? ` — ${raw.slice(0, 60)}` : "";
       return `${term}${summary}`;
     }
     case "operator_notification": {
@@ -1304,6 +1309,12 @@ export function RunDetailPage({ runId, onBack }: RunDetailPageProps) {
   // appears the moment the run terminates, without requiring a refetch.
   const { events: streamEvents } = useEventStream();
   const [liveCompletion, setLiveCompletion] = useState<RunCompletion | null>(null);
+  // Reset the live-SSE fallback whenever the user navigates to a different
+  // run; otherwise the previous run's completion would leak into the new
+  // detail page until its own orchestrate_finished frame arrived.
+  useEffect(() => {
+    setLiveCompletion(null);
+  }, [runId]);
   useEffect(() => {
     for (const ev of streamEvents) {
       if (ev.type !== "orchestrate_finished") continue;
