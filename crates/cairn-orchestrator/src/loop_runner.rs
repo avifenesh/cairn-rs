@@ -616,6 +616,14 @@ where
         // subsequent iterations re-list the same projection row.
         let mut drained_call_ids: std::collections::HashSet<String> =
             std::collections::HashSet::new();
+        // F47 PR1 accumulator: every `ActionResult` observed across this
+        // invocation's iterations, used at Done to distil a
+        // `CompletionVerification` sidecar (warnings/errors/commands). The
+        // extractor filters to `InvokeTool` results internally; we capture
+        // everything so it can evolve independently. Bounded implicitly by
+        // `max_iterations`; each iteration contributes at most a handful
+        // of results so this never exceeds a few KB per run.
+        let mut all_tool_results: Vec<crate::context::ActionResult> = Vec::new();
 
         tracing::info!(
             run_id    = %ctx.run_id,
@@ -1013,6 +1021,9 @@ where
                     e
                 })?;
 
+                // F47 PR1: accumulate results for Done-time verification.
+                all_tool_results.extend(execute_outcome.results.iter().cloned());
+
                 // T5-M8: mirror the main-path post-execute bookkeeping so
                 // resuming from a checkpointed approval-suspended run sees a
                 // step_summary, a persisted checkpoint, and a step_completed
@@ -1133,7 +1144,17 @@ where
                             .find(|p| p.action_type == cairn_domain::ActionType::CompleteRun)
                             .map(|p| p.description.clone())
                             .unwrap_or_else(|| "run completed".to_owned());
-                        return Ok(LoopTermination::Completed { summary });
+                        // F47 PR1: distil evidence from every tool_result
+                        // observed so far on this run. The extractor is
+                        // pure; no IO happens on this path.
+                        let verification =
+                            crate::completion_verification::extract_verification(
+                                &all_tool_results,
+                            );
+                        return Ok(LoopTermination::Completed {
+                            summary,
+                            verification,
+                        });
                     }
                     LoopSignal::Failed { reason } => {
                         return Ok(LoopTermination::Failed { reason });
@@ -1213,6 +1234,9 @@ where
                 tracing::error!(run_id = %ctx.run_id, iteration = ctx.iteration, error = %e, "execute failed");
                 e
             })?;
+
+            // F47 PR1: accumulate results for Done-time verification.
+            all_tool_results.extend(execute_outcome.results.iter().cloned());
 
             let succeeded_count = execute_outcome
                 .results
@@ -1407,14 +1431,26 @@ where
                         .find(|p| p.action_type == cairn_domain::ActionType::CompleteRun)
                         .map(|p| p.description.clone())
                         .unwrap_or_else(|| "run completed".to_owned());
+                    // F47 PR1: verification sidecar over all accumulated
+                    // tool_results. See extractor rustdoc for semantics.
+                    let verification =
+                        crate::completion_verification::extract_verification(
+                            &all_tool_results,
+                        );
 
                     tracing::info!(
-                        run_id    = %ctx.run_id,
-                        iteration = ctx.iteration,
-                        summary   = %summary,
+                        run_id        = %ctx.run_id,
+                        iteration     = ctx.iteration,
+                        summary       = %summary,
+                        warnings      = verification.warnings.len(),
+                        errors        = verification.errors.len(),
+                        scanned       = verification.tool_results_scanned,
                         "orchestrator loop completed"
                     );
-                    return Ok(LoopTermination::Completed { summary });
+                    return Ok(LoopTermination::Completed {
+                        summary,
+                        verification,
+                    });
                 }
 
                 LoopSignal::Failed { reason } => {

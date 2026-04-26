@@ -2734,7 +2734,15 @@ pub(crate) async fn orchestrate_run_handler(
         .run(ctx)
         .await
     {
-        Ok(LoopTermination::Completed { summary }) => (
+        Ok(LoopTermination::Completed {
+            summary,
+            // F47 PR1: the HTTP orchestrate response intentionally does
+            // NOT surface `verification` yet — PR2 adds the REST surface
+            // (event + projection + GET endpoint). Operators see the
+            // evidence via the SSE `orchestrate_finished` event emitted
+            // in `sse_hooks::on_finished`.
+            verification: _,
+        }) => (
             StatusCode::OK,
             Json(serde_json::json!({
                 "termination": "completed", "summary": summary, "model_id": model_id,

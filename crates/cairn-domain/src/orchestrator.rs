@@ -3,6 +3,11 @@
 //! The orchestrator's DECIDE phase calls the LLM with a `ContextBundle` and
 //! receives an `ActionProposal` back.  This module defines the proposal shape
 //! and the exhaustive set of action types the orchestrator can execute.
+//!
+//! Also houses [`CompletionVerification`] (F47): an extractor-produced sidecar
+//! that scans tool_result frames at Done and surfaces warning/error lines and
+//! per-command exit codes so operators have an independent signal alongside
+//! the LLM's free-text `complete_run` summary.
 
 use serde::{Deserialize, Serialize};
 
@@ -119,6 +124,69 @@ impl PartialEq for ActionProposal {
 }
 
 impl Eq for ActionProposal {}
+
+// ── CompletionVerification (F47 PR1) ──────────────────────────────────────────
+
+/// Independent evidence distilled from tool_result frames at run Done.
+///
+/// F47 motivation: during dogfood M1 (2026-04-26) an LLM produced a Rust crate
+/// that emitted `warning: unused imports: …` in a stored bash tool_result, then
+/// claimed `cargo check must pass with no warnings` in its `complete_run`
+/// summary. Operators had no independent signal that the summary lied. This
+/// type is extracted by a pure scanner over tool_result frames and attached to
+/// `LoopTermination::Completed` so SSE watchers see the evidence alongside the
+/// free-text summary.
+///
+/// Intentionally non-authoritative: the extractor reports what the tool
+/// outputs say, not whether the run "succeeded." The orchestrator's loop
+/// signal is still the source of truth for run state.
+///
+/// `extractor_version` identifies the scanner logic that produced the bucket.
+/// Bump when the regex-set or truncation policy changes so downstream consumers
+/// can distinguish shapes across cairn versions.
+///
+/// PR1 (this change) makes this sidecar visible on the SSE `finished` event.
+/// PR2 adds persistence + REST. PR3 adds UI rendering.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CompletionVerification {
+    /// Tool-output lines matched by the warning signal (e.g. Rust
+    /// `warning: …`, `WARN:`). Full matched line, truncated to 500 chars,
+    /// capped at 50 entries.
+    #[serde(default)]
+    pub warnings: Vec<String>,
+    /// Tool-output lines matched by the error signal (e.g. Rust
+    /// `error[E0308]: …`, `error: …`). Same truncation / cap rules.
+    #[serde(default)]
+    pub errors: Vec<String>,
+    /// Per-bash-class-tool outcome: the command that ran and its exit code
+    /// if the tool_result carried one. `exit_code: None` means the frame
+    /// did not structurally expose an exit code; do not infer.
+    #[serde(default)]
+    pub commands: Vec<CommandOutcome>,
+    /// How many tool_result frames the extractor scanned to produce this
+    /// summary. `0` means "Done reached with no recorded tool_results" —
+    /// distinct from "scanned frames but found nothing."
+    pub tool_results_scanned: usize,
+    /// Version of the extractor logic. Bump when the bucket shape or
+    /// scanning policy changes. v1 = F47 PR1.
+    pub extractor_version: u32,
+}
+
+/// One bash-class tool invocation's command and exit code, as observed in a
+/// tool_result frame. For non-bash tools, `cmd` carries a short descriptor
+/// (e.g. the tool name itself) and `exit_code` is `None`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CommandOutcome {
+    /// Tool name from the proposal (e.g. `"bash"`, `"shell_exec"`).
+    pub tool_name: String,
+    /// For bash-class tools: the `command` arg. For other tools: a short
+    /// descriptor. Truncated to 500 chars.
+    pub cmd: String,
+    /// Exit code surfaced by the tool_result, if the structured payload
+    /// carried one. `None` = not present in the frame; callers MUST NOT
+    /// fabricate (e.g. do not default to `0` on success).
+    pub exit_code: Option<i32>,
+}
 
 #[cfg(test)]
 mod tests {

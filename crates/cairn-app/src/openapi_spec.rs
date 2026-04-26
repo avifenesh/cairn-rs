@@ -75,6 +75,46 @@ pub const OPENAPI_JSON: &str = r##"{
           "updated_at":    { "type": "integer" }
         }
       },
+      "CommandOutcome": {
+        "type": "object",
+        "description": "F47: one bash-class tool invocation distilled from a tool_result frame. `exit_code` is only present when the tool_result structurally carried one; the extractor never fabricates exit codes.",
+        "properties": {
+          "tool_name": { "type": "string", "description": "Tool name from the proposal (e.g. `bash`, `shell_exec`)." },
+          "cmd":       { "type": "string", "description": "For bash-class tools, the `command` argument. Truncated to 500 chars." },
+          "exit_code": { "type": "integer", "nullable": true, "description": "Exit code surfaced by the tool_result, if present. `null` means not structurally exposed — do not infer success." }
+        },
+        "required": ["tool_name", "cmd"]
+      },
+      "CompletionVerification": {
+        "type": "object",
+        "description": "F47 PR1 sidecar attached to the `orchestrate_finished` SSE event on `termination=completed` runs. Warning / error lines extracted from tool_result text give operators an independent signal alongside the LLM's free-text `summary`. Non-authoritative: the extractor reports what tool outputs say, not whether the run succeeded.",
+        "properties": {
+          "warnings": {
+            "type": "array",
+            "description": "Tool-output lines matched by the warning signal (e.g. `warning: unused import`). Full matched line, truncated to 500 chars. Capped at 50 entries.",
+            "items": { "type": "string" }
+          },
+          "errors": {
+            "type": "array",
+            "description": "Tool-output lines matched by the error signal (e.g. `error[E0308]:`, `error:`). Same truncation / cap rules as warnings.",
+            "items": { "type": "string" }
+          },
+          "commands": {
+            "type": "array",
+            "description": "Per-bash-class-tool invocations: command text and (optional) exit code.",
+            "items": { "$ref": "#/components/schemas/CommandOutcome" }
+          },
+          "tool_results_scanned": {
+            "type": "integer",
+            "description": "How many InvokeTool results were scanned to produce this summary. `0` means Done reached with no recorded tool calls."
+          },
+          "extractor_version": {
+            "type": "integer",
+            "description": "Version of the extractor logic (1 = F47 PR1). Bumped when the matching or truncation policy changes."
+          }
+        },
+        "required": ["warnings", "errors", "commands", "tool_results_scanned", "extractor_version"]
+      },
       "TaskRecord": {
         "type": "object",
         "properties": {

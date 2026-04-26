@@ -1748,3 +1748,77 @@ export interface WorkspaceCostSummary {
   updated_at_ms: number;
 }
 
+
+// ── F47 PR1: CompletionVerification ────────────────────────────────────────
+// Sidecar attached to the `orchestrate_finished` SSE event (and to the
+// persisted run record in PR2) carrying extractor-produced evidence from
+// tool_results observed during the run. Operators cross-check this against
+// the LLM's free-text `summary` so a claim like "cargo check passed" does
+// not silently override a real `warning: unused imports` line in a bash
+// tool_result.
+//
+// Non-authoritative — the extractor reports what tool_outputs contain, not
+// whether the run "succeeded." The orchestrator's termination signal remains
+// the source of truth for run state.
+//
+// PR3 will render this in the run detail view. PR1 keeps the types here so
+// downstream consumers (dashboards, CLI tooling) can consume the SSE event
+// without bespoke inference.
+
+export interface CommandOutcome {
+  /** Tool name from the proposal (e.g. "bash", "shell_exec"). */
+  tool_name: string;
+  /** For bash-class tools, the `command` arg. Truncated to 500 chars. */
+  cmd: string;
+  /**
+   * Exit code surfaced by the tool_result, if present. `null` means not
+   * structurally exposed — do NOT infer success from a missing code.
+   */
+  exit_code: number | null;
+}
+
+export interface CompletionVerification {
+  /**
+   * Tool-output lines matched by the warning signal. Full matched line,
+   * truncated to 500 chars. Capped at 50 entries.
+   */
+  warnings: string[];
+  /**
+   * Tool-output lines matched by the error signal. Same truncation / cap
+   * rules as warnings.
+   */
+  errors: string[];
+  /** Per-bash-class-tool invocations: command text and optional exit code. */
+  commands: CommandOutcome[];
+  /**
+   * How many InvokeTool results were scanned. `0` means Done reached with no
+   * recorded tool calls — distinct from "scanned but found nothing."
+   */
+  tool_results_scanned: number;
+  /**
+   * Version of the extractor logic (1 = F47 PR1). Bumped when matching or
+   * truncation policy changes so consumers can detect shape drift.
+   */
+  extractor_version: number;
+}
+
+/**
+ * F47 PR1: shape of the `orchestrate_finished` SSE frame's data payload
+ * when `termination === "completed"`. Other terminations omit
+ * `completion_verification`. Matches the serde-rename on
+ * `OrchestratorEvent::Finished` in cairn-orchestrator.
+ */
+export interface OrchestrateFinishedPayload {
+  event: "orchestrate_finished";
+  run_id: string;
+  termination:
+    | "completed"
+    | "failed"
+    | "max_iterations_reached"
+    | "timed_out"
+    | "waiting_approval"
+    | "waiting_subagent"
+    | "plan_proposed";
+  detail: string | null;
+  completion_verification?: CompletionVerification;
+}

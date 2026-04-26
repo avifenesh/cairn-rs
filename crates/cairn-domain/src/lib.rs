@@ -67,7 +67,7 @@ pub use lifecycle::*;
 pub use notification_prefs::*;
 pub use observability::LlmCallTrace;
 pub use onboarding::*;
-pub use orchestrator::{ActionProposal, ActionType};
+pub use orchestrator::{ActionProposal, ActionType, CommandOutcome, CompletionVerification};
 pub use org::*;
 pub use policy::*;
 pub use prompts::*;
