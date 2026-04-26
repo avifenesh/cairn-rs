@@ -1251,6 +1251,28 @@ impl ToolCallApprovalReadModel for SqliteAdapter {
             .map(SqliteToolCallApprovalRow::into_record)
             .collect()
     }
+
+    async fn list_all_pending(
+        &self,
+        limit: usize,
+        offset: usize,
+    ) -> Result<Vec<ToolCallApprovalRecord>, StoreError> {
+        let sql = format!(
+            "{SQLITE_TOOL_CALL_APPROVAL_SELECT} \
+             WHERE state = 'pending' \
+             ORDER BY proposed_at_ms ASC, call_id ASC \
+             LIMIT ? OFFSET ?"
+        );
+        let rows = sqlx::query_as::<_, SqliteToolCallApprovalRow>(&sql)
+            .bind(limit as i64)
+            .bind(offset as i64)
+            .fetch_all(&self.pool)
+            .await
+            .map_err(|e| StoreError::Internal(e.to_string()))?;
+        rows.into_iter()
+            .map(SqliteToolCallApprovalRow::into_record)
+            .collect()
+    }
 }
 
 #[cfg(test)]
