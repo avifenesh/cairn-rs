@@ -128,11 +128,9 @@ impl FabricRunService {
                 lane_id,
                 attempt_index,
                 lease_id: l.lease_id.to_string(),
-                lease_epoch: l.epoch.0.to_string(),
+                lease_epoch: l.lease_epoch.0.to_string(),
                 attempt_id: att.id.to_string(),
-                worker_instance_id: flowfabric::core::types::WorkerInstanceId::new(
-                    l.owner.as_str(),
-                ),
+                worker_instance_id: l.worker_instance_id.clone(),
                 source: String::new(),
             },
             // No lease, or lease without a current attempt — use the
@@ -498,6 +496,9 @@ impl FabricRunService {
         } else {
             "all"
         };
+        // TODO(ff-upstream: https://github.com/avifenesh/FlowFabric/issues/322)
+        // Service-layer suspend via Lua-glue; migrates to typed
+        // `suspend_by_triple` in CG-c once FF#322 lands.
         let suspend_input = build_suspend_input(eid, lease, &params, match_mode);
 
         self.control_plane
@@ -600,6 +601,10 @@ impl FabricRunService {
         // Approval waitpoints listen for EITHER approval_granted or
         // approval_rejected — `match_mode=any`. (Pre-migration this
         // was hardcoded inside `enter_waiting_approval`.)
+        //
+        // TODO(ff-upstream: https://github.com/avifenesh/FlowFabric/issues/322)
+        // Service-layer suspend via Lua-glue; migrates to typed
+        // `suspend_by_triple` in CG-c once FF#322 lands.
         let suspend_input = build_suspend_input(eid, lease, &params, "any");
         self.control_plane
             .suspend_run_execution(suspend_input)
@@ -733,6 +738,13 @@ fn ff_public_state_to_run_state(snapshot: &ExecutionSnapshot) -> RunState {
 /// helper without threading `match_mode` would silently convert the
 /// approval case to AND and leak it as the suspended-after-resume
 /// regression caught by `test_signal_delivery_resumes_waiter`.
+///
+/// TODO(ff-upstream: <https://github.com/avifenesh/FlowFabric/issues/322>):
+/// This helper exists because `EngineBackend::suspend_by_triple` has
+/// not yet landed in FF. All service-layer suspend callers hold a
+/// `LeaseFencingTriple` (not a `Handle`), so we cannot use the typed
+/// `task.suspend(&Handle, SuspendArgs)` path that worker_sdk uses. CG-c
+/// migrates this and all call sites once FF#322 publishes.
 fn build_suspend_input(
     eid: ExecutionId,
     lease: ExecutionLeaseContext,

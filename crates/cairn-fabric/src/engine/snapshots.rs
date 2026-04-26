@@ -1,12 +1,10 @@
 //! Typed snapshot shapes for cairn-side reads of FF state.
 //!
 //! These types are the contract between services and the [`Engine`]
-//! trait. They intentionally mirror the primitives proposed upstream
-//! in [FlowFabric#58](https://github.com/avifenesh/FlowFabric/issues/58)
-//! so that when FF 0.3 ships `describe_execution` / `describe_flow` /
-//! `describe_edge`, the cairn-side `valkey_impl` becomes a thin
-//! passthrough and these types are replaced by re-exports from the
-//! `ff` umbrella crate.
+//! trait. They re-export upstream FF primitives where those primitives
+//! fully cover cairn's needs (FF 0.9 ships `LeaseSummary` with all
+//! fields cairn needs — FF#278) and keep local shapes only where
+//! cairn surfaces additional fields or different encodings.
 //!
 //! # Design notes
 //!
@@ -17,15 +15,16 @@
 //!   translation to cairn state variants.
 //! - **`tags` is a `BTreeMap<String, String>`** (not `HashMap`) for
 //!   stable iteration order in logs and deterministic serialisation.
-//! - **`LeaseSummary` carries `lease_id`, `epoch`, `attempt_index`**
-//!   in addition to `owner`/`expires_at` because release/heartbeat
-//!   FCALL paths feed these back in as ARGV (until FF 0.4 drops the
-//!   requirement).
+//! - **`LeaseSummary` is re-exported from `flowfabric::core::contracts`**
+//!   (FF 0.9, FF#278). Fields: `lease_epoch`, `worker_instance_id`,
+//!   `expires_at`, `lease_id`, `attempt_index`, `last_heartbeat_at`.
+//!   Cairn's local 5-field wrapper was deleted in CG-b.
 
 use std::collections::BTreeMap;
 
+pub use flowfabric::core::contracts::LeaseSummary;
 use flowfabric::core::types::{
-    AttemptId, AttemptIndex, EdgeId, ExecutionId, FlowId, LaneId, LeaseEpoch, LeaseId, Namespace,
+    AttemptId, AttemptIndex, EdgeId, ExecutionId, FlowId, LaneId, LeaseEpoch, Namespace,
     TimestampMs, WaitpointId,
 };
 
@@ -75,24 +74,6 @@ pub struct ExecutionSnapshot {
 pub struct AttemptSummary {
     pub id: AttemptId,
     pub index: AttemptIndex,
-}
-
-/// Snapshot of the active lease on an execution. `None` on
-/// [`ExecutionSnapshot::current_lease`] means no active lease.
-///
-/// Carries more than just `owner` + `expires_at` because release /
-/// heartbeat / complete FCALL paths take `lease_id`, `epoch`, and
-/// `attempt_index` as ARGV today — cairn has to feed those values
-/// back to FF. When FF 0.4 drops those ARGV requirements
-/// (FlowFabric#58), `lease_id` + `attempt_index` become optional
-/// fields here.
-#[derive(Clone, Debug)]
-pub struct LeaseSummary {
-    pub lease_id: LeaseId,
-    pub epoch: LeaseEpoch,
-    pub attempt_index: AttemptIndex,
-    pub owner: String,
-    pub expires_at: TimestampMs,
 }
 
 /// Snapshot of a flow (cairn session).

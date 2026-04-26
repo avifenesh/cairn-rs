@@ -1,9 +1,29 @@
 # FlowFabric 0.3.4 → 0.9.0 Migration Plan
 
-Status: **Active — FF 0.9.0 published 2026-04-25. CG in flight.**
+Status: **Active — FF 0.9.0 published 2026-04-25. CG-a + CG-b shipped; CG-c gated on 3 new FF upstream asks.**
 Last updated: 2026-04-25
 Author: planning aggregated from 4 research agents (breaking changes, PG backend, boot path, encapsulation)
 Related: FF#277–#283 (cairn-first upstream asks — all CLOSED in FF 0.9.0)
+
+## Status post-CG-a/CG-b (2026-04-25)
+
+**CG-a shipped** (#302, merged at `e4ad014d`):
+- FF 0.9.0 bump across all 7 cairn crates via the `flowfabric` umbrella
+- `prepare()` trait adopted in `boot.rs` (replaces the ensure_library retry loop)
+- `seed_waitpoint_hmac_secret` trait adopted in `boot.rs` (replaces raw HSET)
+- FF#277 capability discovery wired
+
+**CG-b shipped** (this PR):
+- `cg_a_suspend` transitional bridge deleted; worker_sdk's `suspend_for_approval` / `suspend_for_subagent` / `suspend_for_tool_result` now call 4-tuple typed helpers (`suspension::typed_*`) that feed directly into `ClaimedTask::suspend(reason, cond, timeout, policy)`
+- Cairn's local 5-field `LeaseSummary` deleted; `engine::snapshots` re-exports `flowfabric::core::contracts::LeaseSummary` (6 fields — FF#278). Field renames `.owner` → `.worker_instance_id`, `.epoch` → `.lease_epoch` propagated through `run_service` / `task_service` / integration tests
+- Service-layer suspend paths (`run_service::pause`, `run_service::enter_waiting_approval`, `task_service::pause`) kept on the legacy Lua-glue `build_suspend_input` path with TODO(ff-upstream) annotations pointing at FF#322 — they cannot migrate without `EngineBackend::suspend_by_triple` because their callers hold `LeaseFencingTriple`, not `Handle`
+- Codec v1 → v2 compat test shell added (`#[ignore]`) pointing at FF#323 for the `v1_handle_for_tests` fixture
+- `lease_history_subscriber` TODO annotation added pointing at FF#324 for Stage B stream_subscribe helpers
+
+**CG-c (deferred, gated on 3 new FF upstream asks)**:
+- [FF#322](https://github.com/avifenesh/FlowFabric/issues/322) — `EngineBackend::suspend_by_triple` typed trait method; unblocks migration of the 3 service-layer suspend call sites and deletion of the `SuspensionParams` / `ConditionMatcher` / `build_suspend_input` legacy surface
+- [FF#323](https://github.com/avifenesh/FlowFabric/issues/323) — `handle_codec::v1_handle_for_tests` fixture; unblocks fleshing out the codec compat test (drops `#[ignore]`)
+- [FF#324](https://github.com/avifenesh/FlowFabric/issues/324) — `subscribe_lease_history` Stage B (typed `decode_lease_history` helper + optional tag filter arg); unblocks migrating `lease_history_subscriber` off raw ferriskey XREAD and dropping the ferriskey direct dep
 
 ## 0.9.0 addendum (2026-04-25)
 

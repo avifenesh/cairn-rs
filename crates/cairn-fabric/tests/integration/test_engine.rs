@@ -292,9 +292,12 @@ async fn describe_execution_after_claim_surfaces_lease_summary() {
         .expect("snapshot present");
 
     let lease = snap.current_lease.expect("claimed execution has a lease");
-    assert!(lease.epoch.0 >= 1, "epoch monotonic ≥ 1 after claim");
+    assert!(lease.lease_epoch.0 >= 1, "epoch monotonic ≥ 1 after claim");
     assert!(lease.expires_at.0 > 0, "expires_at populated after claim");
-    assert!(!lease.owner.is_empty(), "owner populated");
+    assert!(
+        !lease.worker_instance_id.as_str().is_empty(),
+        "worker_instance_id populated"
+    );
     // Sanity: clean up so the shared Valkey doesn't keep the leased
     // state around (other tests see it via different ProjectKeys so
     // no contamination, but the fail path clears it anyway).
