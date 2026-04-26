@@ -572,6 +572,26 @@ impl RunService for FabricRunServiceAdapter {
             .map_err(fabric_err_to_runtime)
     }
 
+    async fn ensure_active(
+        &self,
+        session_id: &SessionId,
+        run_id: &RunId,
+    ) -> Result<RunRecord, RuntimeError> {
+        // F41: idempotent on-ramp used by `POST /v1/runs/:id/orchestrate`.
+        // The FabricRunService-side check inspects the FF snapshot once
+        // and either short-circuits (already active) or walks the normal
+        // grant-and-claim sequence (runnable). Either way, the caller
+        // gets a run that is guaranteed to accept terminal FCALLs
+        // (`ff_complete_execution`, `ff_fail_execution`,
+        // `ff_cancel_execution`).
+        let project = resolve_run_project_checking_session(&self.store, run_id, session_id).await?;
+        self.fabric
+            .runs
+            .ensure_active(&project, session_id, run_id)
+            .await
+            .map_err(fabric_err_to_runtime)
+    }
+
     async fn enter_waiting_approval(
         &self,
         session_id: &SessionId,
