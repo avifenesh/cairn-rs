@@ -121,7 +121,7 @@ prost = { version = "0.14", optional = true }
 # Used by the RFC-011 debug endpoint to compute partition placement.
 # Must track cairn-fabric's flowfabric version so debug.rs's types match
 # FabricServices.runtime.partition_config.
-flowfabric = { version = "0.9", optional = true }
+flowfabric = { version = "0.10", optional = true }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "process", "io-util"] }

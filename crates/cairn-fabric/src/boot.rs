@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use ferriskey::Client;
 use flowfabric::core::backend::{ScannerFilter, ValkeyConnection};
-use flowfabric::core::capability::CapabilityMatrix;
+use flowfabric::core::capability::Capabilities;
 use flowfabric::core::completion_backend::CompletionBackend;
 use flowfabric::core::contracts::SeedWaitpointHmacSecretArgs;
 use flowfabric::core::engine_backend::EngineBackend;
@@ -26,12 +26,13 @@ pub struct FabricRuntime {
     /// lets cairn-app append FF's Prometheus text to its `/metrics`
     /// response without threading a second handle through startup.
     pub ff_metrics: Arc<ff_observability::Metrics>,
-    /// FF 0.9 (FF#277) capability matrix snapshot, computed once at
+    /// FF 0.10 (FF#277) flat capabilities struct, computed once at
     /// boot and cached. Consumers inspect this to grey-render features
     /// a backend does not support without round-tripping into Valkey.
     /// CG-a wires the startup call + getter; CJ-2 consumes it from the
-    /// UI greyrender.
-    pub capabilities: CapabilityMatrix,
+    /// UI greyrender. CG-c migrated the BTreeMap to the flat `Supports`
+    /// struct per the v0.9→v0.10 consumer migration guide.
+    pub capabilities: Capabilities,
     /// Typed handle to the backend. Held for the post-boot surface
     /// (`restore_frames` stream reads, etc.) that now takes
     /// `&dyn EngineBackend`. Kept alongside the raw `client` for CG-a
@@ -197,11 +198,11 @@ impl FabricRuntime {
             .map_err(|e| FabricError::Engine(Box::new(e)))?;
         tracing::info!(kid = %kid, outcome = ?seed_outcome, "waitpoint HMAC secret seeded (FF#280)");
 
-        // FF 0.9 (FF#277): snapshot the backend's capability matrix
-        // once at boot so consumers (cairn-app `/v1/status`, UI
-        // grey-rendering) can reason about backend-parity gaps without
+        // FF 0.10 (FF#277 flat reshape): snapshot the backend's
+        // capabilities once at boot so consumers (cairn-app `/v1/status`,
+        // UI grey-rendering) can reason about backend-parity gaps without
         // per-request RTT. CJ-2 consumes this via AppState.
-        let capabilities = backend.capabilities_matrix();
+        let capabilities = backend.capabilities();
         tracing::info!(
             backend = %capabilities.identity.family,
             version = ?capabilities.identity.version,
@@ -266,7 +267,7 @@ impl FabricRuntime {
 
     /// Expose the cached capability matrix. Stable snapshot captured at
     /// boot; callers MUST treat it as read-only (FF#277).
-    pub fn capabilities(&self) -> &CapabilityMatrix {
+    pub fn capabilities(&self) -> &Capabilities {
         &self.capabilities
     }
 
