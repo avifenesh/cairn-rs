@@ -258,6 +258,14 @@ async fn deprecated_list_redirects_to_unified_path() {
     assert!(loc.starts_with("/v1/approvals?"), "redirect target: {loc}");
     assert!(loc.contains("run_id=run_abc"), "query preserved: {loc}");
     assert!(loc.contains("state=pending"), "query preserved: {loc}");
+    // Legacy semantics: pre-F45 consumers expect tool-call-only rows.
+    // The redirect MUST splice `kind=tool_call` onto the target so a
+    // redirect-following client doesn't suddenly receive mixed
+    // plan+tool_call rows it can't decode.
+    assert!(
+        loc.contains("kind=tool_call"),
+        "redirect must force kind=tool_call: {loc}",
+    );
     // RFC 8594 deprecation signal + RFC 8288 successor link.
     let dep = headers
         .get("deprecation")
@@ -346,4 +354,33 @@ async fn deprecated_approve_redirects_with_308() {
         .to_str()
         .expect("utf-8");
     assert_eq!(target, "/v1/approvals/tc_xyz/approve");
+}
+
+#[tokio::test]
+async fn deprecated_list_drops_inbound_kind_and_forces_tool_call() {
+    // A pre-F45 client has no reason to send `kind=`, but a confused
+    // caller shouldn't be able to flip the redirect target to plan-only.
+    // We strip any inbound `kind` before splicing on `kind=tool_call`.
+    let (app, state) = support::build_test_router_fake_fabric(BootstrapConfig::default()).await;
+    register_principal(&state);
+
+    let (status, _body, headers) = call(
+        app,
+        "GET",
+        "/v1/tool-call-approvals?kind=plan&run_id=run_drop",
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::PERMANENT_REDIRECT);
+    let loc = headers
+        .get(header::LOCATION)
+        .expect("Location")
+        .to_str()
+        .expect("utf-8");
+    assert!(loc.contains("kind=tool_call"), "forced: {loc}");
+    assert!(!loc.contains("kind=plan"), "stripped: {loc}");
+    assert!(
+        loc.contains("run_id=run_drop"),
+        "other params preserved: {loc}"
+    );
 }

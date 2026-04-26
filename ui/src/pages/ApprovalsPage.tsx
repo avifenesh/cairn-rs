@@ -633,7 +633,13 @@ export function ApprovalsPage() {
   const [kindFilter, setKindFilter] = useState<KindFilter>("all");
   const [stateFilter, setStateFilter] = useState<StateFilter>("all");
   const [search, setSearch] = useState("");
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  // Compound selection key: `{kind}:{id}`. Plain `id` collides across
+  // kinds — a plan approval and a tool-call approval can legitimately
+  // share an id (the amend flow historically uses the tool-call id as
+  // the approval id), and a bare-string lookup would open the wrong
+  // drawer and fire mutations at the wrong record.
+  const [selectedKey, setSelectedKey] = useState<string | null>(null);
+  const rowKey = (r: Row) => `${r.kind}:${r.id}`;
 
   // F45 — single unified source of truth. The server merges plan +
   // tool-call approvals and returns them newest-first with a `kind`
@@ -669,8 +675,10 @@ export function ApprovalsPage() {
   }, [rows, kindFilter, stateFilter, search]);
 
   const selected = useMemo(
-    () => filtered.find(r => r.id === selectedId) ?? rows.find(r => r.id === selectedId),
-    [filtered, rows, selectedId],
+    () =>
+      filtered.find(r => rowKey(r) === selectedKey) ??
+      rows.find(r => rowKey(r) === selectedKey),
+    [filtered, rows, selectedKey],
   );
 
   const pending24 = rows.filter(r => !r.resolved).length;
@@ -819,10 +827,10 @@ export function ApprovalsPage() {
           <div className="divide-y divide-gray-100 dark:divide-zinc-800/40">
             {filtered.map(r => (
               <RowItem
-                key={`${r.kind}:${r.id}`}
+                key={rowKey(r)}
                 row={r}
-                selected={selectedId === r.id}
-                onClick={() => setSelectedId(r.id)}
+                selected={selectedKey === rowKey(r)}
+                onClick={() => setSelectedKey(rowKey(r))}
               />
             ))}
           </div>
@@ -832,7 +840,7 @@ export function ApprovalsPage() {
       {/* Drawer */}
       <Drawer
         open={selected !== undefined}
-        onClose={() => setSelectedId(null)}
+        onClose={() => setSelectedKey(null)}
         title={
           selected?.kind === "tool"
             ? `Tool call · ${selected.tool}`
@@ -843,10 +851,10 @@ export function ApprovalsPage() {
         width="w-[420px]"
       >
         {selected?.kind === "legacy" && (
-          <LegacyDrawerBody approval={selected.source} onClose={() => setSelectedId(null)} />
+          <LegacyDrawerBody approval={selected.source} onClose={() => setSelectedKey(null)} />
         )}
         {selected?.kind === "tool" && (
-          <ToolCallDrawerBody record={selected.source} onClose={() => setSelectedId(null)} />
+          <ToolCallDrawerBody record={selected.source} onClose={() => setSelectedKey(null)} />
         )}
       </Drawer>
     </div>

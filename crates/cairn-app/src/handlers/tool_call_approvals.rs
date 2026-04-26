@@ -73,17 +73,29 @@ fn redirect_to(target: String) -> Response {
     resp
 }
 
-/// `GET /v1/tool-call-approvals` → `308 /v1/approvals`.
+/// `GET /v1/tool-call-approvals` → `308 /v1/approvals?kind=tool_call`.
 ///
-/// Query string is forwarded verbatim so the list filters
-/// (`run_id`, `session_id`, `state`, ...) keep working. Any caller that
-/// relies on tool-call-only results can opt in to `kind=tool_call`.
+/// Query string is forwarded so the list filters (`run_id`, `session_id`,
+/// `state`, ...) keep working. We force `kind=tool_call` on the redirect
+/// target so clients that followed the redirect still get a tool-call-only
+/// list — pre-F45 consumers don't know about the `kind` discriminator and
+/// expect homogeneous `ToolCallApprovalRecord` rows. Any inbound `kind` is
+/// dropped before we splice the canonical `kind=tool_call` on.
 pub(crate) async fn redirect_list(OriginalUri(uri): OriginalUri) -> impl IntoResponse {
-    let qs = uri.query().unwrap_or_default();
-    let target = if qs.is_empty() {
-        "/v1/approvals".to_owned()
+    let preserved: Vec<&str> = uri
+        .query()
+        .into_iter()
+        .flat_map(|q| q.split('&'))
+        .filter(|pair| !pair.is_empty())
+        .filter(|pair| {
+            let key = pair.split_once('=').map(|(k, _)| k).unwrap_or(pair);
+            key != "kind"
+        })
+        .collect();
+    let target = if preserved.is_empty() {
+        "/v1/approvals?kind=tool_call".to_owned()
     } else {
-        format!("/v1/approvals?{qs}")
+        format!("/v1/approvals?{}&kind=tool_call", preserved.join("&"))
     };
     redirect_to(target)
 }

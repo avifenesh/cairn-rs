@@ -844,12 +844,22 @@ export function createApiClient(config: ApiClientConfig) {
       return getList(`/v1/approvals${query}`);
     },
 
-    /** POST /v1/approvals/:id/resolve — approve or reject. */
-    resolveApproval: (
+    /** @deprecated F45 — use `approveApproval(id)` / `rejectApproval(id)`.
+     *  Kept as a thin wrapper so pre-F45 call sites compile. Delegates to
+     *  the unified approve/reject paths rather than hitting `/resolve`
+     *  directly — the `/resolve` handler is retained on the server for
+     *  legacy scripts, but every client path inside the UI now goes
+     *  through the unified surface. */
+    resolveApproval: async (
       approvalId: string,
-      decision: "approved" | "rejected"
-    ): Promise<ApprovalRecord> =>
-      post(`/v1/approvals/${approvalId}/resolve`, { decision }),
+      decision: "approved" | "rejected",
+    ): Promise<ApprovalRecord> => {
+      const unified =
+        decision === "approved"
+          ? await post<UnifiedApproval>(`/v1/approvals/${encodeURIComponent(approvalId)}/approve`, {})
+          : await post<UnifiedApproval>(`/v1/approvals/${encodeURIComponent(approvalId)}/reject`, {});
+      return unified as ApprovalRecord;
+    },
 
     // ── Unified approvals (F45) ──────────────────────────────────────────────
     //
