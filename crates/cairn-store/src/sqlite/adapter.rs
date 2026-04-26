@@ -1380,8 +1380,7 @@ mod tests {
         sqlx::query(
             "INSERT INTO runs (
                 run_id, session_id, parent_run_id, tenant_id, workspace_id, project_id,
-                state, failure_class, version, created_at, updated_at,
-                    completion_summary, completion_verification_json, completion_annotated_at_ms
+                state, failure_class, version, created_at, updated_at
              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind("run_1")
@@ -1503,8 +1502,7 @@ mod tests {
         sqlx::query(
             "INSERT INTO runs (
                 run_id, session_id, parent_run_id, tenant_id, workspace_id, project_id,
-                state, failure_class, version, created_at, updated_at,
-                    completion_summary, completion_verification_json, completion_annotated_at_ms
+                state, failure_class, version, created_at, updated_at
              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind("run_root")
@@ -1587,8 +1585,7 @@ mod tests {
         sqlx::query(
             "INSERT INTO runs (
                 run_id, session_id, parent_run_id, tenant_id, workspace_id, project_id,
-                state, failure_class, version, created_at, updated_at,
-                    completion_summary, completion_verification_json, completion_annotated_at_ms
+                state, failure_class, version, created_at, updated_at
              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind("run_root")
