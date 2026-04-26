@@ -42,8 +42,9 @@ use crate::sandbox::workspace_error_response;
 use crate::state::AppState;
 use crate::{
     append_run_intervention_event, current_event_head, event_message, event_type_name,
-    persist_run_mode_default, publish_runtime_frames_since, resolve_run_mode_default,
-    resolve_run_string_default, PaginationQuery, RunRecordView, DEFAULT_PROJECT_ID,
+    persist_run_mode_default, persist_run_string_default, publish_runtime_frames_since,
+    resolve_run_mode_default, resolve_run_string_default, PaginationQuery, RunRecordView,
+    DEFAULT_PROJECT_ID,
     DEFAULT_TENANT_ID, DEFAULT_WORKSPACE_ID,
 };
 #[allow(unused_imports)]
@@ -241,17 +242,35 @@ impl HasProjectScope for RunListQuery {
 }
 
 #[derive(Clone, Debug, serde::Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct CreateRunRequest {
     pub(crate) tenant_id: String,
     pub(crate) workspace_id: String,
     pub(crate) project_id: String,
     pub(crate) session_id: String,
     pub(crate) run_id: String,
+    #[serde(default)]
     pub(crate) parent_run_id: Option<String>,
     /// RFC 018: execution mode (direct/plan/execute).
     #[serde(default)]
     #[schema(value_type = Option<String>)]
     pub(crate) mode: Option<cairn_domain::decisions::RunMode>,
+    /// F42: operator-supplied natural-language objective for this run.
+    ///
+    /// When present, it is persisted as the run's "goal" default so the
+    /// orchestrator's decide phase ships it to the LLM as the user
+    /// message `## Goal` section. Without it, the orchestrator falls
+    /// back to the generic "Execute the run objective." placeholder —
+    /// which dogfood v8 proved is useless: the model has nothing to act
+    /// on and produces a meta-reply ("no specific objective was
+    /// provided").
+    ///
+    /// The field stays optional for back-compat with callers that still
+    /// pass the goal on `POST /v1/runs/:id/orchestrate` instead. When
+    /// both are supplied, the orchestrate-body goal wins (explicit
+    /// per-invocation override beats the run default).
+    #[serde(default)]
+    pub(crate) prompt: Option<String>,
 }
 
 impl CreateRunRequest {
@@ -556,6 +575,26 @@ pub(crate) async fn create_run_handler(
             if let Some(mode) = body.mode.as_ref() {
                 if let Err(err) =
                     persist_run_mode_default(state.as_ref(), &project, &run.run_id, mode).await
+                {
+                    return runtime_error_response(err);
+                }
+            }
+            // F42: persist the operator-supplied prompt as the run's
+            // "goal" default so `POST /v1/runs/:id/orchestrate` reads it
+            // back via `resolve_run_string_default(..., "goal")`. Empty
+            // strings are rejected up-front: an empty prompt is almost
+            // certainly a client bug, and routing "" through as the
+            // goal would silently reproduce the dogfood-v8 symptom
+            // (LLM sees no objective) rather than surface the mistake.
+            if let Some(prompt) = body.prompt.as_ref() {
+                if prompt.trim().is_empty() {
+                    return validation_error_response(
+                        "prompt: must be non-empty when present; omit the field to skip",
+                    );
+                }
+                if let Err(err) =
+                    persist_run_string_default(state.as_ref(), &project, &run.run_id, "goal", prompt)
+                        .await
                 {
                     return runtime_error_response(err);
                 }
@@ -3273,6 +3312,7 @@ mod tests {
             run_id: run.into(),
             parent_run_id: None,
             mode: None,
+            prompt: None,
         }
     }
 

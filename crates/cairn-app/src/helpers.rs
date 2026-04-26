@@ -207,6 +207,31 @@ pub(crate) async fn persist_run_mode_default(
         .map(|_| ())
 }
 
+/// F42: persist a run's per-run string default (e.g. "goal",
+/// "agent_role"). The sibling `resolve_run_string_default` reads these
+/// back during `POST /v1/runs/:id/orchestrate` so an operator-supplied
+/// `prompt` on run creation is routed into the orchestrator's
+/// `## Goal` user-message section.
+pub(crate) async fn persist_run_string_default(
+    state: &AppState,
+    project: &ProjectKey,
+    run_id: &RunId,
+    suffix: &str,
+    value: &str,
+) -> Result<(), cairn_runtime::RuntimeError> {
+    state
+        .runtime
+        .defaults
+        .set(
+            cairn_domain::tenancy::Scope::Project,
+            project.project_id.to_string(),
+            run_default_key(run_id, suffix),
+            serde_json::Value::String(value.to_owned()),
+        )
+        .await
+        .map(|_| ())
+}
+
 /// Resolve a task's session_id.
 ///
 /// Returns the `session_id` already persisted on the task record when present.
