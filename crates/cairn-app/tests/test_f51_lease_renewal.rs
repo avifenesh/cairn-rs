@@ -145,9 +145,15 @@ async fn spawn_mock() -> (String, Arc<AtomicUsize>) {
     });
 
     // Poll /v1/models for readiness to avoid flaky fixed sleeps.
+    // Per-request timeout is load-bearing: without it, a single hung
+    // `send()` (socket accept backlog on a loaded CI runner, etc.)
+    // would stall the loop past the 2s deadline check.
     let base_url = format!("http://{addr}");
     let ready_url = format!("{base_url}/v1/models");
-    let client = reqwest::Client::new();
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_millis(200))
+        .build()
+        .expect("reqwest client");
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
     loop {
         if let Ok(r) = client.get(&ready_url).send().await {

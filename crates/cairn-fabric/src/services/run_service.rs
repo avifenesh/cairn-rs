@@ -281,6 +281,29 @@ impl FabricRunService {
                     entity: "run",
                     id: run_id.to_string(),
                 })?;
+        self.claim_with_snapshot(project, session_id, run_id, eid, &snapshot)
+            .await
+    }
+
+    /// Internal helper for the shared claim path: given an already-read
+    /// snapshot + execution id, walk `issue_grant_and_claim` and
+    /// read the final `RunRecord`.
+    ///
+    /// Callers that just read the snapshot for another reason (e.g.
+    /// `renew_lease_if_stale`'s staleness check, or any future code
+    /// path that inspects lease/attempt state before deciding between
+    /// claim and renew) should route through this helper instead of
+    /// calling `claim` directly, which would re-issue
+    /// `describe_execution` and pay an extra FF round-trip on the
+    /// hot path.
+    async fn claim_with_snapshot(
+        &self,
+        project: &ProjectKey,
+        session_id: &SessionId,
+        run_id: &RunId,
+        eid: flowfabric::core::types::ExecutionId,
+        snapshot: &ExecutionSnapshot,
+    ) -> Result<RunRecord, FabricError> {
         let lane_id = if snapshot.lane_id.as_str().is_empty() {
             self.lane_id(project)
         } else {
@@ -446,9 +469,13 @@ impl FabricRunService {
         // No active lease: fall back to a full re-claim so the caller
         // can proceed with terminal FCALLs. This is the "inter-call
         // expiry" case that motivated F51 — FF's expiry scanner has
-        // already cleared `current_lease_id`.
+        // already cleared `current_lease_id`. Reuse the snapshot we
+        // just read rather than bouncing through `self.claim`, which
+        // would `describe_execution` again.
         let Some(lease) = snapshot.current_lease.as_ref() else {
-            return self.claim(project, session_id, run_id).await;
+            return self
+                .claim_with_snapshot(project, session_id, run_id, eid.clone(), &snapshot)
+                .await;
         };
 
         // Use the crate-local `now_ms` helper so clock-skew logging is
@@ -465,10 +492,11 @@ impl FabricRunService {
         // would reject with `lease_expired` (same reason a terminal
         // FCALL would), so we can't renew — but a fresh
         // `issue_grant_and_claim` is still legal and mints a new
-        // lease + epoch. Do that instead of letting the renewal call
-        // fail.
+        // lease + epoch. Reclaim from the snapshot we already have.
         if remaining_ms <= 0 {
-            return self.claim(project, session_id, run_id).await;
+            return self
+                .claim_with_snapshot(project, session_id, run_id, eid.clone(), &snapshot)
+                .await;
         }
 
         // Fresh enough: no-op. Back-to-back orchestrate calls (<1s)
