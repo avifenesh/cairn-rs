@@ -705,6 +705,23 @@ export interface ToolCallApprovalRecord {
   updated_at: number;
 }
 
+// ── Unified approval (F45) ───────────────────────────────────────────────────
+//
+// The server-side `/v1/approvals/*` family returns a discriminated union
+// keyed by `kind`. Plan approvals flatten `ApprovalRecord`; tool-call
+// approvals flatten `ToolCallApprovalRecord`. The UI treats both as one
+// inbox and narrows on `kind` when it needs a kind-specific action.
+
+/** A plan approval row returned by the unified surface. */
+export type UnifiedPlanApproval = ApprovalRecord & { kind: "plan" };
+
+/** A tool-call approval row returned by the unified surface. */
+export type UnifiedToolCallApproval = ToolCallApprovalRecord & { kind: "tool_call" };
+
+/** Discriminated union of both approval kinds — wire shape of
+ *  `GET /v1/approvals` and `GET /v1/approvals/:id`. */
+export type UnifiedApproval = UnifiedPlanApproval | UnifiedToolCallApproval;
+
 // ── Memory / Knowledge ───────────────────────────────────────────────────────
 
 /** One chunk returned by /v1/memory/search */

@@ -59,6 +59,7 @@ GET	/v1/admin/workspaces/:workspace_id/projects	preserve	-	-
 GET	/v1/agent-templates	preserve	-	-
 GET	/v1/approval-policies	preserve	-	{ items }
 GET	/v1/approvals	preserve	query: status?	{ items, hasMore }
+GET	/v1/approvals/:id	preserve	-	-
 GET	/v1/approvals/pending	preserve	-	-
 GET	/v1/assistant/sessions	preserve	-	{ items }
 GET	/v1/assistant/sessions/:sessionId	preserve	path param: sessionId	{ items } chat messages
@@ -151,13 +152,13 @@ GET	/v1/plugins/:id/tools	preserve	-	-
 GET	/v1/plugins/catalog	preserve	-	-
 GET	/v1/plugins/tools/search	preserve	-	-
 GET	/v1/policies/decisions	preserve	query: limit?	{ items }
-GET	/v1/projects/:tenant/:workspace/:project/costs	preserve	-	{ total_cost_micros, total_tokens_in, total_tokens_out, provider_calls }
 GET	/v1/projects/:project/repos	preserve	-	-
 GET	/v1/projects/:project/repos/:owner/:repo	preserve	-	-
 GET	/v1/projects/:project/run-templates	preserve	-	-
 GET	/v1/projects/:project/run-templates/:template_id	preserve	-	-
 GET	/v1/projects/:project/triggers	preserve	-	-
 GET	/v1/projects/:project/triggers/:trigger_id	preserve	-	-
+GET	/v1/projects/:tenant/:workspace/:project/costs	preserve	-	{ total_cost_micros, total_tokens_in, total_tokens_out, provider_calls }
 GET	/v1/prompts/assets	preserve	query: limit?	{ items }
 GET	/v1/prompts/assets/:id/versions	preserve	-	-
 GET	/v1/prompts/assets/:id/versions/:version_id/diff	preserve	-	-
@@ -253,10 +254,11 @@ GET	/v1/webhooks/github/actions	preserve	-	-
 GET	/v1/webhooks/github/installations	preserve	-	-
 GET	/v1/webhooks/github/queue	preserve	-	-
 GET	/v1/workers	preserve	-	-
-GET	/v1/workspaces/:tenant/:workspace/costs	preserve	-	{ total_cost_micros, total_tokens_in, total_tokens_out, provider_calls }
 GET	/v1/workers/:id	preserve	-	-
+GET	/v1/workspaces/:tenant/:workspace/costs	preserve	-	{ total_cost_micros, total_tokens_in, total_tokens_out, provider_calls }
 GET	/v1/ws	preserve	-	-
 GET	/version	preserve	-	-
+PATCH	/v1/approvals/:id/amend	preserve	-	-
 PATCH	/v1/tool-call-approvals/:call_id/amend	preserve	-	-
 POST	/v1/a2a/tasks	preserve	body: A2A task shape	A2A task submission
 POST	/v1/admin/backup	preserve	-	-

@@ -1,11 +1,14 @@
-//! HTTP integration for tool-call approvals (PR BP-6).
+//! HTTP integration for tool-call approvals under the unified approval
+//! surface (F45).
+//!
+//! Before F45 these endpoints lived at `/v1/tool-call-approvals/*`;
+//! they now live under `/v1/approvals/*` with a `kind` discriminator in
+//! responses. The pre-F45 paths are still live (`308 Permanent
+//! Redirect`) and covered by `test_http_unified_approvals.rs`.
 //!
 //! Uses the `build_test_router_fake_fabric` harness — an InMemoryStore
 //! wired router, no live Valkey — so these tests run as standard
-//! `cargo test -p cairn-app` units. Cross-backend parity for the read
-//! model is covered in `crates/cairn-store/tests/cross_backend_parity.rs`;
-//! this file verifies the HTTP surface behaviour: list/get, approve,
-//! reject, amend, amend-self guard, operator-id impersonation guard.
+//! `cargo test -p cairn-app` units.
 
 mod support;
 
@@ -100,10 +103,20 @@ async fn list_returns_seeded_proposal() {
     seed_principal_for(&state, ACTOR, "default_tenant");
     seed_proposal(&state, "tc_list_1").await;
 
-    let (status, body) = get_json(app, "GET", "/v1/tool-call-approvals?run_id=run_1", None).await;
+    let (status, body) = get_json(
+        app,
+        "GET",
+        "/v1/approvals?kind=tool_call&run_id=run_1",
+        None,
+    )
+    .await;
     assert_eq!(status, StatusCode::OK, "list: {body}");
     let items = body.get("items").and_then(Value::as_array).expect("items");
-    assert!(items.iter().any(|r| r["call_id"] == "tc_list_1"));
+    let hit = items
+        .iter()
+        .find(|r| r["call_id"] == "tc_list_1")
+        .expect("seeded proposal in list");
+    assert_eq!(hit["kind"], "tool_call", "discriminator present");
 }
 
 #[tokio::test]
@@ -112,18 +125,19 @@ async fn get_returns_single_record() {
     seed_principal_for(&state, ACTOR, "default_tenant");
     seed_proposal(&state, "tc_get_1").await;
 
-    let (status, body) = get_json(app, "GET", "/v1/tool-call-approvals/tc_get_1", None).await;
+    let (status, body) = get_json(app, "GET", "/v1/approvals/tc_get_1", None).await;
     assert_eq!(status, StatusCode::OK, "get: {body}");
+    assert_eq!(body["kind"], "tool_call");
     assert_eq!(body["call_id"], "tc_get_1");
     assert_eq!(body["state"], "pending");
 }
 
 #[tokio::test]
-async fn get_returns_404_for_unknown_call_id() {
+async fn get_returns_404_for_unknown_id() {
     let (app, state) = support::build_test_router_fake_fabric(BootstrapConfig::default()).await;
     seed_principal_for(&state, ACTOR, "default_tenant");
 
-    let (status, _) = get_json(app, "GET", "/v1/tool-call-approvals/nope", None).await;
+    let (status, _) = get_json(app, "GET", "/v1/approvals/nope", None).await;
     assert_eq!(status, StatusCode::NOT_FOUND);
 }
 
@@ -136,11 +150,12 @@ async fn approve_once_transitions_to_approved() {
     let (status, body) = get_json(
         app,
         "POST",
-        "/v1/tool-call-approvals/tc_approve_1/approve",
+        "/v1/approvals/tc_approve_1/approve",
         Some(json!({ "scope": { "type": "once" } })),
     )
     .await;
     assert_eq!(status, StatusCode::OK, "approve: {body}");
+    assert_eq!(body["kind"], "tool_call");
     assert_eq!(body["state"], "approved");
     assert_eq!(body["operator_id"], ACTOR);
 }
@@ -151,18 +166,15 @@ async fn approve_session_falls_back_to_proposal_match_policy() {
     seed_principal_for(&state, ACTOR, "default_tenant");
     seed_proposal(&state, "tc_session_1").await;
 
-    // Body omits `match_policy`; handler should derive it from the
-    // proposal's captured default (`Exact`).
     let (status, body) = get_json(
         app,
         "POST",
-        "/v1/tool-call-approvals/tc_session_1/approve",
+        "/v1/approvals/tc_session_1/approve",
         Some(json!({ "scope": { "type": "session" } })),
     )
     .await;
     assert_eq!(status, StatusCode::OK, "session approve: {body}");
     assert_eq!(body["state"], "approved");
-    // The projected scope's match_policy must have resolved to `Exact`.
     assert_eq!(body["scope"]["kind"], "session");
     assert_eq!(body["scope"]["match_policy"]["kind"], "exact");
 }
@@ -176,11 +188,12 @@ async fn reject_with_reason_transitions_to_rejected() {
     let (status, body) = get_json(
         app,
         "POST",
-        "/v1/tool-call-approvals/tc_reject_1/reject",
+        "/v1/approvals/tc_reject_1/reject",
         Some(json!({ "reason": "not this time" })),
     )
     .await;
     assert_eq!(status, StatusCode::OK, "reject: {body}");
+    assert_eq!(body["kind"], "tool_call");
     assert_eq!(body["state"], "rejected");
     assert_eq!(body["reason"], "not this time");
 }
@@ -194,20 +207,18 @@ async fn amend_updates_amended_args_without_resolving() {
     let (status, body) = get_json(
         app,
         "PATCH",
-        "/v1/tool-call-approvals/tc_amend_1/amend",
+        "/v1/approvals/tc_amend_1/amend",
         Some(json!({ "new_tool_args": { "path": "/tmp/b.txt" } })),
     )
     .await;
     assert_eq!(status, StatusCode::OK, "amend: {body}");
-    // State stays pending; projection carries amended args.
+    assert_eq!(body["kind"], "tool_call");
     assert_eq!(body["state"], "pending");
     assert_eq!(body["amended_tool_args"]["path"], "/tmp/b.txt");
 }
 
 #[tokio::test]
 async fn amend_self_targeting_is_forbidden() {
-    // Seed a proposal whose tool_name is the magic sentinel and
-    // confirm the amend handler refuses.
     let (app, state) = support::build_test_router_fake_fabric(BootstrapConfig::default()).await;
     seed_principal_for(&state, ACTOR, "default_tenant");
     let proposal = ToolCallProposal {
@@ -230,7 +241,7 @@ async fn amend_self_targeting_is_forbidden() {
     let (status, body) = get_json(
         app,
         "PATCH",
-        "/v1/tool-call-approvals/tc_self_amend/amend",
+        "/v1/approvals/tc_self_amend/amend",
         Some(json!({ "new_tool_args": {} })),
     )
     .await;
@@ -247,7 +258,7 @@ async fn operator_id_mismatch_is_rejected() {
     let (status, body) = get_json(
         app,
         "POST",
-        "/v1/tool-call-approvals/tc_spoof/approve",
+        "/v1/approvals/tc_spoof/approve",
         Some(json!({
             "operator_id": "not_me",
             "scope": { "type": "once" },
@@ -264,7 +275,6 @@ async fn list_by_project_returns_pending_inbox() {
     seed_principal_for(&state, ACTOR, "default_tenant");
     seed_proposal(&state, "tc_inbox_1").await;
     seed_proposal(&state, "tc_inbox_2").await;
-    // Resolve one so only one remains pending.
     state
         .runtime
         .tool_call_approvals
@@ -277,111 +287,26 @@ async fn list_by_project_returns_pending_inbox() {
         .await
         .expect("approve");
 
-    // Query by project triple — default tenant/workspace/project,
-    // matches the seeded proposals.
     let (status, body) = get_json(
         app.clone(),
         "GET",
-        "/v1/tool-call-approvals?tenant_id=default_tenant&workspace_id=default_workspace&project_id=default_project",
+        "/v1/approvals?kind=tool_call&tenant_id=default_tenant&workspace_id=default_workspace&project_id=default_project",
         None,
     )
     .await;
     assert_eq!(status, StatusCode::OK, "inbox: {body}");
     let items = body["items"].as_array().unwrap();
-    assert_eq!(items.len(), 1, "inbox returns only pending");
+    // Unified inbox only surfaces pending tool-call proposals via
+    // `list_pending_for_project`. The resolved tc_inbox_2 doesn't show
+    // up — operators who want resolved history scope by run/session.
+    assert_eq!(items.len(), 1, "inbox returns only pending tool-calls");
     assert_eq!(items[0]["call_id"], "tc_inbox_1");
     assert_eq!(items[0]["state"], "pending");
 }
 
 #[tokio::test]
-async fn list_by_project_rejects_non_pending_state_filter() {
-    let (app, state) = support::build_test_router_fake_fabric(BootstrapConfig::default()).await;
-    seed_principal_for(&state, ACTOR, "default_tenant");
-
-    let (status, body) = get_json(
-        app,
-        "GET",
-        "/v1/tool-call-approvals?tenant_id=default_tenant&workspace_id=default_workspace&project_id=default_project&state=approved",
-        None,
-    )
-    .await;
-    assert_eq!(
-        status,
-        StatusCode::UNPROCESSABLE_ENTITY,
-        "inbox filter: {body}"
-    );
-    assert_eq!(body["code"], "unsupported_filter");
-}
-
-#[tokio::test]
-async fn list_run_pagination_rejects_out_of_range_window() {
-    let (app, state) = support::build_test_router_fake_fabric(BootstrapConfig::default()).await;
-    seed_principal_for(&state, ACTOR, "default_tenant");
-
-    let (status, body) = get_json(
-        app,
-        "GET",
-        "/v1/tool-call-approvals?run_id=run_x&limit=500&offset=4700",
-        None,
-    )
-    .await;
-    // 500 + 4700 = 5200 > MAX_LIST_FETCH (5000).
-    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "oob: {body}");
-    assert_eq!(body["code"], "pagination_out_of_range");
-}
-
-#[tokio::test]
-async fn list_pagination_applies_after_state_filter() {
-    let (app, state) = support::build_test_router_fake_fabric(BootstrapConfig::default()).await;
-    seed_principal_for(&state, ACTOR, "default_tenant");
-    // Seed 5 proposals on the same run, approve 2.
-    for i in 0..5 {
-        seed_proposal(&state, &format!("tc_page_{i}")).await;
-    }
-    for i in 0..2 {
-        state
-            .runtime
-            .tool_call_approvals
-            .approve(
-                ToolCallId::new(format!("tc_page_{i}")),
-                OperatorId::new(ACTOR),
-                cairn_domain::ApprovalScope::Once,
-                None,
-            )
-            .await
-            .expect("approve");
-    }
-
-    // Filter by pending + limit 2 → 2 items, has_more=true.
-    let (status, body) = get_json(
-        app.clone(),
-        "GET",
-        "/v1/tool-call-approvals?run_id=run_1&state=pending&limit=2&offset=0",
-        None,
-    )
-    .await;
-    assert_eq!(status, StatusCode::OK, "page 0: {body}");
-    let items = body["items"].as_array().unwrap();
-    assert_eq!(items.len(), 2, "page 0 returns limit items");
-    assert_eq!(body["hasMore"], true, "more items beyond page 0");
-
-    // Next page → 1 remaining pending item (5 total - 2 approved - 2 first page = 1).
-    let (status, body) = get_json(
-        app,
-        "GET",
-        "/v1/tool-call-approvals?run_id=run_1&state=pending&limit=2&offset=2",
-        None,
-    )
-    .await;
-    assert_eq!(status, StatusCode::OK, "page 1: {body}");
-    assert_eq!(body["items"].as_array().unwrap().len(), 1);
-    assert_eq!(body["hasMore"], false);
-}
-
-#[tokio::test]
 async fn cross_tenant_request_returns_404() {
     let (app, state) = support::build_test_router_fake_fabric(BootstrapConfig::default()).await;
-    // Seed principal under tenant A.
     state.service_tokens.register(
         TOKEN.to_string(),
         AuthPrincipal::Operator {
@@ -389,8 +314,6 @@ async fn cross_tenant_request_returns_404() {
             tenant: TenantKey::new("tenant_a"),
         },
     );
-    // Seed a proposal under default_tenant (not tenant_a). Need to
-    // also seed the tenant so projections don't complain.
     state
         .runtime
         .tenants
@@ -414,6 +337,6 @@ async fn cross_tenant_request_returns_404() {
         .await
         .expect("submit");
 
-    let (status, _) = get_json(app, "GET", "/v1/tool-call-approvals/tc_other_tenant", None).await;
+    let (status, _) = get_json(app, "GET", "/v1/approvals/tc_other_tenant", None).await;
     assert_eq!(status, StatusCode::NOT_FOUND, "cross-tenant must 404");
 }

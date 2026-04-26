@@ -20,6 +20,7 @@ import type {
   SystemStatus,
   ToolCallApprovalRecord,
   ToolCallApprovalState,
+  UnifiedApproval,
 } from "./types";
 import { getStoredScope } from "../hooks/useScope";
 import { DEFAULT_SCOPE } from "./scope";
@@ -843,22 +844,138 @@ export function createApiClient(config: ApiClientConfig) {
       return getList(`/v1/approvals${query}`);
     },
 
-    /** POST /v1/approvals/:id/resolve — approve or reject. */
-    resolveApproval: (
+    /** @deprecated F45 — use `approveApproval(id)` / `rejectApproval(id)`.
+     *  Kept as a thin wrapper so pre-F45 call sites compile. Delegates to
+     *  the unified approve/reject paths rather than hitting `/resolve`
+     *  directly — the `/resolve` handler is retained on the server for
+     *  legacy scripts, but every client path inside the UI now goes
+     *  through the unified surface. */
+    resolveApproval: async (
       approvalId: string,
-      decision: "approved" | "rejected"
-    ): Promise<ApprovalRecord> =>
-      post(`/v1/approvals/${approvalId}/resolve`, { decision }),
+      decision: "approved" | "rejected",
+    ): Promise<ApprovalRecord> => {
+      const unified =
+        decision === "approved"
+          ? await post<UnifiedApproval>(`/v1/approvals/${encodeURIComponent(approvalId)}/approve`, {})
+          : await post<UnifiedApproval>(`/v1/approvals/${encodeURIComponent(approvalId)}/reject`, {});
+      return unified as ApprovalRecord;
+    },
 
-    // ── Tool-call approvals (PR BP-6) ────────────────────────────────────────
+    // ── Unified approvals (F45) ──────────────────────────────────────────────
+    //
+    // One HTTP surface at `/v1/approvals/*` covers both plan approvals
+    // (`ApprovalRecord`) and tool-call approvals (`ToolCallApprovalRecord`).
+    // The legacy `/v1/tool-call-approvals/*` paths 308-redirect here; the
+    // client always speaks the unified surface so the redirect is never
+    // exercised in normal operation.
 
-    /** GET /v1/tool-call-approvals — list tool-call approval records.
-     *  Accepts any one of `run_id | session_id | project triple`. The
-     *  server enforces tenant visibility on the returned items.
+    /** GET /v1/approvals — merged list of plan + tool-call approvals.
      *
-     *  Returns the items only; use `listToolCallApprovalsPage()` if the
-     *  caller needs `hasMore` for pagination. */
-    listToolCallApprovals: (params?: {
+     *  Filter by `kind` to narrow to one of the two, or by `state`,
+     *  `run_id`, `session_id`, or the project triple. Returns items only;
+     *  use `listApprovalsPage()` if the caller needs `hasMore`. */
+    listApprovals: (params?: {
+      kind?: "plan" | "tool_call";
+      run_id?: string;
+      session_id?: string;
+      state?: ToolCallApprovalState;
+      limit?: number;
+      offset?: number;
+      tenant_id?: string;
+      workspace_id?: string;
+      project_id?: string;
+    }): Promise<UnifiedApproval[]> => {
+      const merged = withScope(params);
+      const qs = new URLSearchParams();
+      if (merged.tenant_id)    qs.set("tenant_id",    merged.tenant_id);
+      if (merged.workspace_id) qs.set("workspace_id", merged.workspace_id);
+      if (merged.project_id)   qs.set("project_id",   merged.project_id);
+      if (params?.kind)        qs.set("kind",         params.kind);
+      if (params?.run_id)      qs.set("run_id",       params.run_id);
+      if (params?.session_id)  qs.set("session_id",   params.session_id);
+      if (params?.state)       qs.set("state",        params.state);
+      if (params?.limit != null)  qs.set("limit",  String(params.limit));
+      if (params?.offset != null) qs.set("offset", String(params.offset));
+      const query = qs.toString() ? `?${qs}` : "";
+      return getList(`/v1/approvals${query}`);
+    },
+
+    /** Paginated variant of `listApprovals`. */
+    listApprovalsPage: (params?: {
+      kind?: "plan" | "tool_call";
+      run_id?: string;
+      session_id?: string;
+      state?: ToolCallApprovalState;
+      limit?: number;
+      offset?: number;
+      tenant_id?: string;
+      workspace_id?: string;
+      project_id?: string;
+    }): Promise<{ items: UnifiedApproval[]; hasMore: boolean }> => {
+      const merged = withScope(params);
+      const qs = new URLSearchParams();
+      if (merged.tenant_id)    qs.set("tenant_id",    merged.tenant_id);
+      if (merged.workspace_id) qs.set("workspace_id", merged.workspace_id);
+      if (merged.project_id)   qs.set("project_id",   merged.project_id);
+      if (params?.kind)        qs.set("kind",         params.kind);
+      if (params?.run_id)      qs.set("run_id",       params.run_id);
+      if (params?.session_id)  qs.set("session_id",   params.session_id);
+      if (params?.state)       qs.set("state",        params.state);
+      if (params?.limit != null)  qs.set("limit",  String(params.limit));
+      if (params?.offset != null) qs.set("offset", String(params.offset));
+      const query = qs.toString() ? `?${qs}` : "";
+      return get<{ items: UnifiedApproval[]; hasMore: boolean }>(`/v1/approvals${query}`);
+    },
+
+    /** GET /v1/approvals/:id — fetch by id across both kinds. */
+    getApproval: (id: string): Promise<UnifiedApproval> =>
+      get(`/v1/approvals/${encodeURIComponent(id)}`),
+
+    /** POST /v1/approvals/:id/approve.
+     *
+     *  For tool-call approvals, `scope` is required:
+     *   - `{ type: "once" }` — apply to this call only.
+     *   - `{ type: "session", match_policy? }` — widen to future matching
+     *     calls in the same session. Omit `match_policy` to inherit the
+     *     match policy captured on the proposal.
+     *  `approved_tool_args` overrides any prior amendment.
+     *  For plan approvals the body is unused (pass `{}`). */
+    approveApproval: (
+      id: string,
+      body: {
+        scope?: { type: "once" } | { type: "session"; match_policy?: ApprovalMatchPolicy };
+        approved_tool_args?: unknown;
+      } = {},
+    ): Promise<UnifiedApproval> =>
+      post(`/v1/approvals/${encodeURIComponent(id)}/approve`, body),
+
+    /** POST /v1/approvals/:id/reject. */
+    rejectApproval: (
+      id: string,
+      body: { reason?: string } = {},
+    ): Promise<UnifiedApproval> =>
+      post(`/v1/approvals/${encodeURIComponent(id)}/reject`, body),
+
+    /** PATCH /v1/approvals/:id/amend — tool-call only; preview-edit
+     *  tool arguments without resolving. Returns 422 for plan approvals. */
+    amendApproval: (
+      id: string,
+      body: { new_tool_args: unknown },
+    ): Promise<UnifiedApproval> =>
+      apiFetch(config, `/v1/approvals/${encodeURIComponent(id)}/amend`, {
+        method: "PATCH",
+        body: JSON.stringify(body),
+      }),
+
+    // ── Legacy tool-call aliases (delegate to the unified surface) ──────────
+    //
+    // Kept so existing call sites compile; new code should call the
+    // unified methods above. These wrappers cast the unified response
+    // back to the narrower `ToolCallApprovalRecord` shape — safe because
+    // they only operate on tool-call ids.
+
+    /** @deprecated Use `listApprovals({ kind: "tool_call", ... })`. */
+    listToolCallApprovals: async (params?: {
       run_id?: string;
       session_id?: string;
       state?: ToolCallApprovalState;
@@ -870,6 +987,7 @@ export function createApiClient(config: ApiClientConfig) {
     }): Promise<ToolCallApprovalRecord[]> => {
       const merged = withScope(params);
       const qs = new URLSearchParams();
+      qs.set("kind", "tool_call");
       if (merged.tenant_id)    qs.set("tenant_id",    merged.tenant_id);
       if (merged.workspace_id) qs.set("workspace_id", merged.workspace_id);
       if (merged.project_id)   qs.set("project_id",   merged.project_id);
@@ -878,80 +996,49 @@ export function createApiClient(config: ApiClientConfig) {
       if (params?.state)       qs.set("state",        params.state);
       if (params?.limit != null)  qs.set("limit",  String(params.limit));
       if (params?.offset != null) qs.set("offset", String(params.offset));
-      const query = qs.toString() ? `?${qs}` : "";
-      return getList(`/v1/tool-call-approvals${query}`);
+      const items = await getList<UnifiedApproval>(`/v1/approvals?${qs}`);
+      return items as ToolCallApprovalRecord[];
     },
 
-    /** Paginated variant of `listToolCallApprovals`. Preserves the
-     *  backend's `{ items, hasMore }` envelope so the caller can drive
-     *  "load more" / offset pagination. */
-    listToolCallApprovalsPage: (params?: {
-      run_id?: string;
-      session_id?: string;
-      state?: ToolCallApprovalState;
-      limit?: number;
-      offset?: number;
-      tenant_id?: string;
-      workspace_id?: string;
-      project_id?: string;
-    }): Promise<{ items: ToolCallApprovalRecord[]; hasMore: boolean }> => {
-      const merged = withScope(params);
-      const qs = new URLSearchParams();
-      if (merged.tenant_id)    qs.set("tenant_id",    merged.tenant_id);
-      if (merged.workspace_id) qs.set("workspace_id", merged.workspace_id);
-      if (merged.project_id)   qs.set("project_id",   merged.project_id);
-      if (params?.run_id)      qs.set("run_id",       params.run_id);
-      if (params?.session_id)  qs.set("session_id",   params.session_id);
-      if (params?.state)       qs.set("state",        params.state);
-      if (params?.limit != null)  qs.set("limit",  String(params.limit));
-      if (params?.offset != null) qs.set("offset", String(params.offset));
-      const query = qs.toString() ? `?${qs}` : "";
-      return get<{ items: ToolCallApprovalRecord[]; hasMore: boolean }>(
-        `/v1/tool-call-approvals${query}`,
-      );
-    },
+    /** @deprecated Use `getApproval(id)`. */
+    getToolCallApproval: async (callId: string): Promise<ToolCallApprovalRecord> =>
+      (await get<UnifiedApproval>(
+        `/v1/approvals/${encodeURIComponent(callId)}`,
+      )) as ToolCallApprovalRecord,
 
-    /** GET /v1/tool-call-approvals/:call_id — fetch a single record. */
-    getToolCallApproval: (callId: string): Promise<ToolCallApprovalRecord> =>
-      get(`/v1/tool-call-approvals/${encodeURIComponent(callId)}`),
-
-    /** POST /v1/tool-call-approvals/:call_id/approve.
-     *
-     *  `scope`:
-     *   - `{ type: "once" }` — apply to this call only.
-     *   - `{ type: "session", match_policy? }` — widen to future matching
-     *     calls in the same session. Omit `match_policy` to inherit the
-     *     match policy captured on the original proposal.
-     *
-     *  `approved_tool_args` overrides any prior amendment + the original
-     *  args with an operator-supplied final payload. */
-    approveToolCallApproval: (
+    /** @deprecated Use `approveApproval(id, body)`. */
+    approveToolCallApproval: async (
       callId: string,
       body: {
         scope: { type: "once" } | { type: "session"; match_policy?: ApprovalMatchPolicy };
         approved_tool_args?: unknown;
       },
     ): Promise<ToolCallApprovalRecord> =>
-      post(`/v1/tool-call-approvals/${encodeURIComponent(callId)}/approve`, body),
+      (await post<UnifiedApproval>(
+        `/v1/approvals/${encodeURIComponent(callId)}/approve`,
+        body,
+      )) as ToolCallApprovalRecord,
 
-    /** POST /v1/tool-call-approvals/:call_id/reject. */
-    rejectToolCallApproval: (
+    /** @deprecated Use `rejectApproval(id, body)`. */
+    rejectToolCallApproval: async (
       callId: string,
       body: { reason?: string },
     ): Promise<ToolCallApprovalRecord> =>
-      post(`/v1/tool-call-approvals/${encodeURIComponent(callId)}/reject`, body),
+      (await post<UnifiedApproval>(
+        `/v1/approvals/${encodeURIComponent(callId)}/reject`,
+        body,
+      )) as ToolCallApprovalRecord,
 
-    /** PATCH /v1/tool-call-approvals/:call_id/amend — preview-edit the
-     *  tool arguments without resolving. The operator can then approve
-     *  or reject the amended version. */
-    amendToolCallApproval: (
+    /** @deprecated Use `amendApproval(id, body)`. */
+    amendToolCallApproval: async (
       callId: string,
       body: { new_tool_args: unknown },
     ): Promise<ToolCallApprovalRecord> =>
-      apiFetch(config, `/v1/tool-call-approvals/${encodeURIComponent(callId)}/amend`, {
-        method: "PATCH",
-        body: JSON.stringify(body),
-      }),
+      (await apiFetch<UnifiedApproval>(
+        config,
+        `/v1/approvals/${encodeURIComponent(callId)}/amend`,
+        { method: "PATCH", body: JSON.stringify(body) },
+      )) as ToolCallApprovalRecord,
 
     // ── Costs ─────────────────────────────────────────────────────────────────
 

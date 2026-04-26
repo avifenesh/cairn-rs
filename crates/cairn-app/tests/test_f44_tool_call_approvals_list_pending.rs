@@ -1,6 +1,6 @@
-//! F44 regression: the `GET /v1/tool-call-approvals` list endpoint
-//! must surface pending approvals that are already visible via
-//! `GET /v1/tool-call-approvals/:call_id`.
+//! F44 regression (carried onto the F45 unified surface): the
+//! `GET /v1/approvals` list endpoint must surface pending tool-call
+//! approvals that are already visible via `GET /v1/approvals/:id`.
 //!
 //! Dogfood M1 (2026-04-26) hit: orchestrate created a pending tool-call
 //! approval whose by-id fetch returned a record in `state=pending`,
@@ -11,6 +11,12 @@
 //! and was silently dropped by the handler, so the response was the
 //! full unfiltered list on an admin token — it looked fine and was
 //! actually wrong.
+//!
+//! F45 unified these paths under `/v1/approvals/*` with a `kind`
+//! discriminator; the legacy `/v1/tool-call-approvals/*` paths now
+//! 308-redirect and are covered in `test_http_unified_approvals.rs`.
+//! This file asserts the same F44 regressions against the new surface
+//! to prove unification did not re-open the bug.
 //!
 //! This test suite pins five properties:
 //!
@@ -138,13 +144,7 @@ async fn f44_pending_approval_is_listed_by_run_id() {
     let proposal = seed_pending_proposal(&state, "tc_f44_run", "run_f44").await;
 
     // 1. Sanity — by-id works, state=pending.
-    let (status, body) = http(
-        app.clone(),
-        "GET",
-        "/v1/tool-call-approvals/tc_f44_run",
-        None,
-    )
-    .await;
+    let (status, body) = http(app.clone(), "GET", "/v1/approvals/tc_f44_run", None).await;
     assert_eq!(status, StatusCode::OK, "by-id must return 200: {body}");
     assert_eq!(body["call_id"], proposal.call_id.as_str());
     assert_eq!(body["state"], "pending");
@@ -154,7 +154,7 @@ async fn f44_pending_approval_is_listed_by_run_id() {
     let (status, body) = http(
         app,
         "GET",
-        "/v1/tool-call-approvals?run_id=run_f44&state=pending",
+        "/v1/approvals?run_id=run_f44&state=pending",
         None,
     )
     .await;
@@ -185,7 +185,7 @@ async fn f44_pending_approval_is_listed_by_project_inbox_as_admin() {
     let (status, body) = http(
         app,
         "GET",
-        "/v1/tool-call-approvals?tenant_id=default_tenant&workspace_id=default_workspace&project_id=default_project",
+        "/v1/approvals?tenant_id=default_tenant&workspace_id=default_workspace&project_id=default_project",
         None,
     )
     .await;
@@ -212,7 +212,7 @@ async fn f44_admin_inbox_without_scope_params_defaults_to_canonical_project() {
     seed_admin_principal(&state, "default");
     let proposal = seed_pending_proposal(&state, "tc_f44_noscope", "run_f44_noscope").await;
 
-    let (status, body) = http(app, "GET", "/v1/tool-call-approvals", None).await;
+    let (status, body) = http(app, "GET", "/v1/approvals", None).await;
     assert_eq!(
         status,
         StatusCode::OK,
@@ -244,7 +244,7 @@ async fn f44_unknown_filter_key_is_rejected_loudly() {
     let (status, body) = http(
         app,
         "GET",
-        "/v1/tool-call-approvals?status=pending&run_id=run_f44_typo",
+        "/v1/approvals?status=pending&run_id=run_f44_typo",
         None,
     )
     .await;
@@ -275,7 +275,7 @@ async fn f44_approve_moves_record_between_state_buckets() {
     let (_, body) = http(
         app.clone(),
         "GET",
-        "/v1/tool-call-approvals?run_id=run_f44_flow&state=pending",
+        "/v1/approvals?run_id=run_f44_flow&state=pending",
         None,
     )
     .await;
@@ -283,7 +283,7 @@ async fn f44_approve_moves_record_between_state_buckets() {
     let (_, body) = http(
         app.clone(),
         "GET",
-        "/v1/tool-call-approvals?run_id=run_f44_flow&state=approved",
+        "/v1/approvals?run_id=run_f44_flow&state=approved",
         None,
     )
     .await;
@@ -308,7 +308,7 @@ async fn f44_approve_moves_record_between_state_buckets() {
     let (_, body) = http(
         app.clone(),
         "GET",
-        "/v1/tool-call-approvals?run_id=run_f44_flow&state=pending",
+        "/v1/approvals?run_id=run_f44_flow&state=pending",
         None,
     )
     .await;
@@ -320,7 +320,7 @@ async fn f44_approve_moves_record_between_state_buckets() {
     let (status, body) = http(
         app,
         "GET",
-        "/v1/tool-call-approvals?run_id=run_f44_flow&state=approved",
+        "/v1/approvals?run_id=run_f44_flow&state=approved",
         None,
     )
     .await;

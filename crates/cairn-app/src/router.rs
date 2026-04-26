@@ -1316,6 +1316,7 @@ impl AppBootstrap {
                     .delete(clear_default_setting_handler),
             )
             // ── Approvals ─────────────────────────────────────────────────────────────
+            .route("/v1/approvals/:id", get(get_approval_handler))
             .route("/v1/approvals/:id/approve", post(approve_approval_handler))
             .route("/v1/approvals/:id/deny", post(deny_approval_handler))
             .route(
@@ -1323,26 +1324,25 @@ impl AppBootstrap {
                 post(delegate_approval_handler),
             )
             .route("/v1/approvals/:id/reject", post(reject_approval_handler))
-            // ── Tool-call approvals (PR BP-6) ─────────────────────────────────────────
-            .route(
-                "/v1/tool-call-approvals",
-                get(list_tool_call_approvals_handler),
-            )
-            .route(
-                "/v1/tool-call-approvals/:call_id",
-                get(get_tool_call_approval_handler),
-            )
+            .route("/v1/approvals/:id/amend", patch(amend_approval_handler))
+            // ── Deprecated `/v1/tool-call-approvals/*` (F45) ──────────────────────────
+            //
+            // Unified under `/v1/approvals/*`. Pre-F45 paths 308-redirect
+            // so existing clients keep working while they migrate. 308
+            // preserves method + body across redirect.
+            .route("/v1/tool-call-approvals", get(redirect_list))
+            .route("/v1/tool-call-approvals/:call_id", get(redirect_get))
             .route(
                 "/v1/tool-call-approvals/:call_id/approve",
-                post(approve_tool_call_approval_handler),
+                post(redirect_approve),
             )
             .route(
                 "/v1/tool-call-approvals/:call_id/reject",
-                post(reject_tool_call_approval_handler),
+                post(redirect_reject),
             )
             .route(
                 "/v1/tool-call-approvals/:call_id/amend",
-                patch(amend_tool_call_approval_handler),
+                patch(redirect_amend),
             )
             // ── Decisions (RFC 019) ───────────────────────────────────────────────────
             // All decision routes use nest() to avoid static/dynamic path conflicts.

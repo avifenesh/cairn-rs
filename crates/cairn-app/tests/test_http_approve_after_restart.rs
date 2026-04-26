@@ -9,7 +9,8 @@
 //! 2. Operator restarts `cairn-app` (or fails over to another replica).
 //!    The projection still carries the pending approval, but the new
 //!    process starts with an empty in-memory cache.
-//! 3. Operator calls `POST /v1/tool-call-approvals/:call_id/approve`.
+//! 3. Operator calls `POST /v1/approvals/:id/approve` (unified F45 surface;
+//!    the legacy `/v1/tool-call-approvals/*` paths now 308-redirect).
 //!    The HTTP handler's `load_record_visible_to_tenant` lookup hits the
 //!    projection and succeeds — proving the approval exists — and then
 //!    hands off to `ToolCallApprovalService::approve`.
@@ -129,8 +130,7 @@ async fn approve_succeeds_after_service_restart_with_same_store() {
 
     // Sanity: HTTP GET on router A sees the pending record (projection
     // is populated).
-    let (get_status, get_body) =
-        http_json(router_a, "GET", "/v1/tool-call-approvals/tc_restart", None).await;
+    let (get_status, get_body) = http_json(router_a, "GET", "/v1/approvals/tc_restart", None).await;
     assert_eq!(get_status, StatusCode::OK, "GET pre-restart: {get_body}");
     assert_eq!(get_body["state"], "pending");
 
