@@ -19,7 +19,7 @@
 //! ```text
 //! exit_code: 0
 //! stdout(tail):
-//! [truncated N chars] …Compiling foo
+//! [truncated …] …Compiling foo
 //! warning: unused import
 //! ```
 //!

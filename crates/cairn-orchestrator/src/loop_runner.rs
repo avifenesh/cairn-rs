@@ -1785,15 +1785,6 @@ fn build_step_summary(
     }
 }
 
-/// Bash-class tool names. The preview strategy for these differs from
-/// generic tools because the LLM reasons about exit codes and the
-/// trailing lines (`warning:` / `error:` / success banner) rather than
-/// the opening "Compiling X" stream. F54 dogfood repro: the LLM re-ran
-/// the same `cargo check` three times in a row because the head+tail
-/// `truncate_for_summary` cap of 400 chars buried the exit_code in the
-/// middle of a 5KB JSON blob and clipped away the final `warning:` line.
-const BASH_LIKE_TOOL_NAMES: &[&str] = &["bash", "shell_exec", "run_bash"];
-
 /// F54: tool-aware preview rendering for the `tool_result[<name>] ok:`
 /// line in a [`StepSummary`].
 ///
@@ -1803,7 +1794,11 @@ const BASH_LIKE_TOOL_NAMES: &[&str] = &["bash", "shell_exec", "run_bash"];
 ///
 ///   1. Surface `exit_code` on its own line so the LLM can pattern-match
 ///      "did the previous invocation succeed?" without having to parse
-///      a truncated JSON object.
+///      a truncated JSON object. Accepts every exit-code key spelling
+///      that [`completion_verification::extract_exit_code`] already
+///      recognises (`exit_code`, `exitCode`, `returncode`,
+///      `return_code`, `status`) so adapter drift does not silently
+///      degrade the preview to `exit_code: ?`.
 ///   2. Preserve the **tail** of stdout/stderr (last ~2 KB) because
 ///      build tools stream "Compiling X" headers and put the decisive
 ///      signal — `warning:`, `error:`, or a success banner — at the
@@ -1813,10 +1808,15 @@ const BASH_LIKE_TOOL_NAMES: &[&str] = &["bash", "shell_exec", "run_bash"];
 /// tools dump a file body whose head is usually the most informative
 /// section, and the LLM has already seen the surrounding action
 /// description.
+///
+/// The bash-name matching and exit-code extraction are shared with
+/// `completion_verification` via the `is_bash_tool` and
+/// `extract_exit_code` helpers so the two subsystems cannot drift
+/// (e.g. adding a new bash-class adapter name elsewhere).
 fn render_tool_output_preview(tool_name: &str, output: &serde_json::Value) -> String {
-    if BASH_LIKE_TOOL_NAMES.contains(&tool_name) {
+    if crate::completion_verification::is_bash_tool(tool_name) {
         if let serde_json::Value::Object(map) = output {
-            return render_bash_preview(map);
+            return render_bash_preview(output, map);
         }
     }
 
@@ -1834,12 +1834,16 @@ fn render_tool_output_preview(tool_name: &str, output: &serde_json::Value) -> St
 /// compiler diagnostic — the signal the LLM actually needs to decide
 /// "did the gate pass?" — survives any downstream truncation done by
 /// the decide-phase prompt builder.
-fn render_bash_preview(map: &serde_json::Map<String, serde_json::Value>) -> String {
+fn render_bash_preview(
+    output: &serde_json::Value,
+    map: &serde_json::Map<String, serde_json::Value>,
+) -> String {
     let mut out = String::with_capacity(2048);
 
-    let exit_code = map
-        .get("exit_code")
-        .and_then(|v| v.as_i64())
+    // Use the shared extract_exit_code so alternate key spellings
+    // (`exitCode`, `returncode`, …) surface the code correctly instead
+    // of degrading to `exit_code: ?`.
+    let exit_code = crate::completion_verification::extract_exit_code(output)
         .map(|n| n.to_string())
         .unwrap_or_else(|| "?".to_owned());
     out.push_str(&format!("exit_code: {exit_code}"));
@@ -2820,6 +2824,44 @@ mod tests {
         assert!(
             !preview.contains("[truncated"),
             "short output must not carry a truncation marker; got: {preview}"
+        );
+    }
+
+    /// Copilot review on PR #315: an adapter that spells exit_code as
+    /// `exitCode` (or `returncode` / `return_code` / `status`) must
+    /// still surface the numeric value in the preview. Pre-fix this
+    /// code path only looked at `exit_code` and fell through to `?`.
+    #[test]
+    fn render_tool_output_preview_bash_accepts_alternate_exit_code_keys() {
+        for (key, expected) in [
+            ("exit_code", "exit_code: 0"),
+            ("exitCode", "exit_code: 0"),
+            ("returncode", "exit_code: 0"),
+            ("return_code", "exit_code: 0"),
+            ("status", "exit_code: 0"),
+        ] {
+            let output = serde_json::json!({
+                key: 0,
+                "stdout": "ok",
+                "stderr": "",
+            });
+            let preview = super::render_tool_output_preview("bash", &output);
+            assert!(
+                preview.starts_with(expected),
+                "key {key} must surface as {expected}; got: {preview}"
+            );
+        }
+    }
+
+    /// Case-insensitive bash matching — some provider adapters
+    /// normalize tool names to `Bash` during JSON marshalling.
+    #[test]
+    fn render_tool_output_preview_bash_case_insensitive() {
+        let output = serde_json::json!({"exit_code": 0, "stdout": "ok", "stderr": ""});
+        let preview = super::render_tool_output_preview("Bash", &output);
+        assert!(
+            preview.starts_with("exit_code: 0"),
+            "uppercase Bash must route through bash preview; got: {preview}"
         );
     }
 
