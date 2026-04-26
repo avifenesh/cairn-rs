@@ -44,8 +44,7 @@ use crate::{
     append_run_intervention_event, current_event_head, event_message, event_type_name,
     persist_run_mode_default, persist_run_string_default, publish_runtime_frames_since,
     resolve_run_mode_default, resolve_run_string_default, PaginationQuery, RunRecordView,
-    DEFAULT_PROJECT_ID,
-    DEFAULT_TENANT_ID, DEFAULT_WORKSPACE_ID,
+    DEFAULT_PROJECT_ID, DEFAULT_TENANT_ID, DEFAULT_WORKSPACE_ID,
 };
 #[allow(unused_imports)]
 use crate::{RunListResponseDoc, RunRecordDoc};
@@ -592,9 +591,14 @@ pub(crate) async fn create_run_handler(
                         "prompt: must be non-empty when present; omit the field to skip",
                     );
                 }
-                if let Err(err) =
-                    persist_run_string_default(state.as_ref(), &project, &run.run_id, "goal", prompt)
-                        .await
+                if let Err(err) = persist_run_string_default(
+                    state.as_ref(),
+                    &project,
+                    &run.run_id,
+                    "goal",
+                    prompt,
+                )
+                .await
                 {
                     return runtime_error_response(err);
                 }

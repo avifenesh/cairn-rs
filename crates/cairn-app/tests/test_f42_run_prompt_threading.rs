@@ -225,7 +225,13 @@ async fn prepare_provider(h: &LiveHarness, tenant: &str, suffix: &str, mock_url:
     }
 }
 
-async fn create_session(h: &LiveHarness, tenant: &str, workspace: &str, project: &str, session_id: &str) {
+async fn create_session(
+    h: &LiveHarness,
+    tenant: &str,
+    workspace: &str,
+    project: &str,
+    session_id: &str,
+) {
     let r = h
         .client()
         .post(format!("{}/v1/sessions", h.base_url))
