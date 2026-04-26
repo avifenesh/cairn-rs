@@ -64,6 +64,25 @@ pub(crate) struct SpawnSubagentRunResponse {
 pub(crate) struct RunDetailResponse {
     pub(crate) run: RunRecordView,
     pub(crate) tasks: Vec<TaskRecord>,
+    /// F47 PR2: completion annotation, if the run has terminated via
+    /// `LoopTermination::Completed` and the `RunCompletionAnnotated`
+    /// event has been projected onto the RunRecord. Absent for running
+    /// / failed / canceled runs and for runs completed before F47 PR2
+    /// shipped (no annotation ever landed on the event log).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) completion: Option<RunCompletion>,
+}
+
+/// F47 PR2: operator-visible shape of the run completion annotation on
+/// `GET /v1/runs/:id`. Mirrors the fields on `RunCompletionAnnotated`
+/// minus the ProjectKey / SessionId / RunId (already carried by the
+/// parent `run` field).
+#[derive(Clone, Debug, serde::Serialize)]
+pub(crate) struct RunCompletion {
+    pub(crate) summary: String,
+    pub(crate) verification: cairn_domain::CompletionVerification,
+    /// Wall-clock ms at which the orchestrator emitted the annotation.
+    pub(crate) completed_at: u64,
 }
 
 #[derive(Clone, Debug, serde::Serialize)]
@@ -464,6 +483,27 @@ pub(crate) async fn get_run_handler(
     let run_id = RunId::new(id);
     match load_run_visible_to_tenant(state.as_ref(), &tenant_scope, &run_id).await {
         Ok(Some(run)) => {
+            // F47 PR2: pull completion annotation fields off the raw
+            // RunRecord BEFORE wrapping in RunRecordView. The fields
+            // survive on the projection regardless of view wrapping,
+            // but resolving them here keeps the response shape explicit
+            // (one `completion` object vs three scattered fields).
+            let completion = match (
+                run.completion_summary.clone(),
+                run.completion_verification.clone(),
+                run.completion_annotated_at_ms,
+            ) {
+                (Some(summary), Some(verification), Some(completed_at)) => Some(RunCompletion {
+                    summary,
+                    verification,
+                    completed_at,
+                }),
+                // Partial annotation is a projection bug (all three
+                // fields are written atomically by the applier). Fall
+                // back to `None` rather than surfacing an inconsistent
+                // half-shape to operators.
+                _ => None,
+            };
             let run = build_run_record_view(state.as_ref(), run).await;
             match TaskReadModel::list_by_parent_run(
                 state.runtime.store.as_ref(),
@@ -472,9 +512,15 @@ pub(crate) async fn get_run_handler(
             )
             .await
             {
-                Ok(tasks) => {
-                    (StatusCode::OK, Json(RunDetailResponse { run, tasks })).into_response()
-                }
+                Ok(tasks) => (
+                    StatusCode::OK,
+                    Json(RunDetailResponse {
+                        run,
+                        tasks,
+                        completion,
+                    }),
+                )
+                    .into_response(),
                 Err(err) => store_error_response(err),
             }
         }
@@ -2736,19 +2782,52 @@ pub(crate) async fn orchestrate_run_handler(
     {
         Ok(LoopTermination::Completed {
             summary,
-            // F47 PR1: the HTTP orchestrate response intentionally does
-            // NOT surface `verification` yet — PR2 adds the REST surface
-            // (event + projection + GET endpoint). Operators see the
-            // evidence via the SSE `orchestrate_finished` event emitted
-            // in `sse_hooks::on_finished`.
-            verification: _,
-        }) => (
-            StatusCode::OK,
-            Json(serde_json::json!({
-                "termination": "completed", "summary": summary, "model_id": model_id,
-            })),
-        )
-            .into_response(),
+            verification,
+        }) => {
+            // F47 PR2: persist the completion annotation via an
+            // event-sourced `RunCompletionAnnotated`. Emitted AFTER
+            // `runs.complete` has flipped the run to the terminal state
+            // (the CompleteRun ActionType inside the loop already fired
+            // that FCALL) — this event only annotates the terminal
+            // run with the LLM summary + extractor-produced evidence.
+            //
+            // Failures to append are logged + swallowed so a transient
+            // store outage never turns a successful run into an HTTP
+            // error. The operator still has the summary in the HTTP
+            // response body (and on the SSE `orchestrate_finished`
+            // frame); the annotation is best-effort durability on top.
+            use cairn_domain::{RunCompletionAnnotated, RuntimeEvent};
+            use cairn_runtime::make_envelope;
+            let annotation = make_envelope(RuntimeEvent::RunCompletionAnnotated(
+                RunCompletionAnnotated {
+                    project: run.project.clone(),
+                    session_id: run.session_id.clone(),
+                    run_id: run.run_id.clone(),
+                    summary: summary.clone(),
+                    verification: verification.clone(),
+                    occurred_at_ms: std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_millis() as u64,
+                },
+            ));
+            if let Err(e) = state.runtime.store.append(&[annotation]).await {
+                tracing::warn!(
+                    run_id = %run.run_id,
+                    error = %e,
+                    "F47 PR2: failed to persist RunCompletionAnnotated — \
+                     completion summary + verification will not survive \
+                     past the SSE stream on this run"
+                );
+            }
+            (
+                StatusCode::OK,
+                Json(serde_json::json!({
+                    "termination": "completed", "summary": summary, "model_id": model_id,
+                })),
+            )
+                .into_response()
+        }
         Ok(LoopTermination::Failed { reason }) => (
             StatusCode::OK,
             Json(serde_json::json!({

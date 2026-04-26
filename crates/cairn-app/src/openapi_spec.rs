@@ -85,6 +85,16 @@ pub const OPENAPI_JSON: &str = r##"{
         },
         "required": ["tool_name", "cmd", "exit_code"]
       },
+      "RunCompletion": {
+        "type": "object",
+        "description": "F47 PR2: operator-visible shape of a run's completion annotation on GET /v1/runs/:id. Populated after `LoopTermination::Completed` is persisted via the `RunCompletionAnnotated` event. Omitted for runs that are still running, failed, canceled, or completed before F47 PR2 shipped (no annotation ever landed on the event log).",
+        "properties": {
+          "summary": { "type": "string", "description": "LLM free-text summary from the CompleteRun action proposal." },
+          "verification": { "$ref": "#/components/schemas/CompletionVerification" },
+          "completed_at": { "type": "integer", "description": "Wall-clock ms at which the orchestrator emitted the annotation." }
+        },
+        "required": ["summary", "verification", "completed_at"]
+      },
       "CompletionVerification": {
         "type": "object",
         "description": "F47 PR1 sidecar attached to the `orchestrate_finished` SSE event on `termination=completed` runs. Warning / error lines extracted from tool_result text give operators an independent signal alongside the LLM's free-text `summary`. Non-authoritative: the extractor reports what tool outputs say, not whether the run succeeded.",

@@ -101,6 +101,33 @@ impl DbAdapter for SqliteAdapter {
                 .map_err(|e| StoreError::Migration(format!("{stmt}: {e}")))?;
         }
 
+        // F47 PR2: completion annotation columns. Same pattern as
+        // workspaces.archived_at — SQLite has no `ADD COLUMN IF NOT
+        // EXISTS`, so consult pragma_table_info first. New installs
+        // get the columns from the fresh CREATE TABLE in SCHEMA_SQL;
+        // upgrades from pre-F47-PR2 databases pick them up here.
+        for (column, kind) in [
+            ("completion_summary", "TEXT"),
+            ("completion_verification_json", "TEXT"),
+            ("completion_annotated_at_ms", "INTEGER"),
+        ] {
+            let exists = sqlx::query_scalar::<_, i64>(
+                "SELECT 1 FROM pragma_table_info('runs') WHERE name = ? LIMIT 1",
+            )
+            .bind(column)
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(|e| StoreError::Migration(format!("pragma runs.{column}: {e}")))?
+            .is_some();
+            if !exists {
+                let stmt = format!("ALTER TABLE runs ADD COLUMN {column} {kind}");
+                sqlx::query(&stmt)
+                    .execute(&self.pool)
+                    .await
+                    .map_err(|e| StoreError::Migration(format!("{stmt}: {e}")))?;
+            }
+        }
+
         Ok(())
     }
 }
@@ -167,7 +194,8 @@ impl RunReadModel for SqliteAdapter {
     async fn get(&self, run_id: &RunId) -> Result<Option<RunRecord>, StoreError> {
         let row = sqlx::query_as::<_, RunRow>(
             "SELECT run_id, session_id, parent_run_id, tenant_id, workspace_id, project_id,
-                    state, failure_class, version, created_at, updated_at
+                    state, failure_class, version, created_at, updated_at,
+                    completion_summary, completion_verification_json, completion_annotated_at_ms
              FROM runs
              WHERE run_id = $1",
         )
@@ -187,7 +215,8 @@ impl RunReadModel for SqliteAdapter {
     ) -> Result<Vec<RunRecord>, StoreError> {
         let rows = sqlx::query_as::<_, RunRow>(
             "SELECT run_id, session_id, parent_run_id, tenant_id, workspace_id, project_id,
-                    state, failure_class, version, created_at, updated_at
+                    state, failure_class, version, created_at, updated_at,
+                    completion_summary, completion_verification_json, completion_annotated_at_ms
              FROM runs
              WHERE session_id = $1
              ORDER BY created_at ASC, run_id ASC
@@ -225,7 +254,8 @@ impl RunReadModel for SqliteAdapter {
     ) -> Result<Option<RunRecord>, StoreError> {
         let row = sqlx::query_as::<_, RunRow>(
             "SELECT run_id, session_id, parent_run_id, tenant_id, workspace_id, project_id,
-                    state, failure_class, version, created_at, updated_at
+                    state, failure_class, version, created_at, updated_at,
+                    completion_summary, completion_verification_json, completion_annotated_at_ms
              FROM runs
              WHERE session_id = $1 AND parent_run_id IS NULL
              ORDER BY created_at DESC, run_id DESC
@@ -250,7 +280,8 @@ impl RunReadModel for SqliteAdapter {
             .unwrap_or_else(|| format!("{state:?}").to_lowercase());
         let rows = sqlx::query_as::<_, RunRow>(
             "SELECT run_id, session_id, parent_run_id, tenant_id, workspace_id, project_id,
-                    state, failure_class, version, created_at, updated_at
+                    state, failure_class, version, created_at, updated_at,
+                    completion_summary, completion_verification_json, completion_annotated_at_ms
              FROM runs
              WHERE state = $1
              ORDER BY created_at ASC
@@ -279,7 +310,8 @@ impl RunReadModel for SqliteAdapter {
             .join(", ");
         let sql = format!(
             "SELECT run_id, session_id, parent_run_id, tenant_id, workspace_id, project_id,
-                    state, failure_class, version, created_at, updated_at
+                    state, failure_class, version, created_at, updated_at,
+                    completion_summary, completion_verification_json, completion_annotated_at_ms
              FROM runs
              WHERE tenant_id = $1 AND workspace_id = $2 AND project_id = $3
                AND state NOT IN ({placeholders})
@@ -312,7 +344,8 @@ impl RunReadModel for SqliteAdapter {
         // index on `parent_run_id WHERE NOT NULL`).
         let rows = sqlx::query_as::<_, RunRow>(
             "SELECT run_id, session_id, parent_run_id, tenant_id, workspace_id, project_id,
-                    state, failure_class, version, created_at, updated_at
+                    state, failure_class, version, created_at, updated_at,
+                    completion_summary, completion_verification_json, completion_annotated_at_ms
              FROM runs
              WHERE parent_run_id = $1
              ORDER BY created_at ASC, run_id ASC
@@ -808,11 +841,24 @@ struct RunRow {
     version: i64,
     created_at: i64,
     updated_at: i64,
+    // F47 PR2: nullable completion annotation (SQLite has no JSONB; we
+    // store verification as TEXT containing serde-JSON, matching the
+    // portable pattern used by `route_policies.rules` and the other
+    // JSON-over-TEXT columns in the SQLite schema).
+    completion_summary: Option<String>,
+    completion_verification_json: Option<String>,
+    completion_annotated_at_ms: Option<i64>,
 }
 
 impl RunRow {
     fn into_record(self) -> Result<RunRecord, StoreError> {
         let project = project_key_from_parts(self.tenant_id, self.workspace_id, self.project_id);
+        let completion_verification = self
+            .completion_verification_json
+            .as_deref()
+            .map(serde_json::from_str::<cairn_domain::CompletionVerification>)
+            .transpose()
+            .map_err(|e| StoreError::Serialization(e.to_string()))?;
         Ok(RunRecord {
             run_id: RunId::new(self.run_id),
             session_id: SessionId::new(self.session_id),
@@ -831,6 +877,9 @@ impl RunRow {
             version: self.version as u64,
             created_at: self.created_at as u64,
             updated_at: self.updated_at as u64,
+            completion_summary: self.completion_summary,
+            completion_verification,
+            completion_annotated_at_ms: self.completion_annotated_at_ms.map(|v| v as u64),
         })
     }
 }
@@ -1316,7 +1365,8 @@ mod tests {
         sqlx::query(
             "INSERT INTO runs (
                 run_id, session_id, parent_run_id, tenant_id, workspace_id, project_id,
-                state, failure_class, version, created_at, updated_at
+                state, failure_class, version, created_at, updated_at,
+                    completion_summary, completion_verification_json, completion_annotated_at_ms
              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind("run_1")
@@ -1438,7 +1488,8 @@ mod tests {
         sqlx::query(
             "INSERT INTO runs (
                 run_id, session_id, parent_run_id, tenant_id, workspace_id, project_id,
-                state, failure_class, version, created_at, updated_at
+                state, failure_class, version, created_at, updated_at,
+                    completion_summary, completion_verification_json, completion_annotated_at_ms
              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind("run_root")
@@ -1521,7 +1572,8 @@ mod tests {
         sqlx::query(
             "INSERT INTO runs (
                 run_id, session_id, parent_run_id, tenant_id, workspace_id, project_id,
-                state, failure_class, version, created_at, updated_at
+                state, failure_class, version, created_at, updated_at,
+                    completion_summary, completion_verification_json, completion_annotated_at_ms
              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind("run_root")

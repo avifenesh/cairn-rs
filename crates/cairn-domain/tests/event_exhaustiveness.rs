@@ -603,6 +603,11 @@ fn assert_all_variants_covered(event: &RuntimeEvent) {
         RuntimeEvent::RecoverySummaryEmitted(_) => {
             assert_eq!(eref, None);
         }
+        // F47 PR2: run-scoped annotation with Run entity_ref.
+        RuntimeEvent::RunCompletionAnnotated(_) => {
+            assert_ne!(proj.tenant_id.as_str(), "_system");
+            assert!(matches!(eref, Some(RuntimeEntityRef::Run { .. })));
+        }
     }
 }
 
@@ -1719,6 +1724,15 @@ fn all_variants() -> Vec<RuntimeEvent> {
             startup_ms: 0,
             summary_at_ms: ts,
         }),
+        // F47 PR2: completion annotation variant.
+        RuntimeEvent::RunCompletionAnnotated(cairn_domain::RunCompletionAnnotated {
+            project: p(),
+            session_id: cairn_domain::SessionId::new("sess_test"),
+            run_id: cairn_domain::RunId::new("run_test"),
+            summary: "done".to_owned(),
+            verification: cairn_domain::CompletionVerification::default(),
+            occurred_at_ms: ts,
+        }),
     ]
 }
 
@@ -1736,8 +1750,8 @@ fn all_runtime_event_variants_covered_count() {
     // F40: ProviderConnectionDeleted).
     assert_eq!(
         variants.len(),
-        141,
-        "all_variants() must construct exactly 141 RuntimeEvent instances"
+        142,
+        "all_variants() must construct exactly 142 RuntimeEvent instances"
     );
 }
 

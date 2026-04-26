@@ -902,6 +902,38 @@ impl SqliteSyncProjection {
                 .await
                 .map_err(|err| StoreError::Internal(err.to_string()))?;
             }
+            // F47 PR2: mirror PG projection. Completion_verification is
+            // stored as TEXT serde-JSON (SQLite has no native JSONB;
+            // portable per the no-DB-specific-features memory). UPDATE-
+            // only; missing-row no-ops silently mirroring the
+            // RunStateChanged handler.
+            RuntimeEvent::RunCompletionAnnotated(e) => {
+                let verification_json = serde_json::to_string(&e.verification)
+                    .map_err(|err| StoreError::Serialization(err.to_string()))?;
+                let annotated_at = i64::try_from(e.occurred_at_ms).map_err(|_| {
+                    StoreError::Internal(format!(
+                        "RunCompletionAnnotated.occurred_at_ms {} exceeds i64::MAX",
+                        e.occurred_at_ms
+                    ))
+                })?;
+                sqlx::query(
+                    "UPDATE runs
+                        SET completion_summary              = ?,
+                            completion_verification_json    = ?,
+                            completion_annotated_at_ms      = ?,
+                            version                         = version + 1,
+                            updated_at                      = ?
+                      WHERE run_id = ?",
+                )
+                .bind(&e.summary)
+                .bind(verification_json)
+                .bind(annotated_at)
+                .bind(now)
+                .bind(e.run_id.as_str())
+                .execute(&mut **tx)
+                .await
+                .map_err(|err| StoreError::Internal(err.to_string()))?;
+            }
             RuntimeEvent::DecisionCacheWarmup(e) => {
                 let warmed_at = i64::try_from(e.warmed_at).map_err(|_| {
                     StoreError::Internal(format!(

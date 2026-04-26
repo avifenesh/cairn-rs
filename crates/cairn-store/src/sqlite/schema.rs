@@ -43,7 +43,15 @@ CREATE TABLE IF NOT EXISTS runs (
     failure_class TEXT,
     version       INTEGER NOT NULL DEFAULT 1,
     created_at    INTEGER NOT NULL,
-    updated_at    INTEGER NOT NULL
+    updated_at    INTEGER NOT NULL,
+    -- F47 PR2: event-sourced persistence of run completion annotation.
+    -- All three columns nullable so pre-F47-PR2 rows (projected before
+    -- `RunCompletionAnnotated` existed) stay valid. `completion_verification_json`
+    -- is TEXT (no native JSONB in SQLite) — matches the portable
+    -- JSON-over-TEXT pattern used by route_policies.rules etc.
+    completion_summary            TEXT,
+    completion_verification_json  TEXT,
+    completion_annotated_at_ms    INTEGER
 );
 
 CREATE TABLE IF NOT EXISTS tasks (

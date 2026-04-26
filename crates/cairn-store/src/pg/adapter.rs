@@ -121,7 +121,8 @@ impl RunReadModel for PgAdapter {
     async fn get(&self, run_id: &RunId) -> Result<Option<RunRecord>, StoreError> {
         let row = sqlx::query_as::<_, RunRow>(
             "SELECT run_id, session_id, parent_run_id, tenant_id, workspace_id, project_id,
-                    state, failure_class, version, created_at, updated_at
+                    state, failure_class, version, created_at, updated_at,
+                    completion_summary, completion_verification_json, completion_annotated_at_ms
              FROM runs
              WHERE run_id = $1",
         )
@@ -141,7 +142,8 @@ impl RunReadModel for PgAdapter {
     ) -> Result<Vec<RunRecord>, StoreError> {
         let rows = sqlx::query_as::<_, RunRow>(
             "SELECT run_id, session_id, parent_run_id, tenant_id, workspace_id, project_id,
-                    state, failure_class, version, created_at, updated_at
+                    state, failure_class, version, created_at, updated_at,
+                    completion_summary, completion_verification_json, completion_annotated_at_ms
              FROM runs
              WHERE session_id = $1
              ORDER BY created_at ASC, run_id ASC
@@ -179,7 +181,8 @@ impl RunReadModel for PgAdapter {
     ) -> Result<Option<RunRecord>, StoreError> {
         let row = sqlx::query_as::<_, RunRow>(
             "SELECT run_id, session_id, parent_run_id, tenant_id, workspace_id, project_id,
-                    state, failure_class, version, created_at, updated_at
+                    state, failure_class, version, created_at, updated_at,
+                    completion_summary, completion_verification_json, completion_annotated_at_ms
              FROM runs
              WHERE session_id = $1 AND parent_run_id IS NULL
              ORDER BY created_at DESC, run_id DESC
@@ -200,7 +203,8 @@ impl RunReadModel for PgAdapter {
     ) -> Result<Vec<RunRecord>, StoreError> {
         let rows = sqlx::query_as::<_, RunRow>(
             "SELECT run_id, session_id, parent_run_id, tenant_id, workspace_id, project_id,
-                    state, failure_class, version, created_at, updated_at
+                    state, failure_class, version, created_at, updated_at,
+                    completion_summary, completion_verification_json, completion_annotated_at_ms
              FROM runs
              WHERE state = $1
              ORDER BY created_at ASC, run_id ASC
@@ -222,7 +226,8 @@ impl RunReadModel for PgAdapter {
     ) -> Result<Vec<RunRecord>, StoreError> {
         let rows = sqlx::query_as::<_, RunRow>(
             "SELECT run_id, session_id, parent_run_id, tenant_id, workspace_id, project_id,
-                    state, failure_class, version, created_at, updated_at
+                    state, failure_class, version, created_at, updated_at,
+                    completion_summary, completion_verification_json, completion_annotated_at_ms
              FROM runs
              WHERE tenant_id = $1 AND workspace_id = $2 AND project_id = $3
                AND state NOT IN ('completed', 'failed', 'canceled', 'dead_lettered')
@@ -248,7 +253,8 @@ impl RunReadModel for PgAdapter {
         // index on `parent_run_id WHERE NOT NULL`).
         let rows = sqlx::query_as::<_, RunRow>(
             "SELECT run_id, session_id, parent_run_id, tenant_id, workspace_id, project_id,
-                    state, failure_class, version, created_at, updated_at
+                    state, failure_class, version, created_at, updated_at,
+                    completion_summary, completion_verification_json, completion_annotated_at_ms
              FROM runs
              WHERE parent_run_id = $1
              ORDER BY created_at ASC, run_id ASC
@@ -827,10 +833,22 @@ struct RunRow {
     version: i64,
     created_at: i64,
     updated_at: i64,
+    // F47 PR2: nullable completion annotation. TEXT columns hold
+    // serde-JSON for `completion_verification_json` so pg + sqlite use
+    // the same serialisation path (no JSONB operators, portable).
+    completion_summary: Option<String>,
+    completion_verification_json: Option<String>,
+    completion_annotated_at_ms: Option<i64>,
 }
 
 impl RunRow {
     fn into_record(self) -> Result<RunRecord, StoreError> {
+        let completion_verification = self
+            .completion_verification_json
+            .as_deref()
+            .map(serde_json::from_str::<cairn_domain::CompletionVerification>)
+            .transpose()
+            .map_err(|e| StoreError::Serialization(e.to_string()))?;
         Ok(RunRecord {
             run_id: RunId::new(self.run_id),
             session_id: SessionId::new(self.session_id),
@@ -849,6 +867,9 @@ impl RunRow {
             version: self.version as u64,
             created_at: self.created_at as u64,
             updated_at: self.updated_at as u64,
+            completion_summary: self.completion_summary,
+            completion_verification,
+            completion_annotated_at_ms: self.completion_annotated_at_ms.map(|v| v as u64),
         })
     }
 }

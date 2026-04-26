@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use cairn_domain::{
-    FailureClass, PauseReason, ProjectKey, PromptReleaseId, ResumeTrigger, RunId, RunState,
-    SessionId,
+    CompletionVerification, FailureClass, PauseReason, ProjectKey, PromptReleaseId, ResumeTrigger,
+    RunId, RunState, SessionId,
 };
 use serde::{Deserialize, Serialize};
 
@@ -25,6 +25,25 @@ pub struct RunRecord {
     pub version: u64,
     pub created_at: u64,
     pub updated_at: u64,
+    /// F47 PR2: LLM free-text summary from `LoopTermination::Completed`.
+    /// `None` until the run terminates via the normal completion path;
+    /// also `None` for records projected from pre-F47-PR2 event logs
+    /// (no `RunCompletionAnnotated` ever landed).
+    #[serde(default)]
+    pub completion_summary: Option<String>,
+    /// F47 PR2: extractor-produced evidence from tool_results observed
+    /// during the run. Paired with `completion_summary`; both populate
+    /// on `RunCompletionAnnotated`. `None` mirrors the summary —
+    /// post-completion annotation has not (yet) been projected.
+    #[serde(default)]
+    pub completion_verification: Option<CompletionVerification>,
+    /// F47 PR2: wall-clock ms when `RunCompletionAnnotated` was emitted.
+    /// Distinct from `updated_at` because `updated_at` is set by the
+    /// projection applier to the current wall-clock on every event it
+    /// handles; `completion_annotated_at_ms` is the domain-time the
+    /// orchestrator recorded the completion.
+    #[serde(default)]
+    pub completion_annotated_at_ms: Option<u64>,
 }
 
 /// Read-model for run current state.
