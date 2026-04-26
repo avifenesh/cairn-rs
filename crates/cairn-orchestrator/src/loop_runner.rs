@@ -745,8 +745,9 @@ where
                     let summary = match &result.status {
                         ActionStatus::Succeeded => match result.tool_output.as_ref() {
                             Some(output) => {
-                                let rendered = output.to_string();
-                                let preview = truncate_for_summary(&rendered, 400);
+                                // F54: tool-aware preview so bash output
+                                // keeps its tail + exit_code line.
+                                let preview = render_tool_output_preview(tool_name, output);
                                 format!("{header}\n  tool_result[{tool_name}] ok: {preview}")
                             }
                             None => header,
@@ -1753,8 +1754,13 @@ fn build_step_summary(
             }
             ActionStatus::Succeeded => {
                 if let Some(output) = result.tool_output.as_ref() {
-                    let rendered = output.to_string();
-                    let preview = truncate_for_summary(&rendered, 400);
+                    // F54: tool-aware preview. For bash tools this
+                    // prepends `exit_code:` and keeps the tail of
+                    // stdout/stderr so the LLM can see the trailing
+                    // `warning:` / `error:` / success banner that
+                    // previously was clipped by the head+tail 400-char
+                    // cap on the serialized JSON blob.
+                    let preview = render_tool_output_preview(tool_name, output);
                     summary.push_str(&format!("\n  tool_result[{tool_name}] ok: {preview}"));
                 }
             }
@@ -1777,6 +1783,130 @@ fn build_step_summary(
         summary,
         succeeded,
     }
+}
+
+/// F54: tool-aware preview rendering for the `tool_result[<name>] ok:`
+/// line in a [`StepSummary`].
+///
+/// For `bash` / `shell_exec` / `run_bash`, we do not fall through to
+/// the generic JSON serialisation + head-and-tail truncation. Instead
+/// we:
+///
+///   1. Surface `exit_code` on its own line so the LLM can pattern-match
+///      "did the previous invocation succeed?" without having to parse
+///      a truncated JSON object. Accepts every exit-code key spelling
+///      that [`completion_verification::extract_exit_code`] already
+///      recognises (`exit_code`, `exitCode`, `returncode`,
+///      `return_code`, `status`) so adapter drift does not silently
+///      degrade the preview to `exit_code: ?`.
+///   2. Preserve the **tail** of stdout/stderr (last ~2 KB) because
+///      build tools stream "Compiling X" headers and put the decisive
+///      signal — `warning:`, `error:`, or a success banner — at the
+///      very end.
+///
+/// For non-bash tools we keep the existing head+tail 400-char cap: read
+/// tools dump a file body whose head is usually the most informative
+/// section, and the LLM has already seen the surrounding action
+/// description.
+///
+/// The bash-name matching and exit-code extraction are shared with
+/// `completion_verification` via the `is_bash_tool` and
+/// `extract_exit_code` helpers so the two subsystems cannot drift
+/// (e.g. adding a new bash-class adapter name elsewhere).
+fn render_tool_output_preview(tool_name: &str, output: &serde_json::Value) -> String {
+    if crate::completion_verification::is_bash_tool(tool_name) {
+        if let serde_json::Value::Object(map) = output {
+            return render_bash_preview(output, map);
+        }
+    }
+
+    truncate_for_summary(&output.to_string(), 400)
+}
+
+/// Tail-biased bash preview: prepend `exit_code`, then render the tail
+/// of `stdout`, then the tail of `stderr`. Total cap stays under ~2.2
+/// KB so a busy run with many iterations does not balloon the
+/// DECIDE-phase prompt.
+///
+/// Why stderr last: `cargo`, `rustc`, and most build tools emit
+/// diagnostics on stderr while using stdout for informational banners
+/// ("Compiling X v0.1.0"). Putting stderr at the end means the
+/// compiler diagnostic — the signal the LLM actually needs to decide
+/// "did the gate pass?" — survives any downstream truncation done by
+/// the decide-phase prompt builder.
+fn render_bash_preview(
+    output: &serde_json::Value,
+    map: &serde_json::Map<String, serde_json::Value>,
+) -> String {
+    let mut out = String::with_capacity(2048);
+
+    // Use the shared extract_exit_code so alternate key spellings
+    // (`exitCode`, `returncode`, …) surface the code correctly instead
+    // of degrading to `exit_code: ?`.
+    let exit_code = crate::completion_verification::extract_exit_code(output)
+        .map(|n| n.to_string())
+        .unwrap_or_else(|| "?".to_owned());
+    out.push_str(&format!("exit_code: {exit_code}"));
+
+    // Split the 2 KB budget 3:1 between stdout and stderr. Build-time
+    // diagnostics usually land on stderr but are small; stdout can
+    // carry multi-megabyte "Compiling X" streams.
+    let stdout = map.get("stdout").and_then(|v| v.as_str()).unwrap_or("");
+    let stderr = map.get("stderr").and_then(|v| v.as_str()).unwrap_or("");
+
+    if !stdout.is_empty() {
+        out.push_str("\nstdout(tail):\n");
+        out.push_str(&tail_of(stdout, 1536));
+    }
+    if !stderr.is_empty() {
+        out.push_str("\nstderr(tail):\n");
+        out.push_str(&tail_of(stderr, 512));
+    }
+
+    out
+}
+
+/// Return the trailing `max_chars` of `text`, prepended with a
+/// `[truncated …]` marker when material was dropped.
+///
+/// Review feedback (Gemini on PR #315): the previous implementation
+/// was an O(N) forward scan over every char. For multi-megabyte tool
+/// outputs that scan is a real cost on the orchestrator's hot path.
+/// We now scan backwards via `char_indices().rev()` to locate the
+/// tail's starting byte offset in O(max_chars) work, then slice the
+/// original `&str` verbatim — no intermediate buffer, no per-char
+/// copy. Memory stays O(max_chars) regardless of input size.
+///
+/// Edge case (Gemini): `max_chars == 0` returns an empty string when
+/// the input is non-empty (with a truncation marker indicating the
+/// whole input was dropped), rather than the degenerate
+/// "full-string-plus-marker" the deque-based approach produced.
+fn tail_of(text: &str, max_chars: usize) -> String {
+    // Byte-length pre-check is a safe "definitely fits" fast path:
+    // bytes ≥ chars for any valid UTF-8.
+    if text.len() <= max_chars {
+        return text.to_owned();
+    }
+
+    // Walk back through char boundaries; stop once we've counted
+    // `max_chars` chars or exhausted the input. `char_indices().rev()`
+    // is O(max_chars) in this use because we break early.
+    let mut start = text.len();
+    for (counted, (idx, _)) in text.char_indices().rev().enumerate() {
+        if counted == max_chars {
+            break;
+        }
+        start = idx;
+    }
+
+    // If the input turned out to have ≤ max_chars chars despite
+    // `text.len() > max_chars` (possible with multi-byte UTF-8), return
+    // verbatim with no marker.
+    if start == 0 {
+        return text.to_owned();
+    }
+
+    format!("[truncated …] …{}", &text[start..])
 }
 
 /// Truncate a string for inclusion in a step history `summary`. Keeps
@@ -2631,6 +2761,174 @@ mod tests {
     fn truncate_for_summary_preserves_short_input() {
         let input = "hello world";
         assert_eq!(super::truncate_for_summary(input, 400), input);
+    }
+
+    /// F54: `render_tool_output_preview` must produce an explicit
+    /// `exit_code:` line for bash-class tools so the LLM has an
+    /// unambiguous success/failure signal even when stdout/stderr are
+    /// truncated. The line must appear at the very start of the
+    /// preview.
+    #[test]
+    fn render_tool_output_preview_bash_prepends_exit_code() {
+        let output = serde_json::json!({
+            "exit_code": 0,
+            "stdout": "Compiling foo\nFinished dev [unoptimized] target\n",
+            "stderr": "",
+        });
+        let preview = super::render_tool_output_preview("bash", &output);
+        assert!(
+            preview.starts_with("exit_code: 0"),
+            "preview must open with exit_code; got: {preview}"
+        );
+        assert!(preview.contains("Finished dev"));
+    }
+
+    /// F54 primary fix: the tail of `stdout` must survive even when
+    /// the payload exceeds the preview budget. A build with hundreds
+    /// of "Compiling X" lines that ends with `warning: unused import`
+    /// must still show that final line — previously head+tail
+    /// truncation of the serialized JSON clipped the warning out.
+    #[test]
+    fn render_tool_output_preview_bash_preserves_trailing_warning() {
+        // 5 KB of "Compiling X" + final warning line. Size chosen to
+        // overflow the prior 400-char head+tail cap comfortably.
+        let mut stdout = String::new();
+        for i in 0..200 {
+            stdout.push_str(&format!("   Compiling crate-stub-{i} v0.1.0\n"));
+        }
+        stdout.push_str("warning: f54-marker-unused-import\n");
+        let output = serde_json::json!({
+            "exit_code": 0,
+            "stdout": stdout,
+            "stderr": "",
+        });
+        let preview = super::render_tool_output_preview("bash", &output);
+        assert!(
+            preview.contains("f54-marker-unused-import"),
+            "trailing warning must survive truncation; got: {preview}"
+        );
+    }
+
+    /// Clean builds produce short output — the preview must include
+    /// it verbatim with no truncation marker.
+    #[test]
+    fn render_tool_output_preview_bash_small_output_verbatim() {
+        let output = serde_json::json!({
+            "exit_code": 0,
+            "stdout": "hello",
+            "stderr": "",
+        });
+        let preview = super::render_tool_output_preview("bash", &output);
+        assert!(preview.contains("exit_code: 0"));
+        assert!(preview.contains("hello"));
+        assert!(
+            !preview.contains("[truncated"),
+            "short output must not carry a truncation marker; got: {preview}"
+        );
+    }
+
+    /// Copilot review on PR #315: an adapter that spells exit_code as
+    /// `exitCode` (or `returncode` / `return_code` / `status`) must
+    /// still surface the numeric value in the preview. Pre-fix this
+    /// code path only looked at `exit_code` and fell through to `?`.
+    #[test]
+    fn render_tool_output_preview_bash_accepts_alternate_exit_code_keys() {
+        for (key, expected) in [
+            ("exit_code", "exit_code: 0"),
+            ("exitCode", "exit_code: 0"),
+            ("returncode", "exit_code: 0"),
+            ("return_code", "exit_code: 0"),
+            ("status", "exit_code: 0"),
+        ] {
+            let output = serde_json::json!({
+                key: 0,
+                "stdout": "ok",
+                "stderr": "",
+            });
+            let preview = super::render_tool_output_preview("bash", &output);
+            assert!(
+                preview.starts_with(expected),
+                "key {key} must surface as {expected}; got: {preview}"
+            );
+        }
+    }
+
+    /// Case-insensitive bash matching — some provider adapters
+    /// normalize tool names to `Bash` during JSON marshalling.
+    #[test]
+    fn render_tool_output_preview_bash_case_insensitive() {
+        let output = serde_json::json!({"exit_code": 0, "stdout": "ok", "stderr": ""});
+        let preview = super::render_tool_output_preview("Bash", &output);
+        assert!(
+            preview.starts_with("exit_code: 0"),
+            "uppercase Bash must route through bash preview; got: {preview}"
+        );
+    }
+
+    /// Non-bash tools keep the existing head+tail truncation strategy
+    /// (F54 is scoped to bash-class tools — other tools like `read`
+    /// expose file bodies where the head is usually informative).
+    #[test]
+    fn render_tool_output_preview_non_bash_falls_through() {
+        let output = serde_json::json!({"result": "ok"});
+        let preview = super::render_tool_output_preview("search", &output);
+        assert!(
+            !preview.starts_with("exit_code:"),
+            "non-bash tools must not synthesise an exit_code line; got: {preview}"
+        );
+        assert!(preview.contains("ok"));
+    }
+
+    /// `tail_of` must preserve the last N chars of a large input and
+    /// include a `[truncated]` marker, with bounded output size.
+    #[test]
+    fn tail_of_preserves_last_chars_and_marks_truncation() {
+        let mut s = String::new();
+        for i in 0..2000 {
+            s.push_str(&format!("{i:04}\n"));
+        }
+        // Sentinel at the tail.
+        s.push_str("FINAL-MARKER\n");
+        let out = super::tail_of(&s, 200);
+        assert!(out.contains("FINAL-MARKER"));
+        assert!(out.contains("[truncated"));
+        assert!(
+            out.len() < 400,
+            "tail_of output too large: {} bytes",
+            out.len()
+        );
+    }
+
+    /// Short inputs to `tail_of` are passed through unchanged.
+    #[test]
+    fn tail_of_passthrough_for_short_input() {
+        assert_eq!(super::tail_of("hello", 100), "hello");
+    }
+
+    /// Edge case (Gemini review on PR #315): `max_chars == 0` on a
+    /// non-empty input must NOT return the full string — it should
+    /// emit a truncation marker with no content. Pre-fix, the
+    /// deque-based implementation degenerated to "full-string + marker"
+    /// because `buf.pop_front()` on an empty deque was a no-op and the
+    /// bounded-length branch never fired.
+    #[test]
+    fn tail_of_zero_max_chars_emits_marker_only() {
+        let out = super::tail_of("abcdef", 0);
+        assert!(
+            out.contains("[truncated"),
+            "zero-max tail must emit truncation marker; got: {out:?}"
+        );
+        assert!(
+            !out.contains("abcdef"),
+            "zero-max tail must NOT leak the input; got: {out:?}"
+        );
+    }
+
+    /// Empty input with any `max_chars` is a verbatim passthrough.
+    #[test]
+    fn tail_of_empty_input_is_empty() {
+        assert_eq!(super::tail_of("", 0), "");
+        assert_eq!(super::tail_of("", 100), "");
     }
 
     // ── tool_search discovery injection ──────────────────────────────────────

@@ -64,7 +64,18 @@ pub const EXTRACTOR_VERSION: u32 = 1;
 /// Bash-class tool names. These are scanned for structured `command` and
 /// `exit_code` fields. Other tools still contribute to warning / error
 /// scanning via their text output but produce no [`CommandOutcome`] entry.
-const BASH_TOOL_NAMES: &[&str] = &["bash", "shell_exec", "run_bash"];
+pub(crate) const BASH_TOOL_NAMES: &[&str] = &["bash", "shell_exec", "run_bash"];
+
+/// Case-insensitive match on any member of [`BASH_TOOL_NAMES`]. Shared
+/// with `loop_runner::render_tool_output_preview` so the preview path
+/// and the verification scanner agree on which tool names are
+/// "bash-class". Matching is case-insensitive because some provider
+/// adapters normalize `"bash"` to `"Bash"` during JSON marshalling.
+pub(crate) fn is_bash_tool(tool_name: &str) -> bool {
+    BASH_TOOL_NAMES
+        .iter()
+        .any(|b| b.eq_ignore_ascii_case(tool_name))
+}
 
 /// Incremental builder. The orchestrator loop feeds one `ActionResult` per
 /// iteration into [`VerificationAccumulator::observe`]; at Done it calls
@@ -100,10 +111,7 @@ impl VerificationAccumulator {
         // Command outcome. Only bash-class tools produce a CommandOutcome
         // entry; non-bash tools contribute to warning/error scanning via
         // their text output but do not appear in `commands[]`.
-        if BASH_TOOL_NAMES
-            .iter()
-            .any(|b| b.eq_ignore_ascii_case(tool_name))
-        {
+        if is_bash_tool(tool_name) {
             let cmd = result
                 .proposal
                 .tool_args
@@ -216,7 +224,7 @@ fn iter_text_sources(result: &ActionResult) -> Vec<std::borrow::Cow<'_, str>> {
 /// present. Accepts several canonical key names used by different harness
 /// adapters (`exit_code`, `exitCode`, `returncode`, …). Non-integer values
 /// return `None` rather than coercing.
-fn extract_exit_code(output: &Value) -> Option<i32> {
+pub(crate) fn extract_exit_code(output: &Value) -> Option<i32> {
     for key in [
         "exit_code",
         "exitCode",
