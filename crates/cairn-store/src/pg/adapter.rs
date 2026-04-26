@@ -1155,6 +1155,15 @@ impl ToolCallApprovalReadModel for PgAdapter {
         limit: usize,
         offset: usize,
     ) -> Result<Vec<ToolCallApprovalRecord>, StoreError> {
+        // Guard against `usize` values > `i64::MAX` wrapping into a
+        // negative `LIMIT`/`OFFSET` at the SQL layer. On 64-bit
+        // platforms this is unreachable in practice (handler caps are
+        // well below `i64::MAX`) but surfacing it loudly is cheaper
+        // than a corrupt query plan.
+        let limit_i64 =
+            i64::try_from(limit).map_err(|_| StoreError::Internal("limit overflows i64".into()))?;
+        let offset_i64 = i64::try_from(offset)
+            .map_err(|_| StoreError::Internal("offset overflows i64".into()))?;
         let sql = format!(
             "{TOOL_CALL_APPROVAL_SELECT} \
              WHERE state = 'pending' \
@@ -1162,8 +1171,8 @@ impl ToolCallApprovalReadModel for PgAdapter {
              LIMIT $1 OFFSET $2"
         );
         let rows = sqlx::query_as::<_, ToolCallApprovalRow>(&sql)
-            .bind(limit as i64)
-            .bind(offset as i64)
+            .bind(limit_i64)
+            .bind(offset_i64)
             .fetch_all(&self.pool)
             .await
             .map_err(|e| StoreError::Internal(e.to_string()))?;

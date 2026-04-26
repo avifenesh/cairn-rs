@@ -299,13 +299,16 @@ pub(crate) async fn list_tool_call_approvals_handler(
     //   *and* it accepts `(limit, offset)`. When the caller has no
     //   state filter (or filters to `pending`) we push `offset`/`limit`
     //   down to the projection, so pagination scales past
-    //   `MAX_LIST_FETCH`. For any other state filter the inbox always
-    //   yields an empty set (the projection doesn't return resolved
-    //   records on this path); return `[]` up front instead of doing an
-    //   expensive fetch + filter that we already know will be empty.
+    //   `MAX_LIST_FETCH`. For any other state filter the inbox would
+    //   always yield an empty set (the projection doesn't return
+    //   resolved records on this path); we 422 up front with
+    //   `unsupported_filter` rather than silently returning `[]`, so
+    //   operators who see approved records on the run view don't
+    //   mistake an empty inbox for "nothing to approve".
     //
     // * admin cross-tenant inbox (F44) — same rules as project inbox:
-    //   pending-only, pagination pushed down to the projection.
+    //   pending-only, pagination pushed down to the projection, same
+    //   422 on non-pending filters.
     let is_project_inbox = query.run_id.is_none() && query.session_id.is_none();
     let inbox_state_is_pending_only =
         matches!(state_filter, None | Some(ToolCallApprovalState::Pending));
@@ -319,7 +322,7 @@ pub(crate) async fn list_tool_call_approvals_handler(
         return AppApiError::new(
             StatusCode::UNPROCESSABLE_ENTITY,
             "unsupported_filter",
-            "listing by project triple only returns pending records; \
+            "inbox listings only return pending records; \
              use run_id or session_id to list resolved state",
         )
         .into_response();

@@ -1,22 +1,32 @@
-//! F44 regression: `GET /v1/tool-call-approvals?status=pending` must
-//! return pending approvals that are visible via `GET /v1/tool-call-approvals/:call_id`.
+//! F44 regression: the `GET /v1/tool-call-approvals` list endpoint
+//! must surface pending approvals that are already visible via
+//! `GET /v1/tool-call-approvals/:call_id`.
 //!
 //! Dogfood M1 (2026-04-26) hit: orchestrate created a pending tool-call
 //! approval whose by-id fetch returned a record in `state=pending`,
 //! but the list endpoint returned `{items:[], hasMore:false}`. The
 //! operator inbox in the UI consumes the list endpoint and was blank
-//! while the approval was live.
+//! while the approval was live. The bug report used `?status=pending`;
+//! `status` is not a supported query key (the server accepts `state`)
+//! and was silently dropped by the handler, so the response was the
+//! full unfiltered list on an admin token — it looked fine and was
+//! actually wrong.
 //!
-//! This test suite pins three properties:
+//! This test suite pins five properties:
 //!
 //!   1. A pending approval produced by `ToolCallApprovalService::submit_proposal`
-//!      is listed by BOTH `?run_id=...` and project-triple inbox queries.
-//!   2. The filter is case-preserving on the `state` name: an UNKNOWN
-//!      alias such as `status=pending` (observed in the bug report —
-//!      not a supported param) is rejected loudly rather than silently
-//!      returning `[]`. Silent `[]` is exactly what made the bug
-//!      invisible during the dogfood run.
-//!   3. After approve, the record drops out of the pending list and
+//!      is listed by `?run_id=...&state=pending`.
+//!   2. The same pending record is listed by the project-triple inbox
+//!      query (admin caller, explicit tenant/workspace/project params).
+//!   3. An admin caller with NO scope params sees pending approvals
+//!      from the canonical `default_tenant` project (the super-admin
+//!      inbox path — previously fell back to the admin service
+//!      account's own tenant and returned `[]`).
+//!   4. An unsupported query key such as `status=pending` is rejected
+//!      loudly with 400 rather than silently dropped — the silent-drop
+//!      behaviour is what made the bug invisible during the dogfood
+//!      run.
+//!   5. After approve, the record drops out of the pending list and
 //!      appears in `?state=approved` for the run scope.
 
 mod support;

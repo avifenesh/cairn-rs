@@ -1257,6 +1257,13 @@ impl ToolCallApprovalReadModel for SqliteAdapter {
         limit: usize,
         offset: usize,
     ) -> Result<Vec<ToolCallApprovalRecord>, StoreError> {
+        // See pg/adapter.rs:list_all_pending — guard `usize` → `i64`
+        // so out-of-range values surface as an error instead of
+        // wrapping to a negative `LIMIT`/`OFFSET` at the SQL layer.
+        let limit_i64 =
+            i64::try_from(limit).map_err(|_| StoreError::Internal("limit overflows i64".into()))?;
+        let offset_i64 = i64::try_from(offset)
+            .map_err(|_| StoreError::Internal("offset overflows i64".into()))?;
         let sql = format!(
             "{SQLITE_TOOL_CALL_APPROVAL_SELECT} \
              WHERE state = 'pending' \
@@ -1264,8 +1271,8 @@ impl ToolCallApprovalReadModel for SqliteAdapter {
              LIMIT ? OFFSET ?"
         );
         let rows = sqlx::query_as::<_, SqliteToolCallApprovalRow>(&sql)
-            .bind(limit as i64)
-            .bind(offset as i64)
+            .bind(limit_i64)
+            .bind(offset_i64)
             .fetch_all(&self.pool)
             .await
             .map_err(|e| StoreError::Internal(e.to_string()))?;
