@@ -356,24 +356,40 @@ async fn orchestrate_after_ttl_gap_recovers_via_reclaim() {
     // terminal-state reply rather than a `lease_expired` failure.
     let (status, body) = orchestrate(&h, &run_id, "Answer again.").await;
 
-    // What we reject: a 5xx or a `termination == "failed"` with the
-    // raw `lease_expired` message leaking through. Post-fix, either
-    // 200 (terminal-run short-circuit) or 409 (InvalidTransition on a
-    // terminal run) is acceptable — both preserve the operator-friendly
-    // cairn-mapped error shape without exposing FF internals.
+    // Post-fix acceptable outcomes (both preserve the operator-friendly
+    // cairn-mapped error shape, neither leaks FF internals):
+    //
+    //   * 200 with `termination == "completed"` — the handler's entry
+    //     re-read projection sees the run already terminal, and
+    //     short-circuits back through the completed path.
+    //   * 409 `InvalidTransition` — the run is terminal and the second
+    //     orchestrate is rejected cleanly before the loop runs.
+    //
+    // Unacceptable: 5xx, `termination == "failed"` with any reason
+    // mentioning `lease_expired`, or any body that leaks the raw
+    // classifier text. Pre-F51 this test would hit
+    // `{"termination":"failed", "reason":"... lease_expired ..."}`.
     let body_str = body.to_string();
-    assert_ne!(
-        status, 500,
-        "F51: orchestrate after TTL gap must not surface as 500; body={body_str}"
+    assert!(
+        status == 200 || status == 409,
+        "F51: orchestrate after TTL gap must return 200 or 409 (terminal-run \
+         short-circuit), got status={status}; body={body_str}"
     );
-    let term = body
-        .get("termination")
-        .and_then(|v| v.as_str())
-        .unwrap_or("<missing>");
-    assert_ne!(
-        term, "failed",
-        "F51: orchestrate after TTL gap must not terminate as failed with \
-         lease_expired; status={status} body={body_str}"
+    if status == 200 {
+        let term = body
+            .get("termination")
+            .and_then(|v| v.as_str())
+            .unwrap_or("<missing>");
+        assert_eq!(
+            term, "completed",
+            "F51: 200-response second orchestrate must carry \
+             termination=completed (run is already terminal); body={body_str}"
+        );
+    }
+    assert!(
+        !body_str.contains("lease_expired"),
+        "F51: response must not leak `lease_expired` across an \
+         inter-call TTL gap; body={body_str}"
     );
     assert!(
         !body_str.contains("lease expired before cairn could write"),
@@ -411,17 +427,29 @@ async fn orchestrate_back_to_back_is_noop_renewal() {
     );
 
     // Immediately orchestrate again (<1s gap). The entry-time renewal
-    // call must no-op (snapshot read only, no FF mutation). The
-    // response is a terminal-state short-circuit on a completed run.
+    // call must no-op (snapshot read only, no FF mutation) AND the
+    // handler's terminal-run short-circuit must kick in. Acceptable
+    // outcomes match the TTL-gap test: 200 with termination=completed
+    // (terminal-run short-circuit) or 409 InvalidTransition.
     let (s2, b2) = orchestrate(&h, &run_id, "Turn two.").await;
-    assert_ne!(
-        s2, 500,
-        "F51: back-to-back orchestrate must not 500 on the renewal call; body={b2}"
+    let body_str = b2.to_string();
+    assert!(
+        s2 == 200 || s2 == 409,
+        "F51: back-to-back orchestrate must return 200 or 409 on a \
+         terminal run, got status={s2}; body={body_str}"
     );
-    let term = b2.get("termination").and_then(|v| v.as_str());
-    assert_ne!(
-        term,
-        Some("failed"),
-        "F51: back-to-back orchestrate must not spuriously fail; body={b2}"
+    if s2 == 200 {
+        let term = b2.get("termination").and_then(|v| v.as_str());
+        assert_eq!(
+            term,
+            Some("completed"),
+            "F51: 200-response second orchestrate must carry \
+             termination=completed; body={body_str}"
+        );
+    }
+    assert!(
+        !body_str.contains("lease_expired"),
+        "F51: back-to-back orchestrate must not surface lease_expired \
+         (lease is fresh, renewal path must no-op); body={body_str}"
     );
 }

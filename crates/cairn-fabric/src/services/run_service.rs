@@ -14,7 +14,7 @@ use crate::engine::{
     FailExecutionOutcome, FailRunInput, ResumeRunInput,
 };
 use crate::event_bridge::{BridgeEvent, EventBridge};
-use crate::helpers::try_parse_project_key;
+use crate::helpers::{now_ms, try_parse_project_key};
 use crate::id_map;
 use crate::state_map;
 
@@ -451,12 +451,12 @@ impl FabricRunService {
             return self.claim(project, session_id, run_id).await;
         };
 
-        let now_ms = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_millis() as i64;
+        // Use the crate-local `now_ms` helper so clock-skew logging is
+        // centralized (it warns-and-returns-0 on pre-epoch clocks
+        // instead of silently collapsing to Duration::default()).
+        let now_ms_i = now_ms() as i64;
         let expires_at_ms = lease.expires_at.0;
-        let remaining_ms = expires_at_ms.saturating_sub(now_ms);
+        let remaining_ms = expires_at_ms.saturating_sub(now_ms_i);
 
         // Already-expired-but-not-cleared window: the snapshot still
         // carries `current_lease_id` because FF's expiry scanner runs
@@ -483,13 +483,39 @@ impl FabricRunService {
         // terminal FCALL that read the triple before this renewal
         // remains valid.
         let lease_ctx = self.resolve_lease_context(&snapshot);
-        self.control_plane
+        let renew = self
+            .control_plane
             .renew_task_lease(crate::engine::RenewLeaseInput {
-                execution_id: eid,
+                execution_id: eid.clone(),
                 lease: lease_ctx,
                 lease_extension_ms: self.runtime.config.lease_ttl_ms,
             })
-            .await?;
+            .await;
+
+        // Race window: the snapshot read and the `ff_renew_lease` FCALL
+        // are not atomic. FF's expiry scanner can roll the execution
+        // forward between them, or a sibling process could rotate the
+        // lease (stale fence). Either case surfaces as a typed Lua
+        // rejection (`lease_expired`, `stale_lease`). Without a
+        // fallback the response bubbles up as a 500 at the handler
+        // — `is_terminal_state_conflict` only classifies terminal
+        // FCALLs (`ff_complete`/`ff_fail`/`ff_cancel`), not
+        // `ff_renew_lease`. Recover by falling back to a full reclaim,
+        // which mints a new lease + epoch and produces the same
+        // end-state the caller would have gotten via a slightly-later
+        // renew attempt.
+        if let Err(err) = renew {
+            if is_renew_race_error(&err) {
+                tracing::warn!(
+                    run_id = %run_id,
+                    error = %err,
+                    "F51: ff_renew_lease lost the scanner/rotation race; \
+                     falling back to full reclaim"
+                );
+                return self.claim(project, session_id, run_id).await;
+            }
+            return Err(err);
+        }
 
         self.read_run_record(project, session_id, run_id).await
     }
@@ -898,6 +924,24 @@ impl FabricRunService {
             }
         }
     }
+}
+
+/// F51: classify `ff_renew_lease` rejections that are safely
+/// recoverable via a full reclaim.
+///
+/// `ff_renew_lease`'s Lua side runs `validate_lease_and_mark_expired`
+/// plus fence-triple validation, which can reject with
+/// `lease_expired` (FF's scanner rolled the exec forward between
+/// snapshot read and FCALL) or `stale_lease` (a sibling rotated the
+/// lease). Both represent a race the caller can cleanly resolve by
+/// re-claiming — the execution is still valid, we just lost the
+/// lease we thought we held.
+///
+/// Other errors (connection, partition gate, programming bug) bubble
+/// up unchanged.
+fn is_renew_race_error(err: &FabricError) -> bool {
+    let msg = err.to_string();
+    msg.contains("lease_expired") || msg.contains("stale_lease")
 }
 
 /// Derive a cairn `RunState` from a snapshot's FF public state, applying
