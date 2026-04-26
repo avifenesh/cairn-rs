@@ -70,8 +70,8 @@ pub enum ToolInvocationTarget {
 /// Maximum number of bytes kept for the projected tool output preview.
 /// Events carry the full payload; the projection stores at most this many
 /// bytes of UTF-8 so operator-observability endpoints do not return
-/// multi-MB blobs. Raised from the original 8 KiB estimate to let shell
-/// commands with typical cargo/git/grep output fit in full.
+/// multi-MB blobs while still retaining a useful preview for common
+/// shell command output.
 pub const TOOL_OUTPUT_PREVIEW_MAX_BYTES: usize = 8 * 1024;
 
 /// Suffix appended to output previews that were truncated at
