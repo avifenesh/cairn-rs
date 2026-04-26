@@ -66,7 +66,9 @@ struct MockState {
     marker_token: String,
 }
 
-async fn spawn_llm_mock(marker_token: String) -> (String, Arc<AtomicUsize>, Arc<Mutex<Vec<Value>>>) {
+async fn spawn_llm_mock(
+    marker_token: String,
+) -> (String, Arc<AtomicUsize>, Arc<Mutex<Vec<Value>>>) {
     let state = MockState {
         hits: Arc::new(AtomicUsize::new(0)),
         bodies: Arc::new(Mutex::new(Vec::new())),
@@ -412,10 +414,7 @@ async fn drained_tool_result_reaches_next_decide_user_message() {
          the same command because it has no memory of the prior execution. \
          Captured bodies ({} total): user texts = {:#?}",
         captured.len(),
-        captured
-            .iter()
-            .map(user_text)
-            .collect::<Vec<_>>(),
+        captured.iter().map(user_text).collect::<Vec<_>>(),
     );
     // Strong form: the marker token should flow through to the user
     // message verbatim (it's the bash stdout). If the drain enrichment
