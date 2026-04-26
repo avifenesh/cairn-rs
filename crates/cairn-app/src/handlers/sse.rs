@@ -282,6 +282,7 @@ fn push_notification_for_event(state: &Arc<AppState>, stored: &cairn_store::Stor
     let trunc: String = event_id.chars().take(16).collect();
     let make_id = |kind: &str| format!("notif-{kind}-{trunc}");
     let payload = &stored.envelope.payload;
+    let tenant_id = ws_event_tenant_id(&stored.envelope).map(|s| s.to_owned());
 
     let maybe_notif: Option<OperatorNotification> = match payload {
         E::ApprovalRequested(e) => Some(OperatorNotification {
@@ -294,6 +295,7 @@ fn push_notification_for_event(state: &Arc<AppState>, stored: &cairn_store::Stor
             entity_id: Some(e.approval_id.as_str().to_owned()),
             href: "approvals".to_owned(),
             created_at_ms,
+            tenant_id: tenant_id.clone(),
         }),
         E::ApprovalResolved(e) => Some(OperatorNotification {
             id: make_id("appres"),
@@ -306,6 +308,7 @@ fn push_notification_for_event(state: &Arc<AppState>, stored: &cairn_store::Stor
             entity_id: Some(e.approval_id.as_str().to_owned()),
             href: "approvals".to_owned(),
             created_at_ms,
+            tenant_id: tenant_id.clone(),
         }),
         E::RunStateChanged(e) => match &e.transition.to {
             RunState::Completed => Some(OperatorNotification {
@@ -315,6 +318,7 @@ fn push_notification_for_event(state: &Arc<AppState>, stored: &cairn_store::Stor
                 entity_id: Some(e.run_id.as_str().to_owned()),
                 href: format!("run/{}", e.run_id.as_str()),
                 created_at_ms,
+                tenant_id: tenant_id.clone(),
             }),
             RunState::Failed => Some(OperatorNotification {
                 id: make_id("runfail"),
@@ -330,6 +334,7 @@ fn push_notification_for_event(state: &Arc<AppState>, stored: &cairn_store::Stor
                 entity_id: Some(e.run_id.as_str().to_owned()),
                 href: format!("run/{}", e.run_id.as_str()),
                 created_at_ms,
+                tenant_id: tenant_id.clone(),
             }),
             _ => None,
         },
@@ -345,6 +350,7 @@ fn push_notification_for_event(state: &Arc<AppState>, stored: &cairn_store::Stor
                 entity_id: Some(e.task_id.as_str().to_owned()),
                 href: "tasks".to_owned(),
                 created_at_ms,
+                tenant_id: tenant_id.clone(),
             }),
             _ => None,
         },

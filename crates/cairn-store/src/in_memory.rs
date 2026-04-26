@@ -308,9 +308,12 @@ impl InMemoryStore {
             .clear();
     }
 
-    /// Test-only read of the `tool_invocation_cache_hits` projection.
-    /// Integration tests assert the projection grew after a
-    /// `ToolInvocationCacheHit` append.
+    /// Test-only read of the `tool_invocation_cache_hits` projection,
+    /// mirroring the `arm_fail_next_append` gating pattern. Integration
+    /// tests assert the projection grew after a
+    /// `ToolInvocationCacheHit` append without committing to a stable
+    /// public API surface on the store.
+    #[cfg(debug_assertions)]
     pub fn all_tool_invocation_cache_hits(
         &self,
     ) -> Vec<crate::projections::ToolInvocationCacheHitRecord> {

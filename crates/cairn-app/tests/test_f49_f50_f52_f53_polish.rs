@@ -117,6 +117,7 @@ async fn f50_sink_installs_once_and_fans_out() {
         entity_id: Some("a1".to_owned()),
         href: "approvals".to_owned(),
         created_at_ms: 1,
+        tenant_id: Some("t_a".to_owned()),
     });
     sink.push(OperatorNotification {
         id: "n2".to_owned(),
@@ -125,6 +126,7 @@ async fn f50_sink_installs_once_and_fans_out() {
         entity_id: Some("run-x".to_owned()),
         href: "run/run-x".to_owned(),
         created_at_ms: 2,
+        tenant_id: None,
     });
 
     let captured = sink_buf.inner.lock().unwrap();
@@ -146,6 +148,7 @@ async fn f50_sink_is_noop_until_installed() {
         entity_id: None,
         href: "tasks".to_owned(),
         created_at_ms: 0,
+        tenant_id: None,
     });
     // No installed sink, no capturing buffer. The only assertion is
     // that we reached this point without crashing.

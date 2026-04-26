@@ -1476,7 +1476,14 @@ async fn main() {
             let (kick_tx, mut kick_rx) =
                 tokio::sync::mpsc::unbounded_channel::<cairn_domain::RunId>();
             lib_state.orchestrate_kick_tx.install(kick_tx);
-            let kick_url = format!("http://{bound}");
+            // Use a loopback host with the bound port: the listener
+            // may have bound 0.0.0.0 or [::] (team mode), which is
+            // not a valid destination for a client POST. The worker
+            // always dials the local process.
+            let kick_url = match bound {
+                std::net::SocketAddr::V4(_) => format!("http://127.0.0.1:{}", bound.port()),
+                std::net::SocketAddr::V6(_) => format!("http://[::1]:{}", bound.port()),
+            };
             let kick_token = admin_token.clone();
             tokio::spawn(async move {
                 let client = reqwest::Client::builder()

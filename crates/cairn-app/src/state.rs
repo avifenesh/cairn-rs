@@ -416,6 +416,13 @@ impl NotificationSink {
 /// F50: a single operator notification destined for the in-memory bell
 /// buffer. Mirrors the fields of the binary's private `Notification`
 /// type but stays crate-public so the lib can construct them.
+///
+/// `tenant_id` is recorded on every notification so the `/v1/
+/// notifications` handler can filter cross-tenant leakage in a future
+/// pass (v1 currently returns the global buffer unfiltered for
+/// backwards compatibility with the bell UI). Multi-tenant deployments
+/// should upgrade the handler to drop rows whose `tenant_id` does not
+/// match the caller principal's tenant.
 #[derive(Clone, Debug)]
 pub struct OperatorNotification {
     pub id: String,
@@ -424,6 +431,10 @@ pub struct OperatorNotification {
     pub entity_id: Option<String>,
     pub href: String,
     pub created_at_ms: u64,
+    /// Originating event's tenant, extracted from the envelope's
+    /// `ownership` field. `None` for system-scoped events that are
+    /// visible to every tenant (same semantics as SSE fan-out).
+    pub tenant_id: Option<String>,
 }
 
 /// F50: notification categories the bell icon distinguishes.

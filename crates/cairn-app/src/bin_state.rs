@@ -202,6 +202,14 @@ pub(crate) struct NotificationBufferSink {
 impl cairn_app::state::OperatorNotificationSink for NotificationBufferSink {
     fn push(&self, n: cairn_app::state::OperatorNotification) {
         use cairn_app::state::OperatorNotificationType as T;
+        // `n.tenant_id` is carried on the lib-side struct for future
+        // tenant-filtered notification listing (follow-up: add a
+        // `tenant_id` column on bin `Notification` + filter in
+        // `list_notifications_handler` by the caller principal's
+        // tenant). v1 keeps the same bell UI shape as pre-F50 so the
+        // field is dropped at the adapter boundary; multi-tenant
+        // deployments should not rely on the bell buffer for
+        // isolation.
         let notif = Notification {
             id: n.id,
             notif_type: match n.notif_type {
