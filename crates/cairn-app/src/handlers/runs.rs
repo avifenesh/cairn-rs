@@ -2041,6 +2041,71 @@ pub(crate) async fn list_child_runs_handler(
     }
 }
 
+// ── F53: terminal-failure state flip helpers ────────────────────────────────
+
+/// F53: heuristically map a `LoopTermination::Failed { reason }` string to
+/// a `FailureClass`. The reason is free-form from the orchestrator loop
+/// (provider errors, lease-expiry diagnostics, tool failures, …), so we
+/// substring-match the obvious cases and fall back to `ExecutionError`
+/// so operators can still filter failed runs by class.
+fn classify_failed_reason(reason: &str) -> cairn_domain::FailureClass {
+    let lower = reason.to_ascii_lowercase();
+    if lower.contains("lease") && (lower.contains("expir") || lower.contains("lost")) {
+        cairn_domain::FailureClass::LeaseExpired
+    } else if lower.contains("timed out") || lower.contains("timeout") {
+        cairn_domain::FailureClass::TimedOut
+    } else if lower.contains("approval") && lower.contains("reject") {
+        cairn_domain::FailureClass::ApprovalRejected
+    } else if lower.contains("policy") && lower.contains("denied") {
+        cairn_domain::FailureClass::PolicyDenied
+    } else {
+        cairn_domain::FailureClass::ExecutionError
+    }
+}
+
+/// F53: flip the run to the terminal `Failed` state via
+/// `RunService::fail`. Called from every non-success
+/// `LoopTermination` branch (Failed / MaxIterationsReached / TimedOut)
+/// so the run projection catches up to the orchestrate response body
+/// (previously runs stayed `Running` forever, forcing operators to
+/// manually cancel).
+///
+/// Swallows errors: a transient store blip or an already-terminal run
+/// (e.g. `runs.complete` already fired inside the loop) must not turn
+/// an orchestrate response into a 5xx for the operator. All failure
+/// paths are logged so ops can spot the drift.
+async fn finalize_run_failure(
+    state: &AppState,
+    session_id: &cairn_domain::SessionId,
+    run_id: &cairn_domain::RunId,
+    failure_class: cairn_domain::FailureClass,
+) {
+    if let Err(e) = state.runtime.runs.fail(session_id, run_id, failure_class).await {
+        // `InvalidTransition` is the common benign case: the loop already
+        // reached a terminal state (Completed / Canceled) before we got
+        // here. Log at debug. Anything else is operator-visible.
+        match &e {
+            cairn_runtime::error::RuntimeError::InvalidTransition { .. } => {
+                tracing::debug!(
+                    run_id = %run_id,
+                    failure_class = ?failure_class,
+                    error = %e,
+                    "F53: run already in terminal state; skip fail-flip"
+                );
+            }
+            _ => {
+                tracing::warn!(
+                    run_id = %run_id,
+                    failure_class = ?failure_class,
+                    error = %e,
+                    "F53: failed to flip run to Failed after terminal orchestrate; \
+                     GET /v1/runs/:id may report stale state=running"
+                );
+            }
+        }
+    }
+}
+
 // ── Orchestrator entry point ──────────────────────────────────────────────
 
 /// POST /v1/runs/:id/orchestrate -- trigger the GATHER -> DECIDE -> EXECUTE loop.
@@ -2841,27 +2906,64 @@ pub(crate) async fn orchestrate_run_handler(
             )
                 .into_response()
         }
-        Ok(LoopTermination::Failed { reason }) => (
-            StatusCode::OK,
-            Json(serde_json::json!({
-                "termination": "failed", "reason": reason,
-            })),
-        )
-            .into_response(),
-        Ok(LoopTermination::MaxIterationsReached) => (
-            StatusCode::OK,
-            Json(serde_json::json!({
-                "termination": "max_iterations_reached",
-            })),
-        )
-            .into_response(),
-        Ok(LoopTermination::TimedOut) => (
-            StatusCode::OK,
-            Json(serde_json::json!({
-                "termination": "timed_out",
-            })),
-        )
-            .into_response(),
+        Ok(LoopTermination::Failed { reason }) => {
+            // F53: flip run.state from Running to Failed. Without this,
+            // GET /v1/runs/:id keeps reporting state=running forever and
+            // the operator has no durable record of the terminal failure.
+            // The "reason" string may mention lease expiry, provider error,
+            // etc.; we map to a FailureClass heuristically and otherwise
+            // default to ExecutionError.
+            let failure_class = classify_failed_reason(&reason);
+            finalize_run_failure(
+                state.as_ref(),
+                &run.session_id,
+                &run.run_id,
+                failure_class,
+            )
+            .await;
+            (
+                StatusCode::OK,
+                Json(serde_json::json!({
+                    "termination": "failed", "reason": reason,
+                })),
+            )
+                .into_response()
+        }
+        Ok(LoopTermination::MaxIterationsReached) => {
+            // F53: same treatment as Failed — max iterations is a terminal
+            // failure and the run must not stay in state=running.
+            finalize_run_failure(
+                state.as_ref(),
+                &run.session_id,
+                &run.run_id,
+                cairn_domain::FailureClass::ExecutionError,
+            )
+            .await;
+            (
+                StatusCode::OK,
+                Json(serde_json::json!({
+                    "termination": "max_iterations_reached",
+                })),
+            )
+                .into_response()
+        }
+        Ok(LoopTermination::TimedOut) => {
+            // F53: same treatment — wall-clock timeout is terminal.
+            finalize_run_failure(
+                state.as_ref(),
+                &run.session_id,
+                &run.run_id,
+                cairn_domain::FailureClass::TimedOut,
+            )
+            .await;
+            (
+                StatusCode::OK,
+                Json(serde_json::json!({
+                    "termination": "timed_out",
+                })),
+            )
+                .into_response()
+        }
         Ok(LoopTermination::WaitingApproval { approval_id }) => (
             StatusCode::ACCEPTED,
             Json(serde_json::json!({
