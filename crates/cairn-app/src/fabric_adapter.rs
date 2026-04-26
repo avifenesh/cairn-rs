@@ -592,6 +592,25 @@ impl RunService for FabricRunServiceAdapter {
             .map_err(fabric_err_to_runtime)
     }
 
+    async fn renew_lease_if_stale(
+        &self,
+        session_id: &SessionId,
+        run_id: &RunId,
+        min_remaining_ms: u64,
+    ) -> Result<RunRecord, RuntimeError> {
+        // F51: keep the run's FF lease fresh across orchestrate
+        // handler invocations. `FabricRunService::renew_lease_if_stale`
+        // snapshot-reads the lease, no-ops if plenty of TTL remains,
+        // renews in place if stale, or falls back to a full claim if
+        // the lease is already gone.
+        let project = resolve_run_project_checking_session(&self.store, run_id, session_id).await?;
+        self.fabric
+            .runs
+            .renew_lease_if_stale(&project, session_id, run_id, min_remaining_ms)
+            .await
+            .map_err(fabric_err_to_runtime)
+    }
+
     async fn enter_waiting_approval(
         &self,
         session_id: &SessionId,

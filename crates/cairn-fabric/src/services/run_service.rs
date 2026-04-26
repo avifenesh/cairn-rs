@@ -14,7 +14,7 @@ use crate::engine::{
     FailExecutionOutcome, FailRunInput, ResumeRunInput,
 };
 use crate::event_bridge::{BridgeEvent, EventBridge};
-use crate::helpers::try_parse_project_key;
+use crate::helpers::{now_ms, try_parse_project_key};
 use crate::id_map;
 use crate::state_map;
 
@@ -281,6 +281,29 @@ impl FabricRunService {
                     entity: "run",
                     id: run_id.to_string(),
                 })?;
+        self.claim_with_snapshot(project, session_id, run_id, eid, &snapshot)
+            .await
+    }
+
+    /// Internal helper for the shared claim path: given an already-read
+    /// snapshot + execution id, walk `issue_grant_and_claim` and
+    /// read the final `RunRecord`.
+    ///
+    /// Callers that just read the snapshot for another reason (e.g.
+    /// `renew_lease_if_stale`'s staleness check, or any future code
+    /// path that inspects lease/attempt state before deciding between
+    /// claim and renew) should route through this helper instead of
+    /// calling `claim` directly, which would re-issue
+    /// `describe_execution` and pay an extra FF round-trip on the
+    /// hot path.
+    async fn claim_with_snapshot(
+        &self,
+        project: &ProjectKey,
+        session_id: &SessionId,
+        run_id: &RunId,
+        eid: flowfabric::core::types::ExecutionId,
+        snapshot: &ExecutionSnapshot,
+    ) -> Result<RunRecord, FabricError> {
         let lane_id = if snapshot.lane_id.as_str().is_empty() {
             self.lane_id(project)
         } else {
@@ -372,6 +395,155 @@ impl FabricRunService {
                 lease_duration_ms: self.runtime.config.lease_ttl_ms,
             })
             .await?;
+
+        self.read_run_record(project, session_id, run_id).await
+    }
+
+    /// F51 (2026-04-26): extend the lease on a run if it is nearing
+    /// expiry, or re-claim if it has no active lease at all.
+    ///
+    /// # Background
+    ///
+    /// `POST /v1/runs/:id/orchestrate` is a **pull-model driver**: each
+    /// HTTP call runs one GATHER → DECIDE → EXECUTE iteration loop and
+    /// returns. Between calls (e.g. while an operator approves a
+    /// tool-call, or while a human-paced agent clicks through 5–10
+    /// tool-calls in a dashboard), no one is renewing the FF lease.
+    ///
+    /// The default `CAIRN_FABRIC_LEASE_TTL_MS = 30_000` (30 s) is easily
+    /// exceeded by any operator-paced workflow. When the next
+    /// `/orchestrate` call arrives the lease is already expired, and the
+    /// run's terminal FCALL (`ff_complete_execution`) rejects with
+    /// `lease_expired`. The operator-visible symptom was
+    /// `{"termination":"failed","reason":"invalid run transition to
+    /// completed: ... lease_expired ..."}`.
+    ///
+    /// # Contract
+    ///
+    /// * If the run is not tracked in FF (not found) → propagates
+    ///   [`FabricError::NotFound`] — same shape as [`Self::claim`] and
+    ///   [`Self::ensure_active`].
+    /// * If the run has no `current_lease` → walk the same
+    ///   `issue_grant_and_claim` path as [`Self::claim`] to re-acquire.
+    /// * If the run has a healthy lease (more than `min_remaining_ms`
+    ///   left) → no-op, no side effects, no FF call.
+    /// * If the run has a stale lease (≤ `min_remaining_ms` left) → call
+    ///   `renew_task_lease` (the FF fcall is engine-agnostic and works
+    ///   for run executions too) with the full `lease_ttl_ms` from
+    ///   [`crate::FabricConfig`]. This extends
+    ///   `exec_core.lease_expires_at` without rotating the lease epoch
+    ///   or attempt; the lease_history cron remains undisturbed.
+    ///
+    /// The method is idempotent: back-to-back calls in <1s against a
+    /// fresh lease produce zero FF mutations (the snapshot read is the
+    /// only cost).
+    ///
+    /// # Why renew instead of always re-claim?
+    ///
+    /// Full re-claim rotates `lease_epoch` and mints a new
+    /// `attempt_id`, which writes a lease-history row and a
+    /// `LeaseClaimedEvent` on every orchestrate call. That's bridge
+    /// traffic + audit-log noise proportional to the number of
+    /// orchestrate invocations on long-running runs. Renewal is a
+    /// single hash-set on `exec_core` with no lease-history write and
+    /// preserves the existing fence triple so any terminal FCALL
+    /// already in flight is not invalidated.
+    pub async fn renew_lease_if_stale(
+        &self,
+        project: &ProjectKey,
+        session_id: &SessionId,
+        run_id: &RunId,
+        min_remaining_ms: u64,
+    ) -> Result<RunRecord, FabricError> {
+        let eid = self.execution_id(project, session_id, run_id);
+
+        let snapshot =
+            self.engine
+                .describe_execution(&eid)
+                .await?
+                .ok_or_else(|| FabricError::NotFound {
+                    entity: "run",
+                    id: run_id.to_string(),
+                })?;
+
+        // No active lease: fall back to a full re-claim so the caller
+        // can proceed with terminal FCALLs. This is the "inter-call
+        // expiry" case that motivated F51 — FF's expiry scanner has
+        // already cleared `current_lease_id`. Reuse the snapshot we
+        // just read rather than bouncing through `self.claim`, which
+        // would `describe_execution` again.
+        let Some(lease) = snapshot.current_lease.as_ref() else {
+            return self
+                .claim_with_snapshot(project, session_id, run_id, eid.clone(), &snapshot)
+                .await;
+        };
+
+        // Use the crate-local `now_ms` helper so clock-skew logging is
+        // centralized (it warns-and-returns-0 on pre-epoch clocks
+        // instead of silently collapsing to Duration::default()).
+        let now_ms_i = now_ms() as i64;
+        let expires_at_ms = lease.expires_at.0;
+        let remaining_ms = expires_at_ms.saturating_sub(now_ms_i);
+
+        // Already-expired-but-not-cleared window: the snapshot still
+        // carries `current_lease_id` because FF's expiry scanner runs
+        // on its own cadence (see `lease_expiry` sorted-set sweeper)
+        // and hasn't rolled this execution forward yet. `ff_renew_lease`
+        // would reject with `lease_expired` (same reason a terminal
+        // FCALL would), so we can't renew — but a fresh
+        // `issue_grant_and_claim` is still legal and mints a new
+        // lease + epoch. Reclaim from the snapshot we already have.
+        if remaining_ms <= 0 {
+            return self
+                .claim_with_snapshot(project, session_id, run_id, eid.clone(), &snapshot)
+                .await;
+        }
+
+        // Fresh enough: no-op. Back-to-back orchestrate calls (<1s)
+        // against a 30s lease TTL hit this path and do not mutate FF.
+        if remaining_ms > min_remaining_ms as i64 {
+            return build_run_record(&snapshot, project, run_id);
+        }
+
+        // Stale: renew in place. The fence triple carried forward via
+        // `resolve_lease_context` is the SAME one that was minted at
+        // claim time (renewal does not rotate it), so any in-flight
+        // terminal FCALL that read the triple before this renewal
+        // remains valid.
+        let lease_ctx = self.resolve_lease_context(&snapshot);
+        let renew = self
+            .control_plane
+            .renew_task_lease(crate::engine::RenewLeaseInput {
+                execution_id: eid.clone(),
+                lease: lease_ctx,
+                lease_extension_ms: self.runtime.config.lease_ttl_ms,
+            })
+            .await;
+
+        // Race window: the snapshot read and the `ff_renew_lease` FCALL
+        // are not atomic. FF's expiry scanner can roll the execution
+        // forward between them, or a sibling process could rotate the
+        // lease (stale fence). Either case surfaces as a typed Lua
+        // rejection (`lease_expired`, `stale_lease`). Without a
+        // fallback the response bubbles up as a 500 at the handler
+        // — `is_terminal_state_conflict` only classifies terminal
+        // FCALLs (`ff_complete`/`ff_fail`/`ff_cancel`), not
+        // `ff_renew_lease`. Recover by falling back to a full reclaim,
+        // which mints a new lease + epoch and produces the same
+        // end-state the caller would have gotten via a slightly-later
+        // renew attempt.
+        if let Err(err) = renew {
+            if is_renew_race_error(&err) {
+                tracing::warn!(
+                    run_id = %run_id,
+                    error = %err,
+                    "F51: ff_renew_lease lost the scanner/rotation race; \
+                     falling back to full reclaim"
+                );
+                return self.claim(project, session_id, run_id).await;
+            }
+            return Err(err);
+        }
 
         self.read_run_record(project, session_id, run_id).await
     }
@@ -780,6 +952,24 @@ impl FabricRunService {
             }
         }
     }
+}
+
+/// F51: classify `ff_renew_lease` rejections that are safely
+/// recoverable via a full reclaim.
+///
+/// `ff_renew_lease`'s Lua side runs `validate_lease_and_mark_expired`
+/// plus fence-triple validation, which can reject with
+/// `lease_expired` (FF's scanner rolled the exec forward between
+/// snapshot read and FCALL) or `stale_lease` (a sibling rotated the
+/// lease). Both represent a race the caller can cleanly resolve by
+/// re-claiming — the execution is still valid, we just lost the
+/// lease we thought we held.
+///
+/// Other errors (connection, partition gate, programming bug) bubble
+/// up unchanged.
+fn is_renew_race_error(err: &FabricError) -> bool {
+    let msg = err.to_string();
+    msg.contains("lease_expired") || msg.contains("stale_lease")
 }
 
 /// Derive a cairn `RunState` from a snapshot's FF public state, applying
