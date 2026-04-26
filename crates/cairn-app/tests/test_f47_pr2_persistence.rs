@@ -137,8 +137,7 @@ async fn drive_run_to_completed(
     let session_id = format!("sess_f47pr2_{scope_suffix}");
     let run_id = format!("run_f47pr2_{scope_suffix}");
 
-    let (mock_url, _hits) =
-        spawn_mock(marker.to_owned(), claimed_summary.to_owned()).await;
+    let (mock_url, _hits) = spawn_mock(marker.to_owned(), claimed_summary.to_owned()).await;
 
     // Credential
     let r = h
@@ -293,8 +292,7 @@ async fn run_detail_carries_completion_summary_and_verification_in_memory() {
     let claim = format!("all checks passed cleanly {suffix}");
 
     let h = LiveHarness::setup().await;
-    let (run_id, _session_id, _tenant) =
-        drive_run_to_completed(&h, &marker, &claim).await;
+    let (run_id, _session_id, _tenant) = drive_run_to_completed(&h, &marker, &claim).await;
 
     // Poll briefly: the RunCompletionAnnotated append is fire-and-forget on
     // the orchestrate response path; the projection should land well within
@@ -366,8 +364,7 @@ async fn run_detail_carries_completion_summary_and_verification_sqlite() {
     let claim = format!("all checks passed cleanly {suffix}");
 
     let h = LiveHarness::setup_with_sqlite().await;
-    let (run_id, _session_id, _tenant) =
-        drive_run_to_completed(&h, &marker, &claim).await;
+    let (run_id, _session_id, _tenant) = drive_run_to_completed(&h, &marker, &claim).await;
 
     let mut body = Value::Null;
     let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
