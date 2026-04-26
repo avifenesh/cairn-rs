@@ -337,9 +337,14 @@ async fn orchestrate_finished_carries_completion_verification_warnings() {
     let finished = frames
         .iter()
         .filter_map(|(_, data)| serde_json::from_str::<Value>(data).ok())
+        // Copilot review on #312: filter by run_id too so concurrent
+        // tests (or background activity on the shared stream) cannot
+        // satisfy the assertion with a stray `orchestrate_finished` frame
+        // from another run.
         .find(|v| {
             v.get("event").and_then(Value::as_str) == Some("orchestrate_finished")
                 && v.get("termination").and_then(Value::as_str) == Some("completed")
+                && v.get("run_id").and_then(Value::as_str) == Some(run_id.as_str())
         })
         .unwrap_or_else(|| {
             panic!(

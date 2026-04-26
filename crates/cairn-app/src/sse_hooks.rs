@@ -372,10 +372,28 @@ impl cairn_orchestrator::OrchestratorEventEmitter for SseOrchestratorEmitter {
         });
         if let Some(v) = verification {
             if let Some(obj) = payload.as_object_mut() {
-                obj.insert(
-                    "completion_verification".to_owned(),
-                    serde_json::to_value(v).unwrap_or(serde_json::Value::Null),
-                );
+                // Copilot review on #312: don't silently fall back to
+                // `null` on a serialisation failure — emitting
+                // `completion_verification: null` would contradict the
+                // "field absent" wire contract for non-Completed frames
+                // and could mask a real bug. `CompletionVerification`
+                // has no non-serialisable fields (all `String` / `Vec` /
+                // `usize` / `u32` / `Option<i32>`), so this path is
+                // unreachable in practice; log-and-skip if it ever
+                // fires rather than corrupting the wire shape.
+                match serde_json::to_value(v) {
+                    Ok(value) => {
+                        obj.insert("completion_verification".to_owned(), value);
+                    }
+                    Err(e) => {
+                        tracing::error!(
+                            run_id = %ctx.run_id,
+                            error = %e,
+                            "failed to serialise completion_verification — \
+                             omitting from SSE frame rather than emitting null"
+                        );
+                    }
+                }
             }
         }
         self.emit(payload);

@@ -1,5 +1,5 @@
-//! F47 PR1: pure extractor that scans tool_result frames at run Done and
-//! produces a [`CompletionVerification`] sidecar for the SSE `finished` event.
+//! F47 PR1: tool_result scanner that produces a [`CompletionVerification`]
+//! sidecar for the SSE `finished` event.
 //!
 //! # Motivation
 //!
@@ -7,19 +7,34 @@
 //! `warning: unused imports: Constraint, Direction, Layout, text::Line` in a
 //! stored bash tool_result, while the LLM's `complete_run` summary claimed
 //! "cargo check must pass with no warnings ✓". Operators had no independent
-//! signal that the summary lied. This extractor is that signal.
+//! signal that the summary lied. This scanner is that signal.
 //!
 //! # Contract
 //!
-//! * Pure function — no IO, no allocation beyond the returned struct and its
-//!   owned strings. Fully unit-testable without a runtime.
+//! * Pure scanning — no IO. Fully unit-testable without a runtime.
 //! * Never fabricates. If an exit code is not present in the tool_result
 //!   structure, `CommandOutcome::exit_code = None`.
-//! * Bounded. Warning / error vectors are capped at [`MAX_ENTRIES_PER_BUCKET`]
-//!   entries, each truncated to [`MAX_LINE_LEN`] chars. Memory stays flat
-//!   regardless of tool_result size.
-//! * Non-authoritative. The extractor reports what tool outputs contain; the
+//! * Bounded retained output. The returned warning / error vectors are
+//!   capped at [`MAX_ENTRIES_PER_BUCKET`] entries, each truncated to
+//!   [`MAX_LINE_LEN`] chars. Scanning may use small per-call temporaries
+//!   but memory retained across a run is proportional to the cap, not the
+//!   tool_output size.
+//! * Non-authoritative. The scanner reports what tool outputs contain; the
 //!   orchestrator's loop signal remains the source of truth for run state.
+//!
+//! # Usage
+//!
+//! Two entry points cover the orchestrator loop's access patterns:
+//!
+//! * [`VerificationAccumulator`] — incremental. Feed one `ActionResult` at
+//!   a time from the loop's execute phase; the full `tool_output` payload
+//!   is scanned and discarded in place, so retained memory stays bounded
+//!   even when the run reads large files via a `read` tool. Used by the
+//!   production loop to avoid holding every iteration's raw `tool_output`
+//!   in memory for the whole run.
+//! * [`extract_verification`] — batch. Accepts a slice of `ActionResult`s
+//!   and internally delegates to the accumulator. Kept for the unit tests
+//!   and for callers that already have the full set in hand.
 //!
 //! # Scope
 //!
@@ -51,47 +66,43 @@ pub const EXTRACTOR_VERSION: u32 = 1;
 /// scanning via their text output but produce no [`CommandOutcome`] entry.
 const BASH_TOOL_NAMES: &[&str] = &["bash", "shell_exec", "run_bash"];
 
-/// Scan the `tool_results` observed across a run and distil a
-/// [`CompletionVerification`] sidecar.
-///
-/// The caller accumulates [`ActionResult`] values across iterations (the
-/// orchestrator loop does this in `run_inner`) and passes the full set at
-/// Done. An empty slice produces a default-valued verification with
-/// `tool_results_scanned = 0` and `extractor_version = EXTRACTOR_VERSION`,
-/// which the caller can use to distinguish "no tool calls in this run"
-/// from "scanned but found nothing."
-pub fn extract_verification(tool_results: &[ActionResult]) -> CompletionVerification {
-    // Only InvokeTool results are meaningful tool_result frames. Other
-    // action kinds (CompleteRun, SpawnSubagent, SendNotification, …) never
-    // produce tool output so they are skipped up front.
-    let mut verification = CompletionVerification {
-        warnings: Vec::new(),
-        errors: Vec::new(),
-        commands: Vec::new(),
-        tool_results_scanned: 0,
-        extractor_version: EXTRACTOR_VERSION,
-    };
+/// Incremental builder. The orchestrator loop feeds one `ActionResult` per
+/// iteration into [`VerificationAccumulator::observe`]; at Done it calls
+/// [`VerificationAccumulator::finish`] to produce the sidecar. This avoids
+/// retaining full `tool_output` payloads (which can be very large — a
+/// `read` tool may return an entire file) across the run's lifetime:
+/// each result is scanned and dropped in place, leaving only the bounded
+/// bucket output in memory.
+#[derive(Clone, Debug, Default)]
+pub struct VerificationAccumulator {
+    warnings: Vec<String>,
+    errors: Vec<String>,
+    commands: Vec<CommandOutcome>,
+    tool_results_scanned: usize,
+}
 
-    for result in tool_results {
+impl VerificationAccumulator {
+    /// Create a fresh accumulator.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Scan a single `ActionResult`. Non-`InvokeTool` proposals are
+    /// ignored up front — they never produce tool output.
+    pub fn observe(&mut self, result: &ActionResult) {
         if result.proposal.action_type != cairn_domain::ActionType::InvokeTool {
-            continue;
+            return;
         }
-        verification.tool_results_scanned += 1;
+        self.tool_results_scanned += 1;
 
-        let tool_name = result
-            .proposal
-            .tool_name
-            .clone()
-            .unwrap_or_else(|| "<unknown>".to_owned());
+        let tool_name = result.proposal.tool_name.as_deref().unwrap_or("<unknown>");
 
-        // Command outcome. Bash-class tools expose `{ command: "…" }` in the
-        // proposal args; the exit code (when present) lives on the tool_output
-        // as either `exit_code` or `returncode` (different adapters). Both are
-        // treated identically here because the extractor is not opinionated
-        // about which tool adapter produced the frame.
+        // Command outcome. Only bash-class tools produce a CommandOutcome
+        // entry; non-bash tools contribute to warning/error scanning via
+        // their text output but do not appear in `commands[]`.
         if BASH_TOOL_NAMES
             .iter()
-            .any(|b| b.eq_ignore_ascii_case(&tool_name))
+            .any(|b| b.eq_ignore_ascii_case(tool_name))
         {
             let cmd = result
                 .proposal
@@ -102,63 +113,109 @@ pub fn extract_verification(tool_results: &[ActionResult]) -> CompletionVerifica
                 .map(|s| truncate(s, MAX_LINE_LEN))
                 .unwrap_or_default();
             let exit_code = result.tool_output.as_ref().and_then(extract_exit_code);
-            verification.commands.push(CommandOutcome {
-                tool_name: tool_name.clone(),
+            self.commands.push(CommandOutcome {
+                tool_name: tool_name.to_owned(),
                 cmd,
                 exit_code,
             });
         }
 
-        // Text scan. Combine tool_output text (for success) and failure
-        // reason text (for ActionStatus::Failed) into one source so a
-        // failed tool that wrote warnings to stderr and returned a
-        // non-zero status still surfaces its warnings.
-        let text_sources = collect_text_sources(result);
-        for src in text_sources {
-            scan_lines(&src, &mut verification);
+        // Text scan. Iterate string sources lazily, scanning in place to
+        // avoid cloning large stdout/stderr payloads. Once both buckets
+        // are full we can short-circuit the remaining sources entirely.
+        for src in iter_text_sources(result) {
+            if self.buckets_full() {
+                return;
+            }
+            self.scan_text(&src);
         }
     }
 
-    verification
+    /// Consume the accumulator and produce the sidecar.
+    pub fn finish(self) -> CompletionVerification {
+        CompletionVerification {
+            warnings: self.warnings,
+            errors: self.errors,
+            commands: self.commands,
+            tool_results_scanned: self.tool_results_scanned,
+            extractor_version: EXTRACTOR_VERSION,
+        }
+    }
+
+    fn buckets_full(&self) -> bool {
+        self.warnings.len() >= MAX_ENTRIES_PER_BUCKET && self.errors.len() >= MAX_ENTRIES_PER_BUCKET
+    }
+
+    fn scan_text(&mut self, text: &str) {
+        for raw_line in text.lines() {
+            if self.buckets_full() {
+                return;
+            }
+            // Trim leading whitespace so indented diagnostics still match.
+            // Don't trim trailing — loss of a trailing period or bracket
+            // changes the meaning of the line.
+            let line = raw_line.trim_start();
+
+            if is_warning_line(line) && self.warnings.len() < MAX_ENTRIES_PER_BUCKET {
+                self.warnings.push(truncate(line, MAX_LINE_LEN));
+            } else if is_error_line(line) && self.errors.len() < MAX_ENTRIES_PER_BUCKET {
+                self.errors.push(truncate(line, MAX_LINE_LEN));
+            }
+        }
+    }
 }
 
-/// Pull every scannable text fragment out of an `ActionResult` into a small
-/// vector. For structured JSON tool outputs we stringify key fields
-/// (`stdout`, `stderr`, `output`, `message`) rather than the whole blob so
-/// the scanner doesn't match on unrelated JSON keys like `"warning_count":
-/// 3`.
-fn collect_text_sources(result: &ActionResult) -> Vec<String> {
-    let mut out = Vec::new();
+/// Batch wrapper over [`VerificationAccumulator`]. Prefer
+/// `VerificationAccumulator::observe` from the loop so large `tool_output`
+/// payloads aren't retained across the whole run; this helper is kept for
+/// unit tests and any caller that already holds the full set.
+pub fn extract_verification(tool_results: &[ActionResult]) -> CompletionVerification {
+    let mut acc = VerificationAccumulator::new();
+    for result in tool_results {
+        acc.observe(result);
+    }
+    acc.finish()
+}
+
+/// Yield each scannable `&str` from an `ActionResult` without cloning. For
+/// structured JSON tool outputs we look at a small set of canonical key
+/// names (`stdout`, `stderr`, `output`, `message`, …) rather than the
+/// whole blob so the scanner doesn't match on unrelated JSON keys like
+/// `"warning_count": 3`. Falls back to the entire object's `to_string()`
+/// only when no canonical key matched — that fallback path does allocate
+/// but covers tool adapters that flatten their payload into a
+/// non-standard shape.
+fn iter_text_sources(result: &ActionResult) -> Vec<std::borrow::Cow<'_, str>> {
+    use std::borrow::Cow;
+    let mut out: Vec<Cow<'_, str>> = Vec::new();
     if let Some(value) = result.tool_output.as_ref() {
         match value {
-            Value::String(s) => out.push(s.clone()),
-            Value::Object(_) => {
+            Value::String(s) => out.push(Cow::Borrowed(s.as_str())),
+            Value::Object(map) => {
                 for key in ["stdout", "stderr", "output", "message", "text", "content"] {
-                    if let Some(Value::String(s)) = value.get(key) {
-                        out.push(s.clone());
+                    if let Some(Value::String(s)) = map.get(key) {
+                        out.push(Cow::Borrowed(s.as_str()));
                     }
                 }
-                // Also consider the whole object serialised as a fallback:
-                // some tool adapters flatten the entire payload into a
-                // single object with no canonical key. Stringifying still
-                // lets the line-based scanner find `warning:` / `error:`.
                 if out.is_empty() {
-                    out.push(value.to_string());
+                    // Only rarely reached — serialises the whole object
+                    // once, not the full tool_result.
+                    out.push(Cow::Owned(value.to_string()));
                 }
             }
-            other => out.push(other.to_string()),
+            other => out.push(Cow::Owned(other.to_string())),
         }
     }
     if let ActionStatus::Failed { reason } = &result.status {
-        out.push(reason.clone());
+        out.push(Cow::Borrowed(reason.as_str()));
     }
     out
 }
 
 /// Extract an exit code from a bash-class tool_output if structurally
-/// present. Accepts both `exit_code` and `returncode` keys (different
-/// harness adapters use different names). Non-integer values return
-/// `None` rather than coercing.
+/// present. Accepts several canonical key names used by different harness
+/// adapters (`exit_code`, `exitCode`, `returncode`, …). Non-integer values
+/// return `None` rather than coercing.
 fn extract_exit_code(output: &Value) -> Option<i32> {
     for key in [
         "exit_code",
@@ -176,31 +233,14 @@ fn extract_exit_code(output: &Value) -> Option<i32> {
     None
 }
 
-/// Scan `text` line-by-line; route warning-prefixed lines into
-/// `verification.warnings` and error-prefixed lines into
-/// `verification.errors`. Respects `MAX_ENTRIES_PER_BUCKET` and
-/// `MAX_LINE_LEN`.
-fn scan_lines(text: &str, verification: &mut CompletionVerification) {
-    for raw_line in text.lines() {
-        // Trim leading whitespace so indented diagnostics (e.g. from a
-        // wrapped bash output) still match. Don't trim trailing — loss of
-        // a trailing period or bracket changes the meaning of the line.
-        let line = raw_line.trim_start();
-
-        if is_warning_line(line) && verification.warnings.len() < MAX_ENTRIES_PER_BUCKET {
-            verification.warnings.push(truncate(line, MAX_LINE_LEN));
-        } else if is_error_line(line) && verification.errors.len() < MAX_ENTRIES_PER_BUCKET {
-            verification.errors.push(truncate(line, MAX_LINE_LEN));
-        }
-    }
-}
-
-/// Case-insensitive ASCII prefix match. Only the first `prefix.len()` bytes
-/// of `line` are compared — identical to `str::starts_with` with a
-/// lowercased input. Operating on bytes (not `get(..N)` char slicing)
-/// avoids any UTF-8 boundary pitfall when non-ASCII tool output is mixed
-/// in: the byte prefix match is well-defined whether or not the next byte
-/// starts a multi-byte sequence.
+/// Case-insensitive ASCII prefix match on the leading bytes of `line`.
+/// Byte-level comparison avoids any UTF-8 boundary pitfall when non-ASCII
+/// tool output is mixed in: the prefix we match on (`warning`, `error`) is
+/// ASCII, so comparing bytes is well-defined whether or not subsequent
+/// bytes start a multi-byte sequence. Cursor / Gemini review flagged the
+/// earlier `str::get(..N)` char-slice form for missing lines like
+/// `"warning: über-thing"` when the char index landed inside a multi-byte
+/// char; this helper closes that gap.
 fn ascii_prefix_ci(line: &str, prefix: &str) -> bool {
     let bytes = line.as_bytes();
     let pb = prefix.as_bytes();
@@ -213,24 +253,25 @@ fn ascii_prefix_ci(line: &str, prefix: &str) -> bool {
         .all(|(a, b)| a.eq_ignore_ascii_case(b))
 }
 
-/// Case-insensitive prefix check for `warning:`. Regex-free to keep the
-/// extractor dependency-light. Equivalent to `(?mi)^\s*warning:` applied
-/// line-by-line — callers trim leading whitespace before dispatch.
+/// Match `warning:` at the start of a (left-trimmed) line. Case-insensitive
+/// but ASCII-only — `WARN:` and other variants are intentionally NOT
+/// matched. The scanner is tuned for `rustc`/`cargo`/`clippy` and the
+/// generic `warning:` prefix, which covers the M1 dogfood regression.
 fn is_warning_line(line: &str) -> bool {
     ascii_prefix_ci(line, "warning:")
 }
 
-/// Case-insensitive prefix check for `error:` / `error[…]:` / `error <ws>`.
-/// Accepts the Rust diagnostic forms (`error[E0308]: mismatched types`) as
-/// well as generic `error:` lines from bash output.
+/// Match `error:` / `error[…]:` / `error <ws>` at the start of a
+/// left-trimmed line. Accepts the Rust diagnostic form
+/// `error[E0308]: mismatched types` as well as plain `error:` from bash
+/// output. Rejects `errored out`, `errorless` etc. so false positives in
+/// ordinary prose stay out of the bucket.
 fn is_error_line(line: &str) -> bool {
     if !ascii_prefix_ci(line, "error") {
         return false;
     }
-    // After the `error` prefix, accept `:` or `[` (rustc style) or
-    // whitespace-then-content. Reject `errored`, `errorless`, etc. Byte
-    // indexing is safe here — `error` is ASCII so the 5th byte is on a
-    // valid char boundary regardless of later multi-byte content.
+    // Byte indexing is safe here — `error` is ASCII so the 5th byte lies
+    // on a valid char boundary regardless of subsequent multi-byte bytes.
     matches!(
         line.as_bytes().get("error".len()),
         Some(b':') | Some(b'[') | Some(b' ') | Some(b'\t')
@@ -238,15 +279,40 @@ fn is_error_line(line: &str) -> bool {
 }
 
 /// Clip `s` to `max` chars, appending an ellipsis marker when trimmed.
-/// Operates on char boundaries so UTF-8 output (e.g. rustc's arrows) is
-/// preserved.
+/// Walks `char_indices` and stops as soon as the cap is known to be
+/// exceeded — work is proportional to `max`, not to the full string
+/// length. This matters for pathological tool outputs (MB-scale
+/// single-line payloads) where `s.chars().count()` would scan the
+/// entire buffer.
 fn truncate(s: &str, max: usize) -> String {
-    if s.chars().count() <= max {
+    // Fast path: ASCII strings that fit.
+    if s.len() <= max && s.is_ascii() {
         return s.to_owned();
     }
-    let mut out: String = s.chars().take(max.saturating_sub(3)).collect();
-    out.push_str("...");
-    out
+    // Walk up to `max` chars. Track the byte offset where the `max-3`rd
+    // char ended, so we can truncate there on overflow.
+    let mut seen = 0usize;
+    let mut split_at = 0usize;
+    let cutoff = max.saturating_sub(3);
+    for (idx, ch) in s.char_indices() {
+        if seen == cutoff {
+            split_at = idx;
+        }
+        seen += 1;
+        if seen > max {
+            let mut out = String::with_capacity(split_at + 3);
+            out.push_str(&s[..split_at]);
+            out.push_str("...");
+            return out;
+        }
+        // Keep `split_at` up to date for the terminating case where the
+        // string is exactly `max` chars long (no truncation needed).
+        if seen == max {
+            split_at = idx + ch.len_utf8();
+        }
+    }
+    // Reached end within the cap — no truncation needed.
+    s.to_owned()
 }
 
 #[cfg(test)]
@@ -348,7 +414,7 @@ error[E0308]: mismatched types
 
     /// (c) Truncation. Synthesise 60 warning lines and a single 700-char
     /// warning line; verify the cap at 50 entries and the 500-char per-line
-    /// trim (with ellipsis marker).
+    /// trim.
     #[test]
     fn truncation_caps_entries_and_line_length() {
         let mut stdout = String::new();
@@ -364,7 +430,6 @@ error[E0308]: mismatched types
             MAX_ENTRIES_PER_BUCKET,
             "must cap at {MAX_ENTRIES_PER_BUCKET}"
         );
-        // Every retained line must respect the per-line char cap.
         for w in &v.warnings {
             assert!(
                 w.chars().count() <= MAX_LINE_LEN,
@@ -429,5 +494,35 @@ error[E0308]: mismatched types
         assert!(is_error_line("error: linker failed"));
         assert!(!is_error_line("errored out"));
         assert!(!is_error_line("errorless"));
+    }
+
+    /// Multi-byte characters after the ASCII prefix must not break
+    /// detection. Cursor / Gemini review flagged this as a real hazard —
+    /// a `"warning: über-thing"` line would have been silently missed by
+    /// the earlier `str::get(..N)` char-slice form when byte 10 landed
+    /// inside the 2-byte encoding of `ü`.
+    #[test]
+    fn multi_byte_characters_do_not_break_detection() {
+        assert!(is_warning_line("warning: über-thing went wrong"));
+        assert!(is_error_line("error[E0308]: mismatched types — 😤"));
+        assert!(!is_warning_line("über-thing: not a warning"));
+    }
+
+    /// Incremental accumulator behaves identically to the batch helper
+    /// for the same inputs. The loop runner uses the incremental form to
+    /// avoid retaining full `tool_output` across the whole run.
+    #[test]
+    fn accumulator_matches_batch_helper() {
+        let inputs = [
+            bash_result("cargo check", "warning: a\nerror: b\n", Some(1)),
+            bash_result("ls", "hello\n", Some(0)),
+        ];
+        let batch = extract_verification(&inputs);
+        let mut acc = VerificationAccumulator::new();
+        for r in &inputs {
+            acc.observe(r);
+        }
+        let incremental = acc.finish();
+        assert_eq!(batch, incremental);
     }
 }

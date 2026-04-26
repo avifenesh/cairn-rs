@@ -77,13 +77,13 @@ pub const OPENAPI_JSON: &str = r##"{
       },
       "CommandOutcome": {
         "type": "object",
-        "description": "F47: one bash-class tool invocation distilled from a tool_result frame. `exit_code` is only present when the tool_result structurally carried one; the extractor never fabricates exit codes.",
+        "description": "F47: one bash-class tool invocation distilled from a tool_result frame. `exit_code` is always emitted; the value is `null` when the tool_result did not structurally expose one. The extractor never fabricates exit codes — do not infer success from a missing code.",
         "properties": {
           "tool_name": { "type": "string", "description": "Tool name from the proposal (e.g. `bash`, `shell_exec`)." },
           "cmd":       { "type": "string", "description": "For bash-class tools, the `command` argument. Truncated to 500 chars." },
-          "exit_code": { "type": "integer", "nullable": true, "description": "Exit code surfaced by the tool_result, if present. `null` means not structurally exposed — do not infer success." }
+          "exit_code": { "type": "integer", "nullable": true, "description": "Exit code surfaced by the tool_result, or `null` when not structurally exposed." }
         },
-        "required": ["tool_name", "cmd"]
+        "required": ["tool_name", "cmd", "exit_code"]
       },
       "CompletionVerification": {
         "type": "object",

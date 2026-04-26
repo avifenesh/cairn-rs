@@ -149,8 +149,12 @@ impl Eq for ActionProposal {}
 /// PR2 adds persistence + REST. PR3 adds UI rendering.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CompletionVerification {
-    /// Tool-output lines matched by the warning signal (e.g. Rust
-    /// `warning: …`, `WARN:`). Full matched line, truncated to 500 chars,
+    /// Tool-output lines matched by the warning signal — lines starting
+    /// with the case-insensitive ASCII prefix `warning:` (e.g. `warning:
+    /// unused import`). Broader forms like `WARN:` / `Warn` are NOT
+    /// currently matched; the scanner is tuned for `rustc`/`cargo`/
+    /// `clippy` plus the generic `warning:` convention, which covers the
+    /// F47 M1 regression. Full matched line, truncated to 500 chars,
     /// capped at 50 entries.
     #[serde(default)]
     pub warnings: Vec<String>,
@@ -158,9 +162,13 @@ pub struct CompletionVerification {
     /// `error[E0308]: …`, `error: …`). Same truncation / cap rules.
     #[serde(default)]
     pub errors: Vec<String>,
-    /// Per-bash-class-tool outcome: the command that ran and its exit code
-    /// if the tool_result carried one. `exit_code: None` means the frame
-    /// did not structurally expose an exit code; do not infer.
+    /// Per-bash-class-tool outcome: the command that ran and its exit
+    /// code if the tool_result carried one. Only bash-class tools
+    /// (`bash`, `shell_exec`, `run_bash`) produce entries here; non-bash
+    /// tools still contribute to `warnings`/`errors` via their text
+    /// output but are not listed in this vector. `exit_code: None` means
+    /// the frame did not structurally expose an exit code; do not infer
+    /// success from its absence.
     #[serde(default)]
     pub commands: Vec<CommandOutcome>,
     /// How many tool_result frames the extractor scanned to produce this
@@ -172,15 +180,16 @@ pub struct CompletionVerification {
     pub extractor_version: u32,
 }
 
-/// One bash-class tool invocation's command and exit code, as observed in a
-/// tool_result frame. For non-bash tools, `cmd` carries a short descriptor
-/// (e.g. the tool name itself) and `exit_code` is `None`.
+/// One bash-class tool invocation's command and exit code, as observed in
+/// a tool_result frame. Only bash-class tools produce `CommandOutcome`
+/// entries — non-bash tools contribute to `warnings`/`errors` via their
+/// text output but never appear here.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CommandOutcome {
     /// Tool name from the proposal (e.g. `"bash"`, `"shell_exec"`).
     pub tool_name: String,
-    /// For bash-class tools: the `command` arg. For other tools: a short
-    /// descriptor. Truncated to 500 chars.
+    /// The `command` arg from the proposal, truncated to 500 chars. Empty
+    /// when the proposal did not carry a `command` field.
     pub cmd: String,
     /// Exit code surfaced by the tool_result, if the structured payload
     /// carried one. `None` = not present in the frame; callers MUST NOT
