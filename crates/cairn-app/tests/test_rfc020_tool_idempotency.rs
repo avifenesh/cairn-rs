@@ -528,6 +528,7 @@ async fn batched_append_is_atomic_all_or_none() {
             tool_name: "memory_store".to_owned(),
         },
         ExecutionClass::SandboxedProcess,
+        None,
     )
     .await
     .expect("record_start");

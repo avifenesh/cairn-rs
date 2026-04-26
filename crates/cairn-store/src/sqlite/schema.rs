@@ -168,6 +168,12 @@ CREATE TABLE IF NOT EXISTS tool_invocations (
     requested_at_ms INTEGER NOT NULL,
     started_at_ms   INTEGER,
     finished_at_ms  INTEGER,
+    -- F55: structured tool args (TEXT-over-JSON since SQLite has no
+    -- native JSONB — mirrors the Postgres V028 migration) and a UTF-8
+    -- safe, truncated preview of the tool output for operator
+    -- observability. Both nullable for pre-F55 rows.
+    args_json       TEXT,
+    output_preview  TEXT,
     created_at      INTEGER NOT NULL,
     updated_at      INTEGER NOT NULL
 );

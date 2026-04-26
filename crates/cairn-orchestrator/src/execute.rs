@@ -59,8 +59,9 @@ pub trait ExecutePhase: Send + Sync {
     /// 1. Skip if `ToolCallResultCache::get(call_id)` hits (already executed).
     /// 2. Record a `ToolInvocationStarted`, dispatch via the registry,
     ///    and record `ToolInvocationCompleted { tool_call_id: Some(...),
-    ///    result_json: Some(...) }` on success so the cache replay path
-    ///    (startup + future drains) can rebuild this entry.
+    ///    result_json: Some(...), output_preview: Some(...) }` on success
+    ///    so the cache replay path (startup + future drains) can rebuild
+    ///    this entry.
     /// 3. Populate the shared `ToolCallResultCache` with the result so
     ///    the same-process next-iteration drain observes the hit.
     ///

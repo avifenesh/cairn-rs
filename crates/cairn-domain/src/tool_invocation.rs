@@ -67,6 +67,37 @@ pub enum ToolInvocationTarget {
     },
 }
 
+/// Maximum number of bytes kept for the projected tool output preview.
+/// Events carry the full payload; the projection stores at most this many
+/// bytes of UTF-8 so operator-observability endpoints do not return
+/// multi-MB blobs. Raised from the original 8 KiB estimate to let shell
+/// commands with typical cargo/git/grep output fit in full.
+pub const TOOL_OUTPUT_PREVIEW_MAX_BYTES: usize = 8 * 1024;
+
+/// Suffix appended to output previews that were truncated at
+/// `TOOL_OUTPUT_PREVIEW_MAX_BYTES`. Operator UIs can key off this marker
+/// to render a "truncated" footer.
+pub const TOOL_OUTPUT_PREVIEW_TRUNCATED_SUFFIX: &str = "\n…[output truncated]";
+
+/// Truncate a tool output preview to `TOOL_OUTPUT_PREVIEW_MAX_BYTES`
+/// UTF-8 bytes, respecting character boundaries and appending the
+/// `TOOL_OUTPUT_PREVIEW_TRUNCATED_SUFFIX` marker when truncation occurs.
+pub fn truncate_output_preview(raw: &str) -> String {
+    if raw.len() <= TOOL_OUTPUT_PREVIEW_MAX_BYTES {
+        return raw.to_owned();
+    }
+    // Walk backward from the byte cap to the nearest char boundary so we
+    // never split a multi-byte UTF-8 sequence in half.
+    let mut cut = TOOL_OUTPUT_PREVIEW_MAX_BYTES;
+    while cut > 0 && !raw.is_char_boundary(cut) {
+        cut -= 1;
+    }
+    let mut out = String::with_capacity(cut + TOOL_OUTPUT_PREVIEW_TRUNCATED_SUFFIX.len());
+    out.push_str(&raw[..cut]);
+    out.push_str(TOOL_OUTPUT_PREVIEW_TRUNCATED_SUFFIX);
+    out
+}
+
 /// Shared durable current-state record for tool invocation projections.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ToolInvocationRecord {
@@ -85,6 +116,18 @@ pub struct ToolInvocationRecord {
     pub finished_at_ms: Option<u64>,
     pub outcome: Option<ToolInvocationOutcomeKind>,
     pub error_message: Option<String>,
+    /// F55: structured tool arguments captured at invocation-start time.
+    /// Persisted on the projection so `GET /v1/tool-invocations` can show
+    /// operators exactly what cairn ran. `None` on legacy records or when
+    /// the caller did not thread args through the seam.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub args_json: Option<serde_json::Value>,
+    /// F55: truncated UTF-8 preview of the tool's captured output,
+    /// capped at `TOOL_OUTPUT_PREVIEW_MAX_BYTES`. Terminal states
+    /// (`completed`/`failed`) carry the preview when the runtime
+    /// supplied one; non-terminal states leave it `None`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub output_preview: Option<String>,
 }
 
 impl ToolInvocationRecord {
@@ -115,10 +158,21 @@ impl ToolInvocationRecord {
             finished_at_ms: None,
             outcome: None,
             error_message: None,
+            args_json: None,
+            output_preview: None,
         };
 
         debug_assert!(validate_tool_invocation_record(&record).is_ok());
         record
+    }
+
+    /// Attach structured args captured at invocation-start time so the
+    /// projection can surface them via `GET /v1/tool-invocations`. No-op
+    /// when `args` is `None`. Preserves the record's current state and
+    /// version — args are invocation-identity metadata, not a transition.
+    pub fn with_args(mut self, args: Option<serde_json::Value>) -> Self {
+        self.args_json = args;
+        self
     }
 
     pub fn mark_started(&self, started_at_ms: u64) -> Result<Self, ToolInvocationValidationError> {
@@ -141,6 +195,19 @@ impl ToolInvocationRecord {
         error_message: Option<String>,
         finished_at_ms: u64,
     ) -> Result<Self, ToolInvocationValidationError> {
+        self.mark_finished_with_output(outcome, error_message, finished_at_ms, None)
+    }
+
+    /// F55: terminal transition carrying the truncated output preview. The
+    /// preview is stored verbatim — callers (runtime seam) are responsible
+    /// for running it through `truncate_output_preview` first.
+    pub fn mark_finished_with_output(
+        &self,
+        outcome: ToolInvocationOutcomeKind,
+        error_message: Option<String>,
+        finished_at_ms: u64,
+        output_preview: Option<String>,
+    ) -> Result<Self, ToolInvocationValidationError> {
         let target_state = outcome.terminal_state();
         if !can_transition_tool_invocation(self.state, target_state) {
             return Err(ToolInvocationValidationError::InvalidTransition);
@@ -152,6 +219,12 @@ impl ToolInvocationRecord {
         next.error_message = error_message;
         next.finished_at_ms = Some(finished_at_ms);
         next.version += 1;
+        // Preserve the preview already stored on the record unless the
+        // caller supplies a fresh one — this lets partial updates (e.g.
+        // failure after a prior completion attempt) retain visibility.
+        if output_preview.is_some() {
+            next.output_preview = output_preview;
+        }
 
         validate_tool_invocation_record(&next)?;
         Ok(next)
@@ -257,6 +330,30 @@ mod tests {
     use crate::policy::ExecutionClass;
 
     #[test]
+    fn output_preview_truncation_respects_utf8_boundaries() {
+        use super::{truncate_output_preview, TOOL_OUTPUT_PREVIEW_MAX_BYTES,
+            TOOL_OUTPUT_PREVIEW_TRUNCATED_SUFFIX};
+        // Short string passes through unchanged.
+        let short = "hello".repeat(10);
+        assert_eq!(truncate_output_preview(&short), short);
+
+        // Oversize ASCII string gets cut + suffix.
+        let long = "a".repeat(TOOL_OUTPUT_PREVIEW_MAX_BYTES + 500);
+        let out = truncate_output_preview(&long);
+        assert!(out.len() <= TOOL_OUTPUT_PREVIEW_MAX_BYTES + TOOL_OUTPUT_PREVIEW_TRUNCATED_SUFFIX.len());
+        assert!(out.ends_with(TOOL_OUTPUT_PREVIEW_TRUNCATED_SUFFIX));
+
+        // Multi-byte UTF-8 near the boundary does not panic and does not
+        // produce invalid UTF-8.
+        let mut mixed = "x".repeat(TOOL_OUTPUT_PREVIEW_MAX_BYTES - 1);
+        mixed.push('世'); // 3-byte char straddling the cap
+        mixed.push_str(&"y".repeat(100));
+        let out = truncate_output_preview(&mixed);
+        assert!(out.is_char_boundary(out.len()));
+        assert!(out.ends_with(TOOL_OUTPUT_PREVIEW_TRUNCATED_SUFFIX));
+    }
+
+    #[test]
     fn tool_invocation_terminal_states_are_explicit() {
         assert!(ToolInvocationState::Completed.is_terminal());
         assert!(ToolInvocationState::Failed.is_terminal());
@@ -285,6 +382,8 @@ mod tests {
             finished_at_ms: Some(14),
             outcome: Some(ToolInvocationOutcomeKind::Success),
             error_message: None,
+            args_json: None,
+            output_preview: None,
         };
 
         assert!(matches!(record.target, ToolInvocationTarget::Plugin { .. }));
@@ -342,6 +441,8 @@ mod tests {
             finished_at_ms: Some(12),
             outcome: Some(ToolInvocationOutcomeKind::RetryableFailure),
             error_message: Some("transient".to_owned()),
+            args_json: None,
+            output_preview: None,
         };
 
         assert_eq!(
@@ -456,6 +557,8 @@ mod tests {
             finished_at_ms: Some(12),
             outcome: Some(ToolInvocationOutcomeKind::PermanentFailure),
             error_message: None,
+            args_json: None,
+            output_preview: None,
         };
 
         assert_eq!(

@@ -219,6 +219,7 @@ async fn tool_invocations_counted_by_name_and_outcome() {
                     outcome,
                     tool_call_id: None,
                     result_json: None,
+                    output_preview: None
                 }),
                 id,
             )])

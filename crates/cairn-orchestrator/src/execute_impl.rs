@@ -497,6 +497,9 @@ impl RuntimeExecutePhase {
 
         // ── Record invocation start ────────────────────────────────────
         let inv_id = ToolInvocationId::new(new_id("inv"));
+        // F55: thread the approved args into the projection so operators
+        // can see "what cairn ran" via GET /v1/tool-invocations. Clone is
+        // cheap — tool args are already a small JSON value.
         self.tool_invocation_service
             .record_start(
                 &ctx.project,
@@ -508,6 +511,7 @@ impl RuntimeExecutePhase {
                     tool_name: tool_name.clone(),
                 },
                 ExecutionClass::SandboxedProcess,
+                Some(approved.tool_args.clone()),
             )
             .await
             .map_err(OrchestratorError::Runtime)?;
@@ -527,6 +531,7 @@ impl RuntimeExecutePhase {
                         tool_name.clone(),
                         ToolInvocationOutcomeKind::PermanentFailure,
                         Some(reason.clone()),
+                        None,
                     )
                     .await
                     .map_err(OrchestratorError::Runtime)?;
@@ -605,6 +610,7 @@ impl RuntimeExecutePhase {
                         tool_name.clone(),
                         ToolInvocationOutcomeKind::PermanentFailure,
                         Some(reason.clone()),
+                        None,
                     )
                     .await
                     .map_err(OrchestratorError::Runtime)?;
@@ -679,6 +685,8 @@ impl RuntimeExecutePhase {
 
                 let inv_id = ToolInvocationId::new(new_id("inv"));
 
+                // F55: capture the proposal args at start-time for the
+                // tool-invocation projection.
                 self.tool_invocation_service
                     .record_start(
                         &ctx.project,
@@ -690,6 +698,7 @@ impl RuntimeExecutePhase {
                             tool_name: tool_name.clone(),
                         },
                         ExecutionClass::SandboxedProcess,
+                        proposal.tool_args.clone(),
                     )
                     .await
                     .map_err(OrchestratorError::Runtime)?;
@@ -904,6 +913,7 @@ impl RuntimeExecutePhase {
                                         tool_name.clone(),
                                         ToolInvocationOutcomeKind::PermanentFailure,
                                         Some(reason.clone()),
+                                        None,
                                     )
                                     .await
                                     .map_err(OrchestratorError::Runtime)?;
@@ -1060,6 +1070,7 @@ impl RuntimeExecutePhase {
                                 tool_name,
                                 ToolInvocationOutcomeKind::PermanentFailure,
                                 Some(reason.clone()),
+                                None,
                             )
                             .await
                             .map_err(OrchestratorError::Runtime)?;

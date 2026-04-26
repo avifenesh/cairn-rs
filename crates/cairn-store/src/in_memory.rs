@@ -545,6 +545,8 @@ impl InMemoryStore {
                 }
             }
             RuntimeEvent::ToolInvocationStarted(e) => {
+                // F55: thread captured args into the in-memory projection
+                // so it returns the same shape as pg + sqlite.
                 let requested = ToolInvocationRecord::new_requested(
                     e.invocation_id.clone(),
                     e.project.clone(),
@@ -554,7 +556,8 @@ impl InMemoryStore {
                     e.target.clone(),
                     e.execution_class,
                     e.requested_at_ms,
-                );
+                )
+                .with_args(e.args_json.clone());
                 let started = requested
                     .mark_started(e.started_at_ms)
                     .expect("tool invocation started event should always be a valid requested->started transition");
@@ -564,15 +567,29 @@ impl InMemoryStore {
             }
             RuntimeEvent::ToolInvocationCompleted(e) => {
                 if let Some(rec) = state.tool_invocations.get_mut(e.invocation_id.as_str()) {
-                    *rec = rec.mark_finished(e.outcome, None, e.finished_at_ms).expect(
-                        "tool invocation completed event should preserve valid terminal transition",
-                    );
+                    // F55: persist the truncated output preview on the
+                    // projection when the event carries one.
+                    *rec = rec
+                        .mark_finished_with_output(
+                            e.outcome,
+                            None,
+                            e.finished_at_ms,
+                            e.output_preview.clone(),
+                        )
+                        .expect(
+                            "tool invocation completed event should preserve valid terminal transition",
+                        );
                 }
             }
             RuntimeEvent::ToolInvocationFailed(e) => {
                 if let Some(rec) = state.tool_invocations.get_mut(e.invocation_id.as_str()) {
                     *rec = rec
-                        .mark_finished(e.outcome, e.error_message.clone(), e.finished_at_ms)
+                        .mark_finished_with_output(
+                            e.outcome,
+                            e.error_message.clone(),
+                            e.finished_at_ms,
+                            e.output_preview.clone(),
+                        )
                         .expect("tool invocation failed event should preserve valid terminal transition");
                 }
             }
@@ -5960,6 +5977,7 @@ mod tests {
                     prompt_release_id: None,
                     requested_at_ms: 100,
                     started_at_ms: 101,
+                    args_json: None
                 })),
                 make_envelope(RuntimeEvent::ToolInvocationCompleted(
                     ToolInvocationCompleted {
@@ -5971,6 +5989,7 @@ mod tests {
                         outcome: ToolInvocationOutcomeKind::Success,
                         tool_call_id: None,
                         result_json: None,
+                        output_preview: None
                     },
                 )),
             ])
@@ -6015,6 +6034,7 @@ mod tests {
                     prompt_release_id: None,
                     requested_at_ms: 200,
                     started_at_ms: 201,
+                    args_json: None
                 })),
                 make_envelope(RuntimeEvent::ToolInvocationFailed(ToolInvocationFailed {
                     project: project.clone(),
@@ -6024,6 +6044,7 @@ mod tests {
                     finished_at_ms: 205,
                     outcome: ToolInvocationOutcomeKind::Canceled,
                     error_message: Some("canceled".to_owned()),
+                    output_preview: None
                 })),
                 make_envelope(RuntimeEvent::ToolInvocationStarted(ToolInvocationStarted {
                     project,
@@ -6038,6 +6059,7 @@ mod tests {
                     prompt_release_id: None,
                     requested_at_ms: 100,
                     started_at_ms: 101,
+                    args_json: None
                 })),
             ])
             .await

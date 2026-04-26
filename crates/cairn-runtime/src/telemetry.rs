@@ -381,6 +381,7 @@ mod tests {
                 prompt_release_id: None,
                 requested_at_ms: 1700000000000,
                 started_at_ms: 1700000000000,
+                args_json: None
             },
         );
         let spans = exporter.event_to_spans(&event);
@@ -406,6 +407,7 @@ mod tests {
                 outcome: cairn_domain::tool_invocation::ToolInvocationOutcomeKind::Success,
                 tool_call_id: None,
                 result_json: None,
+                output_preview: None
             },
         );
         let spans = exporter.event_to_spans(&event);

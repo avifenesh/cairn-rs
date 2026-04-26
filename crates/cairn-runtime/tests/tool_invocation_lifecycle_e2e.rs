@@ -54,6 +54,7 @@ async fn tool_invocation_start_progress_complete() {
             tool_name: "fs.read".to_owned(),
         },
         ExecutionClass::SupervisedProcess,
+        None,
     )
     .await
     .unwrap();
@@ -204,6 +205,7 @@ async fn tool_invocation_cancel_records_canceled_state() {
             tool_name: "code_exec.run".to_owned(),
         },
         ExecutionClass::SandboxedProcess,
+        None,
     )
     .await
     .unwrap();
@@ -223,6 +225,7 @@ async fn tool_invocation_cancel_records_canceled_state() {
         "code_exec.run".to_owned(),
         ToolInvocationOutcomeKind::Canceled,
         Some("operator canceled before completion".to_owned()),
+        None,
     )
     .await
     .unwrap();
@@ -291,6 +294,7 @@ async fn tool_invocation_permanent_failure_records_error() {
             tool_name: "http.get".to_owned(),
         },
         ExecutionClass::SupervisedProcess,
+        None,
     )
     .await
     .unwrap();
@@ -302,6 +306,7 @@ async fn tool_invocation_permanent_failure_records_error() {
         "http.get".to_owned(),
         ToolInvocationOutcomeKind::PermanentFailure,
         Some("connection refused: target host unreachable".to_owned()),
+        None,
     )
     .await
     .unwrap();
@@ -346,6 +351,7 @@ async fn list_by_run_returns_all_invocations() {
                 tool_name: format!("tool_{i}"),
             },
             ExecutionClass::SupervisedProcess,
+            None,
         )
         .await
         .unwrap();
@@ -362,6 +368,7 @@ async fn list_by_run_returns_all_invocations() {
             tool_name: "other.tool".to_owned(),
         },
         ExecutionClass::SupervisedProcess,
+        None,
     )
     .await
     .unwrap();
@@ -424,6 +431,7 @@ async fn all_terminal_outcomes_set_finished_at_ms() {
                 tool_name: "t".to_owned(),
             },
             ExecutionClass::SupervisedProcess,
+            None,
         )
         .await
         .unwrap();
@@ -448,6 +456,7 @@ async fn all_terminal_outcomes_set_finished_at_ms() {
                 "t".to_owned(),
                 *outcome,
                 err_msg.map(|s| s.to_owned()),
+                None,
             )
             .await
             .unwrap();

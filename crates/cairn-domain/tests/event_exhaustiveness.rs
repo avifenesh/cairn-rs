@@ -773,6 +773,7 @@ fn all_variants() -> Vec<RuntimeEvent> {
             prompt_release_id: None,
             requested_at_ms: ts,
             started_at_ms: ts,
+            args_json: None
         }),
         RuntimeEvent::ToolInvocationCompleted(ToolInvocationCompleted {
             project: p(),
@@ -783,6 +784,7 @@ fn all_variants() -> Vec<RuntimeEvent> {
             outcome: ToolInvocationOutcomeKind::Success,
             tool_call_id: None,
             result_json: None,
+            output_preview: None
         }),
         RuntimeEvent::ToolInvocationFailed(ToolInvocationFailed {
             project: p(),
@@ -792,6 +794,7 @@ fn all_variants() -> Vec<RuntimeEvent> {
             finished_at_ms: ts,
             outcome: ToolInvocationOutcomeKind::PermanentFailure,
             error_message: Some("denied".to_owned()),
+            output_preview: None
         }),
         RuntimeEvent::ToolInvocationCacheHit(cairn_domain::ToolInvocationCacheHit {
             project: p(),

@@ -268,6 +268,7 @@ fn assistant_tool_call_completed_and_failed_now_preserve_tool_name_and_task_id()
         outcome: ToolInvocationOutcomeKind::Success,
         tool_call_id: None,
         result_json: None,
+        output_preview: None
     });
     let failed = RuntimeEvent::ToolInvocationFailed(ToolInvocationFailed {
         project: ProjectKey::new("t", "w", "p"),
@@ -277,6 +278,7 @@ fn assistant_tool_call_completed_and_failed_now_preserve_tool_name_and_task_id()
         finished_at_ms: 201,
         outcome: ToolInvocationOutcomeKind::PermanentFailure,
         error_message: Some("bad input".to_owned()),
+        output_preview: None
     });
 
     let completed_json = cairn_api::sse_payloads::shape_event_payload(&completed).unwrap();

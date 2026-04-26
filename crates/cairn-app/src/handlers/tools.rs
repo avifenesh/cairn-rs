@@ -64,6 +64,10 @@ pub(crate) struct CreateToolInvocationRequest {
     pub(crate) task_id: Option<String>,
     pub(crate) target: ToolInvocationTarget,
     pub(crate) execution_class: ExecutionClass,
+    /// F55: structured tool args persisted on the invocation projection.
+    /// Optional — legacy clients that only log lifecycle metadata omit it.
+    #[serde(default)]
+    pub(crate) args: Option<serde_json::Value>,
 }
 
 impl CreateToolInvocationRequest {
@@ -103,6 +107,53 @@ pub(crate) struct SetCheckpointStrategyRequest {
 
 // ── Handlers: Tool Invocations ──────────────────────────────────────────────
 
+/// F55: operator-facing view of a tool invocation. Augments the durable
+/// `ToolInvocationRecord` with flat `tool_name`, `status`, `args`, and
+/// `output` fields so dashboards (and the operator bug reporter at
+/// `GET /v1/tool-invocations?run_id=...`) can read the useful data
+/// without crawling into `target.tool_name` / `state` / no-such-field.
+/// The original `record` is embedded so existing consumers that rely on
+/// the full shape keep working.
+#[derive(Debug, serde::Serialize)]
+pub(crate) struct ToolInvocationView {
+    #[serde(flatten)]
+    record: cairn_domain::tool_invocation::ToolInvocationRecord,
+    /// Flattened tool name (from `target.tool_name`).
+    tool_name: String,
+    /// Alias of `state` kept for legacy operator dashboards that queried
+    /// `status`. Same value, same enum.
+    status: cairn_domain::tool_invocation::ToolInvocationState,
+    /// Whether the projected output preview was truncated at the
+    /// `TOOL_OUTPUT_PREVIEW_MAX_BYTES` cap. Operators can surface a
+    /// "truncated" badge in the UI without parsing the preview text.
+    output_truncated: bool,
+}
+
+impl ToolInvocationView {
+    fn from_record(record: cairn_domain::tool_invocation::ToolInvocationRecord) -> Self {
+        let tool_name = match &record.target {
+            ToolInvocationTarget::Builtin { tool_name } => tool_name.clone(),
+            ToolInvocationTarget::Plugin { tool_name, .. } => tool_name.clone(),
+        };
+        let status = record.state;
+        let output_truncated = record
+            .output_preview
+            .as_deref()
+            .map(|preview| {
+                preview.ends_with(
+                    cairn_domain::tool_invocation::TOOL_OUTPUT_PREVIEW_TRUNCATED_SUFFIX,
+                )
+            })
+            .unwrap_or(false);
+        Self {
+            record,
+            tool_name,
+            status,
+            output_truncated,
+        }
+    }
+}
+
 pub(crate) async fn list_tool_invocations_handler(
     State(state): State<Arc<AppState>>,
     Query(query): Query<ToolInvocationListQuery>,
@@ -110,12 +161,10 @@ pub(crate) async fn list_tool_invocations_handler(
     let Some(run_id) = query.run_id.as_deref() else {
         return (
             StatusCode::OK,
-            Json(
-                ListResponse::<cairn_domain::tool_invocation::ToolInvocationRecord> {
-                    items: Vec::new(),
-                    has_more: false,
-                },
-            ),
+            Json(ListResponse::<ToolInvocationView> {
+                items: Vec::new(),
+                has_more: false,
+            }),
         )
             .into_response();
     };
@@ -140,11 +189,12 @@ pub(crate) async fn list_tool_invocations_handler(
         items.retain(|item| item.state == parsed);
     }
 
-    let items = items
+    let items: Vec<ToolInvocationView> = items
         .into_iter()
         .skip(query.offset())
         .take(query.limit())
-        .collect::<Vec<_>>();
+        .map(ToolInvocationView::from_record)
+        .collect();
 
     (
         StatusCode::OK,
@@ -163,7 +213,13 @@ pub(crate) async fn get_tool_invocation_handler(
     match ToolInvocationReadModel::get(state.runtime.store.as_ref(), &ToolInvocationId::new(id))
         .await
     {
-        Ok(Some(record)) => (StatusCode::OK, Json(record)).into_response(),
+        // F55: return the flattened operator view so single-item GETs
+        // match the shape of the list endpoint.
+        Ok(Some(record)) => (
+            StatusCode::OK,
+            Json(ToolInvocationView::from_record(record)),
+        )
+            .into_response(),
         Ok(None) => AppApiError::new(
             StatusCode::NOT_FOUND,
             "not_found",
@@ -229,6 +285,7 @@ pub(crate) async fn create_tool_invocation_handler(
             body.task_id.map(TaskId::new),
             body.target,
             body.execution_class,
+            body.args,
         )
         .await
     {
@@ -362,6 +419,7 @@ pub(crate) async fn cancel_tool_invocation_handler(
             tool_name,
             cairn_domain::tool_invocation::ToolInvocationOutcomeKind::Canceled,
             Some("cancelled_by_operator".to_owned()),
+            None,
         )
         .await
     {
