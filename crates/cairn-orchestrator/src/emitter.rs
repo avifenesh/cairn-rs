@@ -21,7 +21,7 @@
 //! ```
 
 use async_trait::async_trait;
-use cairn_domain::RunId;
+use cairn_domain::{CompletionVerification, RunId};
 
 use crate::context::{
     DecideOutput, ExecuteOutcome, GatherOutput, LoopTermination, OrchestrationContext,
@@ -114,6 +114,19 @@ pub enum OrchestratorEvent {
         termination: String,
         /// Human-readable summary (from `LoopTermination::Completed` or error reason).
         detail: Option<String>,
+        /// F47 PR1: extractor-produced sidecar of warning/error lines and
+        /// per-command exit codes distilled from tool_results observed
+        /// during the run. Present only when the run reached
+        /// `LoopTermination::Completed`; `None` for failed / timed-out /
+        /// suspended terminations. Serialised as `completion_verification`
+        /// so the JSON wire key cannot be confused with the unrelated
+        /// `termination` field.
+        #[serde(
+            default,
+            skip_serializing_if = "Option::is_none",
+            rename = "completion_verification"
+        )]
+        completion_verification: Option<CompletionVerification>,
     },
 }
 
@@ -393,8 +406,16 @@ impl OrchestratorEventEmitter for ChannelEmitter {
     }
 
     async fn on_finished(&self, ctx: &OrchestrationContext, termination: &LoopTermination) {
+        // F47 PR1: carry the verification sidecar only on the Completed
+        // branch. Other terminations (failed / timed_out / suspended)
+        // have no meaningful "what did the tools say" signal to report.
+        let mut verification: Option<CompletionVerification> = None;
         let (term_str, detail) = match termination {
-            LoopTermination::Completed { summary } => {
+            LoopTermination::Completed {
+                summary,
+                verification: v,
+            } => {
+                verification = Some(v.clone());
                 ("completed".to_owned(), Some(summary.clone()))
             }
             LoopTermination::Failed { reason } => ("failed".to_owned(), Some(reason.clone())),
@@ -416,6 +437,7 @@ impl OrchestratorEventEmitter for ChannelEmitter {
             run_id: ctx.run_id.clone(),
             termination: term_str,
             detail,
+            completion_verification: verification,
         });
     }
 }
@@ -509,6 +531,7 @@ mod tests {
         e.on_finished(
             &ctx,
             &LoopTermination::Completed {
+                verification: Default::default(),
                 summary: "done".into(),
             },
         )
@@ -553,6 +576,7 @@ mod tests {
             .on_finished(
                 &ctx(),
                 &LoopTermination::Completed {
+                    verification: Default::default(),
                     summary: "all done".into(),
                 },
             )
@@ -634,6 +658,7 @@ mod tests {
             .on_finished(
                 &ctx,
                 &LoopTermination::Completed {
+                    verification: Default::default(),
                     summary: "done".into(),
                 },
             )

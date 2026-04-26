@@ -333,8 +333,16 @@ impl cairn_orchestrator::OrchestratorEventEmitter for SseOrchestratorEmitter {
         ctx: &cairn_orchestrator::OrchestrationContext,
         termination: &cairn_orchestrator::LoopTermination,
     ) {
+        // F47 PR1: capture the verification sidecar for the SSE payload.
+        // Only Completed runs carry one; other terminations serialise
+        // without the field (via serde skip_serializing_if).
+        let mut verification: Option<&cairn_domain::CompletionVerification> = None;
         let (term_str, detail) = match termination {
-            cairn_orchestrator::LoopTermination::Completed { summary } => {
+            cairn_orchestrator::LoopTermination::Completed {
+                summary,
+                verification: v,
+            } => {
+                verification = Some(v);
                 ("completed", Some(summary.as_str()))
             }
             cairn_orchestrator::LoopTermination::Failed { reason } => {
@@ -352,12 +360,43 @@ impl cairn_orchestrator::OrchestratorEventEmitter for SseOrchestratorEmitter {
             }
             cairn_orchestrator::LoopTermination::PlanProposed { .. } => ("plan_proposed", None),
         };
-        self.emit(serde_json::json!({
+        // Build the payload conditionally so the field is absent (not
+        // `null`) for non-Completed terminations. Matches the wire shape
+        // of `OrchestratorEvent::Finished` where the field is
+        // `skip_serializing_if = "Option::is_none"`.
+        let mut payload = serde_json::json!({
             "event":       "orchestrate_finished",
             "run_id":      ctx.run_id,
             "termination": term_str,
             "detail":      detail,
-        }));
+        });
+        if let Some(v) = verification {
+            if let Some(obj) = payload.as_object_mut() {
+                // Copilot review on #312: don't silently fall back to
+                // `null` on a serialisation failure — emitting
+                // `completion_verification: null` would contradict the
+                // "field absent" wire contract for non-Completed frames
+                // and could mask a real bug. `CompletionVerification`
+                // has no non-serialisable fields (all `String` / `Vec` /
+                // `usize` / `u32` / `Option<i32>`), so this path is
+                // unreachable in practice; log-and-skip if it ever
+                // fires rather than corrupting the wire shape.
+                match serde_json::to_value(v) {
+                    Ok(value) => {
+                        obj.insert("completion_verification".to_owned(), value);
+                    }
+                    Err(e) => {
+                        tracing::error!(
+                            run_id = %ctx.run_id,
+                            error = %e,
+                            "failed to serialise completion_verification — \
+                             omitting from SSE frame rather than emitting null"
+                        );
+                    }
+                }
+            }
+        }
+        self.emit(payload);
     }
 }
 
@@ -450,6 +489,7 @@ mod sse_orchestrator_tests {
                 &ctx(),
                 &LoopTermination::Completed {
                     summary: "all done".to_owned(),
+                    verification: Default::default(),
                 },
             )
             .await;

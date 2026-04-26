@@ -6,8 +6,8 @@
 use std::path::PathBuf;
 
 use cairn_domain::{
-    decisions::RunMode, ActionProposal, ApprovalId, DefaultSetting, ProjectKey, RunId, SessionId,
-    TaskId, ToolInvocationId,
+    decisions::RunMode, ActionProposal, ApprovalId, CompletionVerification, DefaultSetting,
+    ProjectKey, RunId, SessionId, TaskId, ToolInvocationId,
 };
 use cairn_graph::GraphNode;
 use cairn_memory::retrieval::RetrievalResult;
@@ -249,7 +249,18 @@ impl LoopSignal {
 #[derive(Clone, Debug)]
 pub enum LoopTermination {
     /// Agent declared itself done; run has been completed.
-    Completed { summary: String },
+    ///
+    /// `verification` is the F47 PR1 sidecar: an extractor-produced summary
+    /// of warning/error lines and per-command exit codes distilled from the
+    /// tool_result frames observed during the run. The field is always
+    /// populated (even for runs with no tool calls, in which case it is
+    /// `CompletionVerification::default()` with `tool_results_scanned = 0`)
+    /// so downstream consumers — SSE emitters, dashboards, PR2 persistence
+    /// — can rely on a stable shape without optional plumbing.
+    Completed {
+        summary: String,
+        verification: CompletionVerification,
+    },
     /// Agent or runtime hit an unrecoverable error; run has been failed.
     Failed { reason: String },
     /// Iteration cap reached; run has been failed with `MaxIterations`.

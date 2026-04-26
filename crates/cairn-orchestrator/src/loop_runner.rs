@@ -616,6 +616,21 @@ where
         // subsequent iterations re-list the same projection row.
         let mut drained_call_ids: std::collections::HashSet<String> =
             std::collections::HashSet::new();
+        // F47 PR1 incremental verification accumulator. Each
+        // `ActionResult` produced by execute (main path, approval-gate
+        // inline path, AND the F25 drain path) is fed to
+        // `verification_acc.observe(...)` which scans the tool_output in
+        // place and retains only the bounded bucket output (50 entries *
+        // 500 chars per bucket). Keeps per-run memory flat even when a
+        // run issues a `read` on a large file — we never retain the full
+        // `tool_output` past the scan. At Done `verification_acc.finish()`
+        // produces the `CompletionVerification` sidecar attached to
+        // `LoopTermination::Completed`. Copilot review on #312 flagged
+        // the original `Vec<ActionResult>` form as a memory risk; this
+        // scan-and-discard design closes that. Cursor Bugbot on #312
+        // flagged the drain path as uncovered; every observe-site below
+        // is audited against the three dispatch paths.
+        let mut verification_acc = crate::completion_verification::VerificationAccumulator::new();
 
         tracing::info!(
             run_id    = %ctx.run_id,
@@ -646,6 +661,14 @@ where
                 .await?;
             if !drained.is_empty() {
                 for result in &drained {
+                    // F47 PR1 (Cursor Bugbot #312 fix): the drain path
+                    // dispatches approved tool calls, and its outputs MUST
+                    // flow into the verification sidecar — otherwise an
+                    // operator-approved bash command that emits warnings
+                    // would be invisible to the SSE evidence consumer,
+                    // defeating the F47 contract for approval-gated runs.
+                    verification_acc.observe(result);
+
                     let Some(tool_name) = result.proposal.tool_name.as_deref() else {
                         continue;
                     };
@@ -1013,6 +1036,13 @@ where
                     e
                 })?;
 
+                // F47 PR1: scan this iteration's results incrementally so
+                // tool_output payloads aren't retained across the whole run.
+                // Approval-gate inline dispatch path.
+                for r in &execute_outcome.results {
+                    verification_acc.observe(r);
+                }
+
                 // T5-M8: mirror the main-path post-execute bookkeeping so
                 // resuming from a checkpointed approval-suspended run sees a
                 // step_summary, a persisted checkpoint, and a step_completed
@@ -1133,7 +1163,18 @@ where
                             .find(|p| p.action_type == cairn_domain::ActionType::CompleteRun)
                             .map(|p| p.description.clone())
                             .unwrap_or_else(|| "run completed".to_owned());
-                        return Ok(LoopTermination::Completed { summary });
+                        // F47 PR1: finalise the incremental verification
+                        // sidecar. The extractor is pure; no IO happens
+                        // on this path. `.clone().finish()` because the
+                        // second Done branch (legacy fall-through) owns
+                        // the binding and only one branch executes per
+                        // run; clippy's dead-code analysis would
+                        // otherwise flag the unreachable arm.
+                        let verification = verification_acc.clone().finish();
+                        return Ok(LoopTermination::Completed {
+                            summary,
+                            verification,
+                        });
                     }
                     LoopSignal::Failed { reason } => {
                         return Ok(LoopTermination::Failed { reason });
@@ -1213,6 +1254,13 @@ where
                 tracing::error!(run_id = %ctx.run_id, iteration = ctx.iteration, error = %e, "execute failed");
                 e
             })?;
+
+            // F47 PR1: scan this iteration's results incrementally
+            // (main execute path). See `verification_acc` rustdoc for why
+            // scan-and-discard is preferred over retaining `ActionResult`.
+            for r in &execute_outcome.results {
+                verification_acc.observe(r);
+            }
 
             let succeeded_count = execute_outcome
                 .results
@@ -1407,14 +1455,23 @@ where
                         .find(|p| p.action_type == cairn_domain::ActionType::CompleteRun)
                         .map(|p| p.description.clone())
                         .unwrap_or_else(|| "run completed".to_owned());
+                    // F47 PR1: verification sidecar from the incremental
+                    // accumulator. See extractor rustdoc for semantics.
+                    let verification = verification_acc.clone().finish();
 
                     tracing::info!(
-                        run_id    = %ctx.run_id,
-                        iteration = ctx.iteration,
-                        summary   = %summary,
+                        run_id        = %ctx.run_id,
+                        iteration     = ctx.iteration,
+                        summary       = %summary,
+                        warnings      = verification.warnings.len(),
+                        errors        = verification.errors.len(),
+                        scanned       = verification.tool_results_scanned,
                         "orchestrator loop completed"
                     );
-                    return Ok(LoopTermination::Completed { summary });
+                    return Ok(LoopTermination::Completed {
+                        summary,
+                        verification,
+                    });
                 }
 
                 LoopSignal::Failed { reason } => {
