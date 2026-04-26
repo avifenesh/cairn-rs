@@ -366,6 +366,125 @@ pub struct AppState {
     /// restart by design (in-memory; event-sourced cooldown is a
     /// follow-up).
     pub provider_fallback_cooldown: Arc<ScopedProviderFallbackCooldown>,
+    /// F49: queue for auto-resume orchestrate kicks. Always present on
+    /// AppState — the inner channel is an `OnceLock` inside the sender
+    /// that `main.rs` installs after the HTTP listener binds. When an
+    /// approval resolves AND the run has no other pending approvals
+    /// AND the run is state=running, the SSE publish loop calls
+    /// `OrchestrateKickSender::kick(run_id)`, which is a no-op before
+    /// install (early startup / non-http roles). The worker spawned
+    /// from `main.rs` drains the channel and POSTs
+    /// `/v1/runs/:id/orchestrate` via reqwest on the local listener.
+    pub orchestrate_kick_tx: Arc<OrchestrateKickSender>,
+    /// F50: operator-visible notification sink. Previously only the
+    /// admin `/v1/events/append` path pushed notifications, which meant
+    /// service-layer approvals/run-failures never reached the bell icon
+    /// or sidebar badge. The sink is a trait object so the concrete
+    /// buffer stays in the binary (preserving the crate boundary) while
+    /// the lib-level SSE publish loop can still push into it.
+    pub notification_sink: Arc<NotificationSink>,
+}
+
+/// F50: dynamic-dispatch wrapper so the lib crate can push
+/// `OperatorNotification` values without depending on the binary's
+/// concrete `NotificationBuffer` type.
+#[derive(Debug, Default)]
+pub struct NotificationSink {
+    inner: std::sync::OnceLock<Arc<dyn OperatorNotificationSink>>,
+}
+
+impl NotificationSink {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Install the sink once the binary has built its `NotificationBuffer`.
+    /// Idempotent — first install wins.
+    pub fn install(&self, sink: Arc<dyn OperatorNotificationSink>) {
+        let _ = self.inner.set(sink);
+    }
+
+    /// Push a notification. No-op when the sink hasn't been installed
+    /// yet (early startup).
+    pub fn push(&self, n: OperatorNotification) {
+        if let Some(sink) = self.inner.get() {
+            sink.push(n);
+        }
+    }
+}
+
+/// F50: a single operator notification destined for the in-memory bell
+/// buffer. Mirrors the fields of the binary's private `Notification`
+/// type but stays crate-public so the lib can construct them.
+///
+/// `tenant_id` is recorded on every notification so the `/v1/
+/// notifications` handler can filter cross-tenant leakage in a future
+/// pass (v1 currently returns the global buffer unfiltered for
+/// backwards compatibility with the bell UI). Multi-tenant deployments
+/// should upgrade the handler to drop rows whose `tenant_id` does not
+/// match the caller principal's tenant.
+#[derive(Clone, Debug)]
+pub struct OperatorNotification {
+    pub id: String,
+    pub notif_type: OperatorNotificationType,
+    pub message: String,
+    pub entity_id: Option<String>,
+    pub href: String,
+    pub created_at_ms: u64,
+    /// Originating event's tenant, extracted from the envelope's
+    /// `ownership` field. `None` for system-scoped events that are
+    /// visible to every tenant (same semantics as SSE fan-out).
+    pub tenant_id: Option<String>,
+}
+
+/// F50: notification categories the bell icon distinguishes.
+#[derive(Clone, Copy, Debug)]
+pub enum OperatorNotificationType {
+    ApprovalRequested,
+    ApprovalResolved,
+    RunCompleted,
+    RunFailed,
+    TaskStuck,
+}
+
+/// F50: thin trait the binary implements on its concrete buffer. Keeps
+/// the bin-level `NotificationBuffer` free of lib dependencies.
+pub trait OperatorNotificationSink: Send + Sync + std::fmt::Debug {
+    fn push(&self, notification: OperatorNotification);
+}
+
+/// F49: thin wrapper so the channel sender can be stored in a
+/// pre-existing AppState with zero placeholders.
+///
+/// The inner `OnceLock<Sender>` is set by `main.rs` once the HTTP
+/// listener has bound a port and the worker task has started.
+/// `send(run_id)` is a no-op when the worker is not running — the
+/// approval handler still succeeds, operators just lose the
+/// auto-resume affordance (same behaviour as pre-F49).
+#[derive(Debug, Default)]
+pub struct OrchestrateKickSender {
+    inner: std::sync::OnceLock<tokio::sync::mpsc::UnboundedSender<cairn_domain::RunId>>,
+}
+
+impl OrchestrateKickSender {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Install the sender end once the background worker is running.
+    /// Idempotent — subsequent calls are dropped (the first sender wins).
+    pub fn install(&self, tx: tokio::sync::mpsc::UnboundedSender<cairn_domain::RunId>) {
+        let _ = self.inner.set(tx);
+    }
+
+    /// Best-effort enqueue of a run_id for auto-resume. Returns `true`
+    /// when the channel is installed and the send succeeded.
+    pub fn kick(&self, run_id: cairn_domain::RunId) -> bool {
+        match self.inner.get() {
+            Some(tx) => tx.send(run_id).is_ok(),
+            None => false,
+        }
+    }
 }
 
 /// In-memory provider-fallback cooldown storage partitioned by
@@ -1130,6 +1249,8 @@ impl AppState {
             #[cfg(any(feature = "metrics-core", feature = "metrics-providers"))]
             metrics_tap: None,
             provider_fallback_cooldown: Arc::new(ScopedProviderFallbackCooldown::new()),
+            orchestrate_kick_tx: Arc::new(OrchestrateKickSender::new()),
+            notification_sink: Arc::new(NotificationSink::new()),
         };
         state.runtime.store.reset_usage_counters();
 

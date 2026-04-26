@@ -462,9 +462,46 @@ impl PgSyncProjection {
             RuntimeEvent::ResourceShareRevoked(_) => log_stub("ResourceShareRevoked"),
             RuntimeEvent::ResourceShared(_) => log_stub("ResourceShared"),
             RuntimeEvent::RoutePolicyUpdated(_) => log_stub("RoutePolicyUpdated"),
-            // RFC 020 Track 3: audit-only events; no projection update needed.
-            // ToolCallResultCache consumes these via in-memory scan / replay.
-            RuntimeEvent::ToolInvocationCacheHit(_) => log_stub("ToolInvocationCacheHit"),
+            // Projection contract: one row per `ToolInvocationCacheHit`
+            // keyed by `invocation_id`. Operators query cache activity
+            // via the REST surface (`tool_invocation_cache_hits` table)
+            // instead of replaying the event log. `ON CONFLICT DO
+            // NOTHING` keeps replay idempotent.
+            RuntimeEvent::ToolInvocationCacheHit(e) => {
+                let original_completed_at = i64::try_from(e.original_completed_at_ms).map_err(|_| {
+                    StoreError::Internal(format!(
+                        "ToolInvocationCacheHit.original_completed_at_ms {} exceeds i64::MAX",
+                        e.original_completed_at_ms
+                    ))
+                })?;
+                let served_at = i64::try_from(e.served_at_ms).map_err(|_| {
+                    StoreError::Internal(format!(
+                        "ToolInvocationCacheHit.served_at_ms {} exceeds i64::MAX",
+                        e.served_at_ms
+                    ))
+                })?;
+                sqlx::query(
+                    "INSERT INTO tool_invocation_cache_hits
+                         (invocation_id, tenant_id, workspace_id, project_id,
+                          run_id, task_id, tool_name, tool_call_id,
+                          original_completed_at_ms, served_at_ms)
+                     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+                     ON CONFLICT (invocation_id) DO NOTHING",
+                )
+                .bind(e.invocation_id.as_str())
+                .bind(e.project.tenant_id.as_str())
+                .bind(e.project.workspace_id.as_str())
+                .bind(e.project.project_id.as_str())
+                .bind(e.run_id.as_ref().map(|r| r.as_str()))
+                .bind(e.task_id.as_ref().map(|t| t.as_str()))
+                .bind(e.tool_name.as_str())
+                .bind(e.tool_call_id.as_str())
+                .bind(original_completed_at)
+                .bind(served_at)
+                .execute(&mut **tx)
+                .await
+                .map_err(|err| StoreError::Internal(err.to_string()))?;
+            }
             RuntimeEvent::ToolRecoveryPaused(_) => log_stub("ToolRecoveryPaused"),
             // F39: RFC 020 Track 4 boot-level recovery audit projected to
             // `recovery_summaries` (one row per boot_id). The emitter

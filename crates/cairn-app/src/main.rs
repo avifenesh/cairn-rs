@@ -1036,7 +1036,19 @@ async fn main() {
         lib_metrics: lib_state.metrics.clone(),
         rate_limits: Arc::new(Mutex::new(HashMap::new())),
         request_log: lib_state.request_log.clone(),
-        notifications: Arc::new(std::sync::RwLock::new(NotificationBuffer::new())),
+        notifications: {
+            let buf = Arc::new(std::sync::RwLock::new(NotificationBuffer::new()));
+            // F50: wire the lib-side NotificationSink so the SSE publish
+            // loop (which fires on every service-layer append, not just
+            // admin /v1/events/append) can push notifications into this
+            // same buffer.
+            lib_state.notification_sink.install(Arc::new(
+                crate::bin_state::NotificationBufferSink {
+                    buffer: buf.clone(),
+                },
+            ));
+            buf
+        },
         templates: Arc::new(templates::TemplateRegistry::with_builtins()),
         entitlements: Arc::new(entitlements::EntitlementService::new()),
         bedrock: bedrock.clone(),
@@ -1448,6 +1460,95 @@ async fn main() {
             .local_addr()
             .unwrap_or_else(|e| panic!("failed to read bound addr: {e}"));
         eprintln!("cairn-app listening on http://{bound}");
+
+        // ── F49: auto-resume orchestrate worker ──────────────────────────────
+        //
+        // Drains `AppState::orchestrate_kick_tx`. When the handler on
+        // `POST /v1/approvals/:id/approve|reject` resolves an approval
+        // AND the run has no other pending approvals AND the run is
+        // still Running, the SSE publish loop enqueues the run_id here.
+        // This worker POSTs /v1/runs/:id/orchestrate over loopback with
+        // the admin token so the operator doesn't have to re-kick after
+        // every approval cycle. Best-effort: an HTTP failure logs at
+        // warn and the scanner-based recovery (FF's 14 scanners) still
+        // picks up truly wedged runs.
+        {
+            let (kick_tx, mut kick_rx) =
+                tokio::sync::mpsc::unbounded_channel::<cairn_domain::RunId>();
+            lib_state.orchestrate_kick_tx.install(kick_tx);
+            // Use a loopback host with the bound port: the listener
+            // may have bound 0.0.0.0 or [::] (team mode), which is
+            // not a valid destination for a client POST. The worker
+            // always dials the local process.
+            let kick_url = match bound {
+                std::net::SocketAddr::V4(_) => format!("http://127.0.0.1:{}", bound.port()),
+                std::net::SocketAddr::V6(_) => format!("http://[::1]:{}", bound.port()),
+            };
+            let kick_token = admin_token.clone();
+            tokio::spawn(async move {
+                let client = reqwest::Client::builder()
+                    .timeout(std::time::Duration::from_secs(300))
+                    .build()
+                    .unwrap_or_else(|_| reqwest::Client::new());
+                // De-dup by run_id with a 5s window: multiple approvals
+                // can resolve in quick succession on a single run and
+                // the SSE publish loop fires one kick per resolution.
+                // Without the window we'd burst several concurrent
+                // `/orchestrate` POSTs per run, wasting LLM budget and
+                // racing on the run's FF lease. The map is pruned on
+                // every iteration so the memory footprint is bounded
+                // by the number of distinct runs hit in the last 5s.
+                use std::collections::HashMap;
+                let dedup_window = std::time::Duration::from_secs(5);
+                let mut last_kick: HashMap<String, std::time::Instant> = HashMap::new();
+                while let Some(run_id) = kick_rx.recv().await {
+                    let now = std::time::Instant::now();
+                    last_kick.retain(|_, t| now.duration_since(*t) < dedup_window);
+                    let key = run_id.as_str().to_owned();
+                    if let Some(prev) = last_kick.get(&key) {
+                        if now.duration_since(*prev) < dedup_window {
+                            tracing::debug!(
+                                run_id = %run_id,
+                                "F49: dropping duplicate auto-resume kick within 5s window"
+                            );
+                            continue;
+                        }
+                    }
+                    last_kick.insert(key, now);
+                    let url = format!("{kick_url}/v1/runs/{}/orchestrate", run_id.as_str());
+                    tracing::info!(
+                        run_id = %run_id,
+                        "F49: auto-resume orchestrate worker firing POST"
+                    );
+                    match client
+                        .post(&url)
+                        .bearer_auth(&kick_token)
+                        .json(&serde_json::json!({}))
+                        .send()
+                        .await
+                    {
+                        Ok(resp) => {
+                            if !resp.status().is_success() {
+                                tracing::warn!(
+                                    run_id = %run_id,
+                                    status = %resp.status(),
+                                    "F49: auto-resume orchestrate returned non-2xx; \
+                                     operator may need to re-POST /orchestrate"
+                                );
+                            }
+                        }
+                        Err(err) => {
+                            tracing::warn!(
+                                run_id = %run_id,
+                                error = %err,
+                                "F49: auto-resume orchestrate POST failed; \
+                                 operator may need to re-POST /orchestrate"
+                            );
+                        }
+                    }
+                }
+            });
+        }
 
         // RFC 020 §"Startup order" step 6: flip readiness to ready in a
         // background task so the HTTP listener is already accepting

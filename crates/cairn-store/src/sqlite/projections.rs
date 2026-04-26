@@ -851,8 +851,46 @@ impl SqliteSyncProjection {
             RuntimeEvent::ToolInvocationProgressUpdated(_) => {
                 log_stub("ToolInvocationProgressUpdated")
             }
-            // RFC 020 Track 3: audit-only events; no projection update needed.
-            RuntimeEvent::ToolInvocationCacheHit(_) => log_stub("ToolInvocationCacheHit"),
+            // Projection contract: mirrors the pg handler so operator
+            // REST queries over cache activity work identically across
+            // backends (no-DB-specific-features rule). One row per
+            // `invocation_id`; `ON CONFLICT DO NOTHING` absorbs replay.
+            RuntimeEvent::ToolInvocationCacheHit(e) => {
+                let original_completed_at =
+                    i64::try_from(e.original_completed_at_ms).map_err(|_| {
+                        StoreError::Internal(format!(
+                            "ToolInvocationCacheHit.original_completed_at_ms {} exceeds i64::MAX",
+                            e.original_completed_at_ms
+                        ))
+                    })?;
+                let served_at = i64::try_from(e.served_at_ms).map_err(|_| {
+                    StoreError::Internal(format!(
+                        "ToolInvocationCacheHit.served_at_ms {} exceeds i64::MAX",
+                        e.served_at_ms
+                    ))
+                })?;
+                sqlx::query(
+                    "INSERT INTO tool_invocation_cache_hits
+                         (invocation_id, tenant_id, workspace_id, project_id,
+                          run_id, task_id, tool_name, tool_call_id,
+                          original_completed_at_ms, served_at_ms)
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     ON CONFLICT(invocation_id) DO NOTHING",
+                )
+                .bind(e.invocation_id.as_str())
+                .bind(e.project.tenant_id.as_str())
+                .bind(e.project.workspace_id.as_str())
+                .bind(e.project.project_id.as_str())
+                .bind(e.run_id.as_ref().map(|r| r.as_str()))
+                .bind(e.task_id.as_ref().map(|t| t.as_str()))
+                .bind(e.tool_name.as_str())
+                .bind(e.tool_call_id.as_str())
+                .bind(original_completed_at)
+                .bind(served_at)
+                .execute(&mut **tx)
+                .await
+                .map_err(|err| StoreError::Internal(err.to_string()))?;
+            }
             RuntimeEvent::ToolRecoveryPaused(_) => log_stub("ToolRecoveryPaused"),
             // F39: RFC 019 / RFC 020 decision-cache projection. The
             // in-memory cache is still rebuilt from the event log at
