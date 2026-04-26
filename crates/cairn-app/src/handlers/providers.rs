@@ -617,8 +617,10 @@ pub(crate) async fn create_provider_connection_handler(
             crate::handlers::sse::publish_runtime_frames_since(&state, before).await;
             (StatusCode::CREATED, Json(record)).into_response()
         }
-        Err(err) => AppApiError::new(StatusCode::BAD_REQUEST, "bad_request", err.to_string())
-            .into_response(),
+        // Route through `runtime_error_response` so Conflict maps to 409
+        // (entity-collision) and NotFound/Validation keep their correct
+        // status codes instead of being flattened to 400. F40.
+        Err(err) => runtime_error_response(err),
     }
 }
 
@@ -739,43 +741,24 @@ pub(crate) async fn delete_provider_connection_handler(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
 ) -> impl IntoResponse {
+    // F40: Previously this handler appended a `ProviderConnectionRegistered`
+    // event with empty fields and `Disabled` status — which overwrote the
+    // projection row with bogus data instead of removing it. Re-creating
+    // with the same ID then failed with 400 "provider_connection conflict".
+    // We now emit a real `ProviderConnectionDeleted` event; the projection
+    // hard-removes the row so the ID is free to re-use. The full history
+    // (Registered -> Deleted -> Registered) remains in the event log.
     let conn_id = ProviderConnectionId::new(&id);
     let before = crate::handlers::sse::current_event_head(&state).await;
-    match state.runtime.provider_connections.get(&conn_id).await {
-        Ok(Some(_)) => {
-            let event = cairn_domain::EventEnvelope::for_runtime_event(
-                cairn_domain::EventId::new(format!("evt_del_conn_{}", now_ms())),
-                cairn_domain::EventSource::Runtime,
-                cairn_domain::RuntimeEvent::ProviderConnectionRegistered(
-                    cairn_domain::events::ProviderConnectionRegistered {
-                        tenant: cairn_domain::tenancy::TenantKey::new("default"),
-                        provider_connection_id: conn_id,
-                        provider_family: String::new(),
-                        adapter_type: String::new(),
-                        supported_models: vec![],
-                        status: cairn_domain::providers::ProviderConnectionStatus::Disabled,
-                        registered_at: now_ms(),
-                    },
-                ),
-            );
-            match state.runtime.store.append(&[event]).await {
-                Ok(_) => {
-                    crate::handlers::sse::publish_runtime_frames_since(&state, before).await;
-                    (
-                        StatusCode::OK,
-                        Json(serde_json::json!({ "deleted": true, "connection_id": id })),
-                    )
-                        .into_response()
-                }
-                Err(err) => store_error_response(err),
-            }
+    match state.runtime.provider_connections.delete(&conn_id).await {
+        Ok(()) => {
+            crate::handlers::sse::publish_runtime_frames_since(&state, before).await;
+            (
+                StatusCode::OK,
+                Json(serde_json::json!({ "deleted": true, "connection_id": id })),
+            )
+                .into_response()
         }
-        Ok(None) => AppApiError::new(
-            StatusCode::NOT_FOUND,
-            "not_found",
-            "provider connection not found",
-        )
-        .into_response(),
         Err(err) => runtime_error_response(err),
     }
 }

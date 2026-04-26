@@ -976,6 +976,7 @@ pub fn event_type_name(event: &RuntimeEvent) -> &'static str {
         RuntimeEvent::GuardrailPolicyCreated(_) => "guardrail_policy_created",
         RuntimeEvent::GuardrailPolicyEvaluated(_) => "guardrail_policy_evaluated",
         RuntimeEvent::ProviderConnectionRegistered(_) => "provider_connection_registered",
+        RuntimeEvent::ProviderConnectionDeleted(_) => "provider_connection_deleted",
         RuntimeEvent::ProviderBindingCreated(_) => "provider_binding_created",
         RuntimeEvent::ProviderBindingStateChanged(_) => "provider_binding_state_changed",
         RuntimeEvent::ProviderHealthChecked(_) => "provider_health_checked",
@@ -1412,6 +1413,12 @@ pub(crate) fn event_message(event: &RuntimeEvent) -> String {
         RuntimeEvent::ProviderConnectionRegistered(connection) => {
             format!(
                 "Provider connection {} registered",
+                connection.provider_connection_id
+            )
+        }
+        RuntimeEvent::ProviderConnectionDeleted(connection) => {
+            format!(
+                "Provider connection {} deleted",
                 connection.provider_connection_id
             )
         }

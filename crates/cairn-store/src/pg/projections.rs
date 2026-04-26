@@ -446,6 +446,9 @@ impl PgSyncProjection {
             RuntimeEvent::ProviderConnectionRegistered(_) => {
                 log_stub("ProviderConnectionRegistered")
             }
+            RuntimeEvent::ProviderConnectionDeleted(_) => {
+                log_stub("ProviderConnectionDeleted")
+            }
             RuntimeEvent::ProviderHealthChecked(_) => log_stub("ProviderHealthChecked"),
             RuntimeEvent::ProviderHealthScheduleSet(_) => log_stub("ProviderHealthScheduleSet"),
             RuntimeEvent::ProviderHealthScheduleTriggered(_) => {

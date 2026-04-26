@@ -479,6 +479,9 @@ fn assert_all_variants_covered(event: &RuntimeEvent) {
         RuntimeEvent::ProviderConnectionRegistered(_) => {
             assert!(eref.is_none());
         }
+        RuntimeEvent::ProviderConnectionDeleted(_) => {
+            assert!(eref.is_none());
+        }
         RuntimeEvent::ProviderHealthChecked(_) => {
             assert!(eref.is_none());
         }
@@ -1381,6 +1384,13 @@ fn all_variants() -> Vec<RuntimeEvent> {
             status: ProviderConnectionStatus::Active,
             registered_at: ts,
         }),
+        RuntimeEvent::ProviderConnectionDeleted(
+            cairn_domain::events::ProviderConnectionDeleted {
+                tenant: tkey(),
+                provider_connection_id: ProviderConnectionId::new("conn1"),
+                deleted_at: ts,
+            },
+        ),
         RuntimeEvent::ProviderHealthChecked(ProviderHealthChecked {
             tenant_id: tid(),
             connection_id: ProviderConnectionId::new("conn1"),
@@ -1724,11 +1734,12 @@ fn all_runtime_event_variants_covered_count() {
     // survival pair from PR #85: DecisionRecorded, DecisionCacheWarmup +
     // RFC 020 Track 4: RecoverySummaryEmitted + issue #218: WorkspaceArchived +
     // PR BP-1 tool-call approval foundation: ToolCallProposed,
-    // ToolCallApproved, ToolCallRejected, ToolCallAmended).
+    // ToolCallApproved, ToolCallRejected, ToolCallAmended +
+    // F40: ProviderConnectionDeleted).
     assert_eq!(
         variants.len(),
-        140,
-        "all_variants() must construct exactly 140 RuntimeEvent instances"
+        141,
+        "all_variants() must construct exactly 141 RuntimeEvent instances"
     );
 }
 
