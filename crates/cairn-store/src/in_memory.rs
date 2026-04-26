@@ -149,6 +149,10 @@ struct State {
     /// FF lease_history subscriber cursors, keyed by `(partition_id,
     /// execution_id)`.
     ff_lease_history_cursors: HashMap<(String, String), crate::projections::FfLeaseHistoryCursor>,
+    /// F52: projection of `ToolInvocationCacheHit` events keyed by
+    /// `invocation_id` so replay + second-boot reads converge to the same
+    /// set. Mirrors the pg/sqlite `tool_invocation_cache_hits` table.
+    tool_invocation_cache_hits: HashMap<String, crate::projections::ToolInvocationCacheHitRecord>,
 }
 
 pub struct InMemoryStore {
@@ -248,6 +252,7 @@ impl InMemoryStore {
                 route_policies: HashMap::new(),
                 resource_shares: HashMap::new(),
                 ff_lease_history_cursors: HashMap::new(),
+                tool_invocation_cache_hits: HashMap::new(),
                 tenants: HashMap::new(),
                 workspaces: HashMap::new(),
                 projects: HashMap::new(),
@@ -575,6 +580,24 @@ impl InMemoryStore {
                         .mark_finished(e.outcome, e.error_message.clone(), e.finished_at_ms)
                         .expect("tool invocation failed event should preserve valid terminal transition");
                 }
+            }
+            // F52: project cache-hit events into the in-memory read model.
+            // Mirrors pg + sqlite; idempotent on re-apply (first event per
+            // invocation_id wins, later replays are silently absorbed).
+            RuntimeEvent::ToolInvocationCacheHit(e) => {
+                state
+                    .tool_invocation_cache_hits
+                    .entry(e.invocation_id.as_str().to_owned())
+                    .or_insert_with(|| crate::projections::ToolInvocationCacheHitRecord {
+                        invocation_id: e.invocation_id.clone(),
+                        project: e.project.clone(),
+                        run_id: e.run_id.clone(),
+                        task_id: e.task_id.clone(),
+                        tool_name: e.tool_name.clone(),
+                        tool_call_id: e.tool_call_id.clone(),
+                        original_completed_at_ms: e.original_completed_at_ms,
+                        served_at_ms: e.served_at_ms,
+                    });
             }
             RuntimeEvent::SignalIngested(e) => {
                 state.signals.insert(
@@ -1388,7 +1411,6 @@ impl InMemoryStore {
             | RuntimeEvent::PlanRejected(_)
             | RuntimeEvent::PlanRevisionRequested(_)
             // RFC 020 Track 3: audit-only events; no in-memory projection update.
-            | RuntimeEvent::ToolInvocationCacheHit(_)
             | RuntimeEvent::ToolRecoveryPaused(_)
             // RFC 020 Track 4: boot-level recovery audit event.
             | RuntimeEvent::RecoverySummaryEmitted(_)
