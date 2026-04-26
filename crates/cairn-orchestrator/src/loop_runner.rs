@@ -1863,34 +1863,46 @@ fn render_bash_preview(map: &serde_json::Map<String, serde_json::Value>) -> Stri
 }
 
 /// Return the trailing `max_chars` of `text`, prepended with a
-/// `[truncated N chars]` marker when material was dropped. Streaming
-/// char iterator + bounded deque keeps memory O(max_chars) regardless
-/// of input size — matching the guarantee in [`truncate_for_summary`].
+/// `[truncated …]` marker when material was dropped.
+///
+/// Review feedback (Gemini on PR #315): the previous implementation
+/// was an O(N) forward scan over every char. For multi-megabyte tool
+/// outputs that scan is a real cost on the orchestrator's hot path.
+/// We now scan backwards via `char_indices().rev()` to locate the
+/// tail's starting byte offset in O(max_chars) work, then slice the
+/// original `&str` verbatim — no intermediate buffer, no per-char
+/// copy. Memory stays O(max_chars) regardless of input size.
+///
+/// Edge case (Gemini): `max_chars == 0` returns an empty string when
+/// the input is non-empty (with a truncation marker indicating the
+/// whole input was dropped), rather than the degenerate
+/// "full-string-plus-marker" the deque-based approach produced.
 fn tail_of(text: &str, max_chars: usize) -> String {
+    // Byte-length pre-check is a safe "definitely fits" fast path:
+    // bytes ≥ chars for any valid UTF-8.
     if text.len() <= max_chars {
-        // Byte-length pre-check is a safe "definitely fits" fast path:
-        // bytes ≥ chars for any valid UTF-8.
         return text.to_owned();
     }
 
-    let mut buf: std::collections::VecDeque<char> =
-        std::collections::VecDeque::with_capacity(max_chars);
-    let mut total = 0usize;
-    for c in text.chars() {
-        total += 1;
-        if buf.len() == max_chars {
-            buf.pop_front();
+    // Walk back through char boundaries; stop once we've counted
+    // `max_chars` chars or exhausted the input. `char_indices().rev()`
+    // is O(max_chars) in this use because we break early.
+    let mut start = text.len();
+    for (counted, (idx, _)) in text.char_indices().rev().enumerate() {
+        if counted == max_chars {
+            break;
         }
-        buf.push_back(c);
+        start = idx;
     }
 
-    if total <= max_chars {
-        return buf.into_iter().collect();
+    // If the input turned out to have ≤ max_chars chars despite
+    // `text.len() > max_chars` (possible with multi-byte UTF-8), return
+    // verbatim with no marker.
+    if start == 0 {
+        return text.to_owned();
     }
 
-    let omitted = total.saturating_sub(max_chars);
-    let tail: String = buf.into_iter().collect();
-    format!("[truncated {omitted} chars] …{tail}")
+    format!("[truncated …] …{}", &text[start..])
 }
 
 /// Truncate a string for inclusion in a step history `summary`. Keeps
@@ -2849,6 +2861,32 @@ mod tests {
     #[test]
     fn tail_of_passthrough_for_short_input() {
         assert_eq!(super::tail_of("hello", 100), "hello");
+    }
+
+    /// Edge case (Gemini review on PR #315): `max_chars == 0` on a
+    /// non-empty input must NOT return the full string — it should
+    /// emit a truncation marker with no content. Pre-fix, the
+    /// deque-based implementation degenerated to "full-string + marker"
+    /// because `buf.pop_front()` on an empty deque was a no-op and the
+    /// bounded-length branch never fired.
+    #[test]
+    fn tail_of_zero_max_chars_emits_marker_only() {
+        let out = super::tail_of("abcdef", 0);
+        assert!(
+            out.contains("[truncated"),
+            "zero-max tail must emit truncation marker; got: {out:?}"
+        );
+        assert!(
+            !out.contains("abcdef"),
+            "zero-max tail must NOT leak the input; got: {out:?}"
+        );
+    }
+
+    /// Empty input with any `max_chars` is a verbatim passthrough.
+    #[test]
+    fn tail_of_empty_input_is_empty() {
+        assert_eq!(super::tail_of("", 0), "");
+        assert_eq!(super::tail_of("", 100), "");
     }
 
     // ── tool_search discovery injection ──────────────────────────────────────
