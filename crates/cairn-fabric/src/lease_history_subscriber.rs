@@ -2,6 +2,15 @@
 //! `BridgeEvent`s for state transitions that never flow through a cairn
 //! service call.
 //!
+//! TODO(ff-upstream: <https://github.com/avifenesh/FlowFabric/issues/324>):
+//! This module still uses raw ferriskey XREAD against per-partition
+//! lease-history streams. FF 0.9 exposed Stage A `subscribe_lease_history`
+//! (FF#282), but the returned `StreamEvent.payload: Bytes` is explicitly
+//! unstabilised — consumers would bind to undocumented XADD field shapes.
+//! FF#324 requests Stage B helpers (typed `decode_lease_history` +
+//! optional `ScannerFilter`-style tag filter arg). CG-c migrates this
+//! module onto those helpers and drops the ferriskey direct dep.
+//!
 //! Cairn's normal bridge is call-then-emit: every `BridgeEvent` is
 //! emitted by a cairn wrapper that just called an FCALL. That covers
 //! every cairn-initiated transition but misses FF-initiated ones —
