@@ -111,8 +111,13 @@ impl std::error::Error for RuntimeError {}
 ///
 /// Scope per F41: the terminal and suspend classifiers in
 /// `cairn_app::fabric_adapter` are the two known call sites that
-/// inject FF codes into this field. Keep the table in sync with
-/// `is_terminal_state_conflict` and `is_suspend_state_conflict`.
+/// inject FF codes into this field. Review this table when
+/// `is_terminal_state_conflict` or `is_suspend_state_conflict` change,
+/// but full coverage is not required — unlisted codes (e.g.
+/// `waitpoint_not_token_bound`) fall through to the raw `{from} ->
+/// {to}` format, which is strictly safer than a wrong hint. Only add
+/// a code here when we can write a genuinely actionable recovery
+/// sentence for it.
 fn invalid_transition_hint(from: &str, to: &str, entity: &str) -> Option<&'static str> {
     match from {
         "execution_not_active" => Some(match to {

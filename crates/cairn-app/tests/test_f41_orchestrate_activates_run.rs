@@ -122,8 +122,27 @@ async fn spawn_mock() -> (String, Arc<AtomicUsize>) {
     tokio::spawn(async move {
         axum::serve(listener, app).await.unwrap();
     });
-    tokio::time::sleep(std::time::Duration::from_millis(25)).await;
-    (format!("http://{addr}"), hits)
+
+    // Deterministic readiness probe — a fixed sleep would flake on a
+    // loaded CI runner. Poll /v1/models for up to 2s with a 20ms
+    // backoff; each iteration is one TCP attempt so the happy path
+    // returns after <5ms.
+    let base_url = format!("http://{addr}");
+    let ready_url = format!("{base_url}/v1/models");
+    let client = reqwest::Client::new();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+    loop {
+        if let Ok(r) = client.get(&ready_url).send().await {
+            if r.status().is_success() {
+                break;
+            }
+        }
+        if std::time::Instant::now() >= deadline {
+            panic!("mock provider at {ready_url} did not become ready within 2s");
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    (base_url, hits)
 }
 
 #[tokio::test]
@@ -340,7 +359,7 @@ async fn orchestrate_after_explicit_claim_is_idempotent() {
     assert_eq!(r.status().as_u16(), 201);
 
     for key in ["generate_model", "brain_model"] {
-        let _ = h
+        let r = h
             .client()
             .put(format!(
                 "{}/v1/settings/defaults/system/system/{}",
@@ -351,6 +370,14 @@ async fn orchestrate_after_explicit_claim_is_idempotent() {
             .send()
             .await
             .expect("defaults reach server");
+        // Assert the status so a future setting-endpoint regression
+        // surfaces here rather than as a confusing
+        // no_brain_provider / no_generate_provider downstream error.
+        assert_eq!(
+            r.status().as_u16(),
+            200,
+            "settings PUT for {key} must succeed"
+        );
     }
 
     let r = h
