@@ -1,9 +1,46 @@
-# FlowFabric 0.3.4 → 0.9.0 Migration Plan
+# FlowFabric 0.3.4 → 0.10.0 Migration Plan
 
-Status: **Active — FF 0.9.0 published 2026-04-25. CG-a + CG-b shipped; CG-c gated on 3 new FF upstream asks.**
-Last updated: 2026-04-25
+Status: **Active — FF 0.10.0 published 2026-04-26. CG-a + CG-b + CG-c shipped; CH/CI/CJ remain on the follow-up track.**
+Last updated: 2026-04-26
 Author: planning aggregated from 4 research agents (breaking changes, PG backend, boot path, encapsulation)
-Related: FF#277–#283 (cairn-first upstream asks — all CLOSED in FF 0.9.0)
+Related: FF#277–#283 (cairn-first asks for 0.9) + FF#322/#323/#324 (cairn-first asks for 0.10) — all CLOSED in the respective FF releases.
+
+## Status post-CG-c (2026-04-26)
+
+**CG-c shipped** (this PR, merge SHA TBD — backfill post-merge):
+
+- `flowfabric` umbrella bumped `0.9` → `0.10`. `ff-observability` and `ferriskey` follow the same family.
+- **Capabilities reshape (FF#277 v0.10 rename)**: `CapabilityMatrix` → `Capabilities`, `capabilities_matrix()` → `capabilities()`, flat `Supports` bitset. Cairn's `FabricRuntime.capabilities` field + `FabricRuntime::capabilities()` getter updated.
+- **Service-layer typed suspend (FF#322 adoption)**: the 3 LEGACY Lua-glue call sites in `run_service::pause`, `run_service::enter_waiting_approval`, and `task_service::pause` now build a typed `SuspendArgs` + `LeaseFence` and call `EngineBackend::suspend_by_triple` directly. Deleted: `crate::suspension::{SuspensionParams, ConditionMatcher, for_approval, for_tool_result, for_operator_hold}`, `ControlPlaneBackend::suspend_run_execution`, `SuspendRunInput`, and the `build_suspend_input` helpers in both services. New typed helpers: `SuspendCase` enum + `build_suspend_args` + `build_lease_fence` + `suspend_by_triple` shim. Unfenced suspend (no live lease) surfaces as `FabricError::Validation` instead of riding the Lua `allow_operator_override` path (behaviour change — callers that hit this should read-and-retry on the fresh lease).
+- **Lease-history subscriber on typed stream (FF#324 adoption)**: `lease_history_subscriber` rewritten to consume `EngineBackend::subscribe_lease_history(cursor, &ScannerFilter::with_instance_tag("cairn.instance_id", _))`. Single logical subscription, single persisted cursor (sentinel `__cairn_global__` row), explicit reconnect loop on `EngineError::StreamDisconnected { cursor }`. Module shrinks from ~850 to ~450 LOC. No more hand-rolled XREAD multi-stream parsing.
+- **v1 handle compat test un-ignored (FF#323 adoption)**: `test_handle_codec_compat::v1_handle_compat_decode_round_trips` now uses `ff_core::handle_codec::v1_handle_for_tests` (gated behind `test-fixtures` feature on `ff-core` dev-dep) to synthesise a pre-Wave-1c byte buffer and assert the v2 decode path still accepts it. Locks in the "event logs from FF 0.3 still decode" guarantee.
+
+### Upstream status
+
+All 3 CG-c upstream asks closed in FF 0.10.0:
+
+- [FF#322](https://github.com/avifenesh/FlowFabric/issues/322) — `EngineBackend::suspend_by_triple` — CLOSED (PR #327).
+- [FF#323](https://github.com/avifenesh/FlowFabric/issues/323) — `v1_handle_for_tests` fixture — CLOSED (PR #326).
+- [FF#324](https://github.com/avifenesh/FlowFabric/issues/324) — `ScannerFilter` parameter + typed subscribe events — CLOSED (PRs #282 / #325 / Stage C).
+
+Additional FF 0.10 landings consumed in this PR without cairn-specific adoption work: FF#277 Supports flat struct (v0.9 → v0.10 rename handled in chunk a); typed `subscribe_*` event enums — the cairn-visible slice is `LeaseHistoryEvent` (consumed in chunk c).
+
+### Deferred (on the CH / CI / CJ follow-up track)
+
+- **F43**: lease-heartbeat path typed migration. Service-layer heartbeat still rides the Lua-glue FCALL path; worker-sdk heartbeats are on the typed path already.
+- **CH-1**: typed `EngineError` classifier migration. Cairn's `invalid_transition_hint` maps FF wire strings to operator prose; a typed-enum classifier would let us match on `EngineError` variants instead.
+- **CH-2**: encapsulation collapse — the 26 service-layer `ff_core::{keys::*, partition::*}` imports. Requires either expanding `ControlPlaneBackend` to hide Lua ARGV construction or accepting the internal-layer coupling. **Separate PR.**
+- **CI**: RFC-014/015/016 adoption (composite conditions beyond Pattern 3, suspended-list pagination beyond what CG-b consumed, signal-delivery read-back).
+- **CJ**: Postgres backend opt-in cargo feature.
+
+Remaining `ferriskey::Client` direct consumers in cairn-fabric (documented in `crates/cairn-fabric/Cargo.toml`):
+
+- `signal_bridge.rs` — FCALL ARGV for signal delivery reads.
+- `helpers.rs` — shared FCALL reply parsers.
+- `version_check.rs` — FUNCTION LIST probe.
+- `engine/valkey_control_plane_impl.rs` — the remaining Lua-glue FCALLs (create/complete/fail/cancel/resume + budget/quota/admission).
+
+These converge on the CH-2 encapsulation-collapse PR.
 
 ## Status post-CG-a/CG-b (2026-04-25)
 
