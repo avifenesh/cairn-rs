@@ -502,6 +502,72 @@ where
         Ok(results)
     }
 
+    /// F46 rejection drain: surface every operator-rejected tool call
+    /// for this run that the caller has not already processed. Returns
+    /// one `StepSummary` per rejection so the next DECIDE's user
+    /// message carries the rejection reason verbatim. Without this, a
+    /// rejected proposal leaves no trace in step history and the LLM
+    /// re-proposes the same call — the F46 dogfood repro.
+    ///
+    /// Dedup shares the `already_drained` ledger with the approved
+    /// drain: a call_id can be in at most one terminal state
+    /// (approved-then-executed OR rejected), so one ledger covers both.
+    async fn drain_rejected_pending(
+        &self,
+        ctx: &OrchestrationContext,
+        already_drained: &mut std::collections::HashSet<String>,
+    ) -> Result<Vec<StepSummary>, OrchestratorError> {
+        let Some(reader) = &self.approval_reader else {
+            return Ok(Vec::new());
+        };
+
+        let rejected = reader
+            .list_rejected_for_run(&ctx.run_id)
+            .await
+            .map_err(OrchestratorError::Runtime)?;
+        if rejected.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let mut summaries = Vec::new();
+        for rj in rejected {
+            let call_id_str = rj.call_id.as_str().to_owned();
+            if !already_drained.insert(call_id_str.clone()) {
+                continue;
+            }
+            let reason_text = rj
+                .reason
+                .as_deref()
+                .unwrap_or("operator rejected tool call (no reason provided)");
+            let preview = truncate_for_summary(reason_text, 400);
+            let tool_name = rj.tool_name;
+            tracing::info!(
+                run_id = %ctx.run_id,
+                tool = %tool_name,
+                call_id = %call_id_str,
+                "F46 drain: surfacing rejected tool call to next DECIDE"
+            );
+            summaries.push(StepSummary {
+                iteration: ctx.iteration,
+                action_kind: "invoke_tool".to_owned(),
+                // Format mirrors `build_step_summary` so all three
+                // outcomes (ok / ERROR / REJECTED) render through the
+                // same "tool_result[<name>] ..." grammar downstream.
+                summary: format!(
+                    "rejected approved proposal: {tool_name}\n  tool_result[{tool_name}] REJECTED: {preview}"
+                ),
+                // Rejection is a terminal *non-failure* from the loop's
+                // perspective — the run continues, just without the
+                // tool call. Mark succeeded=true so the DECIDE prompt
+                // doesn't render `ok=false` (which would signal a hard
+                // failure). The summary text itself carries the
+                // rejection semantics.
+                succeeded: true,
+            });
+        }
+        Ok(summaries)
+    }
+
     async fn run_inner(
         &self,
         ctx: &mut OrchestrationContext,
@@ -612,13 +678,30 @@ where
 
                     // Append StepSummary so DECIDE's next gather sees
                     // the drained action as part of the run's history.
+                    //
+                    // F46: mirror `build_step_summary`'s tool_result line
+                    // format so the LLM sees stdout/stderr (bash) or file
+                    // content (read) or error text on the NEXT DECIDE
+                    // turn. Pre-F46 this just wrote "drained approved:
+                    // {tool_name}" with no payload — the LLM saw an
+                    // opaque success marker and re-proposed the same
+                    // call (dogfood M1 repro).
                     let action_kind = "invoke_tool".to_owned();
+                    let header = format!("drained approved: {tool_name}");
                     let summary = match &result.status {
-                        ActionStatus::Succeeded => format!("drained approved: {tool_name}"),
+                        ActionStatus::Succeeded => match result.tool_output.as_ref() {
+                            Some(output) => {
+                                let rendered = output.to_string();
+                                let preview = truncate_for_summary(&rendered, 400);
+                                format!("{header}\n  tool_result[{tool_name}] ok: {preview}")
+                            }
+                            None => header,
+                        },
                         ActionStatus::Failed { reason } => {
-                            format!("drained approved {tool_name} failed: {reason}")
+                            let preview = truncate_for_summary(reason, 400);
+                            format!("{header}\n  tool_result[{tool_name}] ERROR: {preview}")
                         }
-                        _ => format!("drained approved {tool_name}"),
+                        _ => header,
                     };
                     step_history.push(StepSummary {
                         iteration: ctx.iteration,
@@ -627,6 +710,48 @@ where
                         succeeded,
                     });
                 }
+            }
+
+            // ── (0b) F46 rejection drain: surface rejected proposals ─────────
+            //
+            // Operator rejections leave no trace in the in-memory
+            // step_history across suspend/resume boundaries — the
+            // projection row moves to `Rejected` but no drain-side
+            // dispatch emits a StepSummary. Without this pass the next
+            // DECIDE can't see the rejection reason and re-proposes the
+            // same call (F46 dogfood M1 repro). Runs every iteration
+            // because a second approval may be rejected while a first
+            // is executing.
+            let rejection_summaries = self
+                .drain_rejected_pending(ctx, &mut drained_call_ids)
+                .await?;
+            for summary in rejection_summaries {
+                // Emit a tool_result SSE frame too so the UI timeline
+                // matches the step history. Use the tool name parsed
+                // back out of the summary header — the summary was
+                // built immediately above and always starts with the
+                // literal "rejected approved proposal: {tool_name}\n".
+                let sse_tool_name = summary
+                    .summary
+                    .lines()
+                    .next()
+                    .and_then(|l| l.strip_prefix("rejected approved proposal: "))
+                    .unwrap_or("<unknown>");
+                self.emitter
+                    .on_tool_result(
+                        ctx,
+                        sse_tool_name,
+                        false,
+                        None,
+                        summary
+                            .summary
+                            .lines()
+                            .find(|l| l.contains("REJECTED:"))
+                            .map(|l| l.trim()),
+                        0,
+                    )
+                    .await;
+                step_history.push(summary);
             }
 
             // ── (1) Timeout check ─────────────────────────────────────────────
@@ -2847,19 +2972,32 @@ mod tests {
     use cairn_domain::{ApprovalMatchPolicy, ApprovalScope};
     use cairn_runtime::error::RuntimeError;
     use cairn_runtime::tool_call_approvals::{
-        ApprovedProposal, StoredProposal, ToolCallApprovalReader,
+        ApprovedProposal, RejectedProposal, StoredProposal, ToolCallApprovalReader,
     };
 
-    /// Stub reader returning a scripted list of approved proposals plus
-    /// a call-count so tests can assert the reader was consulted.
+    /// Stub reader returning a scripted list of approved + rejected
+    /// proposals plus a call-count so tests can assert the reader was
+    /// consulted. Both lists are drained on the FIRST `list_*_for_run`
+    /// call (subsequent calls see empty vecs) — mirrors the production
+    /// projection's one-shot Approved→Completed and
+    /// Rejected→(no further surfacing) lifecycle.
     struct ScriptedApprovalReader {
         approved: std::sync::Mutex<Vec<ApprovedProposal>>,
+        rejected: std::sync::Mutex<Vec<RejectedProposal>>,
         list_calls: std::sync::atomic::AtomicU32,
     }
     impl ScriptedApprovalReader {
         fn with(approved: Vec<ApprovedProposal>) -> std::sync::Arc<Self> {
             std::sync::Arc::new(Self {
                 approved: std::sync::Mutex::new(approved),
+                rejected: std::sync::Mutex::new(Vec::new()),
+                list_calls: std::sync::atomic::AtomicU32::new(0),
+            })
+        }
+        fn with_rejected(rejected: Vec<RejectedProposal>) -> std::sync::Arc<Self> {
+            std::sync::Arc::new(Self {
+                approved: std::sync::Mutex::new(Vec::new()),
+                rejected: std::sync::Mutex::new(rejected),
                 list_calls: std::sync::atomic::AtomicU32::new(0),
             })
         }
@@ -2892,6 +3030,13 @@ mod tests {
             // first iteration and find nothing on subsequent ones.
             let take = std::mem::take(&mut *guard);
             Ok(take)
+        }
+        async fn list_rejected_for_run(
+            &self,
+            _run_id: &cairn_domain::RunId,
+        ) -> Result<Vec<RejectedProposal>, RuntimeError> {
+            let mut guard = self.rejected.lock().unwrap();
+            Ok(std::mem::take(&mut *guard))
         }
     }
     // Silence "unused match arms via ApprovalMatchPolicy/ApprovalScope"
@@ -3041,6 +3186,320 @@ mod tests {
         assert!(
             dispatched_handle.lock().unwrap().is_empty(),
             "drain must be a no-op when no approval_reader is wired"
+        );
+    }
+
+    /// F46 regression: drained approved proposal must carry the tool
+    /// output into `step_history` via the `tool_result[<name>] ok: ...`
+    /// grammar. Without this the next DECIDE's user message has no
+    /// memory of what happened and the LLM re-proposes the same call.
+    ///
+    /// We capture `ctx.step_history` from inside a gather stub — the
+    /// runner snapshots the loop-local `step_history` into
+    /// `ctx.step_history` immediately before GATHER, so whatever lands
+    /// here is exactly what `build_user_message` will render.
+    #[tokio::test]
+    async fn drained_approved_summary_embeds_tool_result_preview() {
+        use std::sync::{Arc, Mutex};
+
+        #[derive(Default, Clone)]
+        struct CapturingGather {
+            seen: Arc<Mutex<Vec<Vec<StepSummary>>>>,
+        }
+        #[async_trait]
+        impl GatherPhase for CapturingGather {
+            async fn gather(
+                &self,
+                ctx: &OrchestrationContext,
+            ) -> Result<GatherOutput, OrchestratorError> {
+                self.seen.lock().unwrap().push(ctx.step_history.clone());
+                Ok(GatherOutput::default())
+            }
+        }
+
+        let reader = ScriptedApprovalReader::with(vec![approved(
+            "tc_f46",
+            "bash",
+            serde_json::json!({"command": "printf hello"}),
+        )]);
+        let dispatch = RecordingDispatch::new(ActionStatus::Succeeded);
+        let capturing = CapturingGather::default();
+        let seen = capturing.seen.clone();
+
+        let lp = OrchestratorLoop::new(
+            capturing,
+            ScriptedDecide::always(decide_done()),
+            dispatch,
+            LoopConfig::default(),
+        )
+        .with_approval_reader(reader);
+
+        let _ = lp.run(ctx()).await.unwrap();
+
+        // GATHER sees ctx.step_history AFTER the drain pushed its
+        // summary — the very invariant F46 depends on.
+        let snapshots = seen.lock().unwrap().clone();
+        assert!(!snapshots.is_empty(), "gather should have been called");
+        let first = snapshots
+            .iter()
+            .find(|s| !s.is_empty())
+            .expect("at least one gather call must see the drained step");
+        let summary = &first[0];
+        assert_eq!(summary.action_kind, "invoke_tool");
+        assert!(
+            summary.summary.contains("drained approved: bash"),
+            "F46: drain summary must carry the approved-drain header. Got: {:?}",
+            summary.summary
+        );
+        assert!(
+            summary.summary.contains("tool_result[bash] ok:"),
+            "F46: drain summary MUST embed the tool_result grammar so the \
+             LLM can see what happened. Pre-F46 this was a bare header with \
+             no payload — the dogfood regression. Got: {:?}",
+            summary.summary
+        );
+    }
+
+    /// F46: rejected proposals must also leave a `StepSummary` with the
+    /// operator-supplied reason embedded in the `tool_result[<name>]
+    /// REJECTED: <preview>` grammar, so the next DECIDE sees WHY and
+    /// does not re-propose the same call.
+    #[tokio::test]
+    async fn rejected_proposal_drain_embeds_reason_in_step_summary() {
+        use std::sync::{Arc, Mutex};
+
+        #[derive(Default, Clone)]
+        struct CapturingGather {
+            seen: Arc<Mutex<Vec<Vec<StepSummary>>>>,
+        }
+        #[async_trait]
+        impl GatherPhase for CapturingGather {
+            async fn gather(
+                &self,
+                ctx: &OrchestrationContext,
+            ) -> Result<GatherOutput, OrchestratorError> {
+                self.seen.lock().unwrap().push(ctx.step_history.clone());
+                Ok(GatherOutput::default())
+            }
+        }
+
+        let reader = ScriptedApprovalReader::with_rejected(vec![RejectedProposal {
+            call_id: cairn_domain::ToolCallId::new("tc_reject_1"),
+            tool_name: "bash".to_owned(),
+            tool_args: serde_json::json!({"command": "rm -rf /"}),
+            reason: Some("that command is dangerous — use specific paths".to_owned()),
+        }]);
+        let dispatch = RecordingDispatch::new(ActionStatus::Succeeded);
+        let capturing = CapturingGather::default();
+        let seen = capturing.seen.clone();
+
+        let lp = OrchestratorLoop::new(
+            capturing,
+            ScriptedDecide::always(decide_done()),
+            dispatch,
+            LoopConfig::default(),
+        )
+        .with_approval_reader(reader);
+
+        let _ = lp.run(ctx()).await.unwrap();
+
+        let snapshots = seen.lock().unwrap().clone();
+        let first = snapshots
+            .iter()
+            .find(|s| !s.is_empty())
+            .expect("at least one gather call must see the rejection step");
+        let summary = &first[0];
+        assert!(
+            summary.summary.contains("rejected approved proposal: bash"),
+            "F46: rejection summary must carry the rejection header. Got: {:?}",
+            summary.summary,
+        );
+        assert!(
+            summary.summary.contains("tool_result[bash] REJECTED:"),
+            "F46: rejection summary MUST embed the REJECTED tool_result grammar. \
+             Got: {:?}",
+            summary.summary,
+        );
+        assert!(
+            summary
+                .summary
+                .contains("that command is dangerous — use specific paths"),
+            "F46: operator-supplied reason MUST flow into the summary verbatim \
+             (subject to truncate_for_summary). Got: {:?}",
+            summary.summary,
+        );
+    }
+
+    /// F46: rejection drain must never emit the same `call_id` twice
+    /// across iterations — the `drained_call_ids` ledger is shared with
+    /// the approved drain and must dedup both terminal states.
+    #[tokio::test]
+    async fn rejected_drain_dedups_across_iterations() {
+        use std::sync::{Arc, Mutex};
+
+        #[derive(Default, Clone)]
+        struct CountingGather {
+            iters: Arc<Mutex<u32>>,
+            rejections_seen: Arc<Mutex<Vec<StepSummary>>>,
+        }
+        #[async_trait]
+        impl GatherPhase for CountingGather {
+            async fn gather(
+                &self,
+                ctx: &OrchestrationContext,
+            ) -> Result<GatherOutput, OrchestratorError> {
+                *self.iters.lock().unwrap() += 1;
+                for s in &ctx.step_history {
+                    if s.summary.contains("rejected approved proposal") {
+                        self.rejections_seen.lock().unwrap().push(s.clone());
+                    }
+                }
+                Ok(GatherOutput::default())
+            }
+        }
+
+        // Configure a reader whose rejected list is returned ONCE (take-
+        // semantics). On the second iteration list_rejected returns
+        // empty — but dedup must protect us even if a projection bug
+        // ever re-surfaced the row. To exercise that, we'll manually
+        // re-seed the list once and rely on the drained_call_ids ledger
+        // to swallow the duplicate.
+
+        struct RepeatingReader {
+            payload: Mutex<Option<RejectedProposal>>,
+            call_count: std::sync::atomic::AtomicU32,
+        }
+        #[async_trait]
+        impl ToolCallApprovalReader for RepeatingReader {
+            async fn get_tool_call_approval(
+                &self,
+                _call_id: &cairn_domain::ToolCallId,
+            ) -> Result<Option<ApprovedProposal>, RuntimeError> {
+                Ok(None)
+            }
+            async fn get_tool_call_proposal(
+                &self,
+                _call_id: &cairn_domain::ToolCallId,
+            ) -> Result<Option<StoredProposal>, RuntimeError> {
+                Ok(None)
+            }
+            async fn list_approved_for_run(
+                &self,
+                _run_id: &cairn_domain::RunId,
+            ) -> Result<Vec<ApprovedProposal>, RuntimeError> {
+                Ok(vec![])
+            }
+            async fn list_rejected_for_run(
+                &self,
+                _run_id: &cairn_domain::RunId,
+            ) -> Result<Vec<RejectedProposal>, RuntimeError> {
+                // Return the same rejection on every call so the dedup
+                // ledger is the only line of defence.
+                self.call_count
+                    .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                Ok(self.payload.lock().unwrap().clone().into_iter().collect())
+            }
+        }
+
+        let reader = Arc::new(RepeatingReader {
+            payload: Mutex::new(Some(RejectedProposal {
+                call_id: cairn_domain::ToolCallId::new("tc_dup"),
+                tool_name: "bash".to_owned(),
+                tool_args: serde_json::json!({"command": "x"}),
+                reason: Some("nope".to_owned()),
+            })),
+            call_count: std::sync::atomic::AtomicU32::new(0),
+        });
+
+        // Decide returns complete_run on the FIRST call so the loop
+        // terminates after one iteration. The dedup contract is then
+        // proven by `rejections_seen` length == 1 (the next iteration's
+        // gather pass never runs because the run is already terminal).
+        //
+        // To exercise dedup across TWO iterations we need more decide
+        // rounds. Use `decide_tool` for iter 0 (loop continues) then
+        // `decide_done` for iter 1. Both iterations see the drain;
+        // iter-1 rejection must NOT re-emit.
+        struct TwoTurnDecide {
+            hits: std::sync::Mutex<u32>,
+        }
+        #[async_trait]
+        impl DecidePhase for TwoTurnDecide {
+            async fn decide(
+                &self,
+                _ctx: &OrchestrationContext,
+                _gather: &GatherOutput,
+            ) -> Result<DecideOutput, OrchestratorError> {
+                let mut n = self.hits.lock().unwrap();
+                *n += 1;
+                if *n == 1 {
+                    Ok(DecideOutput {
+                        raw_response: "[]".to_owned(),
+                        proposals: vec![ActionProposal {
+                            action_type: ActionType::InvokeTool,
+                            description: "noop".to_owned(),
+                            confidence: 0.5,
+                            tool_name: Some("noop_tool".to_owned()),
+                            tool_args: Some(serde_json::json!({})),
+                            requires_approval: false,
+                        }],
+                        calibrated_confidence: 0.5,
+                        requires_approval: false,
+                        model_id: "m".to_owned(),
+                        latency_ms: 1,
+                        input_tokens: None,
+                        output_tokens: None,
+                    })
+                } else {
+                    Ok(decide_done())
+                }
+            }
+        }
+
+        let dispatch = RecordingDispatch::new(ActionStatus::Succeeded);
+        let gather = CountingGather::default();
+        let rejections_seen = gather.rejections_seen.clone();
+
+        let lp = OrchestratorLoop::new(
+            gather,
+            TwoTurnDecide {
+                hits: std::sync::Mutex::new(0),
+            },
+            dispatch,
+            LoopConfig::default(),
+        )
+        .with_approval_reader(reader.clone());
+
+        let _ = lp.run(ctx()).await.unwrap();
+
+        // Two gather passes ran. Each sees the accumulated step_history.
+        // The rejection must appear exactly ONCE in that history —
+        // meaning on iteration 2 we captured the iter-1 entry again
+        // (that's fine, it's the same push) but the drain did NOT
+        // produce a second push for the same call_id.
+        //
+        // We assert on the *distinct push count* by tracking iteration
+        // numbers on the captured summaries: dedup works iff all
+        // captured rejection summaries share the same `iteration`
+        // stamp (the one where the rejection was first drained).
+        let captured = rejections_seen.lock().unwrap().clone();
+        assert!(
+            !captured.is_empty(),
+            "at least one rejection summary must be captured"
+        );
+        // More than one capture is expected (gather runs twice and the
+        // step_history snapshot carries the entry forward), but they
+        // must all be the SAME entry — same iteration, same summary
+        // text. Dedup failure would manifest as two summaries with
+        // different iteration numbers.
+        let unique_iterations: std::collections::HashSet<u32> =
+            captured.iter().map(|s| s.iteration).collect();
+        assert_eq!(
+            unique_iterations.len(),
+            1,
+            "F46 dedup: rejection drain must emit at most one StepSummary \
+             per call_id. Distinct iterations seen: {unique_iterations:?}, \
+             entries: {captured:#?}",
         );
     }
 

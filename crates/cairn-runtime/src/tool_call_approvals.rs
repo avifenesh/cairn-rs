@@ -103,6 +103,24 @@ pub struct ApprovedProposal {
     pub tool_args: Value,
 }
 
+/// Proposal that an operator rejected.
+///
+/// Surfaced via [`ToolCallApprovalReader::list_rejected_for_run`] so the
+/// orchestrator drain can emit a `StepSummary` entry for every rejection
+/// the LLM hasn't yet been told about. Without this, the next DECIDE
+/// would be blind to the rejection reason and re-propose the same call
+/// (the dogfood F46 repro).
+#[derive(Clone, Debug)]
+pub struct RejectedProposal {
+    pub call_id: ToolCallId,
+    pub tool_name: String,
+    /// Original args the operator rejected. Preserved so the DECIDE
+    /// summary can echo *what* was rejected alongside the reason.
+    pub tool_args: Value,
+    /// Operator-supplied reason. `None` when the rejection omitted one.
+    pub reason: Option<String>,
+}
+
 /// Resolution state of a proposal as observed from the store projection.
 ///
 /// Mirrors the public projection states so callers rebuilding a runtime
@@ -188,6 +206,19 @@ pub trait ToolCallApprovalReader: Send + Sync {
     ) -> Result<Vec<ApprovedProposal>, RuntimeError> {
         Ok(Vec::new())
     }
+
+    /// F46 drain: list every `Rejected`-state tool-call approval for
+    /// `run_id`, oldest-first. The orchestrator surfaces these as
+    /// `StepSummary` entries so the next DECIDE sees the rejection
+    /// reason verbatim and doesn't re-propose the same call. Returns an
+    /// empty vec by default so readers that have not opted in stay
+    /// feature-equivalent to their pre-F46 behaviour.
+    async fn list_rejected_for_run(
+        &self,
+        _run_id: &cairn_domain::RunId,
+    ) -> Result<Vec<RejectedProposal>, RuntimeError> {
+        Ok(Vec::new())
+    }
 }
 
 /// Bridge every store that implements
@@ -265,6 +296,35 @@ where
                     call_id: r.call_id,
                     tool_name: r.tool_name,
                     tool_args,
+                }
+            })
+            .collect())
+    }
+
+    async fn list_rejected_for_run(
+        &self,
+        run_id: &cairn_domain::RunId,
+    ) -> Result<Vec<RejectedProposal>, RuntimeError> {
+        let rows = cairn_store::projections::ToolCallApprovalReadModel::list_for_run(self, run_id)
+            .await
+            .map_err(RuntimeError::Store)?;
+        use cairn_store::projections::ToolCallApprovalState as S;
+        Ok(rows
+            .into_iter()
+            .filter(|r| r.state == S::Rejected)
+            .map(|r| {
+                // Echo the args the operator saw — prefer amended over
+                // original so the DECIDE summary captures any tweaks the
+                // operator reviewed before rejecting.
+                let tool_args = r
+                    .amended_tool_args
+                    .clone()
+                    .unwrap_or_else(|| r.original_tool_args.clone());
+                RejectedProposal {
+                    call_id: r.call_id,
+                    tool_name: r.tool_name,
+                    tool_args,
+                    reason: r.reason,
                 }
             })
             .collect())

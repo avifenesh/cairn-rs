@@ -19,7 +19,8 @@ use cairn_store::projections::{ToolCallApprovalReadModel, ToolCallApprovalState}
 
 use crate::error::RuntimeError;
 use crate::tool_call_approvals::{
-    store_record_to_stored_proposal, ApprovedProposal, StoredProposal, ToolCallApprovalReader,
+    store_record_to_stored_proposal, ApprovedProposal, RejectedProposal, StoredProposal,
+    ToolCallApprovalReader,
 };
 
 /// Generic adapter over any store that implements
@@ -108,6 +109,39 @@ where
                     call_id: r.call_id,
                     tool_name: r.tool_name,
                     tool_args,
+                }
+            })
+            .collect())
+    }
+
+    async fn list_rejected_for_run(
+        &self,
+        run_id: &cairn_domain::RunId,
+    ) -> Result<Vec<RejectedProposal>, RuntimeError> {
+        let rows = self
+            .inner
+            .list_for_run(run_id)
+            .await
+            .map_err(RuntimeError::Store)?;
+        Ok(rows
+            .into_iter()
+            .filter(|r| r.state == ToolCallApprovalState::Rejected)
+            .map(|r| {
+                // Echo the args the operator saw — prefer amended over
+                // original so the DECIDE summary captures any tweaks
+                // the operator reviewed before rejecting. Matches the
+                // blanket `impl<T: ToolCallApprovalReadModel>` in
+                // `tool_call_approvals.rs` so both wiring paths stay
+                // behavioural twins.
+                let tool_args = r
+                    .amended_tool_args
+                    .clone()
+                    .unwrap_or_else(|| r.original_tool_args.clone());
+                RejectedProposal {
+                    call_id: r.call_id,
+                    tool_name: r.tool_name,
+                    tool_args,
+                    reason: r.reason,
                 }
             })
             .collect())
@@ -233,6 +267,130 @@ mod tests {
             .unwrap()
             .expect("approved record");
         assert_eq!(got.tool_args, json!({"path": "/c"}));
+    }
+
+    /// F46 regression: the adapter's `list_rejected_for_run` must
+    /// surface `Rejected` rows with the operator reason preserved. The
+    /// default trait impl returns empty — which is exactly what the
+    /// handler was seeing pre-F46, leaving the rejection drain blind.
+    #[tokio::test]
+    async fn list_rejected_for_run_surfaces_reason() {
+        struct ListRm {
+            rows: Mutex<Vec<ToolCallApprovalRecord>>,
+        }
+        #[async_trait]
+        impl ToolCallApprovalReadModel for ListRm {
+            async fn get(
+                &self,
+                _call_id: &ToolCallId,
+            ) -> Result<Option<ToolCallApprovalRecord>, StoreError> {
+                Ok(None)
+            }
+            async fn list_for_run(
+                &self,
+                _run_id: &RunId,
+            ) -> Result<Vec<ToolCallApprovalRecord>, StoreError> {
+                Ok(self.rows.lock().unwrap().clone())
+            }
+            async fn list_for_session(
+                &self,
+                _session_id: &SessionId,
+            ) -> Result<Vec<ToolCallApprovalRecord>, StoreError> {
+                Ok(vec![])
+            }
+            async fn list_pending_for_project(
+                &self,
+                _project: &ProjectKey,
+                _limit: usize,
+                _offset: usize,
+            ) -> Result<Vec<ToolCallApprovalRecord>, StoreError> {
+                Ok(vec![])
+            }
+            async fn list_all_pending(
+                &self,
+                _limit: usize,
+                _offset: usize,
+            ) -> Result<Vec<ToolCallApprovalRecord>, StoreError> {
+                Ok(vec![])
+            }
+        }
+
+        // Mix of states — adapter must filter to Rejected only.
+        let mut approved = rec(ToolCallApprovalState::Approved);
+        approved.call_id = ToolCallId::new("tc_approved");
+        let mut rejected = rec(ToolCallApprovalState::Rejected);
+        rejected.call_id = ToolCallId::new("tc_rejected");
+        rejected.reason = Some("bad command".into());
+        let mut pending = rec(ToolCallApprovalState::Pending);
+        pending.call_id = ToolCallId::new("tc_pending");
+        let rm = Arc::new(ListRm {
+            rows: Mutex::new(vec![approved, rejected, pending]),
+        });
+        let adapter = ToolCallApprovalReaderAdapter::new(rm);
+        let got = adapter
+            .list_rejected_for_run(&RunId::new("r"))
+            .await
+            .unwrap();
+        assert_eq!(got.len(), 1, "only Rejected rows should surface: {got:?}");
+        assert_eq!(got[0].call_id.as_str(), "tc_rejected");
+        assert_eq!(got[0].reason.as_deref(), Some("bad command"));
+    }
+
+    /// Reason defaults to `None` when the operator omitted one — the
+    /// loop's rejection drain surfaces a generic placeholder upstream.
+    #[tokio::test]
+    async fn list_rejected_for_run_preserves_missing_reason() {
+        struct ListRm {
+            rows: Mutex<Vec<ToolCallApprovalRecord>>,
+        }
+        #[async_trait]
+        impl ToolCallApprovalReadModel for ListRm {
+            async fn get(
+                &self,
+                _call_id: &ToolCallId,
+            ) -> Result<Option<ToolCallApprovalRecord>, StoreError> {
+                Ok(None)
+            }
+            async fn list_for_run(
+                &self,
+                _run_id: &RunId,
+            ) -> Result<Vec<ToolCallApprovalRecord>, StoreError> {
+                Ok(self.rows.lock().unwrap().clone())
+            }
+            async fn list_for_session(
+                &self,
+                _session_id: &SessionId,
+            ) -> Result<Vec<ToolCallApprovalRecord>, StoreError> {
+                Ok(vec![])
+            }
+            async fn list_pending_for_project(
+                &self,
+                _project: &ProjectKey,
+                _limit: usize,
+                _offset: usize,
+            ) -> Result<Vec<ToolCallApprovalRecord>, StoreError> {
+                Ok(vec![])
+            }
+            async fn list_all_pending(
+                &self,
+                _limit: usize,
+                _offset: usize,
+            ) -> Result<Vec<ToolCallApprovalRecord>, StoreError> {
+                Ok(vec![])
+            }
+        }
+        let mut r = rec(ToolCallApprovalState::Rejected);
+        r.reason = None;
+        let rm = Arc::new(ListRm {
+            rows: Mutex::new(vec![r]),
+        });
+        let adapter = ToolCallApprovalReaderAdapter::new(rm);
+        let got = adapter
+            .list_rejected_for_run(&RunId::new("r"))
+            .await
+            .unwrap();
+        assert_eq!(got.len(), 1);
+        assert!(got[0].reason.is_none());
     }
 
     #[tokio::test]
