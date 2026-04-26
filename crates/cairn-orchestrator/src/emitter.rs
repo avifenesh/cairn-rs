@@ -576,7 +576,7 @@ mod tests {
             .on_finished(
                 &ctx(),
                 &LoopTermination::Completed {
-                verification: Default::default(),
+                    verification: Default::default(),
                     summary: "all done".into(),
                 },
             )
@@ -658,7 +658,7 @@ mod tests {
             .on_finished(
                 &ctx,
                 &LoopTermination::Completed {
-                verification: Default::default(),
+                    verification: Default::default(),
                     summary: "done".into(),
                 },
             )

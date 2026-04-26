@@ -1148,9 +1148,7 @@ where
                         // observed so far on this run. The extractor is
                         // pure; no IO happens on this path.
                         let verification =
-                            crate::completion_verification::extract_verification(
-                                &all_tool_results,
-                            );
+                            crate::completion_verification::extract_verification(&all_tool_results);
                         return Ok(LoopTermination::Completed {
                             summary,
                             verification,
@@ -1434,9 +1432,7 @@ where
                     // F47 PR1: verification sidecar over all accumulated
                     // tool_results. See extractor rustdoc for semantics.
                     let verification =
-                        crate::completion_verification::extract_verification(
-                            &all_tool_results,
-                        );
+                        crate::completion_verification::extract_verification(&all_tool_results);
 
                     tracing::info!(
                         run_id        = %ctx.run_id,

@@ -353,16 +353,12 @@ async fn orchestrate_finished_carries_completion_verification_warnings() {
     // CORE F47 ASSERTION: the Finished frame carries a verification
     // object with the marker warning surfaced.
     let verification = finished.get("completion_verification").unwrap_or_else(|| {
-        panic!(
-            "F47 regression: `completion_verification` missing from finished frame: {finished}"
-        )
+        panic!("F47 regression: `completion_verification` missing from finished frame: {finished}")
     });
     let warnings = verification
         .get("warnings")
         .and_then(Value::as_array)
-        .unwrap_or_else(|| {
-            panic!("F47 regression: `warnings` array missing: {verification}")
-        });
+        .unwrap_or_else(|| panic!("F47 regression: `warnings` array missing: {verification}"));
     let found = warnings
         .iter()
         .filter_map(Value::as_str)
@@ -400,10 +396,9 @@ async fn orchestrate_finished_carries_completion_verification_warnings() {
         .and_then(Value::as_array)
         .unwrap_or_else(|| panic!("commands array missing: {verification}"));
     assert!(
-        commands.iter().any(|c| c
-            .get("tool_name")
-            .and_then(Value::as_str)
-            == Some("bash")),
+        commands
+            .iter()
+            .any(|c| c.get("tool_name").and_then(Value::as_str) == Some("bash")),
         "bash invocation not recorded in commands[]: {commands:#?}"
     );
 }

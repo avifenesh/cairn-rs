@@ -89,7 +89,10 @@ pub fn extract_verification(tool_results: &[ActionResult]) -> CompletionVerifica
         // as either `exit_code` or `returncode` (different adapters). Both are
         // treated identically here because the extractor is not opinionated
         // about which tool adapter produced the frame.
-        if BASH_TOOL_NAMES.iter().any(|b| b.eq_ignore_ascii_case(&tool_name)) {
+        if BASH_TOOL_NAMES
+            .iter()
+            .any(|b| b.eq_ignore_ascii_case(&tool_name))
+        {
             let cmd = result
                 .proposal
                 .tool_args
@@ -98,10 +101,7 @@ pub fn extract_verification(tool_results: &[ActionResult]) -> CompletionVerifica
                 .and_then(Value::as_str)
                 .map(|s| truncate(s, MAX_LINE_LEN))
                 .unwrap_or_default();
-            let exit_code = result
-                .tool_output
-                .as_ref()
-                .and_then(extract_exit_code);
+            let exit_code = result.tool_output.as_ref().and_then(extract_exit_code);
             verification.commands.push(CommandOutcome {
                 tool_name: tool_name.clone(),
                 cmd,
@@ -160,7 +160,13 @@ fn collect_text_sources(result: &ActionResult) -> Vec<String> {
 /// harness adapters use different names). Non-integer values return
 /// `None` rather than coercing.
 fn extract_exit_code(output: &Value) -> Option<i32> {
-    for key in ["exit_code", "exitCode", "returncode", "return_code", "status"] {
+    for key in [
+        "exit_code",
+        "exitCode",
+        "returncode",
+        "return_code",
+        "status",
+    ] {
         if let Some(v) = output.get(key) {
             if let Some(n) = v.as_i64() {
                 return i32::try_from(n).ok();
@@ -189,26 +195,46 @@ fn scan_lines(text: &str, verification: &mut CompletionVerification) {
     }
 }
 
+/// Case-insensitive ASCII prefix match. Only the first `prefix.len()` bytes
+/// of `line` are compared — identical to `str::starts_with` with a
+/// lowercased input. Operating on bytes (not `get(..N)` char slicing)
+/// avoids any UTF-8 boundary pitfall when non-ASCII tool output is mixed
+/// in: the byte prefix match is well-defined whether or not the next byte
+/// starts a multi-byte sequence.
+fn ascii_prefix_ci(line: &str, prefix: &str) -> bool {
+    let bytes = line.as_bytes();
+    let pb = prefix.as_bytes();
+    if bytes.len() < pb.len() {
+        return false;
+    }
+    bytes[..pb.len()]
+        .iter()
+        .zip(pb.iter())
+        .all(|(a, b)| a.eq_ignore_ascii_case(b))
+}
+
 /// Case-insensitive prefix check for `warning:`. Regex-free to keep the
 /// extractor dependency-light. Equivalent to `(?mi)^\s*warning:` applied
 /// line-by-line — callers trim leading whitespace before dispatch.
 fn is_warning_line(line: &str) -> bool {
-    let lower = line.get(..10.min(line.len())).unwrap_or("").to_ascii_lowercase();
-    lower.starts_with("warning:")
+    ascii_prefix_ci(line, "warning:")
 }
 
 /// Case-insensitive prefix check for `error:` / `error[…]:` / `error <ws>`.
 /// Accepts the Rust diagnostic forms (`error[E0308]: mismatched types`) as
 /// well as generic `error:` lines from bash output.
 fn is_error_line(line: &str) -> bool {
-    let lower = line.get(..16.min(line.len())).unwrap_or("").to_ascii_lowercase();
-    if !lower.starts_with("error") {
+    if !ascii_prefix_ci(line, "error") {
         return false;
     }
     // After the `error` prefix, accept `:` or `[` (rustc style) or
-    // whitespace-then-content. Reject `errored`, `errorless`, etc.
-    let rest = &lower["error".len()..];
-    matches!(rest.chars().next(), Some(':') | Some('[') | Some(' ') | Some('\t'))
+    // whitespace-then-content. Reject `errored`, `errorless`, etc. Byte
+    // indexing is safe here — `error` is ASCII so the 5th byte is on a
+    // valid char boundary regardless of later multi-byte content.
+    matches!(
+        line.as_bytes().get("error".len()),
+        Some(b':') | Some(b'[') | Some(b' ') | Some(b'\t')
+    )
 }
 
 /// Clip `s` to `max` chars, appending an ellipsis marker when trimmed.
@@ -281,11 +307,7 @@ warning: function `dead` is never used
 error[E0308]: mismatched types
   --> src/lib.rs:20:1
 ";
-        let v = extract_verification(&[bash_result(
-            "cargo check",
-            cargo_stdout,
-            Some(1),
-        )]);
+        let v = extract_verification(&[bash_result("cargo check", cargo_stdout, Some(1))]);
 
         assert_eq!(v.extractor_version, EXTRACTOR_VERSION);
         assert_eq!(v.tool_results_scanned, 1);
@@ -305,11 +327,7 @@ error[E0308]: mismatched types
     /// signal operators rely on.
     #[test]
     fn clean_output_yields_empty_buckets_with_nonzero_scan() {
-        let v = extract_verification(&[bash_result(
-            "echo hello",
-            "hello\n",
-            Some(0),
-        )]);
+        let v = extract_verification(&[bash_result("echo hello", "hello\n", Some(0))]);
         assert!(v.warnings.is_empty());
         assert!(v.errors.is_empty());
         assert_eq!(v.tool_results_scanned, 1);
