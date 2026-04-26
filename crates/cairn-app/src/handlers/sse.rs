@@ -159,8 +159,11 @@ pub(crate) async fn publish_runtime_frames_since(
         // sidebar badge stayed empty. Running this inside the same
         // publish loop that already drives the SSE stream guarantees
         // parity: every event that reaches the SSE frame also reaches
-        // the notification buffer.
-        push_notification_for_event(state, &stored.envelope.payload);
+        // the notification buffer. Notification id + created_at are
+        // derived from the envelope (event_id + stored_at) so replay
+        // of the same event produces an identical notification — no
+        // wall-clock-based duplicates.
+        push_notification_for_event(state, &stored);
 
         // F49: auto-resume orchestrate kick. When an approval resolves,
         // check whether any other pending approvals block the run. If
@@ -263,25 +266,26 @@ pub fn ws_event_tenant_id(
 /// append` and therefore missed service-layer writes). Kept here so
 /// every store append routed through `publish_runtime_frames_since`
 /// surfaces in the bell icon + sidebar badge.
-fn push_notification_for_event(state: &Arc<AppState>, payload: &cairn_domain::RuntimeEvent) {
+fn push_notification_for_event(state: &Arc<AppState>, stored: &cairn_store::StoredEvent) {
     use crate::state::{OperatorNotification, OperatorNotificationType as T};
     use cairn_domain::lifecycle::{RunState, TaskState};
     use cairn_domain::RuntimeEvent as E;
 
-    let now_ms = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis() as u64;
-
-    // Every notification needs a stable-ish id derived from the event —
-    // but we don't have the envelope id here (only the payload). Fall
-    // back to `(notif-<type>-<entity>-<ms>)` which is stable for the
-    // same event across replays because event timestamps don't change.
-    let make_id = |kind: &str, entity: &str| format!("notif-{kind}-{entity}-{now_ms}");
+    // Derived from the envelope rather than `SystemTime::now()` so the
+    // same stored event always produces the same notification id +
+    // created_at. Matches the admin `/v1/events/append` hook's
+    // `notif-<event_id_prefix>` strategy and keeps the bell buffer
+    // idempotent under SSE reconnect replay — no duplicates from the
+    // wall-clock stamp drifting across ticks.
+    let event_id = stored.envelope.event_id.as_str();
+    let created_at_ms = stored.stored_at;
+    let trunc: String = event_id.chars().take(16).collect();
+    let make_id = |kind: &str| format!("notif-{kind}-{trunc}");
+    let payload = &stored.envelope.payload;
 
     let maybe_notif: Option<OperatorNotification> = match payload {
         E::ApprovalRequested(e) => Some(OperatorNotification {
-            id: make_id("appreq", e.approval_id.as_str()),
+            id: make_id("appreq"),
             notif_type: T::ApprovalRequested,
             message: format!(
                 "Approval requested for {}",
@@ -289,10 +293,10 @@ fn push_notification_for_event(state: &Arc<AppState>, payload: &cairn_domain::Ru
             ),
             entity_id: Some(e.approval_id.as_str().to_owned()),
             href: "approvals".to_owned(),
-            created_at_ms: now_ms,
+            created_at_ms,
         }),
         E::ApprovalResolved(e) => Some(OperatorNotification {
-            id: make_id("appres", e.approval_id.as_str()),
+            id: make_id("appres"),
             notif_type: T::ApprovalResolved,
             message: format!(
                 "Approval {} — decision: {:?}",
@@ -301,19 +305,19 @@ fn push_notification_for_event(state: &Arc<AppState>, payload: &cairn_domain::Ru
             ),
             entity_id: Some(e.approval_id.as_str().to_owned()),
             href: "approvals".to_owned(),
-            created_at_ms: now_ms,
+            created_at_ms,
         }),
         E::RunStateChanged(e) => match &e.transition.to {
             RunState::Completed => Some(OperatorNotification {
-                id: make_id("runok", e.run_id.as_str()),
+                id: make_id("runok"),
                 notif_type: T::RunCompleted,
                 message: format!("Run {} completed", e.run_id.as_str()),
                 entity_id: Some(e.run_id.as_str().to_owned()),
                 href: format!("run/{}", e.run_id.as_str()),
-                created_at_ms: now_ms,
+                created_at_ms,
             }),
             RunState::Failed => Some(OperatorNotification {
-                id: make_id("runfail", e.run_id.as_str()),
+                id: make_id("runfail"),
                 notif_type: T::RunFailed,
                 message: format!(
                     "Run {} failed{}",
@@ -325,13 +329,13 @@ fn push_notification_for_event(state: &Arc<AppState>, payload: &cairn_domain::Ru
                 ),
                 entity_id: Some(e.run_id.as_str().to_owned()),
                 href: format!("run/{}", e.run_id.as_str()),
-                created_at_ms: now_ms,
+                created_at_ms,
             }),
             _ => None,
         },
         E::TaskStateChanged(e) => match &e.transition.to {
             TaskState::DeadLettered | TaskState::RetryableFailed => Some(OperatorNotification {
-                id: make_id("stuck", e.task_id.as_str()),
+                id: make_id("stuck"),
                 notif_type: T::TaskStuck,
                 message: format!(
                     "Task {} is stuck ({:?})",
@@ -340,7 +344,7 @@ fn push_notification_for_event(state: &Arc<AppState>, payload: &cairn_domain::Ru
                 ),
                 entity_id: Some(e.task_id.as_str().to_owned()),
                 href: "tasks".to_owned(),
-                created_at_ms: now_ms,
+                created_at_ms,
             }),
             _ => None,
         },

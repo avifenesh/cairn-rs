@@ -366,13 +366,15 @@ pub struct AppState {
     /// restart by design (in-memory; event-sourced cooldown is a
     /// follow-up).
     pub provider_fallback_cooldown: Arc<ScopedProviderFallbackCooldown>,
-    /// F49: queue for auto-resume orchestrate kicks. When an approval
-    /// resolves AND the run has no other pending approvals AND the run
-    /// is in state=running, the bin_events hook sends the run_id here.
-    /// A single background worker spawned from `main.rs` drains the
-    /// queue and POSTs `/v1/runs/:id/orchestrate` via reqwest to the
-    /// local listener. `None` while the worker is not running (early
-    /// startup, role != serves_http).
+    /// F49: queue for auto-resume orchestrate kicks. Always present on
+    /// AppState — the inner channel is an `OnceLock` inside the sender
+    /// that `main.rs` installs after the HTTP listener binds. When an
+    /// approval resolves AND the run has no other pending approvals
+    /// AND the run is state=running, the SSE publish loop calls
+    /// `OrchestrateKickSender::kick(run_id)`, which is a no-op before
+    /// install (early startup / non-http roles). The worker spawned
+    /// from `main.rs` drains the channel and POSTs
+    /// `/v1/runs/:id/orchestrate` via reqwest on the local listener.
     pub orchestrate_kick_tx: Arc<OrchestrateKickSender>,
     /// F50: operator-visible notification sink. Previously only the
     /// admin `/v1/events/append` path pushed notifications, which meant

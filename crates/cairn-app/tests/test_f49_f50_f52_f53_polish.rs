@@ -31,7 +31,7 @@ use cairn_store::{EventLog, InMemoryStore};
 // ── Shared fixtures ──────────────────────────────────────────────────────────
 
 fn project() -> ProjectKey {
-    ProjectKey::new("t_poliish", "w_poliish", "p_poliish")
+    ProjectKey::new("t_polish", "w_polish", "p_polish")
 }
 
 fn cache_hit_event(n: u32) -> RuntimeEvent {

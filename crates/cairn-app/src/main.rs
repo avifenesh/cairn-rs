@@ -1483,11 +1483,31 @@ async fn main() {
                     .timeout(std::time::Duration::from_secs(300))
                     .build()
                     .unwrap_or_else(|_| reqwest::Client::new());
-                // De-dup: drop repeated kicks for the same run_id that
-                // arrive within a short window (multiple approvals can
-                // resolve in quick succession on a single run). The
-                // guard is a simple HashSet that's cleared each iteration.
+                // De-dup by run_id with a 5s window: multiple approvals
+                // can resolve in quick succession on a single run and
+                // the SSE publish loop fires one kick per resolution.
+                // Without the window we'd burst several concurrent
+                // `/orchestrate` POSTs per run, wasting LLM budget and
+                // racing on the run's FF lease. The map is pruned on
+                // every iteration so the memory footprint is bounded
+                // by the number of distinct runs hit in the last 5s.
+                use std::collections::HashMap;
+                let dedup_window = std::time::Duration::from_secs(5);
+                let mut last_kick: HashMap<String, std::time::Instant> = HashMap::new();
                 while let Some(run_id) = kick_rx.recv().await {
+                    let now = std::time::Instant::now();
+                    last_kick.retain(|_, t| now.duration_since(*t) < dedup_window);
+                    let key = run_id.as_str().to_owned();
+                    if let Some(prev) = last_kick.get(&key) {
+                        if now.duration_since(*prev) < dedup_window {
+                            tracing::debug!(
+                                run_id = %run_id,
+                                "F49: dropping duplicate auto-resume kick within 5s window"
+                            );
+                            continue;
+                        }
+                    }
+                    last_kick.insert(key, now);
                     let url = format!("{kick_url}/v1/runs/{}/orchestrate", run_id.as_str());
                     tracing::info!(
                         run_id = %run_id,
