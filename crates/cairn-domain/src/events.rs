@@ -1009,6 +1009,13 @@ pub struct ToolInvocationStarted {
     pub prompt_release_id: Option<crate::ids::PromptReleaseId>,
     pub requested_at_ms: u64,
     pub started_at_ms: u64,
+    /// F55: structured tool arguments captured when the runtime dispatched
+    /// the tool. Enables `GET /v1/tool-invocations` to surface "what cairn
+    /// ran" to operators. `None` on legacy events and for callers that
+    /// could not plumb the args through (kept optional to preserve the
+    /// wire contract on old event-log replay).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub args_json: Option<serde_json::Value>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -1031,6 +1038,12 @@ pub struct ToolInvocationCompleted {
     /// record path was used.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub result_json: Option<serde_json::Value>,
+    /// F55: truncated UTF-8 preview of the tool's captured output. The
+    /// full payload lives on `result_json`; this field is what the
+    /// projection persists for operator observability. `None` on
+    /// legacy events.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub output_preview: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -1042,6 +1055,11 @@ pub struct ToolInvocationFailed {
     pub finished_at_ms: u64,
     pub outcome: ToolInvocationOutcomeKind,
     pub error_message: Option<String>,
+    /// F55: truncated UTF-8 preview of whatever the tool produced before
+    /// it failed (stderr tail, partial stdout, etc.). `None` on legacy
+    /// events and when the runtime had no output to capture.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub output_preview: Option<String>,
 }
 
 /// RFC 020 Track 3: a tool invocation was served from the result cache
@@ -2589,6 +2607,7 @@ mod tests {
                 prompt_release_id: None,
                 requested_at_ms: 10,
                 started_at_ms: 11,
+                args_json: None,
             }),
         };
 
@@ -2639,6 +2658,7 @@ mod tests {
             finished_at_ms: 14,
             outcome: crate::tool_invocation::ToolInvocationOutcomeKind::PermanentFailure,
             error_message: Some("bad input".to_owned()),
+            output_preview: None,
         });
 
         assert_eq!(event.project().project_id.as_str(), "project");

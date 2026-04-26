@@ -94,6 +94,7 @@ fn tool_invocation_event(invocation_id: &str, project: ProjectKey) -> EventEnvel
             prompt_release_id: None,
             requested_at_ms: 1_000,
             started_at_ms: 1_100,
+            args_json: None,
         }),
     )
 }

@@ -272,10 +272,20 @@ impl SqliteSyncProjection {
                 let target = serde_json::to_string(&e.target)
                     .map_err(|e| StoreError::Serialization(e.to_string()))?;
                 let exec_class_str = enum_to_str(&e.execution_class)?;
+                // F55: SQLite has no native JSONB so we store args as a
+                // JSON string — matches the Postgres applier's semantics
+                // while staying on the portable-TEXT path.
+                let args_text = match &e.args_json {
+                    Some(value) => Some(
+                        serde_json::to_string(value)
+                            .map_err(|err| StoreError::Serialization(err.to_string()))?,
+                    ),
+                    None => None,
+                };
 
                 sqlx::query(
-                    "INSERT INTO tool_invocations (invocation_id, tenant_id, workspace_id, project_id, session_id, run_id, task_id, target, execution_class, state, requested_at_ms, started_at_ms, version, created_at, updated_at)
-                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'started', ?, ?, 1, ?, ?)",
+                    "INSERT INTO tool_invocations (invocation_id, tenant_id, workspace_id, project_id, session_id, run_id, task_id, target, execution_class, state, requested_at_ms, started_at_ms, args_json, version, created_at, updated_at)
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'started', ?, ?, ?, 1, ?, ?)",
                 )
                 .bind(e.invocation_id.as_str())
                 .bind(e.project.tenant_id.as_str())
@@ -288,6 +298,7 @@ impl SqliteSyncProjection {
                 .bind(exec_class_str)
                 .bind(e.requested_at_ms as i64)
                 .bind(e.started_at_ms as i64)
+                .bind(args_text)
                 .bind(now)
                 .bind(now)
                 .execute(&mut **tx)
@@ -298,10 +309,11 @@ impl SqliteSyncProjection {
             RuntimeEvent::ToolInvocationCompleted(e) => {
                 let outcome_str = enum_to_str(&e.outcome)?;
                 sqlx::query(
-                    "UPDATE tool_invocations SET state = 'completed', outcome = ?, finished_at_ms = ?, version = version + 1, updated_at = ? WHERE invocation_id = ?",
+                    "UPDATE tool_invocations SET state = 'completed', outcome = ?, finished_at_ms = ?, output_preview = COALESCE(?, output_preview), version = version + 1, updated_at = ? WHERE invocation_id = ?",
                 )
                 .bind(outcome_str)
                 .bind(e.finished_at_ms as i64)
+                .bind(e.output_preview.as_deref())
                 .bind(now)
                 .bind(e.invocation_id.as_str())
                 .execute(&mut **tx)
@@ -316,12 +328,13 @@ impl SqliteSyncProjection {
                 // pre-T2-H5 SQLite hardcoded `'failed'` and mislabeled cancels.
                 let state_str = enum_to_str(&e.outcome.terminal_state())?;
                 sqlx::query(
-                    "UPDATE tool_invocations SET state = ?, outcome = ?, error_message = ?, finished_at_ms = ?, version = version + 1, updated_at = ? WHERE invocation_id = ?",
+                    "UPDATE tool_invocations SET state = ?, outcome = ?, error_message = ?, finished_at_ms = ?, output_preview = COALESCE(?, output_preview), version = version + 1, updated_at = ? WHERE invocation_id = ?",
                 )
                 .bind(state_str)
                 .bind(outcome_str)
                 .bind(e.error_message.as_deref())
                 .bind(e.finished_at_ms as i64)
+                .bind(e.output_preview.as_deref())
                 .bind(now)
                 .bind(e.invocation_id.as_str())
                 .execute(&mut **tx)

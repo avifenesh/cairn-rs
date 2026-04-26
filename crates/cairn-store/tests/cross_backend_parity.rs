@@ -412,6 +412,7 @@ mod sqlite_parity {
                 prompt_release_id: None,
                 requested_at_ms: 200,
                 started_at_ms: 201,
+                args_json: None,
             },
         ))])
         .await
@@ -432,6 +433,7 @@ mod sqlite_parity {
                 prompt_release_id: None,
                 requested_at_ms: 100,
                 started_at_ms: 101,
+                args_json: None,
             },
         ))])
         .await
@@ -448,6 +450,7 @@ mod sqlite_parity {
                 outcome: ToolInvocationOutcomeKind::Success,
                 tool_call_id: None,
                 result_json: None,
+                output_preview: None,
             },
         ))])
         .await
@@ -463,6 +466,7 @@ mod sqlite_parity {
                 finished_at_ms: 250,
                 outcome: ToolInvocationOutcomeKind::PermanentFailure,
                 error_message: Some("disk full".to_owned()),
+                output_preview: None,
             },
         ))])
         .await
@@ -961,6 +965,7 @@ mod sqlite_parity {
                 prompt_release_id: None,
                 requested_at_ms: 100,
                 started_at_ms: 101,
+                args_json: None,
             })),
             make_envelope(RuntimeEvent::ToolInvocationCompleted(
                 ToolInvocationCompleted {
@@ -972,6 +977,7 @@ mod sqlite_parity {
                     outcome: ToolInvocationOutcomeKind::Success,
                     tool_call_id: None,
                     result_json: None,
+                    output_preview: None,
                 },
             )),
             // Canceled tool invocation (recently added path).
@@ -988,6 +994,7 @@ mod sqlite_parity {
                 prompt_release_id: None,
                 requested_at_ms: 300,
                 started_at_ms: 301,
+                args_json: None,
             })),
             make_envelope(RuntimeEvent::ToolInvocationFailed(ToolInvocationFailed {
                 project: project.clone(),
@@ -997,6 +1004,7 @@ mod sqlite_parity {
                 finished_at_ms: 350,
                 outcome: ToolInvocationOutcomeKind::Canceled,
                 error_message: Some("operator cancel".to_owned()),
+                output_preview: None,
             })),
             // External worker (audit-only, no projection).
             make_envelope(RuntimeEvent::RecoveryAttempted(RecoveryAttempted {
@@ -1162,6 +1170,7 @@ mod sqlite_parity {
                         prompt_release_id: None,
                         requested_at_ms: req_ms,
                         started_at_ms: req_ms + 1,
+                        args_json: None,
                     },
                 ))])
                 .await

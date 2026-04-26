@@ -608,7 +608,7 @@ impl ToolInvocationReadModel for PgAdapter {
         let row = sqlx::query_as::<_, ToolInvocationRow>(
             "SELECT invocation_id, tenant_id, workspace_id, project_id, session_id, run_id, task_id,
                     target, execution_class, state, outcome, error_message, version,
-                    requested_at_ms, started_at_ms, finished_at_ms
+                    requested_at_ms, started_at_ms, finished_at_ms, args_json, output_preview
              FROM tool_invocations
              WHERE invocation_id = $1",
         )
@@ -629,7 +629,7 @@ impl ToolInvocationReadModel for PgAdapter {
         let rows = sqlx::query_as::<_, ToolInvocationRow>(
             "SELECT invocation_id, tenant_id, workspace_id, project_id, session_id, run_id, task_id,
                     target, execution_class, state, outcome, error_message, version,
-                    requested_at_ms, started_at_ms, finished_at_ms
+                    requested_at_ms, started_at_ms, finished_at_ms, args_json, output_preview
              FROM tool_invocations
              WHERE run_id = $1
              ORDER BY requested_at_ms ASC, invocation_id ASC
@@ -753,6 +753,11 @@ struct ToolInvocationRow {
     requested_at_ms: i64,
     started_at_ms: Option<i64>,
     finished_at_ms: Option<i64>,
+    // F55: persisted tool args + output preview. Postgres stores
+    // args as JSONB which sqlx decodes as `serde_json::Value`.
+    // Both nullable for pre-F55 rows.
+    args_json: Option<serde_json::Value>,
+    output_preview: Option<String>,
 }
 
 impl ToolInvocationRow {
@@ -778,6 +783,8 @@ impl ToolInvocationRow {
                 .map(parse_string_enum::<ToolInvocationOutcomeKind>)
                 .transpose()?,
             error_message: self.error_message,
+            args_json: self.args_json,
+            output_preview: self.output_preview,
         })
     }
 }

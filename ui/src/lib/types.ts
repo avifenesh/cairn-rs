@@ -1648,6 +1648,19 @@ export interface RunTelemetryToolInvocation {
   started_at_ms: number;
   finished_at_ms: number;
   duration_ms: number;
+  /** F55: structured tool args captured at dispatch time. `null` on
+   *  pre-F55 events. Shape is tool-specific. */
+  args?: unknown;
+  /** F55: truncated UTF-8 preview of the tool output (capped around
+   *  8 KiB). `null` when the tool produced no output or the event is
+   *  pre-F55. */
+  output_preview?: string | null;
+  /** F55: true when the preview was truncated at the backend cap —
+   *  UIs can surface a "truncated" footer. */
+  output_truncated?: boolean;
+  /** F55: error message from a failed invocation (mirrors the durable
+   *  projection field). `null` for successful invocations. */
+  error_message?: string | null;
 }
 
 export interface RunTelemetryTotals {

@@ -90,6 +90,7 @@ async fn tool_invocation_is_recorded_before_approval() {
                     prompt_release_id: None,
                     requested_at_ms: ts,
                     started_at_ms: ts,
+                    args_json: None,
                 }),
             ),
         ])
@@ -549,6 +550,7 @@ async fn full_approval_workflow_tool_to_resolution() {
                 prompt_release_id: None,
                 requested_at_ms: ts,
                 started_at_ms: ts,
+                args_json: None,
             }),
         )])
         .await

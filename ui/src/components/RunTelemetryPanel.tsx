@@ -43,6 +43,18 @@ import type {
  *  Full text is available on row-expand. */
 const ERROR_MESSAGE_TRUNCATE_CHARS = 240;
 
+/** F55: JSON-stringify tool args for the expand-on-click row without
+ *  crashing on cyclic or non-serializable values. Falls back to
+ *  `String(value)` when `JSON.stringify` throws. */
+function safeStringifyJson(value: unknown): string {
+  try {
+    if (typeof value === "string") return value;
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value);
+  }
+}
+
 const LIVE_STATES = new Set(["pending", "running"]);
 
 // ── Status pill ────────────────────────────────────────────────────────────
@@ -203,13 +215,59 @@ function ToolInvocationRow({ inv }: { inv: RunTelemetryToolInvocation }) {
       </tr>
       {expanded && (
         <tr>
-          <td colSpan={3} className="px-4 py-3 bg-gray-50 dark:bg-zinc-900/60 border-y border-gray-200 dark:border-zinc-800 text-[11px] text-gray-500 dark:text-zinc-400 font-mono">
+          <td
+            colSpan={3}
+            className="px-4 py-3 bg-gray-50 dark:bg-zinc-900/60 border-y border-gray-200 dark:border-zinc-800 text-[11px] text-gray-500 dark:text-zinc-400 font-mono"
+            data-testid={`tool-invocation-expanded-${inv.invocation_id}`}
+          >
             <div>invocation {inv.invocation_id}</div>
             {inv.started_at_ms > 0 && (
               <div className="mt-1">started {new Date(inv.started_at_ms).toISOString()}</div>
             )}
             {inv.finished_at_ms > 0 && (
               <div>finished {new Date(inv.finished_at_ms).toISOString()}</div>
+            )}
+            {/* F55 / F48: show the args + captured output inline so operators
+                can see what cairn ran and what it got back without leaving
+                the run-detail page. */}
+            {inv.args !== undefined && inv.args !== null && (
+              <div className="mt-3">
+                <div className="text-[10px] uppercase tracking-wide text-gray-400 dark:text-zinc-500 mb-1">
+                  args
+                </div>
+                <pre
+                  className="whitespace-pre-wrap break-all text-[11px] text-gray-700 dark:text-zinc-300 bg-white/60 dark:bg-zinc-950/60 border border-gray-200 dark:border-zinc-800 rounded px-2 py-1"
+                  data-testid={`tool-invocation-args-${inv.invocation_id}`}
+                >
+                  {safeStringifyJson(inv.args)}
+                </pre>
+              </div>
+            )}
+            {inv.output_preview && (
+              <div className="mt-3">
+                <div className="text-[10px] uppercase tracking-wide text-gray-400 dark:text-zinc-500 mb-1">
+                  output
+                </div>
+                <pre
+                  className="whitespace-pre-wrap break-all text-[11px] text-gray-700 dark:text-zinc-300 bg-white/60 dark:bg-zinc-950/60 border border-gray-200 dark:border-zinc-800 rounded px-2 py-1"
+                  data-testid={`tool-invocation-output-${inv.invocation_id}`}
+                >
+                  {inv.output_preview}
+                </pre>
+                {inv.output_truncated && (
+                  <div className="mt-1 text-[10px] text-amber-500 dark:text-amber-400">
+                    (output truncated at backend cap)
+                  </div>
+                )}
+              </div>
+            )}
+            {inv.error_message && (
+              <div className="mt-3">
+                <div className="text-[10px] uppercase tracking-wide text-red-400 mb-1">error</div>
+                <pre className="whitespace-pre-wrap break-all text-[11px] text-red-400 bg-white/60 dark:bg-zinc-950/60 border border-red-500/30 rounded px-2 py-1">
+                  {inv.error_message}
+                </pre>
+              </div>
             )}
           </td>
         </tr>

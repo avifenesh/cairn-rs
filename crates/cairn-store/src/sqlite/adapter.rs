@@ -128,6 +128,29 @@ impl DbAdapter for SqliteAdapter {
             }
         }
 
+        // F55: args_json + output_preview on tool_invocations. Pre-F55
+        // databases do not get backfilled — the event log is not replayed
+        // at migration time, so legacy rows keep NULL in both columns.
+        // Events arriving post-upgrade populate the columns going forward,
+        // which is sufficient for the dogfood observability fix.
+        for (column, kind) in [("args_json", "TEXT"), ("output_preview", "TEXT")] {
+            let exists = sqlx::query_scalar::<_, i64>(
+                "SELECT 1 FROM pragma_table_info('tool_invocations') WHERE name = ? LIMIT 1",
+            )
+            .bind(column)
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(|e| StoreError::Migration(format!("pragma tool_invocations.{column}: {e}")))?
+            .is_some();
+            if !exists {
+                let stmt = format!("ALTER TABLE tool_invocations ADD COLUMN {column} {kind}");
+                sqlx::query(&stmt)
+                    .execute(&self.pool)
+                    .await
+                    .map_err(|e| StoreError::Migration(format!("{stmt}: {e}")))?;
+            }
+        }
+
         Ok(())
     }
 }
@@ -701,7 +724,7 @@ impl ToolInvocationReadModel for SqliteAdapter {
         let row = sqlx::query_as::<_, ToolInvocationRow>(
             "SELECT invocation_id, tenant_id, workspace_id, project_id, session_id, run_id, task_id,
                     target, execution_class, state, outcome, error_message, version,
-                    requested_at_ms, started_at_ms, finished_at_ms
+                    requested_at_ms, started_at_ms, finished_at_ms, args_json, output_preview
              FROM tool_invocations
              WHERE invocation_id = $1",
         )
@@ -722,7 +745,7 @@ impl ToolInvocationReadModel for SqliteAdapter {
         let rows = sqlx::query_as::<_, ToolInvocationRow>(
             "SELECT invocation_id, tenant_id, workspace_id, project_id, session_id, run_id, task_id,
                     target, execution_class, state, outcome, error_message, version,
-                    requested_at_ms, started_at_ms, finished_at_ms
+                    requested_at_ms, started_at_ms, finished_at_ms, args_json, output_preview
              FROM tool_invocations
              WHERE run_id = $1
              ORDER BY requested_at_ms ASC, invocation_id ASC
@@ -759,11 +782,23 @@ struct ToolInvocationRow {
     requested_at_ms: i64,
     started_at_ms: Option<i64>,
     finished_at_ms: Option<i64>,
+    // F55: persisted tool args + output preview. SQLite has no native
+    // JSONB, so args are stored as a JSON string and parsed app-side
+    // into `serde_json::Value` — matches the portable-TEXT pattern
+    // used elsewhere in this crate.
+    args_json: Option<String>,
+    output_preview: Option<String>,
 }
 
 impl ToolInvocationRow {
     fn into_record(self) -> Result<ToolInvocationRecord, StoreError> {
         let project = project_key_from_parts(self.tenant_id, self.workspace_id, self.project_id);
+        let args_json = match self.args_json.as_deref() {
+            Some(text) => Some(
+                serde_json::from_str(text).map_err(|e| StoreError::Serialization(e.to_string()))?,
+            ),
+            None => None,
+        };
         Ok(ToolInvocationRecord {
             invocation_id: ToolInvocationId::new(self.invocation_id),
             project,
@@ -785,6 +820,8 @@ impl ToolInvocationRow {
                 .map(parse_string_enum::<ToolInvocationOutcomeKind>)
                 .transpose()?,
             error_message: self.error_message,
+            args_json,
+            output_preview: self.output_preview,
         })
     }
 }

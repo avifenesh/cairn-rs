@@ -64,6 +64,10 @@ pub(crate) struct CreateToolInvocationRequest {
     pub(crate) task_id: Option<String>,
     pub(crate) target: ToolInvocationTarget,
     pub(crate) execution_class: ExecutionClass,
+    /// F55: structured tool args persisted on the invocation projection.
+    /// Optional — legacy clients that only log lifecycle metadata omit it.
+    #[serde(default)]
+    pub(crate) args: Option<serde_json::Value>,
 }
 
 impl CreateToolInvocationRequest {
@@ -103,6 +107,64 @@ pub(crate) struct SetCheckpointStrategyRequest {
 
 // ── Handlers: Tool Invocations ──────────────────────────────────────────────
 
+/// F55: operator-facing view of a tool invocation. Explicitly names every
+/// field the operator dashboards (and `GET /v1/tool-invocations`) need —
+/// no `#[serde(flatten)]` over `ToolInvocationRecord` because
+/// `ToolInvocationTarget::Builtin` / `::Plugin` both serialize a nested
+/// `tool_name` that would collide with the flat `tool_name` below and
+/// produce a duplicate-key JSON object. Instead we carry the durable
+/// record under a stable `record` namespace so clients that want the
+/// full projection shape still have it.
+#[derive(Debug, serde::Serialize)]
+pub(crate) struct ToolInvocationView {
+    /// Flattened tool name (from `target.tool_name`). Primary operator
+    /// field — the dogfood bug was that this was null in the response.
+    tool_name: String,
+    /// Alias of the durable `state` enum. Preserved under this name so
+    /// dashboards that were written against the earlier `status`
+    /// convention keep working.
+    status: cairn_domain::tool_invocation::ToolInvocationState,
+    /// Structured tool arguments captured at dispatch time.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    args: Option<serde_json::Value>,
+    /// Truncated UTF-8 preview of the captured tool output.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    output: Option<String>,
+    /// True when `output` was truncated at the backend cap.
+    output_truncated: bool,
+    /// The durable projection record, unchanged, under an explicit key
+    /// so the response doesn't collide with the flat fields above.
+    record: cairn_domain::tool_invocation::ToolInvocationRecord,
+}
+
+impl ToolInvocationView {
+    fn from_record(record: cairn_domain::tool_invocation::ToolInvocationRecord) -> Self {
+        let tool_name = match &record.target {
+            ToolInvocationTarget::Builtin { tool_name } => tool_name.clone(),
+            ToolInvocationTarget::Plugin { tool_name, .. } => tool_name.clone(),
+        };
+        let status = record.state;
+        let args = record.args_json.clone();
+        let output = record.output_preview.clone();
+        let output_truncated = record
+            .output_preview
+            .as_deref()
+            .map(|preview| {
+                preview
+                    .ends_with(cairn_domain::tool_invocation::TOOL_OUTPUT_PREVIEW_TRUNCATED_SUFFIX)
+            })
+            .unwrap_or(false);
+        Self {
+            tool_name,
+            status,
+            args,
+            output,
+            output_truncated,
+            record,
+        }
+    }
+}
+
 pub(crate) async fn list_tool_invocations_handler(
     State(state): State<Arc<AppState>>,
     Query(query): Query<ToolInvocationListQuery>,
@@ -110,20 +172,33 @@ pub(crate) async fn list_tool_invocations_handler(
     let Some(run_id) = query.run_id.as_deref() else {
         return (
             StatusCode::OK,
-            Json(
-                ListResponse::<cairn_domain::tool_invocation::ToolInvocationRecord> {
-                    items: Vec::new(),
-                    has_more: false,
-                },
-            ),
+            Json(ListResponse::<ToolInvocationView> {
+                items: Vec::new(),
+                has_more: false,
+            }),
         )
             .into_response();
     };
 
-    let mut items = match ToolInvocationReadModel::list_by_run(
+    // F55 review: filter BEFORE pagination. The state filter is applied
+    // in-memory (the read model doesn't push it down), so fetching only
+    // `limit + offset` pre-filter would silently drop matching rows that
+    // sit past the raw-fetch window. Fetch the run's full invocation
+    // list (bounded by a safety cap), filter, THEN offset+limit.
+    const MAX_TOOL_INVOCATIONS_PER_RUN: usize = 10_000;
+
+    let parsed_state = match query.state.as_deref() {
+        Some(s) => match parse_tool_invocation_state(s) {
+            Ok(parsed) => Some(parsed),
+            Err(message) => return bad_request_response(message),
+        },
+        None => None,
+    };
+
+    let all = match ToolInvocationReadModel::list_by_run(
         state.runtime.store.as_ref(),
         &RunId::new(run_id),
-        query.limit().saturating_add(query.offset()),
+        MAX_TOOL_INVOCATIONS_PER_RUN,
         0,
     )
     .await
@@ -132,28 +207,27 @@ pub(crate) async fn list_tool_invocations_handler(
         Err(err) => return store_error_response(err),
     };
 
-    if let Some(state_filter) = query.state.as_deref() {
-        let parsed = match parse_tool_invocation_state(state_filter) {
-            Ok(state) => state,
-            Err(message) => return bad_request_response(message),
-        };
-        items.retain(|item| item.state == parsed);
-    }
+    let filtered: Vec<_> = match parsed_state {
+        Some(s) => all.into_iter().filter(|i| i.state == s).collect(),
+        None => all,
+    };
 
-    let items = items
+    let offset = query.offset();
+    let limit = query.limit();
+    let total = filtered.len();
+    let items: Vec<ToolInvocationView> = filtered
         .into_iter()
-        .skip(query.offset())
-        .take(query.limit())
-        .collect::<Vec<_>>();
+        .skip(offset)
+        .take(limit)
+        .map(ToolInvocationView::from_record)
+        .collect();
 
-    (
-        StatusCode::OK,
-        Json(ListResponse {
-            items,
-            has_more: false,
-        }),
-    )
-        .into_response()
+    // F55 review: has_more accurately reflects whether matching rows
+    // exist past this page, so cursor-style paging works with the
+    // state filter active.
+    let has_more = offset.saturating_add(items.len()) < total;
+
+    (StatusCode::OK, Json(ListResponse { items, has_more })).into_response()
 }
 
 pub(crate) async fn get_tool_invocation_handler(
@@ -163,7 +237,13 @@ pub(crate) async fn get_tool_invocation_handler(
     match ToolInvocationReadModel::get(state.runtime.store.as_ref(), &ToolInvocationId::new(id))
         .await
     {
-        Ok(Some(record)) => (StatusCode::OK, Json(record)).into_response(),
+        // F55: return the flattened operator view so single-item GETs
+        // match the shape of the list endpoint.
+        Ok(Some(record)) => (
+            StatusCode::OK,
+            Json(ToolInvocationView::from_record(record)),
+        )
+            .into_response(),
         Ok(None) => AppApiError::new(
             StatusCode::NOT_FOUND,
             "not_found",
@@ -229,6 +309,7 @@ pub(crate) async fn create_tool_invocation_handler(
             body.task_id.map(TaskId::new),
             body.target,
             body.execution_class,
+            body.args,
         )
         .await
     {
@@ -362,6 +443,7 @@ pub(crate) async fn cancel_tool_invocation_handler(
             tool_name,
             cairn_domain::tool_invocation::ToolInvocationOutcomeKind::Canceled,
             Some("cancelled_by_operator".to_owned()),
+            None,
         )
         .await
     {

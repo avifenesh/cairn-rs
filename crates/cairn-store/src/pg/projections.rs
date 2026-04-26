@@ -242,9 +242,12 @@ impl PgSyncProjection {
                     .map_err(|e| StoreError::Serialization(e.to_string()))?;
                 let exec_class_str = enum_to_str(&e.execution_class)?;
 
+                // F55: persist captured args so GET /v1/tool-invocations
+                // can surface "what cairn ran" without replaying the
+                // event log.
                 sqlx::query(
-                    "INSERT INTO tool_invocations (invocation_id, tenant_id, workspace_id, project_id, session_id, run_id, task_id, target, execution_class, state, requested_at_ms, started_at_ms, version, created_at, updated_at)
-                     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'started', $10, $11, 1, $12, $12)",
+                    "INSERT INTO tool_invocations (invocation_id, tenant_id, workspace_id, project_id, session_id, run_id, task_id, target, execution_class, state, requested_at_ms, started_at_ms, args_json, version, created_at, updated_at)
+                     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'started', $10, $11, $12, 1, $13, $13)",
                 )
                 .bind(e.invocation_id.as_str())
                 .bind(e.project.tenant_id.as_str())
@@ -257,6 +260,7 @@ impl PgSyncProjection {
                 .bind(exec_class_str)
                 .bind(e.requested_at_ms as i64)
                 .bind(e.started_at_ms as i64)
+                .bind(e.args_json.clone())
                 .bind(now)
                 .execute(&mut **tx)
                 .await
@@ -265,11 +269,15 @@ impl PgSyncProjection {
 
             RuntimeEvent::ToolInvocationCompleted(e) => {
                 let outcome_str = enum_to_str(&e.outcome)?;
+                // F55: persist the truncated output preview so the read
+                // path returns "what cairn got back" alongside the
+                // lifecycle metadata.
                 sqlx::query(
-                    "UPDATE tool_invocations SET state = 'completed', outcome = $1, finished_at_ms = $2, version = version + 1, updated_at = $3 WHERE invocation_id = $4",
+                    "UPDATE tool_invocations SET state = 'completed', outcome = $1, finished_at_ms = $2, output_preview = COALESCE($3, output_preview), version = version + 1, updated_at = $4 WHERE invocation_id = $5",
                 )
                 .bind(outcome_str)
                 .bind(e.finished_at_ms as i64)
+                .bind(e.output_preview.as_deref())
                 .bind(now)
                 .bind(e.invocation_id.as_str())
                 .execute(&mut **tx)
@@ -281,12 +289,13 @@ impl PgSyncProjection {
                 let state_str = tool_invocation_terminal_state_str(e.outcome)?;
                 let outcome_str = enum_to_str(&e.outcome)?;
                 sqlx::query(
-                    "UPDATE tool_invocations SET state = $1, outcome = $2, error_message = $3, finished_at_ms = $4, version = version + 1, updated_at = $5 WHERE invocation_id = $6",
+                    "UPDATE tool_invocations SET state = $1, outcome = $2, error_message = $3, finished_at_ms = $4, output_preview = COALESCE($5, output_preview), version = version + 1, updated_at = $6 WHERE invocation_id = $7",
                 )
                 .bind(state_str)
                 .bind(outcome_str)
                 .bind(e.error_message.as_deref())
                 .bind(e.finished_at_ms as i64)
+                .bind(e.output_preview.as_deref())
                 .bind(now)
                 .bind(e.invocation_id.as_str())
                 .execute(&mut **tx)

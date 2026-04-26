@@ -95,6 +95,7 @@ async fn tool_invocation_start_emits_event() {
             tool_name: "fs.read".to_owned(),
         },
         ExecutionClass::SupervisedProcess,
+        None,
     )
     .await
     .unwrap();
@@ -123,6 +124,7 @@ async fn tool_invocation_complete_emits_event() {
             tool_name: "test.tool".to_owned(),
         },
         ExecutionClass::SandboxedProcess,
+        None,
     )
     .await
     .unwrap();
@@ -162,6 +164,7 @@ async fn tool_invocation_failed_emits_event_with_outcome() {
             tool_name: "fs.write".to_owned(),
         },
         ExecutionClass::SupervisedProcess,
+        None,
     )
     .await
     .unwrap();
@@ -173,6 +176,7 @@ async fn tool_invocation_failed_emits_event_with_outcome() {
         "fs.write".to_owned(),
         ToolInvocationOutcomeKind::PermanentFailure,
         Some("permission denied".to_owned()),
+        None,
     )
     .await
     .unwrap();

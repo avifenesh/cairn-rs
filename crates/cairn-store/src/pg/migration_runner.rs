@@ -150,6 +150,11 @@ const MIGRATIONS: &[(u32, &str, &str)] = &[
         "add_run_completion_annotation",
         include_str!("migrations/V027__add_run_completion_annotation.sql"),
     ),
+    (
+        28,
+        "tool_invocation_args_output",
+        include_str!("migrations/V028__tool_invocation_args_output.sql"),
+    ),
 ];
 
 /// Return the compile-time migration registry as (version, name, sql) triples.

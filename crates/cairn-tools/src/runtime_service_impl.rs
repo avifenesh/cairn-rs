@@ -69,6 +69,9 @@ where
         match &pipeline_result.outcome {
             PipelineOutcome::Completed(outcome) => {
                 // Record start
+                // F55: thread the raw tool params into the projection so
+                // operators can see the arguments via
+                // GET /v1/tool-invocations.
                 self.tool_invocation_service
                     .record_start(
                         &request.project,
@@ -78,6 +81,7 @@ where
                         request.task_id.clone(),
                         request.target.clone(),
                         request.execution_class,
+                        Some(request.params.clone()),
                     )
                     .await
                     .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> { Box::new(e) })?;
@@ -109,6 +113,7 @@ where
                                 tool_name.clone(),
                                 outcome_to_kind(other),
                                 outcome_error_message(other),
+                                None,
                             )
                             .await
                             .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> {
@@ -232,6 +237,7 @@ mod tests {
                 _: Option<cairn_domain::TaskId>,
                 _: ToolInvocationTarget,
                 _: ExecutionClass,
+                _: Option<serde_json::Value>,
             ) -> Result<(), cairn_runtime::error::RuntimeError> {
                 Ok(())
             }
@@ -256,6 +262,7 @@ mod tests {
                 _: Option<cairn_domain::TaskId>,
                 _: String,
                 _: ToolInvocationOutcomeKind,
+                _: Option<String>,
                 _: Option<String>,
             ) -> Result<(), cairn_runtime::error::RuntimeError> {
                 Ok(())
@@ -289,6 +296,7 @@ mod tests {
                 _: Option<cairn_domain::TaskId>,
                 _: ToolInvocationTarget,
                 _: ExecutionClass,
+                _: Option<serde_json::Value>,
             ) -> Result<(), cairn_runtime::error::RuntimeError> {
                 Ok(())
             }
@@ -311,6 +319,7 @@ mod tests {
                 _: Option<cairn_domain::TaskId>,
                 _: String,
                 _: ToolInvocationOutcomeKind,
+                _: Option<String>,
                 _: Option<String>,
             ) -> Result<(), cairn_runtime::error::RuntimeError> {
                 Ok(())
@@ -563,6 +572,7 @@ mod tests {
                 task_id: Option<cairn_domain::TaskId>,
                 _: ToolInvocationTarget,
                 _: ExecutionClass,
+                _: Option<serde_json::Value>,
             ) -> Result<(), cairn_runtime::error::RuntimeError> {
                 self.start_args.lock().unwrap().push((
                     session_id.map(|id| id.to_string()),
@@ -592,6 +602,7 @@ mod tests {
                 _: Option<cairn_domain::TaskId>,
                 _: String,
                 _: ToolInvocationOutcomeKind,
+                _: Option<String>,
                 _: Option<String>,
             ) -> Result<(), cairn_runtime::error::RuntimeError> {
                 Ok(())

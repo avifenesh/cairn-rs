@@ -6,7 +6,9 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use cairn_domain::tool_invocation::{ToolInvocationOutcomeKind, ToolInvocationTarget};
+use cairn_domain::tool_invocation::{
+    truncate_output_preview, ToolInvocationOutcomeKind, ToolInvocationTarget,
+};
 use cairn_domain::*;
 use cairn_store::EventLog;
 
@@ -20,6 +22,12 @@ use crate::error::RuntimeError;
 #[async_trait]
 pub trait ToolInvocationService: Send + Sync {
     /// Record that a tool invocation has been requested and started.
+    ///
+    /// F55: `args_json` carries the structured tool arguments so the
+    /// `tool_invocations` projection can surface "what cairn ran" to
+    /// operators. Callers that cannot produce args (legacy record paths,
+    /// synthetic cache-hit paths) pass `None`.
+    #[allow(clippy::too_many_arguments)]
     async fn record_start(
         &self,
         project: &ProjectKey,
@@ -29,6 +37,7 @@ pub trait ToolInvocationService: Send + Sync {
         task_id: Option<TaskId>,
         target: ToolInvocationTarget,
         execution_class: ExecutionClass,
+        args_json: Option<serde_json::Value>,
     ) -> Result<(), RuntimeError>;
 
     /// Record that a tool invocation completed successfully.
@@ -46,6 +55,7 @@ pub trait ToolInvocationService: Send + Sync {
     /// the `ToolInvocationCompleted` event so a restart can rebuild
     /// `ToolCallResultCache` purely from the event log. Legacy / non-
     /// orchestrator callers pass `None` for both.
+    #[allow(clippy::too_many_arguments)]
     async fn record_completed(
         &self,
         project: &ProjectKey,
@@ -58,6 +68,12 @@ pub trait ToolInvocationService: Send + Sync {
     ) -> Result<(), RuntimeError>;
 
     /// Record that a tool invocation failed.
+    ///
+    /// F55: `output_preview` carries whatever stdout/stderr tail the
+    /// runtime captured before the failure, truncated to
+    /// `TOOL_OUTPUT_PREVIEW_MAX_BYTES`. `None` when the runtime had no
+    /// output to surface.
+    #[allow(clippy::too_many_arguments)]
     async fn record_failed(
         &self,
         project: &ProjectKey,
@@ -66,6 +82,7 @@ pub trait ToolInvocationService: Send + Sync {
         tool_name: String,
         outcome: ToolInvocationOutcomeKind,
         error_message: Option<String>,
+        output_preview: Option<String>,
     ) -> Result<(), RuntimeError>;
 
     /// RFC 020 Track 3: append a raw audit event (e.g. `ToolRecoveryPaused`)
@@ -112,6 +129,7 @@ where
         task_id: Option<TaskId>,
         target: ToolInvocationTarget,
         execution_class: ExecutionClass,
+        args_json: Option<serde_json::Value>,
     ) -> Result<(), RuntimeError> {
         let now = now_ms();
         let event = make_envelope(RuntimeEvent::ToolInvocationStarted(ToolInvocationStarted {
@@ -125,6 +143,7 @@ where
             prompt_release_id: None,
             requested_at_ms: now,
             started_at_ms: now,
+            args_json,
         }));
         self.store.append(&[event]).await?;
         Ok(())
@@ -146,6 +165,11 @@ where
         for ev in additional_events {
             batch.push(make_envelope(ev.clone()));
         }
+        // F55: derive the truncated preview from `result_json` at the
+        // seam so every completion path — orchestrator, tool-context,
+        // recovery — persists a consistent shape without forcing each
+        // caller to re-implement UTF-8 safe truncation.
+        let output_preview = result_json.as_ref().map(tool_result_preview_for_projection);
         batch.push(make_envelope(RuntimeEvent::ToolInvocationCompleted(
             ToolInvocationCompleted {
                 project: project.clone(),
@@ -156,6 +180,7 @@ where
                 outcome: ToolInvocationOutcomeKind::Success,
                 tool_call_id,
                 result_json,
+                output_preview,
             },
         )));
         self.store.append(&batch).await?;
@@ -170,7 +195,12 @@ where
         tool_name: String,
         outcome: ToolInvocationOutcomeKind,
         error_message: Option<String>,
+        output_preview: Option<String>,
     ) -> Result<(), RuntimeError> {
+        // F55: truncate any caller-supplied preview at the seam so the
+        // projection never stores a multi-MB blob even if a runtime
+        // caller passed raw output by accident.
+        let output_preview = output_preview.as_deref().map(truncate_output_preview);
         let event = make_envelope(RuntimeEvent::ToolInvocationFailed(ToolInvocationFailed {
             project: project.clone(),
             invocation_id,
@@ -179,6 +209,7 @@ where
             finished_at_ms: now_ms(),
             outcome,
             error_message,
+            output_preview,
         }));
         self.store.append(&[event]).await?;
         Ok(())
@@ -192,4 +223,23 @@ where
         self.store.append(&batch).await?;
         Ok(())
     }
+}
+
+/// F55: derive a UTF-8 safe, length-capped preview string from a tool's
+/// structured result payload for operator observability.
+///
+/// - Plain-string results (the common case for bash/read/grep) use the
+///   string directly.
+/// - Anything else is serialized back to pretty JSON so operators can
+///   eyeball structured tool returns in the run-detail view.
+///
+/// The returned string is always truncated via `truncate_output_preview`
+/// so the projection never holds more than
+/// `TOOL_OUTPUT_PREVIEW_MAX_BYTES` + the truncation marker.
+pub(crate) fn tool_result_preview_for_projection(value: &serde_json::Value) -> String {
+    let raw = match value {
+        serde_json::Value::String(s) => s.clone(),
+        other => serde_json::to_string_pretty(other).unwrap_or_else(|_| other.to_string()),
+    };
+    truncate_output_preview(&raw)
 }

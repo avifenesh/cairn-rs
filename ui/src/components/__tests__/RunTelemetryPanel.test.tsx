@@ -207,4 +207,43 @@ describe("<RunTelemetryPanel />", () => {
     // Truncation to 240 chars: only 239 x's visible + the ellipsis char.
     expect(container.textContent ?? "").not.toContain(longMsg);
   });
+
+  it("F55/F48: expands tool invocation row to show args + output preview", async () => {
+    getRunTelemetry.mockResolvedValue(
+      makeTelemetry({
+        tool_invocations: [{
+          invocation_id: "tool-expand-1",
+          tool_name: "bash",
+          status: "completed",
+          started_at_ms: 100,
+          finished_at_ms: 350,
+          duration_ms: 250,
+          args: { command: "echo hello-f55-marker" },
+          output_preview: "hello-f55-marker\n",
+          output_truncated: false,
+          error_message: null,
+        }],
+      }),
+    );
+    const { container } = renderPanel();
+    const row = await screen.findByText("bash");
+    // Click the row to expand. Closest <tr> is the collapsed row; the
+    // expanded row is inserted as a sibling with our data-testid.
+    const tr = row.closest("tr");
+    expect(tr).not.toBeNull();
+    tr!.click();
+    await waitFor(() => {
+      expect(
+        container.querySelector("[data-testid=\"tool-invocation-args-tool-expand-1\"]"),
+      ).not.toBeNull();
+    });
+    const args = container.querySelector(
+      "[data-testid=\"tool-invocation-args-tool-expand-1\"]",
+    );
+    expect(args?.textContent ?? "").toContain("echo hello-f55-marker");
+    const output = container.querySelector(
+      "[data-testid=\"tool-invocation-output-tool-expand-1\"]",
+    );
+    expect(output?.textContent ?? "").toContain("hello-f55-marker");
+  });
 });
