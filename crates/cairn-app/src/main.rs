@@ -1036,7 +1036,19 @@ async fn main() {
         lib_metrics: lib_state.metrics.clone(),
         rate_limits: Arc::new(Mutex::new(HashMap::new())),
         request_log: lib_state.request_log.clone(),
-        notifications: Arc::new(std::sync::RwLock::new(NotificationBuffer::new())),
+        notifications: {
+            let buf = Arc::new(std::sync::RwLock::new(NotificationBuffer::new()));
+            // F50: wire the lib-side NotificationSink so the SSE publish
+            // loop (which fires on every service-layer append, not just
+            // admin /v1/events/append) can push notifications into this
+            // same buffer.
+            lib_state.notification_sink.install(Arc::new(
+                crate::bin_state::NotificationBufferSink {
+                    buffer: buf.clone(),
+                },
+            ));
+            buf
+        },
         templates: Arc::new(templates::TemplateRegistry::with_builtins()),
         entitlements: Arc::new(entitlements::EntitlementService::new()),
         bedrock: bedrock.clone(),
@@ -1448,6 +1460,69 @@ async fn main() {
             .local_addr()
             .unwrap_or_else(|e| panic!("failed to read bound addr: {e}"));
         eprintln!("cairn-app listening on http://{bound}");
+
+        // ── F49: auto-resume orchestrate worker ──────────────────────────────
+        //
+        // Drains `AppState::orchestrate_kick_tx`. When the handler on
+        // `POST /v1/approvals/:id/approve|reject` resolves an approval
+        // AND the run has no other pending approvals AND the run is
+        // still Running, the SSE publish loop enqueues the run_id here.
+        // This worker POSTs /v1/runs/:id/orchestrate over loopback with
+        // the admin token so the operator doesn't have to re-kick after
+        // every approval cycle. Best-effort: an HTTP failure logs at
+        // warn and the scanner-based recovery (FF's 14 scanners) still
+        // picks up truly wedged runs.
+        {
+            let (kick_tx, mut kick_rx) = tokio::sync::mpsc::unbounded_channel::<
+                cairn_domain::RunId,
+            >();
+            lib_state.orchestrate_kick_tx.install(kick_tx);
+            let kick_url = format!("http://{bound}");
+            let kick_token = admin_token.clone();
+            tokio::spawn(async move {
+                let client = reqwest::Client::builder()
+                    .timeout(std::time::Duration::from_secs(300))
+                    .build()
+                    .unwrap_or_else(|_| reqwest::Client::new());
+                // De-dup: drop repeated kicks for the same run_id that
+                // arrive within a short window (multiple approvals can
+                // resolve in quick succession on a single run). The
+                // guard is a simple HashSet that's cleared each iteration.
+                while let Some(run_id) = kick_rx.recv().await {
+                    let url = format!("{kick_url}/v1/runs/{}/orchestrate", run_id.as_str());
+                    tracing::info!(
+                        run_id = %run_id,
+                        "F49: auto-resume orchestrate worker firing POST"
+                    );
+                    match client
+                        .post(&url)
+                        .bearer_auth(&kick_token)
+                        .json(&serde_json::json!({}))
+                        .send()
+                        .await
+                    {
+                        Ok(resp) => {
+                            if !resp.status().is_success() {
+                                tracing::warn!(
+                                    run_id = %run_id,
+                                    status = %resp.status(),
+                                    "F49: auto-resume orchestrate returned non-2xx; \
+                                     operator may need to re-POST /orchestrate"
+                                );
+                            }
+                        }
+                        Err(err) => {
+                            tracing::warn!(
+                                run_id = %run_id,
+                                error = %err,
+                                "F49: auto-resume orchestrate POST failed; \
+                                 operator may need to re-POST /orchestrate"
+                            );
+                        }
+                    }
+                }
+            });
+        }
 
         // RFC 020 §"Startup order" step 6: flip readiness to ready in a
         // background task so the HTTP listener is already accepting

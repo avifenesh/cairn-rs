@@ -144,6 +144,7 @@ pub(crate) struct Notification {
     pub(crate) created_at: u64,
 }
 
+#[derive(Debug)]
 pub(crate) struct NotificationBuffer {
     pub(crate) entries: VecDeque<Notification>,
 }
@@ -185,6 +186,40 @@ impl NotificationBuffer {
 
     pub(crate) fn unread_count(&self) -> usize {
         self.entries.iter().filter(|n| !n.read).count()
+    }
+}
+
+/// F50: adapter that lets `cairn_app::state::NotificationSink` push into
+/// this binary's concrete `NotificationBuffer`. The lib crate can't
+/// reference `NotificationBuffer` directly (it's `pub(crate)` and lives
+/// in the binary crate), so we implement the lib-level trait here and
+/// map field-for-field.
+#[derive(Debug)]
+pub(crate) struct NotificationBufferSink {
+    pub(crate) buffer: Arc<RwLock<NotificationBuffer>>,
+}
+
+impl cairn_app::state::OperatorNotificationSink for NotificationBufferSink {
+    fn push(&self, n: cairn_app::state::OperatorNotification) {
+        use cairn_app::state::OperatorNotificationType as T;
+        let notif = Notification {
+            id: n.id,
+            notif_type: match n.notif_type {
+                T::ApprovalRequested => NotifType::ApprovalRequested,
+                T::ApprovalResolved => NotifType::ApprovalResolved,
+                T::RunCompleted => NotifType::RunCompleted,
+                T::RunFailed => NotifType::RunFailed,
+                T::TaskStuck => NotifType::TaskStuck,
+            },
+            message: n.message,
+            entity_id: n.entity_id,
+            href: n.href,
+            read: false,
+            created_at: n.created_at_ms,
+        };
+        if let Ok(mut buf) = self.buffer.write() {
+            buf.push(notif);
+        }
     }
 }
 
