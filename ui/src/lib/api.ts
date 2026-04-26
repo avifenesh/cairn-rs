@@ -782,7 +782,13 @@ export function createApiClient(config: ApiClientConfig) {
     listRunInterventions: (runId: string, limit = 50): Promise<import("./types").InterventionRecord[]> =>
       getList(`/v1/runs/${encodeURIComponent(runId)}/interventions?limit=${limit}`),
 
-    /** POST /v1/runs — start a new run in a session. */
+    /** POST /v1/runs — start a new run in a session.
+     *
+     * `prompt` is the operator-supplied natural-language objective.
+     * When present, cairn persists it as the run's default goal so the
+     * orchestrator hands it to the LLM as the user-message `## Goal`
+     * section (see F42). Omit when the caller will supply `goal` on a
+     * subsequent `/orchestrate` body instead. */
     createRun: (body: {
       tenant_id?: string;
       workspace_id?: string;
@@ -791,6 +797,7 @@ export function createApiClient(config: ApiClientConfig) {
       run_id?: string;
       parent_run_id?: string;
       mode?: RunModeRequest;
+      prompt?: string;
     }): Promise<RunRecord> => post("/v1/runs", withScope(body)),
 
     /** POST /v1/runs/batch — create multiple runs at once. */
