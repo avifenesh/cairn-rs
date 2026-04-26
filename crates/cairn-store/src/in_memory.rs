@@ -315,6 +315,16 @@ impl InMemoryStore {
     /// HTTP server accepts traffic.
     ///
     /// Pass `Arc<PgEventLog>` or `Arc<SqliteEventLog>` — any `EventLog` impl works.
+    /// F52: test-only read of the `tool_invocation_cache_hits`
+    /// projection. Integration tests assert the projection grew after
+    /// a `ToolInvocationCacheHit` append.
+    pub fn all_tool_invocation_cache_hits(
+        &self,
+    ) -> Vec<crate::projections::ToolInvocationCacheHitRecord> {
+        let state = self.state.lock().unwrap_or_else(|p| p.into_inner());
+        state.tool_invocation_cache_hits.values().cloned().collect()
+    }
+
     pub fn set_secondary_log(&self, log: Arc<dyn EventLog + Send + Sync>) {
         *self
             .secondary_log
