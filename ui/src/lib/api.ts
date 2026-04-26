@@ -520,6 +520,40 @@ export function createApiClient(config: ApiClientConfig) {
       return unwrapRun(raw);
     },
 
+    /**
+     * GET /v1/runs/:id — full envelope form used by the run detail page.
+     * F47 PR2 ships `{ run, tasks, completion }`; older servers still return
+     * bare `RunRecord`. Normalize both into the envelope shape so callers
+     * can branch on `completion === null` without feature-detecting the wire
+     * format.
+     */
+    getRunDetail: async (runId: string): Promise<{
+      run: RunRecord;
+      tasks?: import("./types").TaskRecord[];
+      completion: import("./types").RunCompletion | null;
+    }> => {
+      const raw = await get<
+        RunRecord | {
+          run: RunRecord;
+          tasks?: import("./types").TaskRecord[];
+          completion?: import("./types").RunCompletion | null;
+        }
+      >(`/v1/runs/${encodeURIComponent(runId)}`);
+      if (raw && typeof raw === "object" && "run" in raw) {
+        const env = raw as {
+          run: RunRecord;
+          tasks?: import("./types").TaskRecord[];
+          completion?: import("./types").RunCompletion | null;
+        };
+        return {
+          run: env.run,
+          tasks: env.tasks,
+          completion: env.completion ?? null,
+        };
+      }
+      return { run: raw as RunRecord, completion: null };
+    },
+
     // ── Tenants (scope discovery) ────────────────────────────────────────────
 
     /** GET /v1/admin/tenants — list all tenants visible to the admin token.

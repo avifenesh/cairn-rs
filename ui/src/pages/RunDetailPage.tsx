@@ -5,7 +5,7 @@ import {
   Brain, Search, Zap, CheckCircle2, Wrench, ChevronDown, ChevronRight,
   Play, AlertTriangle, FileText, ThumbsUp, ThumbsDown, RotateCcw,
   Bolt, Box, Pause, Stethoscope, LifeBuoy, Lock, GitBranch,
-  MessageSquare, Sparkles,
+  MessageSquare, Sparkles, Info, AlertCircle, Terminal,
 } from "lucide-react";
 import { clsx } from "clsx";
 import { StatCard } from "../components/StatCard";
@@ -28,6 +28,7 @@ import { EntityExplainer } from "../components/EntityExplainer";
 import { ENTITY_EXPLAINERS } from "../lib/entityExplainers";
 import type {
   RunRecord, InterveneRequest, InterventionAction,
+  RunCompletion, CompletionVerification,
 } from "../lib/types";
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
@@ -130,7 +131,12 @@ function orchSummary(type: string, p: Record<string, unknown>): string {
     }
     case "orchestrate_finished": {
       const term = typeof p.termination === "string" ? p.termination : "unknown";
-      const summary = typeof p.summary === "string" ? ` — ${p.summary.slice(0, 60)}` : "";
+      // Wire field is `detail` (see OrchestratorEvent::Finished); the older
+      // `summary` key is kept as a fallback for any replayed legacy payloads.
+      const raw = typeof p.detail === "string"
+        ? p.detail
+        : typeof p.summary === "string" ? p.summary : "";
+      const summary = raw ? ` — ${raw.slice(0, 60)}` : "";
       return `${term}${summary}`;
     }
     case "operator_notification": {
@@ -1012,6 +1018,254 @@ function ChildRunsSection({ runId }: { runId: string }) {
 
 // ── Section wrapper ────────────────────────────────────────────────────────────
 
+// ── F47 PR3: "What actually happened" block ──────────────────────────────────
+//
+// Renders the CompletionVerification sidecar below the orchestrator's free-text
+// summary so operators can cross-check the LLM's claims against extractor-
+// produced evidence (warning/error lines + command outcomes from tool_results).
+//
+// Hidden entirely when `completion` is null — we do not show empty scaffolding
+// for still-running runs, failed/canceled runs, or pre-F47 runs that never had
+// a `RunCompletionAnnotated` event appended. See RunCompletion in types.ts.
+
+const COMPLETION_BLOCK_TOOLTIP =
+  "Cairn extracts warnings, errors, and command outcomes from the run's " +
+  "tool outputs independently of the LLM's summary above. Use this to " +
+  "verify the summary's claims.";
+
+/** Small ellipsis-on-overflow string cell with a `title` for full text on hover. */
+function TruncLine({ text, maxChars }: { text: string; maxChars: number }) {
+  const truncated = text.length > maxChars ? `${text.slice(0, maxChars)}…` : text;
+  return (
+    <span title={text.length > maxChars ? text : undefined} className="break-all">
+      {truncated}
+    </span>
+  );
+}
+
+function CompletionBlock({ completion }: { completion: RunCompletion }) {
+  // Defensive: while current persisted payloads always carry a fully-populated
+  // `verification`, guarding against missing/partial shapes keeps the block
+  // from crashing on older runs or unexpected backends replaying pre-F47
+  // envelopes.
+  const summary = completion.summary ?? "";
+  const verification = completion.verification ?? ({} as Partial<CompletionVerification>);
+  const warnings = Array.isArray(verification.warnings) ? verification.warnings : [];
+  const errors = Array.isArray(verification.errors) ? verification.errors : [];
+  const commands = Array.isArray(verification.commands) ? verification.commands : [];
+  const tool_results_scanned =
+    typeof verification.tool_results_scanned === "number" ? verification.tool_results_scanned : 0;
+  const extractor_version =
+    typeof verification.extractor_version === "number" ? verification.extractor_version : 0;
+
+  const scanned = tool_results_scanned;
+  const nothingScanned = scanned === 0;
+  const allEmpty = warnings.length === 0 && errors.length === 0 && commands.length === 0;
+  const cleanRun = !nothingScanned && allEmpty;
+
+  return (
+    <Section title="What actually happened">
+      {/* LLM summary (context above the evidence block) */}
+      <p className="text-[12px] text-gray-400 dark:text-zinc-500 mb-2 flex items-start gap-2">
+        {/* F32 tooltip on the header */}
+        <button
+          type="button"
+          aria-label="About this block"
+          title={COMPLETION_BLOCK_TOOLTIP}
+          className="shrink-0 mt-[2px] text-gray-400 dark:text-zinc-500 hover:text-gray-600 dark:hover:text-zinc-300 cursor-help"
+        >
+          <Info size={12} />
+        </button>
+        <span>
+          <span className="text-gray-500 dark:text-zinc-400 font-medium">LLM says:</span>{" "}
+          {summary.trim().length > 0
+            ? <span className="italic">{summary}</span>
+            : <span className="italic text-gray-300 dark:text-zinc-600">(no summary)</span>}
+        </span>
+      </p>
+
+      {nothingScanned ? (
+        <div className="rounded-lg border border-gray-200 dark:border-zinc-800 bg-gray-50 dark:bg-zinc-900 px-4 py-3">
+          <p className="text-[12px] text-gray-500 dark:text-zinc-400">No tool results scanned.</p>
+          <p className="text-[11px] text-gray-400 dark:text-zinc-500 mt-1">
+            The run completed without invoking any tools, so there is no tool output
+            to cross-check the summary against.
+          </p>
+        </div>
+      ) : cleanRun ? (
+        <div className="rounded-lg border border-emerald-900/40 bg-emerald-950/20 px-4 py-3">
+          <p className="text-[12px] text-emerald-300">
+            No warnings or errors captured from {scanned} tool result{scanned === 1 ? "" : "s"}.
+          </p>
+          <p className="text-[11px] text-emerald-400/70 mt-1">
+            The summary has nothing to contradict in this run's tool outputs.
+          </p>
+        </div>
+      ) : (
+        <div className="space-y-2">
+          <CompletionSubsection
+            title="Warnings"
+            oneLiner='Lines matching "warning:" in tool outputs.'
+            count={warnings.length}
+            accent="warning"
+            icon={<AlertTriangle size={12} className="text-amber-400" />}
+            emptyLabel="No warnings"
+          >
+            {warnings.length > 0 && (
+              <ul className="divide-y divide-amber-900/30">
+                {warnings.map((w, i) => (
+                  <li
+                    key={i}
+                    className="px-3 py-1.5 font-mono text-[11px] text-amber-200 hover:bg-amber-950/30 transition-colors"
+                  >
+                    <TruncLine text={w} maxChars={500} />
+                  </li>
+                ))}
+              </ul>
+            )}
+          </CompletionSubsection>
+
+          <CompletionSubsection
+            title="Errors"
+            oneLiner='Lines matching "error:" or "error[...]" in tool outputs.'
+            count={errors.length}
+            accent={errors.length > 0 ? "error" : "warning"}
+            icon={<AlertCircle size={12} className={errors.length > 0 ? "text-red-400" : "text-gray-400 dark:text-zinc-500"} />}
+            emptyLabel="No errors"
+          >
+            {errors.length > 0 && (
+              <ul className="divide-y divide-red-900/30">
+                {errors.map((e, i) => (
+                  <li
+                    key={i}
+                    className="px-3 py-1.5 font-mono text-[11px] text-red-200 hover:bg-red-950/30 transition-colors"
+                  >
+                    <TruncLine text={e} maxChars={500} />
+                  </li>
+                ))}
+              </ul>
+            )}
+          </CompletionSubsection>
+
+          <CompletionSubsection
+            title="Commands"
+            oneLiner="Tool invocations and their exit codes."
+            count={commands.length}
+            accent="neutral"
+            icon={<Terminal size={12} className="text-gray-500 dark:text-zinc-400" />}
+            emptyLabel="No commands"
+          >
+            {commands.length > 0 && (
+              <div className="overflow-x-auto">
+                <table className="min-w-full text-[11px]">
+                  <thead className="bg-gray-100 dark:bg-zinc-900/60">
+                    <tr>
+                      <TH ch="tool" />
+                      <TH ch="cmd" />
+                      <TH ch="exit" right />
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-200 dark:divide-zinc-800/50">
+                    {commands.map((c, i) => {
+                      const isBashLike = c.tool_name === "bash" || c.tool_name === "shell_exec";
+                      const cmdDisplay = isBashLike && c.cmd.length > 120
+                        ? `${c.cmd.slice(0, 120)}…`
+                        : c.cmd;
+                      return (
+                        <tr key={i} className="hover:bg-gray-100/60 dark:hover:bg-zinc-800/40">
+                          <td className="px-3 py-1 font-mono text-gray-700 dark:text-zinc-300 whitespace-nowrap">
+                            {c.tool_name}
+                          </td>
+                          <td
+                            className="px-3 py-1 font-mono text-gray-600 dark:text-zinc-400"
+                            title={isBashLike && c.cmd.length > 120 ? c.cmd : undefined}
+                          >
+                            {cmdDisplay}
+                          </td>
+                          <td className="px-3 py-1 font-mono text-right tabular-nums">
+                            {c.exit_code === null ? (
+                              <span className="text-gray-300 dark:text-zinc-600">—</span>
+                            ) : c.exit_code === 0 ? (
+                              <span className="text-emerald-400">{c.exit_code}</span>
+                            ) : (
+                              <span className="text-red-400">{c.exit_code}</span>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </CompletionSubsection>
+        </div>
+      )}
+
+      <p className="text-[10px] text-gray-400 dark:text-zinc-600 mt-2">
+        Scanned {scanned} tool result{scanned === 1 ? "" : "s"} · extractor v{extractor_version}
+      </p>
+    </Section>
+  );
+}
+
+function CompletionSubsection({
+  title,
+  oneLiner,
+  count,
+  accent,
+  icon,
+  emptyLabel,
+  children,
+}: {
+  title: string;
+  oneLiner: string;
+  count: number;
+  accent: "warning" | "error" | "neutral";
+  icon: React.ReactNode;
+  emptyLabel: string;
+  children: React.ReactNode;
+}) {
+  const borderCls =
+    accent === "error" && count > 0
+      ? "border-red-900/50"
+      : accent === "warning" && count > 0
+      ? "border-amber-900/50"
+      : "border-gray-200 dark:border-zinc-800";
+  const badgeCls =
+    accent === "error" && count > 0
+      ? "bg-red-950/40 text-red-300 ring-red-900/60"
+      : accent === "warning" && count > 0
+      ? "bg-amber-950/40 text-amber-300 ring-amber-900/60"
+      : "bg-gray-100 dark:bg-zinc-800 text-gray-500 dark:text-zinc-400 ring-gray-300 dark:ring-zinc-700";
+
+  return (
+    <details
+      open={count > 0}
+      className={clsx(
+        "rounded-lg border bg-gray-50 dark:bg-zinc-900 overflow-hidden",
+        borderCls,
+      )}
+    >
+      <summary className="flex items-center gap-2 px-3 py-2 cursor-pointer select-none hover:bg-gray-100/60 dark:hover:bg-zinc-800/40">
+        {icon}
+        <span className="text-[12px] font-medium text-gray-700 dark:text-zinc-300">{title}</span>
+        <span className={clsx("rounded px-1.5 py-0.5 text-[10px] font-mono ring-1 tabular-nums", badgeCls)}>
+          {count}
+        </span>
+        <span className="text-[10px] text-gray-400 dark:text-zinc-500 ml-1">{oneLiner}</span>
+      </summary>
+      {count === 0 ? (
+        <p className="px-3 py-2 text-[11px] text-gray-400 dark:text-zinc-500 italic border-t border-gray-200 dark:border-zinc-800">
+          {emptyLabel}
+        </p>
+      ) : (
+        <div className="border-t border-gray-200 dark:border-zinc-800">{children}</div>
+      )}
+    </details>
+  );
+}
+
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <div>
@@ -1053,11 +1307,41 @@ export function RunDetailPage({ runId, onBack }: RunDetailPageProps) {
   const queryClient = useQueryClient();
   const toast = useToast();
 
-  const { data: run } = useQuery({
+  const { data: runDetail } = useQuery({
     queryKey: ["run-detail", runId],
-    queryFn: () => defaultApi.getRun(runId),
+    queryFn: () => defaultApi.getRunDetail(runId),
     staleTime: 10_000,
   });
+  const run = runDetail?.run;
+
+  // F47 PR3: completion block is driven by the persisted envelope but can be
+  // live-updated from the `orchestrate_finished` SSE frame so the block
+  // appears the moment the run terminates, without requiring a refetch.
+  const { events: streamEvents } = useEventStream();
+  const [liveCompletion, setLiveCompletion] = useState<RunCompletion | null>(null);
+  // Reset the live-SSE fallback whenever the user navigates to a different
+  // run; otherwise the previous run's completion would leak into the new
+  // detail page until its own orchestrate_finished frame arrived.
+  useEffect(() => {
+    setLiveCompletion(null);
+  }, [runId]);
+  useEffect(() => {
+    for (const ev of streamEvents) {
+      if (ev.type !== "orchestrate_finished") continue;
+      const p = (ev.payload ?? {}) as Record<string, unknown>;
+      if (p.run_id !== runId && p.runId !== runId) continue;
+      if (p.termination !== "completed") continue;
+      const verification = p.completion_verification as CompletionVerification | undefined;
+      if (!verification) continue;
+      const summary = typeof p.detail === "string" ? p.detail : "";
+      setLiveCompletion({
+        summary,
+        verification,
+        completed_at: ev.receivedAt,
+      });
+    }
+  }, [streamEvents, runId]);
+  const completion: RunCompletion | null = runDetail?.completion ?? liveCompletion;
 
   const { data: tasks, isLoading: tasksLoading } = useQuery({
     queryKey: ["run-tasks", runId],
@@ -1232,6 +1516,9 @@ export function RunDetailPage({ runId, onBack }: RunDetailPageProps) {
 
         {/* Orchestration live timeline — visible when SSE events arrive */}
         <OrchestrationTimeline runId={runId} />
+
+        {/* F47 PR3: "What actually happened" — LLM summary + extractor evidence */}
+        {completion && <CompletionBlock completion={completion} />}
 
         {/* F29 CE — Telemetry panel (provider calls, tool invocations, totals) */}
         <RunTelemetryPanel runId={runId} />
