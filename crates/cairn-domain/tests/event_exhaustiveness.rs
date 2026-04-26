@@ -1384,13 +1384,11 @@ fn all_variants() -> Vec<RuntimeEvent> {
             status: ProviderConnectionStatus::Active,
             registered_at: ts,
         }),
-        RuntimeEvent::ProviderConnectionDeleted(
-            cairn_domain::events::ProviderConnectionDeleted {
-                tenant: tkey(),
-                provider_connection_id: ProviderConnectionId::new("conn1"),
-                deleted_at: ts,
-            },
-        ),
+        RuntimeEvent::ProviderConnectionDeleted(cairn_domain::events::ProviderConnectionDeleted {
+            tenant: tkey(),
+            provider_connection_id: ProviderConnectionId::new("conn1"),
+            deleted_at: ts,
+        }),
         RuntimeEvent::ProviderHealthChecked(ProviderHealthChecked {
             tenant_id: tid(),
             connection_id: ProviderConnectionId::new("conn1"),
