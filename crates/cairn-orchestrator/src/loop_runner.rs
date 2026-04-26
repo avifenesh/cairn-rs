@@ -307,6 +307,28 @@ pub const MIN_DECIDE_BUDGET_MS: u64 = 5_000;
 
 // ── OrchestratorLoop ──────────────────────────────────────────────────────────
 
+/// One operator-rejected tool call surfaced by the F46 rejection
+/// drain.
+///
+/// Packaging the `tool_name` and truncated `preview` alongside the
+/// built `StepSummary` lets the loop emit SSE (or do nothing, as the
+/// current policy requires) without parsing the tool name back out of
+/// the summary text — that's brittle to formatting changes and forces
+/// the summary string to serve two purposes at once.
+struct DrainedRejection {
+    /// Tool whose proposal was rejected. Kept so callers who want to
+    /// emit SSE or metrics don't have to re-derive it from the summary.
+    #[allow(dead_code)] // Reserved for future SSE/metrics plumbing; see run_inner.
+    tool_name: String,
+    /// Operator-supplied reason, already passed through
+    /// `truncate_for_summary` for memory-bounding.
+    #[allow(dead_code)] // Reserved for future SSE/metrics plumbing; see run_inner.
+    preview: String,
+    /// Step summary that will be pushed into `step_history` so the
+    /// next DECIDE's user message sees the rejection verbatim.
+    summary: StepSummary,
+}
+
 /// Drives the GATHER → DECIDE → EXECUTE loop for a single run.
 ///
 /// # Type parameters
@@ -516,7 +538,7 @@ where
         &self,
         ctx: &OrchestrationContext,
         already_drained: &mut std::collections::HashSet<String>,
-    ) -> Result<Vec<StepSummary>, OrchestratorError> {
+    ) -> Result<Vec<DrainedRejection>, OrchestratorError> {
         let Some(reader) = &self.approval_reader else {
             return Ok(Vec::new());
         };
@@ -529,7 +551,7 @@ where
             return Ok(Vec::new());
         }
 
-        let mut summaries = Vec::new();
+        let mut out = Vec::new();
         for rj in rejected {
             let call_id_str = rj.call_id.as_str().to_owned();
             if !already_drained.insert(call_id_str.clone()) {
@@ -547,14 +569,18 @@ where
                 call_id = %call_id_str,
                 "F46 drain: surfacing rejected tool call to next DECIDE"
             );
-            summaries.push(StepSummary {
+            let summary = StepSummary {
                 iteration: ctx.iteration,
                 action_kind: "invoke_tool".to_owned(),
                 // Format mirrors `build_step_summary` so all three
                 // outcomes (ok / ERROR / REJECTED) render through the
                 // same "tool_result[<name>] ..." grammar downstream.
+                // Header uses "drained rejected" — avoids the
+                // contradictory "rejected approved proposal" wording
+                // while staying parallel to the approved drain's
+                // "drained approved: <tool>" header.
                 summary: format!(
-                    "rejected approved proposal: {tool_name}\n  tool_result[{tool_name}] REJECTED: {preview}"
+                    "drained rejected: {tool_name}\n  tool_result[{tool_name}] REJECTED: {preview}"
                 ),
                 // Rejection is a terminal *non-failure* from the loop's
                 // perspective — the run continues, just without the
@@ -563,9 +589,14 @@ where
                 // failure). The summary text itself carries the
                 // rejection semantics.
                 succeeded: true,
+            };
+            out.push(DrainedRejection {
+                tool_name,
+                preview,
+                summary,
             });
         }
-        Ok(summaries)
+        Ok(out)
     }
 
     async fn run_inner(
@@ -722,35 +753,24 @@ where
             // same call (F46 dogfood M1 repro). Runs every iteration
             // because a second approval may be rejected while a first
             // is executing.
-            let rejection_summaries = self
+            let rejections = self
                 .drain_rejected_pending(ctx, &mut drained_call_ids)
                 .await?;
-            for summary in rejection_summaries {
-                // Emit a tool_result SSE frame too so the UI timeline
-                // matches the step history. Use the tool name parsed
-                // back out of the summary header — the summary was
-                // built immediately above and always starts with the
-                // literal "rejected approved proposal: {tool_name}\n".
-                let sse_tool_name = summary
-                    .summary
-                    .lines()
-                    .next()
-                    .and_then(|l| l.strip_prefix("rejected approved proposal: "))
-                    .unwrap_or("<unknown>");
-                self.emitter
-                    .on_tool_result(
-                        ctx,
-                        sse_tool_name,
-                        false,
-                        None,
-                        summary
-                            .summary
-                            .lines()
-                            .find(|l| l.contains("REJECTED:"))
-                            .map(|l| l.trim()),
-                        0,
-                    )
-                    .await;
+            for DrainedRejection {
+                tool_name: _,
+                preview: _,
+                summary,
+            } in rejections
+            {
+                // Rejections are NOT tool executions — the tool was
+                // never invoked. Emitting a `tool_result` SSE frame
+                // (succeeded=false) would mislead UI consumers and skew
+                // tool-failure metrics. The rejection is already
+                // surfaced to operators via the ToolCallApproval
+                // projection + its dedicated `/reject` endpoint — the
+                // UI consumes that stream directly. Here we only need
+                // to thread the rejection into the next DECIDE's user
+                // message, which happens via `step_history` below.
                 step_history.push(summary);
             }
 
@@ -3310,7 +3330,7 @@ mod tests {
             .expect("at least one gather call must see the rejection step");
         let summary = &first[0];
         assert!(
-            summary.summary.contains("rejected approved proposal: bash"),
+            summary.summary.contains("drained rejected: bash"),
             "F46: rejection summary must carry the rejection header. Got: {:?}",
             summary.summary,
         );
@@ -3350,7 +3370,7 @@ mod tests {
             ) -> Result<GatherOutput, OrchestratorError> {
                 *self.iters.lock().unwrap() += 1;
                 for s in &ctx.step_history {
-                    if s.summary.contains("rejected approved proposal") {
+                    if s.summary.contains("drained rejected") {
                         self.rejections_seen.lock().unwrap().push(s.clone());
                     }
                 }
