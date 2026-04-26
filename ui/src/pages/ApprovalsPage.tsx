@@ -1,17 +1,11 @@
 /**
- * ApprovalsPage — unified operator inbox for BOTH approval kinds:
+ * ApprovalsPage — unified operator inbox (F45).
  *
- *   1. Legacy `ApprovalRecord` — plan review, release gates, run-level
- *      pauses. Uses `/v1/approvals` + `/v1/approvals/:id/{approve,reject}`.
- *   2. `ToolCallApprovalRecord` (PR BP-6) — per-tool-call gating with
- *      amend-before-approve, session widening, and match policies.
- *      Uses `/v1/tool-call-approvals/*`.
+ * Sources a single `/v1/approvals` query that merges plan approvals
+ * (`ApprovalRecord`) and tool-call approvals (`ToolCallApprovalRecord`)
+ * via a `kind` discriminator. Clicking a row opens a kind-specific drawer:
  *
- * Layout is list-on-left + side drawer on right (the shape the user
- * picked during PR BP-6 design review). Row kinds render uniform badge
- * + metadata rows; clicking a row opens the matching drawer:
- *
- *   - ApprovalDrawer       — legacy approve/reject with confirmation.
+ *   - ApprovalDrawer       — plan approve/reject with confirmation.
  *   - ToolCallDrawer       — view args, amend inline, pick scope (Once |
  *                            Session + optional match policy), reject
  *                            with reason, approve.
@@ -41,6 +35,7 @@ import type {
   ApprovalMatchPolicy,
   ApprovalRecord,
   ToolCallApprovalRecord,
+  UnifiedApproval,
 } from "../lib/types";
 import { useAutoRefresh, REFRESH_OPTIONS } from "../hooks/useAutoRefresh";
 import { EmptyScopeHint } from "../components/EmptyScopeHint";
@@ -105,28 +100,32 @@ const toolCallDecision = (r: ToolCallApprovalRecord): "approved" | "rejected" | 
   return null;
 };
 
-const toRow = (r: ApprovalRecord | ToolCallApprovalRecord): Row =>
-  "call_id" in r
-    ? {
-        kind: "tool",
-        id: r.call_id,
-        tool: r.tool_name,
-        runId: r.run_id,
-        createdAt: r.proposed_at_ms,
-        resolved: r.state !== "pending",
-        decision: toolCallDecision(r),
-        source: r,
-      }
-    : {
-        kind: "legacy",
-        id: r.approval_id,
-        tool: legacyLabel(r),
-        runId: r.run_id,
-        createdAt: r.created_at,
-        resolved: r.decision !== null,
-        decision: r.decision,
-        source: r,
-      };
+const toRow = (r: UnifiedApproval): Row => {
+  if (r.kind === "tool_call") {
+    const tc = r as ToolCallApprovalRecord & { kind: "tool_call" };
+    return {
+      kind: "tool",
+      id: tc.call_id,
+      tool: tc.tool_name,
+      runId: tc.run_id,
+      createdAt: tc.proposed_at_ms,
+      resolved: tc.state !== "pending",
+      decision: toolCallDecision(tc),
+      source: tc,
+    };
+  }
+  const pl = r as ApprovalRecord & { kind: "plan" };
+  return {
+    kind: "legacy",
+    id: pl.approval_id,
+    tool: legacyLabel(pl),
+    runId: pl.run_id,
+    createdAt: pl.created_at,
+    resolved: pl.decision !== null,
+    decision: pl.decision,
+    source: pl,
+  };
+};
 
 // ── Badges ─────────────────────────────────────────────────────────────────────
 
@@ -227,7 +226,9 @@ function LegacyDrawerBody({
 
   const resolve = useMutation({
     mutationFn: (decision: ApprovalDecision) =>
-      defaultApi.resolveApproval(approval.approval_id, decision),
+      decision === "approved"
+        ? defaultApi.approveApproval(approval.approval_id)
+        : defaultApi.rejectApproval(approval.approval_id),
     onSuccess: (_, decision) => {
       toast.success(decision === "approved" ? "Approval granted." : "Approval denied.");
       void qc.invalidateQueries({ queryKey: ["approvals"] });
@@ -314,7 +315,6 @@ function ToolCallDrawerBody({
   const [rejectOpen, setRejectOpen] = useState(false);
 
   const onResolved = () => {
-    void qc.invalidateQueries({ queryKey: ["tool-call-approvals"] });
     void qc.invalidateQueries({ queryKey: ["approvals"] });
     if (record.run_id) {
       void qc.invalidateQueries({ queryKey: ["run-detail", record.run_id] });
@@ -325,11 +325,11 @@ function ToolCallDrawerBody({
 
   const amend = useMutation({
     mutationFn: (new_tool_args: unknown) =>
-      defaultApi.amendToolCallApproval(record.call_id, { new_tool_args }),
+      defaultApi.amendApproval(record.call_id, { new_tool_args }),
     onSuccess: () => {
       toast.success("Arguments amended.");
       setEditing(false);
-      void qc.invalidateQueries({ queryKey: ["tool-call-approvals"] });
+      void qc.invalidateQueries({ queryKey: ["approvals"] });
     },
     onError: (err: unknown) =>
       toast.error(`Amend failed — ${err instanceof Error ? err.message : "try again."}`),
@@ -337,7 +337,7 @@ function ToolCallDrawerBody({
 
   const approve = useMutation({
     mutationFn: () =>
-      defaultApi.approveToolCallApproval(record.call_id, {
+      defaultApi.approveApproval(record.call_id, {
         scope:
           scopeType === "once"
             ? { type: "once" }
@@ -353,7 +353,7 @@ function ToolCallDrawerBody({
 
   const reject = useMutation({
     mutationFn: () =>
-      defaultApi.rejectToolCallApproval(record.call_id, {
+      defaultApi.rejectApproval(record.call_id, {
         reason: rejectReason.trim() ? rejectReason.trim() : undefined,
       }),
     onSuccess: () => {
@@ -635,26 +635,20 @@ export function ApprovalsPage() {
   const [search, setSearch] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
-  const legacyQ = useQuery({
+  // F45 — single unified source of truth. The server merges plan +
+  // tool-call approvals and returns them newest-first with a `kind`
+  // discriminator on every row.
+  const approvalsQ = useQuery({
     queryKey: ["approvals"],
-    queryFn: () => defaultApi.getAllApprovals(),
-    refetchInterval: refreshMs,
-  });
-  const toolQ = useQuery({
-    queryKey: ["tool-call-approvals"],
-    queryFn: () => defaultApi.listToolCallApprovals(),
+    queryFn: () => defaultApi.listApprovals(),
     refetchInterval: refreshMs,
   });
 
   const rows: Row[] = useMemo(() => {
-    const merged: Row[] = [
-      ...(legacyQ.data ?? []).map(toRow),
-      ...(toolQ.data ?? []).map(toRow),
-    ];
-    // Newest first.
+    const merged: Row[] = (approvalsQ.data ?? []).map(toRow);
     merged.sort((a, b) => b.createdAt - a.createdAt);
     return merged;
-  }, [legacyQ.data, toolQ.data]);
+  }, [approvalsQ.data]);
 
   const filtered = useMemo(() => {
     const needle = search.trim().toLowerCase();
@@ -689,18 +683,17 @@ export function ApprovalsPage() {
     return rows.filter(r => r.resolved && r.decision === "rejected" && r.createdAt >= since).length;
   }, [rows]);
 
-  const isLoading = legacyQ.isLoading || toolQ.isLoading;
-  const isFetching = legacyQ.isFetching || toolQ.isFetching;
-  const error = legacyQ.error ?? toolQ.error;
+  const isLoading = approvalsQ.isLoading;
+  const isFetching = approvalsQ.isFetching;
+  const error = approvalsQ.error;
 
-  if (legacyQ.isError && toolQ.isError) {
+  if (approvalsQ.isError) {
     return (
       <ErrorFallback
         error={error}
         resource="approvals"
         onRetry={() => {
-          void legacyQ.refetch();
-          void toolQ.refetch();
+          void approvalsQ.refetch();
         }}
       />
     );
@@ -788,7 +781,7 @@ export function ApprovalsPage() {
             </span>
           </div>
           <button
-            onClick={() => { void legacyQ.refetch(); void toolQ.refetch(); }}
+            onClick={() => { void approvalsQ.refetch(); }}
             disabled={isFetching}
             className="flex items-center gap-1 h-7 px-2 rounded border border-gray-200 dark:border-zinc-700 bg-gray-50 dark:bg-zinc-900 text-[11px] text-gray-400 dark:text-zinc-500 hover:text-gray-800 dark:hover:text-zinc-200 hover:border-zinc-600 disabled:opacity-40 transition-colors"
             title="Refresh now"

@@ -110,6 +110,11 @@ chrono = { version = "0.4", features = ["serde", "clock"], default-features = fa
 dotenvy = "0.15"
 aes-gcm = "0.10"
 sha2 = "0.10"
+# Percent-encoding is used by the deprecated /v1/tool-call-approvals/*
+# redirect handlers (F45) to safely embed the :call_id in the Location
+# header of the 308 response. Dev-dep entry below is kept for the
+# existing test-only use of source_id encoding.
+percent-encoding = "2"
 
 # metrics-otel: OTLP HTTP/protobuf transport. `opentelemetry-proto`
 # gives us the generated prost structs (ExportTraceServiceRequest +

@@ -647,139 +647,167 @@ pub const OPENAPI_JSON: &str = r##"{
         }
       }
     },
-    "/v1/approvals/pending": {
+    "/v1/approvals": {
       "get": {
         "tags": ["Approvals"],
-        "summary": "List pending approvals",
-        "operationId": "listPendingApprovals",
-        "responses": { "200": { "description": "Pending approvals" } }
-      }
-    },
-    "/v1/approvals/{id}/resolve": {
-      "post": {
-        "tags": ["Approvals"],
-        "summary": "Approve or reject an approval",
-        "operationId": "resolveApproval",
-        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
-        "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "properties": { "decision": { "type": "string", "enum": ["approved","rejected"] }, "reason": { "type": "string" } }, "required": ["decision"] } } } },
-        "responses": { "200": { "description": "Resolved approval" } }
-      }
-    },
-    "/v1/approvals/{id}/approve": {
-      "post": {
-        "tags": ["Approvals"],
-        "summary": "Approve a pending approval (sugar for resolve with decision=approved)",
-        "operationId": "approveApproval",
-        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
-        "responses": { "200": { "description": "Approved", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ApprovalRecord" } } } } }
-      }
-    },
-    "/v1/approvals/{id}/reject": {
-      "post": {
-        "tags": ["Approvals"],
-        "summary": "Reject a pending approval (sugar for resolve with decision=rejected)",
-        "operationId": "rejectApproval",
-        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
-        "responses": { "200": { "description": "Rejected", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ApprovalRecord" } } } } }
-      }
-    },
-    "/v1/tool-call-approvals": {
-      "get": {
-        "tags": ["Approvals"],
-        "summary": "List tool-call approvals (operator inbox)",
-        "description": "Tool-call approvals are the BP-v2 approval flow for LLM-proposed tool invocations. Filter by `run_id`, `session_id`, or project triple. `state` accepts `pending | approved | rejected | timeout`.",
-        "operationId": "listToolCallApprovals",
+        "summary": "List approvals (unified — plan + tool-call, F45)",
+        "description": "Merged operator inbox across both approval kinds. Every item carries a `kind` discriminator (`plan` | `tool_call`). Plan-approval rows flatten `ApprovalRecord`; tool-call rows flatten `ToolCallApprovalRecord`. Supersedes the pre-F45 `/v1/tool-call-approvals` list, which now 308-redirects here.",
+        "operationId": "listApprovals",
         "parameters": [
-          { "name": "run_id",       "in": "query", "schema": { "type": "string" } },
-          { "name": "session_id",   "in": "query", "schema": { "type": "string" } },
+          { "name": "kind",         "in": "query", "schema": { "type": "string", "enum": ["plan","tool_call"] }, "description": "Narrow to one kind; absent = both." },
           { "name": "state",        "in": "query", "schema": { "type": "string", "enum": ["pending","approved","rejected","timeout"] } },
+          { "name": "run_id",       "in": "query", "schema": { "type": "string" } },
+          { "name": "session_id",   "in": "query", "schema": { "type": "string" }, "description": "Tool-call native; excludes plan approvals when set." },
           { "name": "tenant_id",    "in": "query", "schema": { "type": "string" } },
           { "name": "workspace_id", "in": "query", "schema": { "type": "string" } },
           { "name": "project_id",   "in": "query", "schema": { "type": "string" } },
           { "name": "limit",        "in": "query", "schema": { "type": "integer", "default": 100 } },
           { "name": "offset",       "in": "query", "schema": { "type": "integer", "default": 0 } }
         ],
-        "responses": { "200": { "description": "Tool-call approval records" } }
+        "responses": { "200": { "description": "Merged approval records, newest first" } }
+      }
+    },
+    "/v1/approvals/pending": {
+      "get": {
+        "tags": ["Approvals"],
+        "summary": "List pending plan approvals",
+        "operationId": "listPendingApprovals",
+        "responses": { "200": { "description": "Pending plan approvals" } }
+      }
+    },
+    "/v1/approvals/{id}": {
+      "get": {
+        "tags": ["Approvals"],
+        "summary": "Fetch any approval by id (unified, F45)",
+        "description": "Resolves tool-call first, then plan. Response carries a `kind` discriminator.",
+        "operationId": "getApproval",
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": {
+          "200": { "description": "Unified approval record" },
+          "404": { "description": "Not found (or cross-tenant)" }
+        }
+      }
+    },
+    "/v1/approvals/{id}/approve": {
+      "post": {
+        "tags": ["Approvals"],
+        "summary": "Approve an approval (kind-aware)",
+        "description": "For plan approvals the body is ignored. For tool-call approvals `scope` is required: `{type:\"once\"}` resolves this call only; `{type:\"session\", match_policy?}` widens to matching calls in the same session (omitted `match_policy` inherits the proposal's). `approved_tool_args` overrides any prior amendment. `operator_id` in the body must match the authenticated principal when present (else 400 `identity_mismatch`).",
+        "operationId": "approveApproval",
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "requestBody": { "required": false, "content": { "application/json": { "schema": { "type": "object", "properties": {
+          "operator_id": { "type": "string" },
+          "scope": { "type": "object", "oneOf": [
+            { "type": "object", "properties": { "type": { "type": "string", "enum": ["once"] } }, "required": ["type"] },
+            { "type": "object", "properties": { "type": { "type": "string", "enum": ["session"] }, "match_policy": { "type": "object" } }, "required": ["type"] }
+          ] },
+          "approved_tool_args": {}
+        } } } } },
+        "responses": {
+          "200": { "description": "Approved" },
+          "400": { "description": "operator_id in body does not match authenticated principal" },
+          "404": { "description": "Unknown id" },
+          "409": { "description": "Approval already resolved" },
+          "422": { "description": "tool-call approval missing required `scope`" }
+        }
+      }
+    },
+    "/v1/approvals/{id}/reject": {
+      "post": {
+        "tags": ["Approvals"],
+        "summary": "Reject an approval (kind-aware)",
+        "operationId": "rejectApproval",
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "requestBody": { "required": false, "content": { "application/json": { "schema": { "type": "object", "properties": {
+          "operator_id": { "type": "string" },
+          "reason":      { "type": "string" }
+        } } } } },
+        "responses": {
+          "200": { "description": "Rejected" },
+          "400": { "description": "operator_id mismatch" },
+          "404": { "description": "Unknown id" },
+          "409": { "description": "Approval already resolved" }
+        }
+      }
+    },
+    "/v1/approvals/{id}/deny": {
+      "post": {
+        "tags": ["Approvals"],
+        "summary": "Alias of /reject (legacy route)",
+        "operationId": "denyApproval",
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": { "200": { "description": "Rejected" } }
+      }
+    },
+    "/v1/approvals/{id}/amend": {
+      "patch": {
+        "tags": ["Approvals"],
+        "summary": "Amend tool-call arguments (tool-call kind only)",
+        "description": "Non-resolving — operator must still approve/reject. Returns 422 `unsupported_on_plan_approval` when the id points at a plan approval, and 403 `self_amend_forbidden` if the proposal's `tool_name` is `amend_approval`.",
+        "operationId": "amendApproval",
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "properties": {
+          "operator_id":   { "type": "string" },
+          "new_tool_args": {}
+        }, "required": ["new_tool_args"] } } } },
+        "responses": {
+          "200": { "description": "Amended; state remains pending" },
+          "400": { "description": "operator_id mismatch" },
+          "403": { "description": "Cannot amend amend_approval tool calls" },
+          "404": { "description": "Unknown id" },
+          "409": { "description": "Proposal already resolved" },
+          "422": { "description": "Amend not supported on plan approvals" }
+        }
+      }
+    },
+    "/v1/tool-call-approvals": {
+      "get": {
+        "tags": ["Approvals"],
+        "summary": "Deprecated — 308-redirects to /v1/approvals?kind=tool_call",
+        "description": "Deprecated in F45. Clients should call `/v1/approvals?kind=tool_call`. This path 308-redirects (preserves method + body); response carries `Deprecation: true`.",
+        "operationId": "listToolCallApprovals",
+        "deprecated": true,
+        "responses": { "308": { "description": "Permanent Redirect to /v1/approvals" } }
       }
     },
     "/v1/tool-call-approvals/{call_id}": {
       "get": {
         "tags": ["Approvals"],
-        "summary": "Fetch a single tool-call approval",
+        "summary": "Deprecated — 308-redirects to /v1/approvals/{id}",
         "operationId": "getToolCallApproval",
+        "deprecated": true,
         "parameters": [{ "name": "call_id", "in": "path", "required": true, "schema": { "type": "string" } }],
-        "responses": {
-          "200": { "description": "Tool-call approval record" },
-          "404": { "description": "Not found (including cross-tenant)" }
-        }
+        "responses": { "308": { "description": "Permanent Redirect" } }
       }
     },
     "/v1/tool-call-approvals/{call_id}/approve": {
       "post": {
         "tags": ["Approvals"],
-        "summary": "Approve a tool-call proposal",
-        "description": "`scope.type=once` resolves this call only; `scope.type=session` widens the decision to future matching calls in the same session. When `match_policy` is omitted on `session`, the server inherits the match policy captured on the original proposal. `approved_tool_args` overrides any prior amendment and the original arguments with operator-supplied final args. The `operator_id` in the body is only accepted when it matches the authenticated principal; bodies that disagree are rejected with 400 `identity_mismatch`.",
+        "summary": "Deprecated — 308-redirects to /v1/approvals/{id}/approve",
         "operationId": "approveToolCallApproval",
+        "deprecated": true,
         "parameters": [{ "name": "call_id", "in": "path", "required": true, "schema": { "type": "string" } }],
-        "requestBody": {
-          "required": true,
-          "content": { "application/json": { "schema": { "type": "object", "properties": {
-            "operator_id": { "type": "string" },
-            "scope": { "type": "object", "oneOf": [
-              { "type": "object", "properties": { "type": { "type": "string", "enum": ["once"] } }, "required": ["type"] },
-              { "type": "object", "properties": { "type": { "type": "string", "enum": ["session"] }, "match_policy": { "type": "object" } }, "required": ["type"] }
-            ] },
-            "approved_tool_args": {}
-          }, "required": ["scope"] } } }
-        },
-        "responses": {
-          "200": { "description": "Approved" },
-          "400": { "description": "operator_id in body does not match authenticated principal" },
-          "409": { "description": "Proposal already resolved" },
-          "404": { "description": "Unknown call_id" }
-        }
+        "responses": { "308": { "description": "Permanent Redirect" } }
       }
     },
     "/v1/tool-call-approvals/{call_id}/reject": {
       "post": {
         "tags": ["Approvals"],
-        "summary": "Reject a tool-call proposal",
+        "summary": "Deprecated — 308-redirects to /v1/approvals/{id}/reject",
         "operationId": "rejectToolCallApproval",
+        "deprecated": true,
         "parameters": [{ "name": "call_id", "in": "path", "required": true, "schema": { "type": "string" } }],
-        "requestBody": {
-          "required": true,
-          "content": { "application/json": { "schema": { "type": "object", "properties": {
-            "operator_id": { "type": "string" },
-            "reason":      { "type": "string" }
-          } } } }
-        },
-        "responses": {
-          "200": { "description": "Rejected" },
-          "400": { "description": "operator_id mismatch" },
-          "409": { "description": "Proposal already resolved" }
-        }
+        "responses": { "308": { "description": "Permanent Redirect" } }
       }
     },
     "/v1/tool-call-approvals/{call_id}/amend": {
       "patch": {
         "tags": ["Approvals"],
-        "summary": "Preview-edit tool arguments without resolving",
-        "description": "Amendments are non-resolving — after amending the operator still needs to approve or reject. Refused with 403 `self_amend_forbidden` when the proposal's `tool_name` is `amend_approval` (confused-deputy guard).",
+        "summary": "Deprecated — 308-redirects to /v1/approvals/{id}/amend",
         "operationId": "amendToolCallApproval",
+        "deprecated": true,
         "parameters": [{ "name": "call_id", "in": "path", "required": true, "schema": { "type": "string" } }],
-        "requestBody": {
-          "required": true,
-          "content": { "application/json": { "schema": { "type": "object", "properties": {
-            "operator_id":   { "type": "string" },
-            "new_tool_args": {}
-          }, "required": ["new_tool_args"] } } }
-        },
-        "responses": {
-          "200": { "description": "Amended; state remains pending" },
-          "400": { "description": "operator_id mismatch" },
-          "403": { "description": "Cannot amend amend_approval tool calls" },
-          "409": { "description": "Proposal already resolved" }
-        }
+        "responses": { "308": { "description": "Permanent Redirect" } }
       }
     },
     "/v1/providers": {
