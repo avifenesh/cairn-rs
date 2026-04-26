@@ -82,11 +82,16 @@ enum ApprovalKind {
 /// payloads for consumers. The inner record is flattened so existing
 /// field names stay stable for clients migrating off
 /// `/v1/tool-call-approvals/*`.
+///
+/// Both variants are boxed to keep the enum compact and equal-sized —
+/// the records are ~224 and ~488 bytes respectively, which triggers
+/// `clippy::large_enum_variant` if either is stored inline. `Box<T>`
+/// serializes transparently via serde, so the wire shape is unchanged.
 #[derive(Debug, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub(crate) enum UnifiedApproval {
-    Plan(ApprovalRecord),
-    ToolCall(ToolCallApprovalRecord),
+    Plan(Box<ApprovalRecord>),
+    ToolCall(Box<ToolCallApprovalRecord>),
 }
 
 impl UnifiedApproval {
@@ -323,13 +328,13 @@ async fn resolve_approval_by_id(
 ) -> Result<UnifiedApproval, axum::response::Response> {
     let call_id = ToolCallId::new(raw_id);
     match load_tool_call_visible_to_tenant(state, tenant_scope, &call_id).await {
-        Ok(Some(record)) => return Ok(UnifiedApproval::ToolCall(record)),
+        Ok(Some(record)) => return Ok(UnifiedApproval::ToolCall(Box::new(record))),
         Ok(None) => {}
         Err(resp) => return Err(resp),
     }
     let approval_id = ApprovalId::new(raw_id);
     match load_plan_approval_visible_to_tenant(state, tenant_scope, &approval_id).await {
-        Ok(Some(record)) => Ok(UnifiedApproval::Plan(record)),
+        Ok(Some(record)) => Ok(UnifiedApproval::Plan(Box::new(record))),
         Ok(None) => Err(
             AppApiError::new(StatusCode::NOT_FOUND, "not_found", "approval not found")
                 .into_response(),
@@ -486,7 +491,7 @@ pub(crate) async fn list_approvals_handler(
                             continue;
                         }
                     }
-                    merged.push(UnifiedApproval::Plan(record));
+                    merged.push(UnifiedApproval::Plan(Box::new(record)));
                 }
             }
             Err(err) => return runtime_error_response(err),
@@ -524,7 +529,7 @@ pub(crate) async fn list_approvals_handler(
                             continue;
                         }
                     }
-                    merged.push(UnifiedApproval::ToolCall(record));
+                    merged.push(UnifiedApproval::ToolCall(Box::new(record)));
                 }
             }
             Err(err) => return store_error_response(err),
@@ -532,7 +537,7 @@ pub(crate) async fn list_approvals_handler(
     }
 
     // Newest first by created/proposed timestamp.
-    merged.sort_by(|a, b| b.created_at_ms().cmp(&a.created_at_ms()));
+    merged.sort_by_key(|r| std::cmp::Reverse(r.created_at_ms()));
 
     let total = merged.len();
     let end = offset.saturating_add(limit).min(total);
@@ -617,7 +622,7 @@ pub(crate) async fn approve_approval_handler(
             approve_tool_call(
                 &state,
                 &principal,
-                record,
+                *record,
                 operator_id,
                 scope_body,
                 body.approved_tool_args,
@@ -666,7 +671,7 @@ pub(crate) async fn reject_approval_handler(
                 Ok(o) => o,
                 Err(err) => return err.into_response(),
             };
-            reject_tool_call(&state, &principal, record, operator_id, body.reason).await
+            reject_tool_call(&state, &principal, *record, operator_id, body.reason).await
         }
     }
 }
@@ -768,7 +773,7 @@ pub(crate) async fn amend_approval_handler(
             let reader: &dyn ToolCallApprovalReadModel = state.runtime.store.as_ref();
             match reader.get(&call_id).await {
                 Ok(Some(updated)) => {
-                    (StatusCode::OK, Json(UnifiedApproval::ToolCall(updated))).into_response()
+                    (StatusCode::OK, Json(UnifiedApproval::ToolCall(Box::new(updated)))).into_response()
                 }
                 Ok(None) => AppApiError::new(
                     StatusCode::INTERNAL_SERVER_ERROR,
@@ -831,7 +836,7 @@ async fn resolve_plan_approval(
         {
             Ok(_) => {
                 crate::handlers::sse::publish_runtime_frames_since(state, before).await;
-                (StatusCode::OK, Json(UnifiedApproval::Plan(updated))).into_response()
+                (StatusCode::OK, Json(UnifiedApproval::Plan(Box::new(updated)))).into_response()
             }
             Err(err) => runtime_error_response(err),
         },
@@ -899,7 +904,7 @@ async fn approve_tool_call(
             let reader: &dyn ToolCallApprovalReadModel = state.runtime.store.as_ref();
             match reader.get(&call_id).await {
                 Ok(Some(updated)) => {
-                    (StatusCode::OK, Json(UnifiedApproval::ToolCall(updated))).into_response()
+                    (StatusCode::OK, Json(UnifiedApproval::ToolCall(Box::new(updated)))).into_response()
                 }
                 Ok(None) => AppApiError::new(
                     StatusCode::INTERNAL_SERVER_ERROR,
@@ -953,7 +958,7 @@ async fn reject_tool_call(
             let reader: &dyn ToolCallApprovalReadModel = state.runtime.store.as_ref();
             match reader.get(&call_id).await {
                 Ok(Some(updated)) => {
-                    (StatusCode::OK, Json(UnifiedApproval::ToolCall(updated))).into_response()
+                    (StatusCode::OK, Json(UnifiedApproval::ToolCall(Box::new(updated)))).into_response()
                 }
                 Ok(None) => AppApiError::new(
                     StatusCode::INTERNAL_SERVER_ERROR,
