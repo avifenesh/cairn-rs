@@ -859,6 +859,21 @@ impl RunRow {
             .map(serde_json::from_str::<cairn_domain::CompletionVerification>)
             .transpose()
             .map_err(|e| StoreError::Serialization(e.to_string()))?;
+        // Checked conversion (Copilot review on #313): mirror the
+        // pg adapter — a negative `completion_annotated_at_ms` wraps
+        // to a huge `u64` via `as u64` and would silently surface an
+        // invalid timestamp. Fail loud instead.
+        let completion_annotated_at_ms = self
+            .completion_annotated_at_ms
+            .map(|v| {
+                u64::try_from(v).map_err(|_| {
+                    StoreError::Serialization(format!(
+                        "runs.completion_annotated_at_ms {} is negative or out of u64 range",
+                        v
+                    ))
+                })
+            })
+            .transpose()?;
         Ok(RunRecord {
             run_id: RunId::new(self.run_id),
             session_id: SessionId::new(self.session_id),
@@ -879,7 +894,7 @@ impl RunRow {
             updated_at: self.updated_at as u64,
             completion_summary: self.completion_summary,
             completion_verification,
-            completion_annotated_at_ms: self.completion_annotated_at_ms.map(|v| v as u64),
+            completion_annotated_at_ms,
         })
     }
 }

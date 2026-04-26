@@ -129,6 +129,13 @@ async fn drive_run_to_completed(
     marker: &str,
     claimed_summary: &str,
 ) -> (String, String, String) {
+    // The admin-credential + provider-connection path targets the
+    // bootstrap `default_*` scope that LiveHarness pre-provisions for
+    // the admin token (matching F47 PR1's harness contract). Test
+    // isolation under parallel execution comes from the uuid-suffixed
+    // session_id / run_id / connection_id below — the tenant/workspace
+    // /project triple is the admin-default surface, not a per-test
+    // isolation axis.
     let scope_suffix = h.project.clone();
     let tenant = "default_tenant".to_owned();
     let workspace = "default_workspace".to_owned();
@@ -421,6 +428,9 @@ async fn run_detail_carries_completion_summary_and_verification_sqlite() {
 async fn run_detail_completion_absent_for_running_run() {
     let h = LiveHarness::setup().await;
 
+    // default_* = admin-bootstrap scope (matches PR1 test); uuid
+    // suffix on session_id / run_id provides the per-test isolation
+    // under parallel execution against the shared Valkey container.
     let scope_suffix = h.project.clone();
     let tenant = "default_tenant".to_owned();
     let workspace = "default_workspace".to_owned();
@@ -487,6 +497,8 @@ async fn run_detail_completion_absent_for_running_run() {
 async fn run_detail_completion_absent_when_no_annotation_event() {
     let h = LiveHarness::setup().await;
 
+    // default_* = admin-bootstrap scope (matches PR1 test); uuid
+    // suffix on session_id / run_id provides the per-test isolation.
     let scope_suffix = h.project.clone();
     let tenant = "default_tenant".to_owned();
     let workspace = "default_workspace".to_owned();
