@@ -385,6 +385,9 @@ impl InMemoryStore {
                         version: 1,
                         created_at: now,
                         updated_at: now,
+                        completion_summary: None,
+                        completion_verification: None,
+                        completion_annotated_at_ms: None,
                     },
                 );
                 // Update run quota counter
@@ -2003,6 +2006,27 @@ impl InMemoryStore {
             // cairn-app rebuilds the in-memory decision cache from the
             // event log at startup.
             RuntimeEvent::DecisionRecorded(_) | RuntimeEvent::DecisionCacheWarmup(_) => {}
+            // F47 PR2: attach summary + verification to the existing
+            // RunRecord. The completion fields (`completion_summary`,
+            // `completion_verification`, `completion_annotated_at_ms`)
+            // are overwrite-stable: replaying the same event leaves
+            // those three fields at identical values. `version` and
+            // `updated_at` still bump on replay — matching the
+            // RunStateChanged handler and the projection-bookkeeping
+            // contract other projections use — but the operator-
+            // observable shape stays the same. Absent run row (orphan
+            // annotation) is silently ignored; annotation cannot
+            // create a run. Mirrors the `if let Some(rec) = get_mut`
+            // pattern used by RunStateChanged above.
+            RuntimeEvent::RunCompletionAnnotated(e) => {
+                if let Some(rec) = state.runs.get_mut(e.run_id.as_str()) {
+                    rec.completion_summary = Some(e.summary.clone());
+                    rec.completion_verification = Some(e.verification.clone());
+                    rec.completion_annotated_at_ms = Some(e.occurred_at_ms);
+                    rec.version += 1;
+                    rec.updated_at = now;
+                }
+            }
         }
     }
 }

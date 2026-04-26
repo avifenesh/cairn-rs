@@ -1067,6 +1067,46 @@ impl PgSyncProjection {
                 .await
                 .map_err(|err| StoreError::Internal(err.to_string()))?;
             }
+            // F47 PR2: persist the completion summary + verification
+            // sidecar onto the existing runs row. UPDATE-only — the
+            // event presumes the run row already exists (the normal
+            // completion path runs RunCreated → RunStateChanged →
+            // complete() → RunCompletionAnnotated). Silent no-op on
+            // missing row mirrors the RunStateChanged handler above:
+            // replay of an annotation with no corresponding RunCreated
+            // in the same log is a malformed log, not something the
+            // projection should hard-fail on. `completion_verification_json`
+            // stores serde-JSON as TEXT rather than JSONB so the
+            // portable cross-backend contract (per the no-DB-specific-
+            // features memory) holds; the value is written and read
+            // wholesale, never queried with JSONB operators.
+            RuntimeEvent::RunCompletionAnnotated(e) => {
+                let verification_json = serde_json::to_string(&e.verification)
+                    .map_err(|err| StoreError::Serialization(err.to_string()))?;
+                let annotated_at = i64::try_from(e.occurred_at_ms).map_err(|_| {
+                    StoreError::Internal(format!(
+                        "RunCompletionAnnotated.occurred_at_ms {} exceeds i64::MAX",
+                        e.occurred_at_ms
+                    ))
+                })?;
+                sqlx::query(
+                    "UPDATE runs
+                        SET completion_summary              = $1,
+                            completion_verification_json    = $2,
+                            completion_annotated_at_ms      = $3,
+                            version                         = version + 1,
+                            updated_at                      = $4
+                      WHERE run_id = $5",
+                )
+                .bind(&e.summary)
+                .bind(verification_json)
+                .bind(annotated_at)
+                .bind(now)
+                .bind(e.run_id.as_str())
+                .execute(&mut **tx)
+                .await
+                .map_err(|err| StoreError::Internal(err.to_string()))?;
+            }
             RuntimeEvent::DecisionCacheWarmup(e) => {
                 let warmed_at = i64::try_from(e.warmed_at).map_err(|_| {
                     StoreError::Internal(format!(

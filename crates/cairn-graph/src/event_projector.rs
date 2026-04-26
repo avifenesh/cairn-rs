@@ -476,7 +476,12 @@ impl<P: GraphProjection> EventProjector<P> {
             | RuntimeEvent::ToolCallProposed(_)
             | RuntimeEvent::ToolCallApproved(_)
             | RuntimeEvent::ToolCallRejected(_)
-            | RuntimeEvent::ToolCallAmended(_) => {}
+            | RuntimeEvent::ToolCallAmended(_)
+            // F47 PR2: run completion annotation carries summary +
+            // verification sidecar. The runs node already exists from
+            // RunCreated; annotation is stored on the cairn-store
+            // projection, not the graph. No edges to add here.
+            | RuntimeEvent::RunCompletionAnnotated(_) => {}
 
             RuntimeEvent::EvalRunStarted(e) => {
                 self.add_node(

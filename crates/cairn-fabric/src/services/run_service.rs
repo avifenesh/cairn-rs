@@ -845,6 +845,14 @@ fn build_run_record(
         version: snapshot.current_lease_epoch.map(|e| e.0).unwrap_or(1),
         created_at: snapshot.created_at.0 as u64,
         updated_at: snapshot.last_mutation_at.0 as u64,
+        // F47 PR2: fabric snapshots are FF-derived and never carry the
+        // completion annotation — that lives on cairn-store's event-
+        // sourced projection. Callers who want the annotation read
+        // from the RunReadModel projection; fabric read-path always
+        // reports `None` here.
+        completion_summary: None,
+        completion_verification: None,
+        completion_annotated_at_ms: None,
     })
 }
 

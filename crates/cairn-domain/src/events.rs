@@ -266,6 +266,20 @@ pub enum RuntimeEvent {
     /// entries were restored and how many were dropped because their TTL
     /// had already expired at replay time.
     DecisionCacheWarmup(DecisionCacheWarmup),
+    /// F47 PR2: run completion annotated with the LLM's free-text summary
+    /// and the extractor-produced `CompletionVerification` sidecar.
+    ///
+    /// Emitted AFTER the orchestrator loop returns `LoopTermination::Completed`
+    /// and after `runs.complete` has flipped the run to the terminal state.
+    /// This event does not drive state transitions — `RunStateChanged` is
+    /// still the authority. It purely annotates the already-terminal run
+    /// with the truth-vs-claim gap so operators can inspect the evidence
+    /// on a run detail page after the SSE stream is gone.
+    ///
+    /// Replay-safe: the projection stores summary + verification on
+    /// nullable columns, so event logs written before F47 PR2 deserialize
+    /// cleanly and surface `completion: None` at the REST boundary.
+    RunCompletionAnnotated(RunCompletionAnnotated),
 }
 
 impl RuntimeEvent {
@@ -330,6 +344,7 @@ impl RuntimeEvent {
             RuntimeEvent::PlanRejected(event) => &event.project,
             RuntimeEvent::PlanRevisionRequested(event) => &event.project,
             RuntimeEvent::DecisionRecorded(event) => &event.project,
+            RuntimeEvent::RunCompletionAnnotated(event) => &event.project,
             RuntimeEvent::TriggerCreated(event) => &event.project,
             RuntimeEvent::TriggerEnabled(event) => &event.project,
             RuntimeEvent::TriggerDisabled(event) => &event.project,
@@ -668,6 +683,9 @@ impl RuntimeEvent {
             | RuntimeEvent::ScheduledTaskCreated(_)
             | RuntimeEvent::DecisionRecorded(_)
             | RuntimeEvent::DecisionCacheWarmup(_) => None,
+            RuntimeEvent::RunCompletionAnnotated(event) => Some(RuntimeEntityRef::Run {
+                run_id: event.run_id.clone(),
+            }),
         }
     }
 }
@@ -2470,6 +2488,31 @@ pub struct DecisionCacheWarmup {
     pub cached: u32,
     pub expired_and_dropped: u32,
     pub warmed_at: u64,
+}
+
+/// F47 PR2: annotates a completed run with the LLM's free-text summary
+/// and the extractor-produced `CompletionVerification` sidecar.
+///
+/// Emitted after `runs.complete` has flipped the run to the terminal
+/// state and after the orchestrator loop has returned
+/// `LoopTermination::Completed`. Does not drive state transitions —
+/// projections use it to populate nullable `completion_summary` /
+/// `completion_verification_json` columns so the evidence survives
+/// past the SSE `orchestrate_finished` frame.
+///
+/// Per-field `#[serde(default)]` keeps event logs written before this
+/// variant existed deserialising cleanly: a legacy log simply has no
+/// `RunCompletionAnnotated` entries, so every projected run shows
+/// `completion: None` at the REST boundary.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RunCompletionAnnotated {
+    pub project: crate::tenancy::ProjectKey,
+    pub session_id: crate::ids::SessionId,
+    pub run_id: crate::ids::RunId,
+    pub summary: String,
+    #[serde(default)]
+    pub verification: crate::orchestrator::CompletionVerification,
+    pub occurred_at_ms: u64,
 }
 
 #[cfg(test)]

@@ -252,6 +252,9 @@ mod tests {
             version: 1,
             created_at: 1_000_000,
             updated_at: 1_000_001,
+            completion_summary: None,
+            completion_verification: None,
+            completion_annotated_at_ms: None,
         }
     }
 

@@ -1038,6 +1038,8 @@ pub fn event_type_name(event: &RuntimeEvent) -> &'static str {
         RuntimeEvent::DecisionCacheWarmup(_) => "decision_cache_warmup",
         // RFC 020 Track 4
         RuntimeEvent::RecoverySummaryEmitted(_) => "recovery_summary",
+        // F47 PR2
+        RuntimeEvent::RunCompletionAnnotated(_) => "run_completion_annotated",
     }
 }
 
@@ -1560,6 +1562,16 @@ pub(crate) fn event_message(event: &RuntimeEvent) -> String {
             format!(
                 "Decision cache warmup: {} restored, {} expired",
                 warmup.cached, warmup.expired_and_dropped
+            )
+        }
+        // F47 PR2
+        RuntimeEvent::RunCompletionAnnotated(e) => {
+            format!(
+                "Run {} annotated ({} warnings, {} errors, {} commands)",
+                e.run_id,
+                e.verification.warnings.len(),
+                e.verification.errors.len(),
+                e.verification.commands.len(),
             )
         }
         RuntimeEvent::TaskPriorityChanged(_)

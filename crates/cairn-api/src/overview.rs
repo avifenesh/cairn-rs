@@ -172,6 +172,9 @@ mod tests {
                 version: 1,
                 created_at: 1000,
                 updated_at: 1000,
+                completion_summary: None,
+                completion_verification: None,
+                completion_annotated_at_ms: None,
             },
             RunRecord {
                 run_id: RunId::new("run_2"),
@@ -187,6 +190,9 @@ mod tests {
                 version: 1,
                 created_at: 2000,
                 updated_at: 2000,
+                completion_summary: None,
+                completion_verification: None,
+                completion_annotated_at_ms: None,
             },
             RunRecord {
                 run_id: RunId::new("run_3"),
@@ -202,6 +208,9 @@ mod tests {
                 version: 1,
                 created_at: 3000,
                 updated_at: 3000,
+                completion_summary: None,
+                completion_verification: None,
+                completion_annotated_at_ms: None,
             },
         ];
 

@@ -1822,3 +1822,19 @@ export interface OrchestrateFinishedPayload {
   detail: string | null;
   completion_verification?: CompletionVerification;
 }
+
+/**
+ * F47 PR2: operator-visible shape of a run's completion annotation on
+ * GET /v1/runs/:id. Absent for runs that are still running, failed,
+ * canceled, or completed before F47 PR2 shipped (no `RunCompletionAnnotated`
+ * event ever landed on the log). Matches `RunCompletion` in the Rust
+ * handler response; PR3 will render this on the run detail page.
+ */
+export interface RunCompletion {
+  /** LLM free-text summary from the CompleteRun action proposal. */
+  summary: string;
+  /** Extractor-produced evidence (warnings / errors / commands). */
+  verification: CompletionVerification;
+  /** Wall-clock ms at which the orchestrator emitted the annotation. */
+  completed_at: number;
+}

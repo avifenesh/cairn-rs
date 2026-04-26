@@ -85,6 +85,26 @@ pub const OPENAPI_JSON: &str = r##"{
         },
         "required": ["tool_name", "cmd", "exit_code"]
       },
+      "RunCompletion": {
+        "type": "object",
+        "description": "F47 PR2: operator-visible shape of a run's completion annotation on GET /v1/runs/:id. Populated after `LoopTermination::Completed` is persisted via the `RunCompletionAnnotated` event. Omitted for runs that are still running, failed, canceled, or completed before F47 PR2 shipped (no annotation ever landed on the event log).",
+        "properties": {
+          "summary": { "type": "string", "description": "LLM free-text summary from the CompleteRun action proposal." },
+          "verification": { "$ref": "#/components/schemas/CompletionVerification" },
+          "completed_at": { "type": "integer", "description": "Wall-clock ms at which the orchestrator emitted the annotation." }
+        },
+        "required": ["summary", "verification", "completed_at"]
+      },
+      "RunDetailResponse": {
+        "type": "object",
+        "description": "Response body for GET /v1/runs/:id. Wraps the RunRecord alongside child tasks and the F47 PR2 completion annotation.",
+        "properties": {
+          "run":        { "$ref": "#/components/schemas/RunRecord" },
+          "tasks":      { "type": "array", "items": { "$ref": "#/components/schemas/TaskRecord" } },
+          "completion": { "$ref": "#/components/schemas/RunCompletion", "nullable": true, "description": "F47 PR2 annotation. Omitted from the response body when absent (`skip_serializing_if = Option::is_none`)." }
+        },
+        "required": ["run", "tasks"]
+      },
       "CompletionVerification": {
         "type": "object",
         "description": "F47 PR1 sidecar attached to the `orchestrate_finished` SSE event on `termination=completed` runs. Warning / error lines extracted from tool_result text give operators an independent signal alongside the LLM's free-text `summary`. Non-authoritative: the extractor reports what tool outputs say, not whether the run succeeded.",
@@ -487,7 +507,17 @@ pub const OPENAPI_JSON: &str = r##"{
         "summary": "Get run by ID",
         "operationId": "getRun",
         "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
-        "responses": { "200": { "description": "Run record" }, "404": { "description": "Not found" } }
+        "responses": {
+          "200": {
+            "description": "Run detail. Includes a `completion` object once the run has been annotated via `RunCompletionAnnotated` (F47 PR2) — absent for running / failed / canceled / force-completed runs.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/RunDetailResponse" }
+              }
+            }
+          },
+          "404": { "description": "Not found" }
+        }
       }
     },
     "/v1/runs/{id}/claim": {
