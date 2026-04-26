@@ -113,11 +113,9 @@ impl FabricTaskService {
                 lane_id,
                 attempt_index,
                 lease_id: l.lease_id.to_string(),
-                lease_epoch: l.epoch.0.to_string(),
+                lease_epoch: l.lease_epoch.0.to_string(),
                 attempt_id: att.id.to_string(),
-                worker_instance_id: flowfabric::core::types::WorkerInstanceId::new(
-                    l.owner.as_str(),
-                ),
+                worker_instance_id: l.worker_instance_id.clone(),
                 source: String::new(),
             },
             // Any other shape (no lease, or lease without attempt) → use
@@ -181,7 +179,7 @@ impl FabricTaskService {
 
         let (lease_owner, lease_expires_at) = match snapshot.current_lease.as_ref() {
             Some(l) => (
-                Some(l.owner.clone()).filter(|s| !s.is_empty()),
+                Some(l.worker_instance_id.as_str().to_owned()).filter(|s| !s.is_empty()),
                 Some(l.expires_at.0 as u64).filter(|&v| v > 0),
             ),
             None => (None, None),
@@ -920,6 +918,9 @@ impl FabricTaskService {
         } else {
             "all"
         };
+        // TODO(ff-upstream: https://github.com/avifenesh/FlowFabric/issues/322)
+        // Service-layer suspend via Lua-glue; migrates to typed
+        // `suspend_by_triple` in CG-c once FF#322 lands.
         let suspend_input = build_suspend_input(eid, lease, &params, match_mode);
 
         self.control_plane
@@ -1068,6 +1069,13 @@ impl FabricTaskService {
 /// different resume-condition model than runs. Today both services
 /// use identical logic; deduplication would hide the policy choice
 /// behind a function boundary that callers don't read.
+///
+/// TODO(ff-upstream: <https://github.com/avifenesh/FlowFabric/issues/322>):
+/// This helper exists because `EngineBackend::suspend_by_triple` has
+/// not yet landed in FF. All service-layer suspend callers hold a
+/// `LeaseFencingTriple` (not a `Handle`), so we cannot use the typed
+/// `task.suspend(&Handle, SuspendArgs)` path that worker_sdk uses. CG-c
+/// migrates this and all call sites once FF#322 publishes.
 fn build_suspend_input(
     eid: ExecutionId,
     lease: ExecutionLeaseContext,

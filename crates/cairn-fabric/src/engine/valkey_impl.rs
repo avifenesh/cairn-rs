@@ -582,22 +582,34 @@ fn parse_execution_snapshot(
                     .and_then(|s| s.parse().ok())
                     .unwrap_or(0),
             );
-            let owner = core
-                .get("current_worker_instance_id")
-                .cloned()
-                .unwrap_or_default();
+            let worker_instance_id = flowfabric::core::types::WorkerInstanceId::new(
+                core.get("current_worker_instance_id")
+                    .cloned()
+                    .unwrap_or_default(),
+            );
             let expires_at = TimestampMs::from_millis(
                 core.get("lease_expires_at")
                     .and_then(|s| s.parse().ok())
                     .unwrap_or(0),
             );
-            Some(LeaseSummary {
-                lease_id,
-                epoch,
-                attempt_index,
-                owner,
-                expires_at,
-            })
+            // Upstream LeaseSummary (FF#278) is `#[non_exhaustive]` —
+            // use the `new` + `with_*` builder chain rather than struct
+            // literal. `last_heartbeat_at` is the FF#278-added field;
+            // cairn surfaces it from `lease_last_renewed_at` on
+            // exec_core when populated (backends that don't emit
+            // per-renewal ticks leave the field empty, which we map to
+            // `None`).
+            let mut summary = LeaseSummary::new(epoch, worker_instance_id, expires_at)
+                .with_lease_id(lease_id)
+                .with_attempt_index(attempt_index);
+            if let Some(ts) = core
+                .get("lease_last_renewed_at")
+                .and_then(|s| s.parse::<i64>().ok())
+                .filter(|ms| *ms > 0)
+            {
+                summary = summary.with_last_heartbeat_at(TimestampMs::from_millis(ts));
+            }
+            Some(summary)
         }
         None => None,
     };
