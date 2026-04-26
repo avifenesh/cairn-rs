@@ -286,18 +286,28 @@ async fn test_signal_delivery_resumes_waiter() {
 }
 
 /// Dedup: goes directly through `SignalBridge` so the waitpoint id is
-/// passed explicitly — `runs.resolve_approval` clears
-/// `current_waitpoint_id` on the first call, so a second resolve would
-/// error before hitting the idempotency guard.
+/// passed explicitly.
 ///
-/// Uses `deliver_tool_result_signal` because its signal_name
-/// `tool_result:<inv_id>` does NOT match the approval waitpoint's
-/// `approval_granted|rejected` matchers. The first delivery records a
-/// no-op and the waitpoint stays open; the second delivery with the same
-/// idempotency_key trips the SET NX in signal.lua and returns
+/// Uses a `ToolRequestedSuspension` pause — the waitpoint's typed
+/// resume condition is `Single { matcher: ByName("tool_result:<inv_a>") }`
+/// — and delivers a DIFFERENT invocation's signal (`tool_result:<inv_b>`)
+/// twice. The first delivery lands on the matcher-failed branch
+/// (waitpoint stays open), and the second delivery with the same
+/// idempotency_key trips FF's SET NX dedup and returns
 /// `SignalOutcome::Duplicate`.
+///
+/// Why not reuse an approval waitpoint: cairn's FF 0.10 approval
+/// waitpoint uses `SignalMatcher::Wildcard` (the typed trait cannot
+/// express "OR of two ByName matchers" on a single waitpoint
+/// without Pattern-3 multi-binding). A non-matching signal to a
+/// Wildcard waitpoint still resumes it, which would close the
+/// waitpoint before the idempotency check could run on the second
+/// delivery. The tool-result waitpoint preserves the "signal name
+/// must match to resume" semantic this idempotency test depends on.
 #[tokio::test]
 async fn test_signal_delivery_is_idempotent() {
+    use cairn_domain::{PauseReason, PauseReasonKind};
+
     let h = TestHarness::setup().await;
     let session_id = h.unique_session_id();
     let run_id = h.unique_run_id();
@@ -314,20 +324,31 @@ async fn test_signal_delivery_is_idempotent() {
         .await
         .expect("runs.claim failed");
 
+    // Pause the run on a ToolRequestedSuspension waitpoint — resume
+    // condition is `Single { matcher: ByName("tool_result:<inv_a>") }`.
+    let invocation_a = format!("inv_{}", uuid::Uuid::new_v4());
     h.fabric
         .runs
-        .enter_waiting_approval(&h.project, &session_id, &run_id)
+        .pause(
+            &h.project,
+            &session_id,
+            &run_id,
+            PauseReason {
+                kind: PauseReasonKind::ToolRequestedSuspension,
+                detail: Some(invocation_a.clone()),
+                resume_after_ms: None,
+                actor: None,
+            },
+        )
         .await
-        .expect("enter_waiting_approval failed");
+        .expect("pause on tool-requested suspension failed");
 
-    // Read the active waitpoint id from exec_core (populated by
-    // ff_suspend_execution at lua/suspension.lua:199).
     let core = read_exec_core_for_run(&h, &session_id, &run_id).await;
     let wp_id_str = core
         .get("current_waitpoint_id")
         .cloned()
         .filter(|s| !s.is_empty())
-        .expect("current_waitpoint_id must be set after enter_waiting_approval");
+        .expect("current_waitpoint_id must be set after pause");
     let wp_id =
         flowfabric::core::types::WaitpointId::parse(&wp_id_str).expect("waitpoint_id must parse");
     let eid = cairn_fabric::id_map::session_run_to_execution_id(
@@ -337,31 +358,31 @@ async fn test_signal_delivery_is_idempotent() {
         h.partition_config(),
     );
 
-    let invocation_id = format!("inv_{}", uuid::Uuid::new_v4());
-
-    // First delivery: records signal, no matcher hit, no_op. Waitpoint
-    // stays open because `tool_result:<inv_id>` is not in the matcher set
-    // for an approval waitpoint.
+    // Deliver a DIFFERENT invocation's tool_result signal. This
+    // fails the waitpoint's ByName(tool_result:<inv_a>) matcher so
+    // the waitpoint stays open, but the idempotency key is still
+    // written.
+    let invocation_b = format!("inv_{}", uuid::Uuid::new_v4());
     let first = h
         .fabric
         .signals
-        .deliver_tool_result_signal(&eid, &wp_id, &invocation_id, None)
+        .deliver_tool_result_signal(&eid, &wp_id, &invocation_b, None)
         .await
         .expect("first tool_result signal delivery failed");
     assert!(
         matches!(first, SignalOutcome::Accepted { .. }),
-        "first delivery must be Accepted (not Duplicate), got {:?}",
+        "first delivery of non-matching tool_result must be Accepted (not TriggeredResume), got {:?}",
         first,
     );
 
-    // Second delivery with SAME invocation_id → same idempotency_key
-    // (`tool_result:<inv_id>`). FF signal.lua:117-124 reads the idem_key,
-    // finds it present, returns `ok_duplicate(existing)` → parsed to
-    // SignalOutcome::Duplicate by ff-sdk.
+    // Second delivery with SAME invocation_b → same idempotency_key
+    // (`tool_result:<inv_b>`). FF signal.lua:117-124 reads the
+    // idem_key, finds it present, returns `ok_duplicate(existing)` →
+    // parsed to SignalOutcome::Duplicate by ff-sdk.
     let second = h
         .fabric
         .signals
-        .deliver_tool_result_signal(&eid, &wp_id, &invocation_id, None)
+        .deliver_tool_result_signal(&eid, &wp_id, &invocation_b, None)
         .await
         .expect("second tool_result signal delivery must return Duplicate, not error");
     assert!(

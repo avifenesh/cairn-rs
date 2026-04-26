@@ -6,14 +6,14 @@
 //! 1. **Worker-side 4-tuple helpers** ([`typed_approval`],
 //!    [`typed_subagent`], [`typed_tool_result`], [`typed_signal`]).
 //!    Each returns the `(SuspensionReasonCode, ResumeCondition,
-//!    Option<(TimestampMs, TimeoutBehavior)>, ResumePolicy)` tuple that
-//!    `flowfabric::sdk::task::ClaimedTask::suspend` consumes. CG-b
-//!    wired worker_sdk onto these.
-//!
-//! 2. **Service-side [`SuspendArgs`] builders** ([`build_suspend_args`]
-//!    + the `SuspendCase` variants). CG-c adopted FF#322 — the
-//!    service-layer pause / waiting-approval / policy-hold paths now
-//!    build a typed [`SuspendArgs`] + [`LeaseFence`] triple and call
+//!    Option<(TimestampMs, TimeoutBehavior)>, ResumePolicy)` tuple
+//!    that `flowfabric::sdk::task::ClaimedTask::suspend` consumes.
+//!    CG-b wired worker_sdk onto these.
+//! 2. **Service-side [`SuspendArgs`] builders**
+//!    ([`build_suspend_args`] + the [`SuspendCase`] variants). CG-c
+//!    adopted FF#322 — the service-layer pause / waiting-approval /
+//!    policy-hold paths now build a typed [`SuspendArgs`] +
+//!    [`LeaseFence`] triple and call
 //!    `EngineBackend::suspend_by_triple` directly. No Lua-ARGV
 //!    translation lives in cairn anymore; every suspension shape is
 //!    expressed as typed fields the FF trait validates on its side.
@@ -24,6 +24,7 @@ use flowfabric::core::contracts::{
 };
 use flowfabric::core::types::{
     AttemptId, ExecutionId, LeaseEpoch, LeaseFence, LeaseId, SuspensionId, TimestampMs,
+    WaitpointId,
 };
 
 use crate::engine::ExecutionLeaseContext;
@@ -60,32 +61,58 @@ fn compute_timeout(
     })
 }
 
-/// Build the approval-suspend `ResumeCondition` — resume on EITHER
-/// `approval_granted:<id>` or `approval_rejected:<id>`. First one wins.
+/// Build the approval-suspend `ResumeCondition` — any signal
+/// delivered to the single bound waitpoint resumes.
+///
+/// `waitpoint_key` must match the `WaitpointBinding::Fresh.waitpoint_key`
+/// the caller passes to `SuspendArgs::new`. The `Single { matcher:
+/// Wildcard }` shape tells the Lua evaluator to accept any signal
+/// name — and the `resolve_approval` / `resolve_task_approval` callers
+/// only ever deliver `approval_granted:<id>` or `approval_rejected:<id>`
+/// to this waitpoint, so the functional semantic (first approval
+/// signal resumes) is preserved without a typed composite that would
+/// need to carry both signal-name alternatives.
+///
+/// Why not `Composite(Count { matcher: ByName(...) })`: the v0.10 Lua
+/// evaluator's `matcher_accepts` compares a single `SignalMatcher`
+/// against the incoming signal name — it does not support an
+/// "either-of-two-names" matcher at the Count node. The old Lua-glue
+/// path expressed this via `required_signal_names: [granted, rejected]`
+/// which was a bespoke v0.9-era `signal_set` condition; the typed
+/// trait has no direct equivalent. Wildcard + caller-controlled
+/// delivery set is the idiomatic translation.
 ///
 /// Shared between the worker `suspend_for_approval` path and the
-/// service-layer `enter_waiting_approval` path so both produce the
-/// exact same composite; a drift would cause approval sessions to
-/// resume differently depending on which code path requested the
-/// suspension.
-fn approval_resume_condition(approval_id: &str) -> ResumeCondition {
+/// service-layer `enter_waiting_approval` path.
+fn approval_resume_condition(waitpoint_key: &str) -> ResumeCondition {
+    ResumeCondition::Single {
+        waitpoint_key: waitpoint_key.to_owned(),
+        matcher: SignalMatcher::Wildcard,
+    }
+}
+
+/// Typed 4-tuple for approval suspension. The worker_sdk path binds
+/// its own waitpoint via `ClaimedTask::suspend(...)`, which mints the
+/// `WaitpointBinding::Fresh` internally; the resume condition reads
+/// the waitpoint_key from `primary().waitpoint_key()` at the Lua
+/// layer, so we cannot materialise the `Single { waitpoint_key }`
+/// shape here without knowing the binding. Keep the worker helper on
+/// the composite `Count { DistinctWaitpoints }` shape it has used
+/// since CG-b — the worker-side `ClaimedTask::suspend` converts this
+/// into the v0.10 bindings internally (see flowfabric::sdk::task).
+pub(crate) fn typed_approval(approval_id: &str, timeout_ms: Option<u64>) -> TypedSuspendArgs {
     let safe_id = sanitize_signal_component(approval_id);
     let granted = format!("approval_granted:{safe_id}");
     let rejected = format!("approval_rejected:{safe_id}");
-    ResumeCondition::Composite(CompositeBody::count(
+    let cond = ResumeCondition::Composite(CompositeBody::count(
         1,
         CountKind::DistinctWaitpoints,
         None,
         vec![granted, rejected],
-    ))
-}
-
-/// Typed 4-tuple for approval suspension: `approval_granted:<id>` OR
-/// `approval_rejected:<id>` resumes.
-pub(crate) fn typed_approval(approval_id: &str, timeout_ms: Option<u64>) -> TypedSuspendArgs {
+    ));
     (
         SuspensionReasonCode::WaitingForApproval,
-        approval_resume_condition(approval_id),
+        cond,
         compute_timeout(timeout_ms, TimeoutBehavior::Escalate),
         ResumePolicy::normal(),
     )
@@ -150,10 +177,10 @@ pub(crate) fn typed_signal(signal_name: &str, timeout_ms: Option<u64>) -> TypedS
 /// these typed variants. [`build_suspend_args`] turns the variant into
 /// a full [`SuspendArgs`] the FF trait accepts.
 ///
-/// Each variant captures the semantic (reason code + resume condition
-/// + timeout behaviour) — not a wire-level signal-set shape. No
-/// `resume_condition_json` / `resume_policy_json` strings are built
-/// on cairn's side.
+/// Each variant captures the semantic (reason code, resume condition,
+/// timeout behaviour), not a wire-level signal-set shape. No
+/// `resume_condition_json` or `resume_policy_json` string is built on
+/// cairn's side.
 pub(crate) enum SuspendCase<'a> {
     /// Operator-initiated pause. Only an explicit operator resume
     /// closes the waitpoint. `TimeoutBehavior::Escalate` preserves
@@ -183,8 +210,17 @@ pub(crate) enum SuspendCase<'a> {
         resume_after_ms: Option<u64>,
     },
     /// Service-layer approval suspension (pre-claim gate). Resume on
-    /// `approval_granted:<run_id>` OR `approval_rejected:<run_id>`.
+    /// any signal delivered to the bound waitpoint — see
+    /// [`approval_resume_condition`] for the Wildcard rationale.
+    /// `approval_id` is the scope identifier (run_id or task_id)
+    /// used to construct the correlated `approval_granted:<id>` /
+    /// `approval_rejected:<id>` signal names on the delivery side.
+    /// Currently unused inside the typed resume condition (the
+    /// condition targets the bound waitpoint_key, not a signal name)
+    /// but kept on the variant for parity with the caller-side shape
+    /// and for debug/trace output.
     WaitingForApproval {
+        #[allow(dead_code)] // see doc-comment above
         approval_id: &'a str,
         timeout_ms: Option<u64>,
     },
@@ -204,34 +240,36 @@ impl SuspendCase<'_> {
     }
 
     /// The typed resume condition FF evaluates against delivered
-    /// signals.
-    fn resume_condition(&self) -> ResumeCondition {
+    /// signals. Takes the bound waitpoint's key because approval
+    /// conditions (which resume on an unconstrained signal set)
+    /// reference the waitpoint directly rather than a signal name.
+    fn resume_condition(&self, waitpoint_key: &str) -> ResumeCondition {
         match self {
             Self::OperatorPause => ResumeCondition::OperatorOnly,
             Self::ToolRequestedSuspension { invocation_id, .. } => {
                 let safe = sanitize_signal_component(invocation_id);
-                let waitpoint = format!("tool_result:{safe}");
+                let signal = format!("tool_result:{safe}");
                 ResumeCondition::Single {
-                    waitpoint_key: waitpoint.clone(),
-                    matcher: SignalMatcher::ByName(waitpoint),
+                    waitpoint_key: waitpoint_key.to_owned(),
+                    matcher: SignalMatcher::ByName(signal),
                 }
             }
             Self::RuntimeSuspension { signal_name, .. } => {
                 let safe = sanitize_signal_component(signal_name);
                 ResumeCondition::Single {
-                    waitpoint_key: safe.clone(),
+                    waitpoint_key: waitpoint_key.to_owned(),
                     matcher: SignalMatcher::ByName(safe),
                 }
             }
             Self::PolicyHold { detail, .. } => {
                 let safe = sanitize_signal_component(detail);
-                let waitpoint = format!("policy_resolved:{safe}");
+                let signal = format!("policy_resolved:{safe}");
                 ResumeCondition::Single {
-                    waitpoint_key: waitpoint.clone(),
-                    matcher: SignalMatcher::ByName(waitpoint),
+                    waitpoint_key: waitpoint_key.to_owned(),
+                    matcher: SignalMatcher::ByName(signal),
                 }
             }
-            Self::WaitingForApproval { approval_id, .. } => approval_resume_condition(approval_id),
+            Self::WaitingForApproval { .. } => approval_resume_condition(waitpoint_key),
         }
     }
 
@@ -271,13 +309,25 @@ impl SuspendCase<'_> {
 /// place. Worker-originated suspensions continue to ride the SDK
 /// `task.suspend(…)` path with `SuspensionRequester::Worker`.
 pub(crate) fn build_suspend_args(case: SuspendCase<'_>) -> SuspendArgs {
-    let resume_condition = case.resume_condition();
+    // Mint the waitpoint_id / waitpoint_key up front so the typed
+    // ResumeCondition can reference the exact key the binding will
+    // carry. `WaitpointBinding::fresh()` would generate its own
+    // uuid — we replicate its shape manually to keep the binding and
+    // the condition in sync.
+    let waitpoint_id = WaitpointId::new();
+    let waitpoint_key = format!("wpk:{waitpoint_id}");
+    let binding = WaitpointBinding::Fresh {
+        waitpoint_id,
+        waitpoint_key: waitpoint_key.clone(),
+    };
+
+    let resume_condition = case.resume_condition(&waitpoint_key);
     let reason_code = case.reason_code();
     let timeout = case.timeout();
 
     let mut args = SuspendArgs::new(
         SuspensionId::new(),
-        WaitpointBinding::fresh(),
+        binding,
         resume_condition,
         ResumePolicy::normal(),
         reason_code,
@@ -311,13 +361,23 @@ pub(crate) fn build_lease_fence(
         || lease.lease_epoch.is_empty()
         || lease.attempt_id.is_empty()
     {
-        return Err(FabricError::Validation {
-            reason:
-                "suspend_by_triple requires an active lease fence triple — execution has no \
-                 current lease (never claimed, terminal, or reclaimed). Re-read the \
-                 execution snapshot and retry on the live lease."
-                    .to_owned(),
-        });
+        // Shape the error message as `ff_suspend_execution rejected:
+        // fence_required` so the cairn-app `fabric_adapter`
+        // `is_suspend_state_conflict` classifier maps it to
+        // `RuntimeError::InvalidTransition` → HTTP 409 (not 500, not
+        // 422). This is the operator-visible state conflict a pending-
+        // run pause hits: the run has no lease yet, so there is no
+        // fence triple to build.
+        //
+        // FF 0.10's `suspend_by_triple` would return the same
+        // `fence_required` code if we passed a nil lease triple into
+        // the FCALL; we short-circuit here (no round-trip to Valkey)
+        // because the missing-lease check is cheap and local. Keeping
+        // the wire-string shape identical means the HTTP layer
+        // classifier does not need a second code path.
+        return Err(FabricError::Internal(
+            "ff_suspend_execution rejected: fence_required".to_owned(),
+        ));
     }
     let lease_id = LeaseId::parse(&lease.lease_id).map_err(|e| FabricError::Validation {
         reason: format!("suspend_by_triple: malformed lease_id {:?}: {e}", lease.lease_id),
@@ -458,16 +518,31 @@ mod tests {
         assert_eq!(args.requested_by, SuspensionRequester::Operator);
     }
 
+    /// Helper: pull the bound waitpoint_key from a built SuspendArgs
+    /// so we can cross-check the ResumeCondition references the same
+    /// string.
+    fn bound_wp_key(args: &SuspendArgs) -> String {
+        match args.primary() {
+            WaitpointBinding::Fresh { waitpoint_key, .. } => waitpoint_key.clone(),
+            other => panic!("expected Fresh binding, got {other:?}"),
+        }
+    }
+
     #[test]
-    fn service_tool_requested_suspension_single_waitpoint() {
+    fn service_tool_requested_suspension_targets_bound_waitpoint() {
         let args = build_suspend_args(SuspendCase::ToolRequestedSuspension {
             invocation_id: "inv_7",
             resume_after_ms: Some(30_000),
         });
         assert_eq!(args.reason_code, SuspensionReasonCode::WaitingForToolResult);
+        let wp = bound_wp_key(&args);
         match &args.resume_condition {
-            ResumeCondition::Single { waitpoint_key, .. } => {
-                assert_eq!(waitpoint_key, "tool_result:inv_7");
+            ResumeCondition::Single { waitpoint_key, matcher } => {
+                assert_eq!(waitpoint_key, &wp);
+                match matcher {
+                    SignalMatcher::ByName(name) => assert_eq!(name, "tool_result:inv_7"),
+                    other => panic!("expected ByName matcher, got {other:?}"),
+                }
             }
             other => panic!("expected Single, got {other:?}"),
         }
@@ -481,9 +556,11 @@ mod tests {
             resume_after_ms: None,
         });
         assert_eq!(args.reason_code, SuspensionReasonCode::WaitingForSignal);
+        let wp = bound_wp_key(&args);
         match &args.resume_condition {
-            ResumeCondition::Single { waitpoint_key, .. } => {
-                assert_eq!(waitpoint_key, "my_signal");
+            ResumeCondition::Single { waitpoint_key, matcher } => {
+                assert_eq!(waitpoint_key, &wp);
+                assert!(matches!(matcher, SignalMatcher::ByName(n) if n == "my_signal"));
             }
             other => panic!("expected Single, got {other:?}"),
         }
@@ -497,46 +574,55 @@ mod tests {
             resume_after_ms: None,
         });
         assert_eq!(args.reason_code, SuspensionReasonCode::PausedByPolicy);
+        let wp = bound_wp_key(&args);
         match &args.resume_condition {
-            ResumeCondition::Single { waitpoint_key, .. } => {
-                assert_eq!(waitpoint_key, "policy_resolved:budget");
+            ResumeCondition::Single { waitpoint_key, matcher } => {
+                assert_eq!(waitpoint_key, &wp);
+                assert!(matches!(matcher, SignalMatcher::ByName(n) if n == "policy_resolved:budget"));
             }
             other => panic!("expected Single, got {other:?}"),
         }
     }
 
     #[test]
-    fn service_waiting_for_approval_composite() {
+    fn service_waiting_for_approval_wildcard_single() {
         let args = build_suspend_args(SuspendCase::WaitingForApproval {
             approval_id: "run_7",
             timeout_ms: Some(60_000),
         });
         assert_eq!(args.reason_code, SuspensionReasonCode::WaitingForApproval);
+        let wp = bound_wp_key(&args);
         match &args.resume_condition {
-            ResumeCondition::Composite(body) => {
-                let json = serde_json::to_string(body).expect("composite serialises");
-                assert!(json.contains("approval_granted:run_7"));
-                assert!(json.contains("approval_rejected:run_7"));
+            ResumeCondition::Single { waitpoint_key, matcher } => {
+                assert_eq!(waitpoint_key, &wp);
+                assert!(matches!(matcher, SignalMatcher::Wildcard));
             }
-            other => panic!("expected Composite, got {other:?}"),
+            other => panic!("expected Single, got {other:?}"),
         }
     }
 
     #[test]
-    fn lease_fence_rejects_operator_override() {
+    fn lease_fence_rejects_operator_override_as_fence_required() {
+        // Unfenced context (no live lease) must surface a `fence_required`
+        // error in the shape the cairn-app fabric_adapter classifier
+        // recognises, so pause-on-pending-run returns HTTP 409 not 500.
         let ctx = ExecutionLeaseContext::unfenced(
             flowfabric::core::types::LaneId::new("cairn"),
             flowfabric::core::types::AttemptIndex::new(0),
         );
         let err = build_lease_fence(&ctx).unwrap_err();
         match err {
-            FabricError::Validation { reason } => {
+            FabricError::Internal(msg) => {
                 assert!(
-                    reason.contains("suspend_by_triple"),
-                    "expected suspend_by_triple in error: {reason}"
+                    msg.starts_with("ff_suspend_execution rejected: "),
+                    "expected ff_suspend_execution prefix: {msg}"
+                );
+                assert!(
+                    msg.ends_with(": fence_required"),
+                    "expected fence_required code: {msg}"
                 );
             }
-            other => panic!("expected Validation, got {other:?}"),
+            other => panic!("expected Internal(fence_required), got {other:?}"),
         }
     }
 

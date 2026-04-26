@@ -391,13 +391,11 @@ impl Worker {
                     .map(|l| l.expires_at.0.max(0) as u64)
                     .unwrap_or(0),
             })
-        } else if let Some(run_id) = snapshot.tags.get("cairn.run_id") {
-            Some(EntityContext::Run {
+        } else {
+            snapshot.tags.get("cairn.run_id").map(|run_id| EntityContext::Run {
                 project,
                 run_id: RunId::new(run_id.clone()),
             })
-        } else {
-            None
         }
     }
 
