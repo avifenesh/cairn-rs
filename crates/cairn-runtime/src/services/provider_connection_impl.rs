@@ -137,6 +137,26 @@ where
         )
         .await?)
     }
+
+    async fn delete(&self, id: &ProviderConnectionId) -> Result<(), RuntimeError> {
+        let existing = ProviderConnectionReadModel::get(self.store.as_ref(), id)
+            .await?
+            .ok_or_else(|| RuntimeError::NotFound {
+                entity: "provider_connection",
+                id: id.to_string(),
+            })?;
+
+        let event = make_envelope(RuntimeEvent::ProviderConnectionDeleted(
+            ProviderConnectionDeleted {
+                tenant: TenantKey::new(existing.tenant_id.clone()),
+                provider_connection_id: id.clone(),
+                deleted_at: now_ms(),
+            },
+        ));
+
+        self.store.append(&[event]).await?;
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -149,6 +169,74 @@ mod tests {
     use crate::provider_connections::{ProviderConnectionConfig, ProviderConnectionService};
     use crate::services::{ProviderConnectionServiceImpl, TenantServiceImpl};
     use crate::tenants::TenantService;
+
+    /// F40: hard-delete allows re-creating with the same ID. Before the
+    /// fix, DELETE appended a malformed Registered event and the create
+    /// path hit `RuntimeError::Conflict` on the second attempt.
+    #[tokio::test]
+    async fn delete_then_recreate_same_id_succeeds() {
+        let store = Arc::new(InMemoryStore::new());
+        let tenant_service = TenantServiceImpl::new(store.clone());
+        tenant_service
+            .create(TenantId::new("tenant_f40"), "F40".to_owned())
+            .await
+            .unwrap();
+
+        let service = ProviderConnectionServiceImpl::new(store);
+        let id = ProviderConnectionId::new("conn_f40");
+
+        service
+            .create(
+                TenantId::new("tenant_f40"),
+                id.clone(),
+                ProviderConnectionConfig {
+                    provider_family: "openai".to_owned(),
+                    adapter_type: "responses_api".to_owned(),
+                    supported_models: vec!["gpt-4".to_owned()],
+                },
+            )
+            .await
+            .expect("first create");
+
+        service.delete(&id).await.expect("delete");
+
+        assert!(
+            service.get(&id).await.unwrap().is_none(),
+            "projection row must be gone after delete",
+        );
+
+        let recreated = service
+            .create(
+                TenantId::new("tenant_f40"),
+                id.clone(),
+                ProviderConnectionConfig {
+                    provider_family: "anthropic".to_owned(),
+                    adapter_type: "messages_api".to_owned(),
+                    supported_models: vec!["claude-opus".to_owned()],
+                },
+            )
+            .await
+            .expect("recreate after delete");
+
+        assert_eq!(recreated.provider_family, "anthropic");
+        assert_eq!(recreated.adapter_type, "messages_api");
+    }
+
+    /// F40: delete on a non-existent connection surfaces `NotFound`,
+    /// which maps to 404 at the HTTP layer.
+    #[tokio::test]
+    async fn delete_missing_connection_is_not_found() {
+        let store = Arc::new(InMemoryStore::new());
+        let service = ProviderConnectionServiceImpl::new(store);
+        let err = service
+            .delete(&ProviderConnectionId::new("ghost"))
+            .await
+            .expect_err("delete on missing");
+        assert!(
+            matches!(err, crate::RuntimeError::NotFound { entity, .. } if entity == "provider_connection"),
+            "expected NotFound, got {err:?}",
+        );
+    }
 
     #[tokio::test]
     async fn create_and_get_round_trip() {

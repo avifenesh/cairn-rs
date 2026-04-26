@@ -40,4 +40,11 @@ pub trait ProviderConnectionService: Send + Sync {
         limit: usize,
         offset: usize,
     ) -> Result<Vec<ProviderConnectionRecord>, RuntimeError>;
+
+    /// Hard-delete a provider connection. The projection row is removed
+    /// so the `provider_connection_id` is available for re-creation;
+    /// the historical `ProviderConnectionRegistered` event stays in the
+    /// log for audit. Returns `NotFound` if the connection does not
+    /// exist. F40.
+    async fn delete(&self, id: &ProviderConnectionId) -> Result<(), RuntimeError>;
 }

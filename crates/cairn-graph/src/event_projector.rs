@@ -438,6 +438,7 @@ impl<P: GraphProjection> EventProjector<P> {
             | RuntimeEvent::ProviderBudgetAlertTriggered(_)
             | RuntimeEvent::ProviderBudgetExceeded(_)
             | RuntimeEvent::ProviderConnectionRegistered(_)
+            | RuntimeEvent::ProviderConnectionDeleted(_)
             | RuntimeEvent::ProviderHealthChecked(_)
             | RuntimeEvent::ProviderHealthScheduleSet(_)
             | RuntimeEvent::ProviderHealthScheduleTriggered(_)

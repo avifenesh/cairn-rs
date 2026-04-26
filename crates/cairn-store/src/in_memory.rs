@@ -979,6 +979,13 @@ impl InMemoryStore {
                     },
                 );
             }
+            RuntimeEvent::ProviderConnectionDeleted(e) => {
+                // Hard-remove so the ID can be re-created. History stays in
+                // the event log for audit. F40.
+                state
+                    .provider_connections
+                    .remove(e.provider_connection_id.as_str());
+            }
             RuntimeEvent::ProviderHealthChecked(e) => {
                 let healthy = matches!(
                     e.status,

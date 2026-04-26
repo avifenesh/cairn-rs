@@ -204,6 +204,10 @@ pub enum RuntimeEvent {
     ProviderBudgetAlertTriggered(ProviderBudgetAlertTriggered),
     ProviderBudgetExceeded(ProviderBudgetExceeded),
     ProviderConnectionRegistered(ProviderConnectionRegistered),
+    /// Operator removed a provider connection. The projection hard-removes
+    /// the row so the ID can be re-used; full history remains in the event
+    /// log. F40.
+    ProviderConnectionDeleted(ProviderConnectionDeleted),
     ProviderHealthChecked(ProviderHealthChecked),
     ProviderHealthScheduleSet(ProviderHealthScheduleSet),
     ProviderHealthScheduleTriggered(ProviderHealthScheduleTriggered),
@@ -383,6 +387,7 @@ impl RuntimeEvent {
             | RuntimeEvent::ProviderBudgetAlertTriggered(_)
             | RuntimeEvent::ProviderBudgetExceeded(_)
             | RuntimeEvent::ProviderConnectionRegistered(_)
+            | RuntimeEvent::ProviderConnectionDeleted(_)
             | RuntimeEvent::ProviderHealthChecked(_)
             | RuntimeEvent::ProviderHealthScheduleSet(_)
             | RuntimeEvent::ProviderHealthScheduleTriggered(_)
@@ -623,6 +628,7 @@ impl RuntimeEvent {
             | RuntimeEvent::ProviderBudgetAlertTriggered(_)
             | RuntimeEvent::ProviderBudgetExceeded(_)
             | RuntimeEvent::ProviderConnectionRegistered(_)
+            | RuntimeEvent::ProviderConnectionDeleted(_)
             | RuntimeEvent::ProviderHealthChecked(_)
             | RuntimeEvent::ProviderHealthScheduleSet(_)
             | RuntimeEvent::ProviderHealthScheduleTriggered(_)
@@ -2031,6 +2037,18 @@ pub struct ProviderConnectionRegistered {
     pub supported_models: Vec<String>,
     pub status: crate::providers::ProviderConnectionStatus,
     pub registered_at: u64,
+}
+
+/// Projection directive emitted when the operator deletes a provider
+/// connection. The in-memory projection hard-removes the row so the
+/// `provider_connection_id` is free to be re-used immediately. Prior
+/// `ProviderConnectionRegistered` events for the same ID are preserved
+/// in the event log for audit. F40.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProviderConnectionDeleted {
+    pub tenant: crate::tenancy::TenantKey,
+    pub provider_connection_id: crate::ids::ProviderConnectionId,
+    pub deleted_at: u64,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
