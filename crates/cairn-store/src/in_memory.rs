@@ -2006,11 +2006,17 @@ impl InMemoryStore {
             // cairn-app rebuilds the in-memory decision cache from the
             // event log at startup.
             RuntimeEvent::DecisionRecorded(_) | RuntimeEvent::DecisionCacheWarmup(_) => {}
-            // F47 PR2: attach summary + verification to the existing RunRecord.
-            // Idempotent (overwrite semantics): re-applying the same event
-            // yields the same projected state. Absent run row (orphan
-            // annotation) is silently ignored — annotation cannot create
-            // a run. This mirrors the `if let Some(rec) = ... get_mut`
+            // F47 PR2: attach summary + verification to the existing
+            // RunRecord. The completion fields (`completion_summary`,
+            // `completion_verification`, `completion_annotated_at_ms`)
+            // are overwrite-stable: replaying the same event leaves
+            // those three fields at identical values. `version` and
+            // `updated_at` still bump on replay — matching the
+            // RunStateChanged handler and the projection-bookkeeping
+            // contract other projections use — but the operator-
+            // observable shape stays the same. Absent run row (orphan
+            // annotation) is silently ignored; annotation cannot
+            // create a run. Mirrors the `if let Some(rec) = get_mut`
             // pattern used by RunStateChanged above.
             RuntimeEvent::RunCompletionAnnotated(e) => {
                 if let Some(rec) = state.runs.get_mut(e.run_id.as_str()) {

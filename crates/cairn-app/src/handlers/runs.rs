@@ -2798,6 +2798,18 @@ pub(crate) async fn orchestrate_run_handler(
             // frame); the annotation is best-effort durability on top.
             use cairn_domain::{RunCompletionAnnotated, RuntimeEvent};
             use cairn_runtime::make_envelope;
+            // Checked conversion (Copilot review on #313): `as_millis()`
+            // returns `u128` and `as u64` would silently truncate past
+            // year 584 million. `unwrap_or_default()` mapped pre-epoch
+            // clocks to `0`. Saturating to `u64::MAX` is the right
+            // failure mode: a broken clock produces an obviously-
+            // nonsensical timestamp that operators can spot, rather
+            // than a silent zero or wrapped value. Pre-epoch
+            // (`duration_since` error) clamps to `0` explicitly.
+            let occurred_at_ms = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX))
+                .unwrap_or(0);
             let annotation = make_envelope(RuntimeEvent::RunCompletionAnnotated(
                 RunCompletionAnnotated {
                     project: run.project.clone(),
@@ -2805,10 +2817,7 @@ pub(crate) async fn orchestrate_run_handler(
                     run_id: run.run_id.clone(),
                     summary: summary.clone(),
                     verification: verification.clone(),
-                    occurred_at_ms: std::time::SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .unwrap_or_default()
-                        .as_millis() as u64,
+                    occurred_at_ms,
                 },
             ));
             if let Err(e) = state.runtime.store.append(&[annotation]).await {
