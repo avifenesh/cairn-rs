@@ -5977,7 +5977,7 @@ mod tests {
                     prompt_release_id: None,
                     requested_at_ms: 100,
                     started_at_ms: 101,
-                    args_json: None
+                    args_json: None,
                 })),
                 make_envelope(RuntimeEvent::ToolInvocationCompleted(
                     ToolInvocationCompleted {
@@ -5989,7 +5989,7 @@ mod tests {
                         outcome: ToolInvocationOutcomeKind::Success,
                         tool_call_id: None,
                         result_json: None,
-                        output_preview: None
+                        output_preview: None,
                     },
                 )),
             ])
@@ -6034,7 +6034,7 @@ mod tests {
                     prompt_release_id: None,
                     requested_at_ms: 200,
                     started_at_ms: 201,
-                    args_json: None
+                    args_json: None,
                 })),
                 make_envelope(RuntimeEvent::ToolInvocationFailed(ToolInvocationFailed {
                     project: project.clone(),
@@ -6044,7 +6044,7 @@ mod tests {
                     finished_at_ms: 205,
                     outcome: ToolInvocationOutcomeKind::Canceled,
                     error_message: Some("canceled".to_owned()),
-                    output_preview: None
+                    output_preview: None,
                 })),
                 make_envelope(RuntimeEvent::ToolInvocationStarted(ToolInvocationStarted {
                     project,
@@ -6059,7 +6059,7 @@ mod tests {
                     prompt_release_id: None,
                     requested_at_ms: 100,
                     started_at_ms: 101,
-                    args_json: None
+                    args_json: None,
                 })),
             ])
             .await

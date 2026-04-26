@@ -2607,7 +2607,7 @@ mod tests {
                 prompt_release_id: None,
                 requested_at_ms: 10,
                 started_at_ms: 11,
-                args_json: None
+                args_json: None,
             }),
         };
 
@@ -2658,7 +2658,7 @@ mod tests {
             finished_at_ms: 14,
             outcome: crate::tool_invocation::ToolInvocationOutcomeKind::PermanentFailure,
             error_message: Some("bad input".to_owned()),
-            output_preview: None
+            output_preview: None,
         });
 
         assert_eq!(event.project().project_id.as_str(), "project");

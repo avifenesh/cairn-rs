@@ -531,7 +531,7 @@ impl RuntimeExecutePhase {
                         tool_name.clone(),
                         ToolInvocationOutcomeKind::PermanentFailure,
                         Some(reason.clone()),
-                        None,
+                        Some(reason.clone()),
                     )
                     .await
                     .map_err(OrchestratorError::Runtime)?;
@@ -610,7 +610,7 @@ impl RuntimeExecutePhase {
                         tool_name.clone(),
                         ToolInvocationOutcomeKind::PermanentFailure,
                         Some(reason.clone()),
-                        None,
+                        Some(reason.clone()),
                     )
                     .await
                     .map_err(OrchestratorError::Runtime)?;
@@ -913,7 +913,7 @@ impl RuntimeExecutePhase {
                                         tool_name.clone(),
                                         ToolInvocationOutcomeKind::PermanentFailure,
                                         Some(reason.clone()),
-                                        None,
+                                        Some(reason.clone()),
                                     )
                                     .await
                                     .map_err(OrchestratorError::Runtime)?;
@@ -1070,7 +1070,7 @@ impl RuntimeExecutePhase {
                                 tool_name,
                                 ToolInvocationOutcomeKind::PermanentFailure,
                                 Some(reason.clone()),
-                                None,
+                                Some(reason.clone()),
                             )
                             .await
                             .map_err(OrchestratorError::Runtime)?;

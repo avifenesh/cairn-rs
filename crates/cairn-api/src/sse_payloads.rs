@@ -777,7 +777,7 @@ mod tests {
             prompt_release_id: None,
             requested_at_ms: 100,
             started_at_ms: 101,
-            args_json: None
+            args_json: None,
         });
         let payload = shape_event_payload(&event).unwrap();
         assert_eq!(payload["taskId"], "task_1");

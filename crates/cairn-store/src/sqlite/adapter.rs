@@ -140,9 +140,7 @@ impl DbAdapter for SqliteAdapter {
             .bind(column)
             .fetch_optional(&self.pool)
             .await
-            .map_err(|e| {
-                StoreError::Migration(format!("pragma tool_invocations.{column}: {e}"))
-            })?
+            .map_err(|e| StoreError::Migration(format!("pragma tool_invocations.{column}: {e}")))?
             .is_some();
             if !exists {
                 let stmt = format!("ALTER TABLE tool_invocations ADD COLUMN {column} {kind}");
@@ -797,8 +795,7 @@ impl ToolInvocationRow {
         let project = project_key_from_parts(self.tenant_id, self.workspace_id, self.project_id);
         let args_json = match self.args_json.as_deref() {
             Some(text) => Some(
-                serde_json::from_str(text)
-                    .map_err(|e| StoreError::Serialization(e.to_string()))?,
+                serde_json::from_str(text).map_err(|e| StoreError::Serialization(e.to_string()))?,
             ),
             None => None,
         };

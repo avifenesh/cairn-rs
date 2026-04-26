@@ -138,16 +138,22 @@ async fn run_tool_invocation_roundtrip(h: &LiveHarness) {
         item["status"], "completed",
         "F55: flat status alias must be populated"
     );
-    // args_json is the canonical field; `args` is not top-level-flattened
-    // for the `/v1/tool-invocations` response (only the view fields are
-    // flattened), so we read from the embedded record shape.
+    // The operator view surfaces args at the top level; the durable
+    // record shape lives under `record` for clients that want the full
+    // projection. Both must carry the round-tripped command.
     assert_eq!(
-        item["args_json"]["command"], format!("echo {MARKER}"),
-        "F55: args must round-trip through the projection"
+        item["args"]["command"],
+        format!("echo {MARKER}"),
+        "F55: top-level args must round-trip through the projection"
     );
     assert_eq!(
-        item["args_json"]["timeout_ms"], 5_000,
+        item["args"]["timeout_ms"], 5_000,
         "F55: structured args must preserve their shape"
+    );
+    assert_eq!(
+        item["record"]["args_json"]["command"],
+        format!("echo {MARKER}"),
+        "F55: embedded record retains the durable args_json field"
     );
     assert!(
         item["output_truncated"].is_boolean(),
@@ -180,7 +186,11 @@ async fn run_tool_invocation_roundtrip(h: &LiveHarness) {
     let tool_invocations = body["tool_invocations"]
         .as_array()
         .expect("tool_invocations array on telemetry");
-    assert_eq!(tool_invocations.len(), 1, "one tool invocation on telemetry");
+    assert_eq!(
+        tool_invocations.len(),
+        1,
+        "one tool invocation on telemetry"
+    );
     let ti = &tool_invocations[0];
     assert_eq!(ti["tool_name"], "bash");
     assert_eq!(ti["args"]["command"], format!("echo {MARKER}"));

@@ -101,7 +101,7 @@ async fn tool_invocation_started_shows_started_state() {
                 prompt_release_id: None,
                 requested_at_ms: ts,
                 started_at_ms: ts + 1,
-                args_json: None
+                args_json: None,
             }),
         )])
         .await
@@ -151,7 +151,7 @@ async fn tool_invocation_completed_transitions_to_success() {
                 prompt_release_id: None,
                 requested_at_ms: ts,
                 started_at_ms: ts + 1,
-                args_json: None
+                args_json: None,
             }),
         )])
         .await
@@ -176,7 +176,7 @@ async fn tool_invocation_completed_transitions_to_success() {
                 outcome: ToolInvocationOutcomeKind::Success,
                 tool_call_id: None,
                 result_json: None,
-                output_preview: None
+                output_preview: None,
             }),
         )])
         .await
@@ -223,7 +223,7 @@ async fn tool_invocation_failed_with_retryable_error() {
                     prompt_release_id: None,
                     requested_at_ms: ts,
                     started_at_ms: ts + 1,
-                    args_json: None
+                    args_json: None,
                 }),
             ),
             evt(
@@ -236,7 +236,7 @@ async fn tool_invocation_failed_with_retryable_error() {
                     finished_at_ms: ts + 100,
                     outcome: ToolInvocationOutcomeKind::RetryableFailure,
                     error_message: Some("upstream returned 503, retry eligible".to_owned()),
-                    output_preview: None
+                    output_preview: None,
                 }),
             ),
         ])
@@ -288,7 +288,7 @@ async fn tool_invocation_failed_with_permanent_error() {
                     prompt_release_id: None,
                     requested_at_ms: ts,
                     started_at_ms: ts + 2,
-                    args_json: None
+                    args_json: None,
                 }),
             ),
             evt(
@@ -301,7 +301,7 @@ async fn tool_invocation_failed_with_permanent_error() {
                     finished_at_ms: ts + 15,
                     outcome: ToolInvocationOutcomeKind::PermanentFailure,
                     error_message: Some("permission denied: insufficient privileges".to_owned()),
-                    output_preview: None
+                    output_preview: None,
                 }),
             ),
         ])
@@ -355,7 +355,7 @@ async fn tool_invocation_failed_with_timeout() {
                     prompt_release_id: None,
                     requested_at_ms: ts,
                     started_at_ms: ts + 1,
-                    args_json: None
+                    args_json: None,
                 }),
             ),
             evt(
@@ -368,7 +368,7 @@ async fn tool_invocation_failed_with_timeout() {
                     finished_at_ms: ts + 30_000,
                     outcome: ToolInvocationOutcomeKind::Timeout,
                     error_message: Some("request timed out after 30s".to_owned()),
-                    output_preview: None
+                    output_preview: None,
                 }),
             ),
         ])
@@ -415,7 +415,7 @@ async fn list_by_run_returns_all_invocations_for_run() {
                     prompt_release_id: None,
                     requested_at_ms: ts,
                     started_at_ms: ts + 1,
-                    args_json: None
+                    args_json: None,
                 }),
             ),
             evt(
@@ -433,7 +433,7 @@ async fn list_by_run_returns_all_invocations_for_run() {
                     prompt_release_id: None,
                     requested_at_ms: ts + 10,
                     started_at_ms: ts + 11,
-                    args_json: None
+                    args_json: None,
                 }),
             ),
         ])
@@ -457,7 +457,7 @@ async fn list_by_run_returns_all_invocations_for_run() {
                 prompt_release_id: None,
                 requested_at_ms: ts + 20,
                 started_at_ms: ts + 21,
-                args_json: None
+                args_json: None,
             }),
         )])
         .await
@@ -511,7 +511,7 @@ async fn plugin_tool_target_preserved_through_projection() {
                 prompt_release_id: None,
                 requested_at_ms: ts,
                 started_at_ms: ts + 5,
-                args_json: None
+                args_json: None,
             }),
         )])
         .await
@@ -562,7 +562,7 @@ async fn run_audit_trail_captures_mixed_outcomes() {
                     prompt_release_id: None,
                     requested_at_ms: ts,
                     started_at_ms: ts + 1,
-                    args_json: None
+                    args_json: None,
                 }),
             ),
             evt(
@@ -576,7 +576,7 @@ async fn run_audit_trail_captures_mixed_outcomes() {
                     outcome: ToolInvocationOutcomeKind::Success,
                     tool_call_id: None,
                     result_json: None,
-                    output_preview: None
+                    output_preview: None,
                 }),
             ),
             // Second call: fails with protocol violation.
@@ -596,7 +596,7 @@ async fn run_audit_trail_captures_mixed_outcomes() {
                     prompt_release_id: None,
                     requested_at_ms: ts + 25,
                     started_at_ms: ts + 26,
-                    args_json: None
+                    args_json: None,
                 }),
             ),
             evt(
@@ -609,7 +609,7 @@ async fn run_audit_trail_captures_mixed_outcomes() {
                     finished_at_ms: ts + 30,
                     outcome: ToolInvocationOutcomeKind::ProtocolViolation,
                     error_message: Some("plugin returned malformed JSON response".to_owned()),
-                    output_preview: None
+                    output_preview: None,
                 }),
             ),
         ])

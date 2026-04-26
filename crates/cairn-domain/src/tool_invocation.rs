@@ -331,8 +331,10 @@ mod tests {
 
     #[test]
     fn output_preview_truncation_respects_utf8_boundaries() {
-        use super::{truncate_output_preview, TOOL_OUTPUT_PREVIEW_MAX_BYTES,
-            TOOL_OUTPUT_PREVIEW_TRUNCATED_SUFFIX};
+        use super::{
+            truncate_output_preview, TOOL_OUTPUT_PREVIEW_MAX_BYTES,
+            TOOL_OUTPUT_PREVIEW_TRUNCATED_SUFFIX,
+        };
         // Short string passes through unchanged.
         let short = "hello".repeat(10);
         assert_eq!(truncate_output_preview(&short), short);
@@ -340,7 +342,9 @@ mod tests {
         // Oversize ASCII string gets cut + suffix.
         let long = "a".repeat(TOOL_OUTPUT_PREVIEW_MAX_BYTES + 500);
         let out = truncate_output_preview(&long);
-        assert!(out.len() <= TOOL_OUTPUT_PREVIEW_MAX_BYTES + TOOL_OUTPUT_PREVIEW_TRUNCATED_SUFFIX.len());
+        assert!(
+            out.len() <= TOOL_OUTPUT_PREVIEW_MAX_BYTES + TOOL_OUTPUT_PREVIEW_TRUNCATED_SUFFIX.len()
+        );
         assert!(out.ends_with(TOOL_OUTPUT_PREVIEW_TRUNCATED_SUFFIX));
 
         // Multi-byte UTF-8 near the boundary does not panic and does not

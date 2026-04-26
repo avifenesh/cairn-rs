@@ -169,9 +169,7 @@ where
         // seam so every completion path — orchestrator, tool-context,
         // recovery — persists a consistent shape without forcing each
         // caller to re-implement UTF-8 safe truncation.
-        let output_preview = result_json
-            .as_ref()
-            .map(tool_result_preview_for_projection);
+        let output_preview = result_json.as_ref().map(tool_result_preview_for_projection);
         batch.push(make_envelope(RuntimeEvent::ToolInvocationCompleted(
             ToolInvocationCompleted {
                 project: project.clone(),

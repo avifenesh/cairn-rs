@@ -523,7 +523,7 @@ fn runtime_events_map_to_correct_sse_surfaces() {
                 prompt_release_id: None,
                 requested_at_ms: 0,
                 started_at_ms: 0,
-                args_json: None
+                args_json: None,
             }),
             Some(SseEventName::AssistantToolCall),
         ),
