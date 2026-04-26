@@ -8,7 +8,7 @@ use crate::engine::{
     AddExecutionToFlowInput, ApplyDependencyToChildInput, CancelRunInput, CompleteRunInput,
     ControlPlaneBackend, EligibilityResult, Engine, ExecutionLeaseContext, ExecutionSnapshot,
     FailExecutionOutcome, FailRunInput, RenewLeaseInput, ResumeRunInput, StageDependencyEdgeInput,
-    StageDependencyOutcome, SubmitTaskInput, SuspendRunInput,
+    StageDependencyOutcome, SubmitTaskInput,
 };
 use crate::error::FabricError;
 use crate::event_bridge::{BridgeEvent, EventBridge};
@@ -866,8 +866,8 @@ impl FabricTaskService {
         let lease = self.resolve_lease_context(&snapshot);
         let eid = snapshot.execution_id.clone();
 
-        let params = match reason.kind {
-            PauseReasonKind::OperatorPause => crate::suspension::for_operator_hold(),
+        let case = match reason.kind {
+            PauseReasonKind::OperatorPause => crate::suspension::SuspendCase::OperatorPause,
             PauseReasonKind::ToolRequestedSuspension => {
                 let invocation_id = reason
                     .detail
@@ -877,7 +877,10 @@ impl FabricTaskService {
                         reason: "ToolRequestedSuspension requires invocation_id in reason.detail"
                             .to_owned(),
                     })?;
-                crate::suspension::for_tool_result(invocation_id, reason.resume_after_ms)
+                crate::suspension::SuspendCase::ToolRequestedSuspension {
+                    invocation_id,
+                    resume_after_ms: reason.resume_after_ms,
+                }
             }
             PauseReasonKind::RuntimeSuspension => {
                 let signal_name = reason
@@ -888,44 +891,26 @@ impl FabricTaskService {
                         reason: "RuntimeSuspension requires signal_name in reason.detail"
                             .to_owned(),
                     })?;
-                crate::suspension::SuspensionParams {
-                    reason_code: "waiting_for_signal".into(),
-                    condition_matchers: vec![crate::suspension::ConditionMatcher {
-                        signal_name: signal_name.to_owned(),
-                    }],
-                    timeout_ms: reason.resume_after_ms,
-                    timeout_behavior: flowfabric::sdk::task::TimeoutBehavior::Fail,
+                crate::suspension::SuspendCase::RuntimeSuspension {
+                    signal_name,
+                    resume_after_ms: reason.resume_after_ms,
                 }
             }
             PauseReasonKind::PolicyHold => {
                 let detail = reason.detail.as_deref().unwrap_or("policy");
-                crate::suspension::SuspensionParams {
-                    reason_code: "paused_by_policy".into(),
-                    condition_matchers: vec![crate::suspension::ConditionMatcher {
-                        signal_name: format!("policy_resolved:{detail}"),
-                    }],
-                    timeout_ms: reason.resume_after_ms,
-                    timeout_behavior: flowfabric::sdk::task::TimeoutBehavior::Fail,
+                crate::suspension::SuspendCase::PolicyHold {
+                    detail,
+                    resume_after_ms: reason.resume_after_ms,
                 }
             }
         };
 
-        // Task pause: match-mode matches the pre-migration rule —
-        // single matcher resumes on ANY signal, multi-matcher
-        // requires ALL. Identical to FabricRunService::pause.
-        let match_mode = if params.condition_matchers.len() <= 1 {
-            "any"
-        } else {
-            "all"
-        };
-        // TODO(ff-upstream: https://github.com/avifenesh/FlowFabric/issues/322)
-        // Service-layer suspend via Lua-glue; migrates to typed
-        // `suspend_by_triple` in CG-c once FF#322 lands.
-        let suspend_input = build_suspend_input(eid, lease, &params, match_mode);
-
-        self.control_plane
-            .suspend_run_execution(suspend_input)
-            .await?;
+        // FF 0.10 typed surface — identical treatment to
+        // `FabricRunService::pause`. `suspend_by_triple` fences against
+        // the lease triple; no Lua-ARGV translation.
+        let fence = crate::suspension::build_lease_fence(&lease)?;
+        let args = crate::suspension::build_suspend_args(case);
+        crate::suspension::suspend_by_triple(self.runtime.backend(), eid, fence, args).await?;
 
         // Emit TaskStateChanged so the cairn-store projection + SSE
         // subscribers observe the suspension. `record.state` carries FF's
@@ -1061,73 +1046,3 @@ impl FabricTaskService {
     }
 }
 
-/// Build the typed `SuspendRunInput` from a suspension params bundle.
-///
-/// Mirror of `FabricRunService::build_suspend_input` — kept
-/// task-service-local (rather than hoisted to a shared module) so the
-/// match-mode policy (any vs all) can diverge later if tasks grow a
-/// different resume-condition model than runs. Today both services
-/// use identical logic; deduplication would hide the policy choice
-/// behind a function boundary that callers don't read.
-///
-/// TODO(ff-upstream: <https://github.com/avifenesh/FlowFabric/issues/322>):
-/// This helper exists because `EngineBackend::suspend_by_triple` has
-/// not yet landed in FF. All service-layer suspend callers hold a
-/// `LeaseFencingTriple` (not a `Handle`), so we cannot use the typed
-/// `task.suspend(&Handle, SuspendArgs)` path that worker_sdk uses. CG-c
-/// migrates this and all call sites once FF#322 publishes.
-fn build_suspend_input(
-    eid: ExecutionId,
-    lease: ExecutionLeaseContext,
-    params: &crate::suspension::SuspensionParams,
-    match_mode: &'static str,
-) -> SuspendRunInput {
-    // FF 0.9 (RFC-013) added `TimeoutBehavior::as_wire_str()`; cairn's
-    // Lua FCALL args consume this wire form directly. This also
-    // handles the `#[non_exhaustive]` enum contract — a new variant
-    // added upstream routes through `as_wire_str` without a cairn
-    // code change.
-    let timeout_behavior_str = params.timeout_behavior.as_wire_str();
-
-    let required_names: Vec<&str> = params
-        .condition_matchers
-        .iter()
-        .map(|m| m.signal_name.as_str())
-        .collect();
-
-    let resume_condition_json = serde_json::json!({
-        "condition_type": "signal_set",
-        "required_signal_names": required_names,
-        "signal_match_mode": match_mode,
-        "minimum_signal_count": 1,
-        "timeout_behavior": timeout_behavior_str,
-        "allow_operator_override": true,
-    })
-    .to_string();
-
-    let resume_policy_json = serde_json::json!({
-        "resume_target": "runnable",
-        "close_waitpoint_on_resume": true,
-        "consume_matched_signals": true,
-        "retain_signal_buffer_until_closed": true,
-    })
-    .to_string();
-
-    let timeout_at = params
-        .timeout_ms
-        .map(|ms| {
-            let now = flowfabric::core::types::TimestampMs::now().0;
-            now.saturating_add(ms as i64).to_string()
-        })
-        .unwrap_or_default();
-
-    SuspendRunInput {
-        execution_id: eid,
-        lease,
-        reason_code: params.reason_code.clone(),
-        timeout_at,
-        resume_condition_json,
-        resume_policy_json,
-        timeout_behavior: timeout_behavior_str.to_owned(),
-    }
-}

@@ -300,21 +300,14 @@ pub struct FailRunInput {
     pub retry_policy_json: String,
 }
 
-/// A suspension request built by the caller from a `SuspensionParams`.
-///
-/// The service assembles the resume-condition / resume-policy JSON +
-/// timeout-at calculations; the trait impl only wires them into the
-/// `ff_suspend_execution` KEYS/ARGV layout.
-#[derive(Clone, Debug)]
-pub struct SuspendRunInput {
-    pub execution_id: flowfabric::core::types::ExecutionId,
-    pub lease: ExecutionLeaseContext,
-    pub reason_code: String,
-    pub timeout_at: String,
-    pub resume_condition_json: String,
-    pub resume_policy_json: String,
-    pub timeout_behavior: String,
-}
+// `SuspendRunInput` retired in CG-c (2026-04-26, FF#322). The
+// service-layer suspend path now builds a typed `SuspendArgs` +
+// `LeaseFence` and calls `EngineBackend::suspend_by_triple` directly —
+// see `crate::suspension::suspend_by_triple`. The Lua-ARGV JSON blobs
+// (`resume_condition_json`, `resume_policy_json`,
+// `timeout_behavior` wire-string) that this struct carried are no
+// longer assembled on cairn's side; the FF 0.10 trait accepts the
+// typed inputs and does its own validation + serialisation.
 
 /// Input to `resume_run_execution`.
 #[derive(Clone, Debug)]
