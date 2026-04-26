@@ -33,9 +33,13 @@
 //! under the legacy XREAD fan-out. CG-c collapses the row space: the
 //! subscription is a single logical stream, so one sentinel row at
 //! `(partition_id = "__cairn_global__", execution_id = "__cairn_global__")`
-//! holds the persisted cursor. Legacy per-stream rows are pruned at
-//! boot so the table does not grow unbounded during the migration
-//! window.
+//! holds the persisted cursor. Legacy per-stream rows from the 0.9-era
+//! XREAD path are inert — this subscriber only ever reads the sentinel
+//! row, so the legacy rows contribute bounded dead weight that any
+//! routine database vacuum/GC covers. No dedicated pruning pass ships
+//! with CG-c; if the dead-row count becomes operationally visible a
+//! follow-up can add a one-shot `DELETE … WHERE (partition_id,
+//! execution_id) != sentinel` at boot.
 
 use std::sync::Arc;
 
@@ -210,14 +214,33 @@ impl Worker {
                         match result {
                             Ok(event) => {
                                 let event_cursor = event.cursor().clone();
-                                self.handle_event(event).await;
-                                if let Err(e) = self.persist_cursor(&event_cursor).await {
-                                    tracing::warn!(
-                                        error = %e,
-                                        "lease-history subscriber cursor upsert failed"
-                                    );
+                                match self.handle_event(event).await {
+                                    HandleOutcome::Advance => {
+                                        if let Err(e) = self.persist_cursor(&event_cursor).await {
+                                            tracing::warn!(
+                                                error = %e,
+                                                "lease-history subscriber cursor upsert failed"
+                                            );
+                                        }
+                                        cursor = event_cursor;
+                                    }
+                                    HandleOutcome::RetryReopen => {
+                                        // Transient error (e.g. Valkey blip
+                                        // inside `describe_execution`). Do NOT
+                                        // advance the cursor — we would
+                                        // silently drop the event. Reopen the
+                                        // stream from the last committed
+                                        // cursor so the event redelivers.
+                                        tracing::warn!(
+                                            "lease-history: transient handle_event failure; \
+                                             reopening stream from last committed cursor"
+                                        );
+                                        if !self.backoff_or_cancel(&mut reconnect_attempts).await {
+                                            break 'outer;
+                                        }
+                                        continue 'outer;
+                                    }
                                 }
-                                cursor = event_cursor;
                             }
                             Err(EngineError::StreamDisconnected { cursor: resume_cursor }) => {
                                 // FF signalled disconnect; retry from
@@ -307,18 +330,16 @@ impl Worker {
             .map_err(|e| format!("cursor_store.upsert: {e}"))
     }
 
-    async fn handle_event(&self, event: LeaseHistoryEvent) {
+    async fn handle_event(&self, event: LeaseHistoryEvent) -> HandleOutcome {
         match event {
             LeaseHistoryEvent::Expired { execution_id, .. } => {
-                self.dispatch_expired(&execution_id).await;
+                self.dispatch_expired(&execution_id).await
             }
             LeaseHistoryEvent::Reclaimed {
                 execution_id,
                 new_owner,
                 ..
-            } => {
-                self.dispatch_reclaimed(&execution_id, new_owner).await;
-            }
+            } => self.dispatch_reclaimed(&execution_id, new_owner).await,
             // Acquired / Renewed / Revoked: not dispatched today.
             // `Acquired` / `Renewed` transitions flow through the
             // cairn service-level bridge (workers emit them through
@@ -328,13 +349,24 @@ impl Worker {
             // follow-on state transition via the completion stream.
             // `#[non_exhaustive]` wildcard is mandatory — future
             // variants land additively without breaking the build.
-            _ => {}
+            _ => HandleOutcome::Advance,
         }
     }
 
-    /// HGET-ish: fetch the exec tags and classify. Returns `None` when
-    /// the execution is absent (e.g. terminal and pruned), has no
-    /// project tag, or is owned by a different cairn instance.
+    /// HGET-ish: fetch the exec tags and classify. Distinguishes three
+    /// cases so the caller can decide whether to advance the event
+    /// cursor or reopen the stream to retry:
+    ///
+    /// * `Resolved(ctx)` — execution found, owned by this instance,
+    ///   project/task/run tags present. Dispatch the event and advance.
+    /// * `Skip` — permanent "not for us": absent execution (terminal /
+    ///   purged), foreign-instance tag (backend filter skew — defence-
+    ///   in-depth), or missing project tag. The event will never
+    ///   produce a dispatch; advance the cursor.
+    /// * `Retry` — transient backend failure (`describe_execution`
+    ///   returned `Err`). Advancing the cursor here would silently drop
+    ///   an event that might still need to fire on the next attempt;
+    ///   the caller reopens the stream from the last committed cursor.
     ///
     /// The instance-ownership check is defence-in-depth: the backend
     /// filter already drops foreign events inside the stream, so
@@ -342,7 +374,7 @@ impl Worker {
     /// backend missed the filter) or a backfill gap. Rejecting at
     /// this layer preserves the cross-tenant isolation invariant
     /// regardless of backend-side filter behaviour.
-    async fn resolve_context(&self, execution_id: &ExecutionId) -> Option<EntityContext> {
+    async fn resolve_context(&self, execution_id: &ExecutionId) -> ResolveOutcome {
         let snapshot = match self.engine.describe_execution(execution_id).await {
             Ok(Some(s)) => s,
             Ok(None) => {
@@ -350,15 +382,17 @@ impl Worker {
                     exec_id = %execution_id,
                     "lease-history: execution absent (terminal / purged) — skipping"
                 );
-                return None;
+                return ResolveOutcome::Skip;
             }
             Err(e) => {
+                // Transient: do NOT advance the cursor — the event
+                // must redeliver on the next subscribe iteration.
                 tracing::warn!(
                     exec_id = %execution_id,
                     error = %e,
-                    "lease-history: describe_execution failed — skipping event"
+                    "lease-history: describe_execution failed — will retry"
                 );
-                return None;
+                return ResolveOutcome::Retry;
             }
         };
         match snapshot.tags.get("cairn.instance_id") {
@@ -369,20 +403,24 @@ impl Worker {
                     foreign = %other,
                     "lease-history: event for foreign instance (backend filter skew?); skipping"
                 );
-                return None;
+                return ResolveOutcome::Skip;
             }
             None => {
                 tracing::trace!(
                     exec_id = %execution_id,
                     "lease-history: execution missing cairn.instance_id tag; skipping"
                 );
-                return None;
+                return ResolveOutcome::Skip;
             }
         }
-        let project_str = snapshot.tags.get("cairn.project")?;
-        let project = try_parse_project_key(project_str)?;
-        if let Some(task_id) = snapshot.tags.get("cairn.task_id") {
-            Some(EntityContext::Task {
+        let Some(project_str) = snapshot.tags.get("cairn.project") else {
+            return ResolveOutcome::Skip;
+        };
+        let Some(project) = try_parse_project_key(project_str) else {
+            return ResolveOutcome::Skip;
+        };
+        let ctx = if let Some(task_id) = snapshot.tags.get("cairn.task_id") {
+            EntityContext::Task {
                 project,
                 task_id: TaskId::new(task_id.clone()),
                 lease_epoch: snapshot
@@ -395,21 +433,23 @@ impl Worker {
                     .as_ref()
                     .map(|l| l.expires_at.0.max(0) as u64)
                     .unwrap_or(0),
-            })
+            }
+        } else if let Some(run_id) = snapshot.tags.get("cairn.run_id") {
+            EntityContext::Run {
+                project,
+                run_id: RunId::new(run_id.clone()),
+            }
         } else {
-            snapshot
-                .tags
-                .get("cairn.run_id")
-                .map(|run_id| EntityContext::Run {
-                    project,
-                    run_id: RunId::new(run_id.clone()),
-                })
-        }
+            return ResolveOutcome::Skip;
+        };
+        ResolveOutcome::Resolved(ctx)
     }
 
-    async fn dispatch_expired(&self, execution_id: &ExecutionId) {
-        let Some(ctx) = self.resolve_context(execution_id).await else {
-            return;
+    async fn dispatch_expired(&self, execution_id: &ExecutionId) -> HandleOutcome {
+        let ctx = match self.resolve_context(execution_id).await {
+            ResolveOutcome::Resolved(c) => c,
+            ResolveOutcome::Skip => return HandleOutcome::Advance,
+            ResolveOutcome::Retry => return HandleOutcome::RetryReopen,
         };
         match ctx {
             EntityContext::Task {
@@ -435,19 +475,22 @@ impl Worker {
                     .await;
             }
         }
+        HandleOutcome::Advance
     }
 
     async fn dispatch_reclaimed(
         &self,
         execution_id: &ExecutionId,
         new_owner: Option<flowfabric::core::types::WorkerInstanceId>,
-    ) {
+    ) -> HandleOutcome {
         // On reclaim FF minted a fresh lease + new worker. For tasks
         // we emit `TaskLeaseClaimed` so the projection surfaces the
         // new owner. Runs have no dedicated `RunLeaseClaimed` variant
         // — the next cairn-side transition re-syncs the projection.
-        let Some(ctx) = self.resolve_context(execution_id).await else {
-            return;
+        let ctx = match self.resolve_context(execution_id).await {
+            ResolveOutcome::Resolved(c) => c,
+            ResolveOutcome::Skip => return HandleOutcome::Advance,
+            ResolveOutcome::Retry => return HandleOutcome::RetryReopen,
         };
         let EntityContext::Task {
             project,
@@ -456,7 +499,7 @@ impl Worker {
             lease_expires_at_ms,
         } = ctx
         else {
-            return;
+            return HandleOutcome::Advance;
         };
         let lease_owner = new_owner.map(|w| w.as_str().to_owned()).unwrap_or_default();
         self.bridge
@@ -468,7 +511,32 @@ impl Worker {
                 lease_expires_at_ms,
             })
             .await;
+        HandleOutcome::Advance
     }
+}
+
+/// Caller-side signal: should the subscriber advance its cursor past
+/// this event, or reopen the stream from the last committed cursor to
+/// retry? Only transient backend errors (e.g. `describe_execution`
+/// returning `Err`) produce `RetryReopen` — permanent conditions (absent
+/// execution, foreign tenant, missing project tag) advance so the
+/// subscriber does not wedge on a genuinely-uninteresting event.
+#[derive(Debug, Clone, Copy)]
+enum HandleOutcome {
+    Advance,
+    RetryReopen,
+}
+
+/// Three-way classification from `resolve_context`. See the method
+/// doc-comment for semantics.
+enum ResolveOutcome {
+    Resolved(EntityContext),
+    /// Permanent: execution absent, foreign tenant, or missing tags.
+    /// Advance the cursor.
+    Skip,
+    /// Transient: backend call failed. Do NOT advance — reopen the
+    /// stream.
+    Retry,
 }
 
 enum EntityContext {
@@ -503,10 +571,10 @@ fn now_ms() -> u64 {
 // FF `StreamCursor` byte sequence — a prefix byte + 16 bytes of
 // positional data (Valkey) or 8 bytes (Postgres). We encode as base64
 // so the existing `String` column roundtrips bytes without a schema
-// migration. Legacy rows (Valkey stream-id strings) at the sentinel
-// key path are never read because we use a reserved sentinel row and
-// prune old rows at boot (see `prune_legacy_rows` below, invoked by
-// the caller).
+// migration. Legacy rows (Valkey stream-id strings) under non-sentinel
+// keys are never read because CG-c only ever upserts/reads the single
+// sentinel row. No dedicated prune runs — see the module-level
+// "Persisted cursor schema reuse" section for the rationale.
 
 /// Tiny URL-safe base64 without padding. The cursor byte space is
 /// small (<= ~17 bytes for Valkey; 9 for Postgres) so a dependency

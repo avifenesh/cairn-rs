@@ -81,8 +81,16 @@ fn compute_timeout(
 /// trait has no direct equivalent. Wildcard + caller-controlled
 /// delivery set is the idiomatic translation.
 ///
-/// Shared between the worker `suspend_for_approval` path and the
-/// service-layer `enter_waiting_approval` path.
+/// Service-layer only. The worker path (`typed_approval`) cannot use
+/// this shape because the `SuspendArgs` it feeds into
+/// `ClaimedTask::suspend` is built before the SDK mints its own
+/// waitpoint binding, so the resume condition cannot reference a
+/// `waitpoint_key` that has not been allocated yet. The worker helper
+/// therefore keeps the `Composite(Count { kind: DistinctWaitpoints })`
+/// shape over the `[approval_granted:<id>, approval_rejected:<id>]`
+/// waitpoint set (see `typed_approval`). The service-layer path has
+/// the binding in hand inside `build_suspend_args`, so it can use the
+/// simpler `Single { waitpoint_key, matcher: Wildcard }` here.
 fn approval_resume_condition(waitpoint_key: &str) -> ResumeCondition {
     ResumeCondition::Single {
         waitpoint_key: waitpoint_key.to_owned(),
@@ -288,8 +296,12 @@ impl SuspendCase<'_> {
             Self::RuntimeSuspension {
                 resume_after_ms, ..
             } => (*resume_after_ms, TimeoutBehavior::Fail),
-            // Policy holds are escalated to operator review — they
-            // typically need human adjudication, not auto-fail.
+            // Policy holds fail the run if no `policy_resolved:<detail>`
+            // signal arrives before the deadline. Operator-driven
+            // escalation is a follow-up track (see cairn-domain
+            // `PolicyHoldEscalation` RFC); today the safe default is
+            // fail-closed so a stuck policy gate does not linger as a
+            // silent "paused forever" run.
             Self::PolicyHold {
                 resume_after_ms, ..
             } => (*resume_after_ms, TimeoutBehavior::Fail),
@@ -346,12 +358,18 @@ pub(crate) fn build_suspend_args(case: SuspendCase<'_>) -> SuspendArgs {
 /// (`source = "operator_override"`, all three tokens empty)
 /// [`ExecutionLeaseContext`]. The typed FF 0.10 trait surface has no
 /// such override — a suspension without an active lease is a
-/// contract violation, and we surface that as
-/// [`FabricError::Validation`] rather than silently reaching a Lua
-/// branch that bypasses the fence gate. Callers that hit this are
-/// asking FF to suspend an execution whose current lease is gone
-/// (never claimed, terminal, or reclaimed); the right thing is to
-/// read-and-retry or reject at the API layer.
+/// contract violation. We surface that as
+/// [`FabricError::Internal`] carrying the wire-string
+/// `"ff_suspend_execution rejected: fence_required"` so
+/// cairn-app's `fabric_adapter::is_suspend_state_conflict` classifier
+/// maps the error to HTTP 409 (InvalidTransition) — the same class
+/// FF's Lua rejection would map to if we had let the empty triple
+/// round-trip. Callers that hit this are asking FF to suspend an
+/// execution whose current lease is gone (never claimed, terminal, or
+/// reclaimed); the right thing is to read-and-retry or reject at the
+/// API layer. Malformed triples (lease_id/lease_epoch/attempt_id that
+/// fail typed parse after passing the non-empty gate) surface as
+/// [`FabricError::Validation`] with the specific parse error.
 pub(crate) fn build_lease_fence(lease: &ExecutionLeaseContext) -> Result<LeaseFence, FabricError> {
     if lease.source == "operator_override"
         || lease.lease_id.is_empty()
