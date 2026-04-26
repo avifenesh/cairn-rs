@@ -1044,9 +1044,19 @@ function TruncLine({ text, maxChars }: { text: string; maxChars: number }) {
 }
 
 function CompletionBlock({ completion }: { completion: RunCompletion }) {
-  const { summary, verification } = completion;
-  const { warnings, errors, commands, tool_results_scanned, extractor_version } =
-    verification;
+  // Defensive: while current persisted payloads always carry a fully-populated
+  // `verification`, guarding against missing/partial shapes keeps the block
+  // from crashing on older runs or unexpected backends replaying pre-F47
+  // envelopes.
+  const summary = completion.summary ?? "";
+  const verification = completion.verification ?? ({} as Partial<CompletionVerification>);
+  const warnings = Array.isArray(verification.warnings) ? verification.warnings : [];
+  const errors = Array.isArray(verification.errors) ? verification.errors : [];
+  const commands = Array.isArray(verification.commands) ? verification.commands : [];
+  const tool_results_scanned =
+    typeof verification.tool_results_scanned === "number" ? verification.tool_results_scanned : 0;
+  const extractor_version =
+    typeof verification.extractor_version === "number" ? verification.extractor_version : 0;
 
   const scanned = tool_results_scanned;
   const nothingScanned = scanned === 0;
