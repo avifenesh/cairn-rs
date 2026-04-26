@@ -602,6 +602,7 @@ dependencies = [
  "cairn-orchestrator",
  "cairn-store",
  "ferriskey",
+ "ff-core",
  "ff-observability",
  "flowfabric",
  "futures",

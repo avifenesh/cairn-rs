@@ -92,3 +92,8 @@ cairn-orchestrator = { path = "../cairn-orchestrator" }
 # stream via `ff_engine::Engine::start_with_completions`, which does
 # its own hand-rolled `poll_next` loop and doesn't pull `futures` in.
 futures = "0.3"
+# `test_handle_codec_compat` needs `v1_handle_for_tests` (FF#323) to
+# synthesise a pre-Wave-1c handle byte buffer and assert the 0.9+
+# decode compat path still accepts it. The `test-fixtures` feature is
+# dev-only on ff-core — production binaries never link it.
+ff-core = { version = "0.10", features = ["test-fixtures"] }

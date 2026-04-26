@@ -1,58 +1,69 @@
-//! Handle codec v1 → v2 compatibility shell.
+//! Handle codec v1 → v2 compatibility round-trip (FF#323).
 //!
 //! FF 0.8 added a v2 wire format for `HandleOpaque` that prepends a
 //! `BackendTag` byte (RFC-011 §4.1). The decoder accepts both v1 (pre-
-//! 0.8) and v2 (0.8+) shapes. Cairn's migration from FF 0.3 to FF 0.9
+//! 0.8) and v2 (0.8+) shapes. Cairn's migration from FF 0.3 to FF 0.10
 //! crosses this boundary: event logs persisted under 0.3 contain v1-
-//! shape handles that, on resume, must decode via the v2 compat path.
+//! shape handles that, on resume, must decode cleanly via the v2 compat
+//! path.
 //!
-//! This test covers that path end-to-end:
-//!
-//!   1. Mint a v1-shape handle for a known `LeaseFencingTriple`.
-//!   2. Persist via the standard cairn event-log write path.
-//!   3. Read back via the standard decode path.
-//!   4. Assert all three fence fields round-trip identically.
-//!
-//! ## Why this test is `#[ignore]`
-//!
-//! Step 1 requires a public test fixture for minting v1-shape handle
-//! bytes. FF 0.9 does not expose one — `HandleCodec::encode` always
-//! writes v2, and `HandleOpaque` is opaque by contract. Reverse-
-//! engineering the v1 layout to construct raw bytes here would couple
-//! this test to internal codec details that FF 0.9's own compat-decoder
-//! is the only supported consumer of.
-//!
-//! Filed upstream as
-//! <https://github.com/avifenesh/FlowFabric/issues/323>
-//! (`ff_core::handle_codec::v1_handle_for_tests` behind the
-//! `test-fixtures` feature). Once that lands, drop the `#[ignore]`,
-//! replace the placeholder with the real fixture call, and flesh out
-//! steps 2-4.
+//! FF 0.10 ships `ff_core::handle_codec::v1_handle_for_tests` behind
+//! the `test-fixtures` feature (FF#323). Cairn's dev-deps pull that
+//! feature on `ff-core`, so this test synthesises a real v1-shape byte
+//! buffer and drives it through the production decode path.
 
-/// Compat-path round-trip: v1-shape handle bytes decode to the same
-/// `LeaseFencingTriple` the original encode used.
-///
-/// Ignored until FF#323 publishes the `v1_handle_for_tests` fixture.
-/// Once unignored, this test must run against a real Valkey backend
-/// (event log round-trip is not a pure unit test) so it lives in the
-/// integration suite, not under `#[cfg(test)]` in a crate's src tree.
+use ff_core::backend::{BackendTag, HandleOpaque};
+use ff_core::handle_codec::{self, HandlePayload};
+use ff_core::types::{
+    AttemptId, AttemptIndex, ExecutionId, LaneId, LeaseEpoch, LeaseId, WorkerInstanceId,
+};
+
+/// Compat-path round-trip: v1-shape bytes decode to the same
+/// [`HandlePayload`] fields the v1 encoder recorded, and the decoder
+/// infers [`BackendTag::Valkey`] per the RFC-011 compat rule.
 #[test]
-#[ignore = "blocked on FF#323 (v1_handle_for_tests fixture)"]
 fn v1_handle_compat_decode_round_trips() {
-    // See module docstring. When FF#323 lands:
-    //
-    //   let bytes = ff_core::handle_codec::v1_handle_for_tests(
-    //       ExecutionId::new(...),
-    //       LeaseFencingTriple { ... },
-    //       // other v1 fields
-    //   );
-    //   let handle = HandleCodec::decode(&bytes)
-    //       .expect("v2 compat path must accept v1 bytes");
-    //   assert_eq!(handle.exec_id(), ...);
-    //   assert_eq!(handle.lease_fencing_triple(), ...);
-    //
-    // Until then, failing loudly on invocation is wrong — the test is
-    // ignored. This assertion documents the expected shape via a
-    // compile-checked pattern.
-    panic!("FF#323 fixture required — remove #[ignore] when the fixture lands");
+    // Deterministic fixture. Use a parseable ExecutionId so the
+    // decoder's ExecutionId::parse step accepts it — the v1 fixture
+    // serialises the ExecutionId's string form.
+    let execution_id = ExecutionId::parse("{fp:0}:11111111-1111-4111-8111-111111111111")
+        .expect("execution id fixture parses");
+    let attempt_id = AttemptId::parse("22222222-2222-4222-8222-222222222222")
+        .expect("attempt id fixture parses");
+    let lease_id = LeaseId::parse("33333333-3333-4333-8333-333333333333")
+        .expect("lease id fixture parses");
+
+    let payload = HandlePayload::new(
+        execution_id.clone(),
+        AttemptIndex::new(7),
+        attempt_id.clone(),
+        lease_id.clone(),
+        LeaseEpoch::new(3),
+        30_000,
+        LaneId::new("cairn"),
+        WorkerInstanceId::new("instance-a"),
+    );
+
+    // Synthesise the v1 byte buffer via FF's test-fixture. Wrap into a
+    // HandleOpaque the production decoder consumes.
+    let v1_bytes = handle_codec::v1_handle_for_tests(&payload);
+    let opaque = HandleOpaque::new(v1_bytes.into_boxed_slice());
+
+    // Decode via the v2-era decoder's compat path.
+    let decoded = handle_codec::decode(&opaque)
+        .expect("v1 compat decode path must accept v1_handle_for_tests output");
+
+    // v1 inferences: BackendTag::Valkey (RFC-011 §4.1 — pre-Wave-1c
+    // buffers are Valkey-only).
+    assert_eq!(decoded.tag, BackendTag::Valkey, "v1 compat tag is Valkey");
+
+    // Every payload field must round-trip byte-identical.
+    assert_eq!(decoded.payload.execution_id, execution_id);
+    assert_eq!(decoded.payload.attempt_index, AttemptIndex::new(7));
+    assert_eq!(decoded.payload.attempt_id, attempt_id);
+    assert_eq!(decoded.payload.lease_id, lease_id);
+    assert_eq!(decoded.payload.lease_epoch, LeaseEpoch::new(3));
+    assert_eq!(decoded.payload.lease_ttl_ms, 30_000);
+    assert_eq!(decoded.payload.lane_id.as_str(), "cairn");
+    assert_eq!(decoded.payload.worker_instance_id.as_str(), "instance-a");
 }
