@@ -1823,16 +1823,17 @@ fn render_tool_output_preview(tool_name: &str, output: &serde_json::Value) -> St
     truncate_for_summary(&output.to_string(), 400)
 }
 
-/// Tail-biased bash preview: prepend `exit_code` then the tail of
-/// `stderr` (usually short — holds the compiler diagnostics) then the
-/// tail of `stdout`. Total cap stays under ~2.2 KB so a busy run with
-/// many iterations does not balloon the DECIDE-phase prompt.
+/// Tail-biased bash preview: prepend `exit_code`, then render the tail
+/// of `stdout`, then the tail of `stderr`. Total cap stays under ~2.2
+/// KB so a busy run with many iterations does not balloon the
+/// DECIDE-phase prompt.
 ///
-/// Why stderr before stdout: `cargo`, `rustc`, and most build tools
-/// emit diagnostics on stderr while using stdout for informational
-/// banners. Putting stderr last in the rendered preview means it
-/// survives any downstream truncation done by the decide-phase prompt
-/// builder.
+/// Why stderr last: `cargo`, `rustc`, and most build tools emit
+/// diagnostics on stderr while using stdout for informational banners
+/// ("Compiling X v0.1.0"). Putting stderr at the end means the
+/// compiler diagnostic — the signal the LLM actually needs to decide
+/// "did the gate pass?" — survives any downstream truncation done by
+/// the decide-phase prompt builder.
 fn render_bash_preview(map: &serde_json::Map<String, serde_json::Value>) -> String {
     let mut out = String::with_capacity(2048);
 
@@ -2837,7 +2838,11 @@ mod tests {
         let out = super::tail_of(&s, 200);
         assert!(out.contains("FINAL-MARKER"));
         assert!(out.contains("[truncated"));
-        assert!(out.len() < 400, "tail_of output too large: {} bytes", out.len());
+        assert!(
+            out.len() < 400,
+            "tail_of output too large: {} bytes",
+            out.len()
+        );
     }
 
     /// Short inputs to `tail_of` are passed through unchanged.
