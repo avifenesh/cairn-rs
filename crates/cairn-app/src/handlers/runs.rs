@@ -2020,6 +2020,40 @@ pub(crate) async fn orchestrate_run_handler(
         }
     }
 
+    // F41 (2026-04-24): activate the run's FF execution before the
+    // orchestrator loop dispatches any terminal FCALL.
+    //
+    // `POST /v1/runs` calls `runs.start` which calls FF's
+    // `ff_create_execution` — that leaves the execution in
+    // `lifecycle_phase = "runnable"`. FF's terminal FCALLs
+    // (`ff_complete_execution` et al.) gate on
+    // `lifecycle_phase == "active"` via `validate_lease_and_mark_expired`,
+    // so the loop's final `CompleteRun` step was being rejected with
+    // `execution_not_active -> completed` (surfaced to the operator as
+    // the F37 classifier's 409). The transition to `active` is owned
+    // by `ff_claim_execution` / `ff_issue_claim_grant` — previously
+    // only reachable via `POST /v1/runs/:id/claim`, which the orchestrate
+    // flow did not invoke.
+    //
+    // `ensure_active` is idempotent: on a run that already holds an
+    // FF lease (operator called `/claim` explicitly, or we're resuming
+    // after a recoverable transient) it short-circuits. A failure here
+    // (runtime-level 5xx, tenant visibility issue) aborts orchestration
+    // before we burn provider budget on a run that can't terminate.
+    if let Err(err) = state
+        .runtime
+        .runs
+        .ensure_active(&run.session_id, &run.run_id)
+        .await
+    {
+        tracing::error!(
+            run_id = %run.run_id,
+            error = %err,
+            "F41: failed to activate run execution before orchestrate loop"
+        );
+        return runtime_error_response(err);
+    }
+
     let now_ms = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()

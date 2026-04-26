@@ -193,6 +193,28 @@ impl RunService for FakeFabricRuns {
         Err(readonly("runs.claim"))
     }
 
+    async fn ensure_active(
+        &self,
+        session_id: &SessionId,
+        run_id: &RunId,
+    ) -> Result<RunRecord, RuntimeError> {
+        // In-memory fake has no lease concept — the projection is the
+        // source of truth. Return the current record so orchestrate-path
+        // tests that run against this fake don't trip the default
+        // `claim`-delegation behavior (which would surface as a 500).
+        match RunReadModel::get(self.store.as_ref(), run_id).await? {
+            Some(record) if &record.session_id == session_id => Ok(record),
+            Some(_) => Err(RuntimeError::NotFound {
+                entity: "run",
+                id: run_id.to_string(),
+            }),
+            None => Err(RuntimeError::NotFound {
+                entity: "run",
+                id: run_id.to_string(),
+            }),
+        }
+    }
+
     async fn enter_waiting_approval(
         &self,
         _session_id: &SessionId,

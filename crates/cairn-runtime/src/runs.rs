@@ -107,6 +107,28 @@ pub trait RunService: Send + Sync {
         run_id: &RunId,
     ) -> Result<RunRecord, RuntimeError>;
 
+    /// Idempotent activation of a run's FF execution.
+    ///
+    /// Like [`Self::claim`], but safe to call on already-active runs:
+    /// returns the current record instead of tripping FF's
+    /// `grant_already_exists` eligibility gate. Used by
+    /// `POST /v1/runs/:id/orchestrate` to ensure the terminal-FCALL
+    /// path (`ff_complete_execution`, which gates on
+    /// `lifecycle_phase == "active"`) can succeed regardless of whether
+    /// the caller explicitly `/claim`ed before orchestrating.
+    ///
+    /// Default implementation delegates to [`Self::claim`]; backends
+    /// that have a cheaper idempotency check (e.g. the Fabric adapter
+    /// reads the FF snapshot once) override to skip the grant round-trip
+    /// when the execution already holds a lease.
+    async fn ensure_active(
+        &self,
+        session_id: &SessionId,
+        run_id: &RunId,
+    ) -> Result<RunRecord, RuntimeError> {
+        self.claim(session_id, run_id).await
+    }
+
     /// Transition a run to WaitingApproval (approval gate).
     async fn enter_waiting_approval(
         &self,

@@ -301,6 +301,81 @@ impl FabricRunService {
         self.read_run_record(project, session_id, run_id).await
     }
 
+    /// Idempotent variant of [`Self::claim`] that activates the run's FF
+    /// execution only if it is not already active.
+    ///
+    /// F41 (2026-04-24): `POST /v1/runs/:id/orchestrate` kicks off the
+    /// GATHER → DECIDE → EXECUTE loop, which ends by calling
+    /// [`Self::complete`]. FF's `ff_complete_execution` gates on
+    /// `lifecycle_phase == "active"` via `validate_lease_and_mark_expired`;
+    /// a freshly-created run is in `lifecycle_phase = "runnable"`
+    /// (see `ff_create_execution`, cannot be completed without first
+    /// transitioning to active. The transition is owned by
+    /// `ff_claim_execution` via `issue_grant_and_claim`, but the
+    /// orchestrate handler had no claim step — so every dogfood run
+    /// terminated with `execution_not_active -> completed` regardless of
+    /// whether the LLM produced a valid answer.
+    ///
+    /// `ensure_active` plugs that gap. On the happy path (execution not
+    /// yet claimed) it walks the same `issue_grant_and_claim` sequence as
+    /// `claim`. On the already-claimed path (`current_lease.is_some()`)
+    /// it short-circuits and returns the current record, so operator
+    /// paths that already invoked `POST /v1/runs/:id/claim` before
+    /// orchestrating are not double-punished by FF's `grant_already_exists`
+    /// contention rejection.
+    ///
+    /// Lease-expiry note: if the lease TTL expires mid-loop, FF's
+    /// `validate_lease_and_mark_expired` clears `current_lease_id` and
+    /// subsequent terminal FCALLs will reject with `lease_expired`. That
+    /// is a distinct failure mode from this fix; surfacing it as a 409
+    /// with an actionable message is handled in
+    /// `cairn_app::fabric_adapter::fabric_err_to_runtime`.
+    pub async fn ensure_active(
+        &self,
+        project: &ProjectKey,
+        session_id: &SessionId,
+        run_id: &RunId,
+    ) -> Result<RunRecord, FabricError> {
+        let eid = self.execution_id(project, session_id, run_id);
+
+        let snapshot =
+            self.engine
+                .describe_execution(&eid)
+                .await?
+                .ok_or_else(|| FabricError::NotFound {
+                    entity: "run",
+                    id: run_id.to_string(),
+                })?;
+
+        // Already-active guard. `current_lease.is_some()` is derived
+        // from a non-empty `current_lease_id` in `exec_core`
+        // (`valkey_impl::build_execution_snapshot`). FF's
+        // `validate_lease_and_mark_expired` clears that field on expiry,
+        // so a stale `Some` means the lease is still within its TTL and
+        // terminal FCALLs will accept the unfenced operator-override
+        // path that cairn uses.
+        if snapshot.current_lease.is_some() {
+            return build_run_record(&snapshot, project, run_id);
+        }
+
+        let lane_id = if snapshot.lane_id.as_str().is_empty() {
+            self.lane_id(project)
+        } else {
+            snapshot.lane_id.clone()
+        };
+
+        let _outcome = self
+            .control_plane
+            .issue_grant_and_claim(crate::engine::IssueGrantAndClaimInput {
+                execution_id: eid,
+                lane_id,
+                lease_duration_ms: self.runtime.config.lease_ttl_ms,
+            })
+            .await?;
+
+        self.read_run_record(project, session_id, run_id).await
+    }
+
     pub async fn complete(
         &self,
         project: &ProjectKey,
