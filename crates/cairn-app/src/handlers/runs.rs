@@ -2153,6 +2153,43 @@ pub(crate) async fn orchestrate_run_handler(
         return runtime_error_response(err);
     }
 
+    // F51 (2026-04-26): `POST /v1/runs/:id/orchestrate` is a pull-model
+    // driver — each call runs one GATHER → DECIDE → EXECUTE iteration
+    // and returns; no long-lived worker renews the lease between
+    // invocations. Operator-paced flows (human approvals, slow
+    // tool-call confirms) routinely exceed the 30s default TTL, and
+    // the next call's terminal FCALL (`ff_complete_execution`) then
+    // rejects with `lease_expired`. Prior workaround was to crank
+    // `CAIRN_FABRIC_LEASE_TTL_MS` up to 600_000, which paid 20× recovery
+    // latency on stuck runs and worker_leases index bloat.
+    //
+    // Stale-check-and-renew at handler entry closes the gap: we extend
+    // the lease in place if it has less than `F51_MIN_REMAINING_MS`
+    // left, fall back to a full re-claim if the lease is already gone,
+    // and no-op otherwise (back-to-back orchestrate calls hit the
+    // no-op path). `ensure_active` above handles the first-call case
+    // where no lease exists at all; this call handles subsequent
+    // invocations on the same run.
+    //
+    // Threshold rationale: 10s gives one iteration's worth of headroom
+    // under the default 30s TTL. Calls arriving with ≥20s of TTL
+    // already burned are rare but always worth renewing early so the
+    // iteration's terminal FCALL doesn't spill past expiry.
+    const F51_MIN_REMAINING_MS: u64 = 10_000;
+    if let Err(err) = state
+        .runtime
+        .runs
+        .renew_lease_if_stale(&run.session_id, &run.run_id, F51_MIN_REMAINING_MS)
+        .await
+    {
+        tracing::error!(
+            run_id = %run.run_id,
+            error = %err,
+            "F51: failed to refresh run lease before orchestrate loop"
+        );
+        return runtime_error_response(err);
+    }
+
     let now_ms = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()

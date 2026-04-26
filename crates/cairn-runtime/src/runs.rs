@@ -129,6 +129,29 @@ pub trait RunService: Send + Sync {
         self.claim(session_id, run_id).await
     }
 
+    /// Extend the lease on a run if it is nearing expiry; re-claim if
+    /// the lease has expired entirely.
+    ///
+    /// F51 (2026-04-26): `POST /v1/runs/:id/orchestrate` is a pull-model
+    /// driver — the operator-paced gap between HTTP calls easily
+    /// exceeds `CAIRN_FABRIC_LEASE_TTL_MS` (default 30s) on runs that
+    /// await human approval or tool-call review. Calling this at the
+    /// top of the handler keeps the lease healthy across those gaps so
+    /// the run's terminal FCALL (`ff_complete_execution`) does not
+    /// reject with `lease_expired`.
+    ///
+    /// Idempotent: back-to-back calls against a fresh lease produce no
+    /// FF mutations. Default impl delegates to [`Self::ensure_active`]
+    /// for backends that do not track lease staleness directly.
+    async fn renew_lease_if_stale(
+        &self,
+        session_id: &SessionId,
+        run_id: &RunId,
+        _min_remaining_ms: u64,
+    ) -> Result<RunRecord, RuntimeError> {
+        self.ensure_active(session_id, run_id).await
+    }
+
     /// Transition a run to WaitingApproval (approval gate).
     async fn enter_waiting_approval(
         &self,
