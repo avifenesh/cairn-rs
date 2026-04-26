@@ -12,17 +12,20 @@
 //!    worker_sdk onto.
 //!
 //! 2. **LEGACY [`SuspensionParams`] / [`ConditionMatcher`] factories**
-//!    ([`for_approval`], [`for_subagent`], [`for_tool_result`],
-//!    [`for_operator_hold`]). Used only by the service-layer suspend
-//!    paths in `services/run_service.rs` and
-//!    `services/task_service.rs`, which still go through the
-//!    Lua-glue `build_suspend_input` + FCALL path because those
-//!    callers hold a `LeaseFencingTriple`, not a `Handle`. Removal
-//!    is blocked on FF upstream issue
+//!    ([`for_approval`], [`for_tool_result`], [`for_operator_hold`]).
+//!    Used only by the service-layer suspend paths in
+//!    `services/run_service.rs` and `services/task_service.rs`, which
+//!    still go through the Lua-glue `build_suspend_input` + FCALL
+//!    path because those callers hold a `LeaseFencingTriple`, not a
+//!    `Handle`. Removal is blocked on FF upstream issue
 //!    <https://github.com/avifenesh/FlowFabric/issues/322>
 //!    (`EngineBackend::suspend_by_triple` typed trait method). Once
 //!    that lands, CG-c migrates the 3 service-layer call sites onto
 //!    the typed path and this legacy surface is deleted.
+//!
+//!    Note: the subagent factory (`for_subagent`) is worker-only —
+//!    no service-layer suspend call site uses child-completion — so
+//!    it lives solely in the typed path ([`typed_subagent`]).
 
 use flowfabric::core::contracts::{
     CompositeBody, CountKind, ResumeCondition, ResumePolicy, SignalMatcher, SuspensionReasonCode,

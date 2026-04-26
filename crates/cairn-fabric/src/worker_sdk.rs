@@ -389,8 +389,7 @@ impl CairnTask {
         // bridge events so Rejected surfaces as a distinct state
         // transition — today both branches land under
         // `RunState::WaitingApproval` and the worker polls on resume.
-        let (reason, cond, timeout, policy) =
-            suspension::typed_approval(approval_id, timeout_ms);
+        let (reason, cond, timeout, policy) = suspension::typed_approval(approval_id, timeout_ms);
         let (task, bridge, run_id, project) = self.take_task();
 
         let handle = task
