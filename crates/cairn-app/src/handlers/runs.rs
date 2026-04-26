@@ -288,6 +288,15 @@ impl CreateRunRequest {
     /// the `project()` accessor intentionally stays infallible so it can
     /// continue serving as the `HasProjectScope` impl.
     pub(crate) fn validate(&self) -> Result<(), String> {
+        // F42: prompts are bounded at the HTTP boundary — an unbounded
+        // string would bloat the defaults store and blow up the user
+        // message sent to the LLM. Matches the ceiling used by the
+        // prompt-authoring endpoint (`bin_providers.rs`).
+        let prompt_len_check = self
+            .prompt
+            .as_deref()
+            .map(|p| crate::validate::max_len_str("prompt", p, crate::validate::MAX_PROMPT_LEN))
+            .unwrap_or(Ok(()));
         crate::validate::check_all(&[
             crate::validate::require_id("tenant_id", &self.tenant_id),
             crate::validate::require_id("workspace_id", &self.workspace_id),
@@ -295,6 +304,7 @@ impl CreateRunRequest {
             crate::validate::require_id("session_id", &self.session_id),
             crate::validate::require_id("run_id", &self.run_id),
             crate::validate::valid_id("parent_run_id", &self.parent_run_id),
+            prompt_len_check,
         ])
     }
 }
@@ -3388,6 +3398,28 @@ mod tests {
         assert!(r.validate().is_ok());
         r.parent_run_id = Some("parent\x07id".into());
         assert!(r.validate().is_err());
+    }
+
+    /// F42: prompt field has the standard `MAX_PROMPT_LEN` bound. An
+    /// unbounded value would bloat the per-run defaults store and blow
+    /// up the LLM user message — the handler-side 422 makes the limit
+    /// actionable.
+    #[test]
+    fn validate_rejects_oversized_prompt() {
+        let mut r = req("t1", "w1", "p1", "s1", "r1");
+        r.prompt = Some("x".repeat(crate::validate::MAX_PROMPT_LEN + 1));
+        let err = r.validate().unwrap_err();
+        assert!(err.contains("prompt"));
+        assert!(err.contains("exceeds maximum length"));
+    }
+
+    /// F42: a prompt exactly at the limit must pass — off-by-one
+    /// guard.
+    #[test]
+    fn validate_accepts_prompt_at_limit() {
+        let mut r = req("t1", "w1", "p1", "s1", "r1");
+        r.prompt = Some("x".repeat(crate::validate::MAX_PROMPT_LEN));
+        assert!(r.validate().is_ok());
     }
 
     // ── F29 CD: redact_provider_error ───────────────────────────────
