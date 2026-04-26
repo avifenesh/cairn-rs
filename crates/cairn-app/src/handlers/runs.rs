@@ -2080,7 +2080,12 @@ async fn finalize_run_failure(
     run_id: &cairn_domain::RunId,
     failure_class: cairn_domain::FailureClass,
 ) {
-    if let Err(e) = state.runtime.runs.fail(session_id, run_id, failure_class).await {
+    if let Err(e) = state
+        .runtime
+        .runs
+        .fail(session_id, run_id, failure_class)
+        .await
+    {
         // `InvalidTransition` is the common benign case: the loop already
         // reached a terminal state (Completed / Canceled) before we got
         // here. Log at debug. Anything else is operator-visible.
@@ -2914,13 +2919,7 @@ pub(crate) async fn orchestrate_run_handler(
             // etc.; we map to a FailureClass heuristically and otherwise
             // default to ExecutionError.
             let failure_class = classify_failed_reason(&reason);
-            finalize_run_failure(
-                state.as_ref(),
-                &run.session_id,
-                &run.run_id,
-                failure_class,
-            )
-            .await;
+            finalize_run_failure(state.as_ref(), &run.session_id, &run.run_id, failure_class).await;
             (
                 StatusCode::OK,
                 Json(serde_json::json!({

@@ -308,16 +308,9 @@ impl InMemoryStore {
             .clear();
     }
 
-    /// Attach a durable secondary event log.
-    ///
-    /// After this call every `append()` will dual-write to `log` after the
-    /// in-memory write. Intended to be called once at startup, before the
-    /// HTTP server accepts traffic.
-    ///
-    /// Pass `Arc<PgEventLog>` or `Arc<SqliteEventLog>` — any `EventLog` impl works.
-    /// F52: test-only read of the `tool_invocation_cache_hits`
-    /// projection. Integration tests assert the projection grew after
-    /// a `ToolInvocationCacheHit` append.
+    /// Test-only read of the `tool_invocation_cache_hits` projection.
+    /// Integration tests assert the projection grew after a
+    /// `ToolInvocationCacheHit` append.
     pub fn all_tool_invocation_cache_hits(
         &self,
     ) -> Vec<crate::projections::ToolInvocationCacheHitRecord> {
@@ -325,6 +318,13 @@ impl InMemoryStore {
         state.tool_invocation_cache_hits.values().cloned().collect()
     }
 
+    /// Attach a durable secondary event log.
+    ///
+    /// After this call every `append()` will dual-write to `log` after the
+    /// in-memory write. Intended to be called once at startup, before the
+    /// HTTP server accepts traffic.
+    ///
+    /// Pass `Arc<PgEventLog>` or `Arc<SqliteEventLog>` — any `EventLog` impl works.
     pub fn set_secondary_log(&self, log: Arc<dyn EventLog + Send + Sync>) {
         *self
             .secondary_log

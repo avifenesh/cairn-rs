@@ -1,19 +1,11 @@
--- F52: durable projection for `ToolInvocationCacheHit` events.
+-- Durable projection for `ToolInvocationCacheHit` events. One row per
+-- cache-hit keyed by `invocation_id`. Operators query cache activity
+-- (counts per run, recent hits, served_at_ms latencies) through this
+-- read-model instead of scanning `event_log`.
 --
--- The Phase 2 dogfood run surfaced a WARN "pg projection stub: event
--- committed to event_log but no projection table updated" for the
--- `ToolInvocationCacheHit` variant. F39 was supposed to close this
--- projection-coverage class, but the CacheHit variant was missed
--- because Track 3 originally classified it as audit-only.
---
--- Operators now need to see cache-hit activity on the REST surface
--- (not just via event-log replay). This table records one row per hit
--- so the read side can report counts, recent hits per run, and
--- served_at_ms latencies without scanning `event_log`.
---
--- Portable surface only: no JSONB, no arrays, no partial indexes
--- outside Postgres+SQLite (both supported here). See the
--- `no-DB-specific-features` project memory for the full rubric.
+-- Portable surface only: no JSONB, no arrays, no Postgres-specific
+-- operators. Mirrors the SQLite schema in
+-- `crates/cairn-store/src/sqlite/schema.rs`.
 
 CREATE TABLE IF NOT EXISTS tool_invocation_cache_hits (
     invocation_id            TEXT   PRIMARY KEY,

@@ -851,10 +851,10 @@ impl SqliteSyncProjection {
             RuntimeEvent::ToolInvocationProgressUpdated(_) => {
                 log_stub("ToolInvocationProgressUpdated")
             }
-            // F52: project `ToolInvocationCacheHit` into
-            // `tool_invocation_cache_hits`. Mirrors the pg handler so
-            // operator REST queries over cache activity work identically
-            // across backends (no-DB-specific-features rule).
+            // Projection contract: mirrors the pg handler so operator
+            // REST queries over cache activity work identically across
+            // backends (no-DB-specific-features rule). One row per
+            // `invocation_id`; `ON CONFLICT DO NOTHING` absorbs replay.
             RuntimeEvent::ToolInvocationCacheHit(e) => {
                 let original_completed_at =
                     i64::try_from(e.original_completed_at_ms).map_err(|_| {

@@ -462,12 +462,11 @@ impl PgSyncProjection {
             RuntimeEvent::ResourceShareRevoked(_) => log_stub("ResourceShareRevoked"),
             RuntimeEvent::ResourceShared(_) => log_stub("ResourceShared"),
             RuntimeEvent::RoutePolicyUpdated(_) => log_stub("RoutePolicyUpdated"),
-            // F52: project `ToolInvocationCacheHit` into
-            // `tool_invocation_cache_hits` so operators can query cache
-            // effectiveness via the REST surface without replaying the
-            // event log. Originally classified as audit-only (Track 3);
-            // Phase 2 dogfood made the gap visible as a WARN on every
-            // run with a cache hit.
+            // Projection contract: one row per `ToolInvocationCacheHit`
+            // keyed by `invocation_id`. Operators query cache activity
+            // via the REST surface (`tool_invocation_cache_hits` table)
+            // instead of replaying the event log. `ON CONFLICT DO
+            // NOTHING` keeps replay idempotent.
             RuntimeEvent::ToolInvocationCacheHit(e) => {
                 let original_completed_at = i64::try_from(e.original_completed_at_ms).map_err(|_| {
                     StoreError::Internal(format!(

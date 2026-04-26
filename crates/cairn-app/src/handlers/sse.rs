@@ -263,10 +263,7 @@ pub fn ws_event_tenant_id(
 /// append` and therefore missed service-layer writes). Kept here so
 /// every store append routed through `publish_runtime_frames_since`
 /// surfaces in the bell icon + sidebar badge.
-fn push_notification_for_event(
-    state: &Arc<AppState>,
-    payload: &cairn_domain::RuntimeEvent,
-) {
+fn push_notification_for_event(state: &Arc<AppState>, payload: &cairn_domain::RuntimeEvent) {
     use crate::state::{OperatorNotification, OperatorNotificationType as T};
     use cairn_domain::lifecycle::{RunState, TaskState};
     use cairn_domain::RuntimeEvent as E;
@@ -366,10 +363,7 @@ fn push_notification_for_event(
 /// Every check is best-effort — a transient store blip or a missing
 /// run_id degrades gracefully to the pre-F49 behaviour (operator
 /// re-POSTs `/orchestrate`). No panics, no 5xxs from this path.
-async fn maybe_auto_resume_orchestrate(
-    state: &Arc<AppState>,
-    e: &cairn_domain::ApprovalResolved,
-) {
+async fn maybe_auto_resume_orchestrate(state: &Arc<AppState>, e: &cairn_domain::ApprovalResolved) {
     use cairn_store::projections::{ApprovalReadModel, RunReadModel};
     let Some(run_id) = resolve_run_for_approval(state, &e.approval_id).await else {
         return;
@@ -413,19 +407,27 @@ async fn maybe_auto_resume_orchestrate(
 /// Walk from approval_id → run_id via the approval projection. The
 /// `ApprovalResolved` frame only carries the id, so we must look up
 /// the run association in the projection.
+///
+/// Transient store errors are logged at debug and degrade to "no
+/// run_id" so auto-resume is best-effort — operators can always
+/// re-POST `/orchestrate` manually (the pre-F49 behaviour).
 async fn resolve_run_for_approval(
     state: &Arc<AppState>,
     approval_id: &cairn_domain::ApprovalId,
 ) -> Option<cairn_domain::RunId> {
     use cairn_store::projections::ApprovalReadModel;
-    state
-        .runtime
-        .store
-        .get(approval_id)
-        .await
-        .ok()
-        .flatten()
-        .and_then(|rec| rec.run_id)
+    match state.runtime.store.get(approval_id).await {
+        Ok(Some(rec)) => rec.run_id,
+        Ok(None) => None,
+        Err(err) => {
+            tracing::debug!(
+                approval_id = %approval_id,
+                error = %err,
+                "F49: skip auto-resume (cannot read approval record from projection)"
+            );
+            None
+        }
+    }
 }
 
 #[cfg(test)]

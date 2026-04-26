@@ -1473,9 +1473,8 @@ async fn main() {
         // warn and the scanner-based recovery (FF's 14 scanners) still
         // picks up truly wedged runs.
         {
-            let (kick_tx, mut kick_rx) = tokio::sync::mpsc::unbounded_channel::<
-                cairn_domain::RunId,
-            >();
+            let (kick_tx, mut kick_rx) =
+                tokio::sync::mpsc::unbounded_channel::<cairn_domain::RunId>();
             lib_state.orchestrate_kick_tx.install(kick_tx);
             let kick_url = format!("http://{bound}");
             let kick_token = admin_token.clone();
