@@ -168,7 +168,8 @@ async fn plan_approval_round_trip_via_unified_surface() {
     assert!(hit["decision"].is_null(), "pending");
 
     // Approve via the unified POST path — body is optional for plan.
-    let (status, body, _) = call(app.clone(), "POST", "/v1/approvals/plan_rt_1/approve", None).await;
+    let (status, body, _) =
+        call(app.clone(), "POST", "/v1/approvals/plan_rt_1/approve", None).await;
     assert_eq!(status, StatusCode::OK, "plan approve: {body}");
     assert_eq!(body["kind"], "plan");
     assert_eq!(body["decision"], "approved");
@@ -254,10 +255,7 @@ async fn deprecated_list_redirects_to_unified_path() {
     let loc = headers.get(header::LOCATION).expect("Location header");
     let loc = loc.to_str().expect("utf-8 location");
     // Query string must be preserved so filters keep working.
-    assert!(
-        loc.starts_with("/v1/approvals?"),
-        "redirect target: {loc}"
-    );
+    assert!(loc.starts_with("/v1/approvals?"), "redirect target: {loc}");
     assert!(loc.contains("run_id=run_abc"), "query preserved: {loc}");
     assert!(loc.contains("state=pending"), "query preserved: {loc}");
     // RFC 8594 deprecation signal + RFC 8288 successor link.

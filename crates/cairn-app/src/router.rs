@@ -1330,14 +1330,8 @@ impl AppBootstrap {
             // Unified under `/v1/approvals/*`. Pre-F45 paths 308-redirect
             // so existing clients keep working while they migrate. 308
             // preserves method + body across redirect.
-            .route(
-                "/v1/tool-call-approvals",
-                get(redirect_list),
-            )
-            .route(
-                "/v1/tool-call-approvals/:call_id",
-                get(redirect_get),
-            )
+            .route("/v1/tool-call-approvals", get(redirect_list))
+            .route("/v1/tool-call-approvals/:call_id", get(redirect_get))
             .route(
                 "/v1/tool-call-approvals/:call_id/approve",
                 post(redirect_approve),

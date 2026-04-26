@@ -56,8 +56,8 @@ fn redirect_to(target: String) -> Response {
     // validation — e.g. embedded control chars. The percent-encoding
     // above already scrubs that set, so the fallback exists purely as
     // a defence-in-depth belt-and-braces.
-    let loc = HeaderValue::try_from(target.as_str())
-        .unwrap_or_else(|_| HeaderValue::from_static("/"));
+    let loc =
+        HeaderValue::try_from(target.as_str()).unwrap_or_else(|_| HeaderValue::from_static("/"));
     headers.insert(header::LOCATION, loc);
     // RFC 8594 — signals the endpoint is deprecated. `true` is the
     // RFC-recommended sentinel value for "deprecated as of now".
@@ -93,22 +93,13 @@ pub(crate) async fn redirect_get(Path(call_id): Path<String>) -> impl IntoRespon
 }
 
 pub(crate) async fn redirect_approve(Path(call_id): Path<String>) -> impl IntoResponse {
-    redirect_to(format!(
-        "/v1/approvals/{}/approve",
-        enc(&call_id)
-    ))
+    redirect_to(format!("/v1/approvals/{}/approve", enc(&call_id)))
 }
 
 pub(crate) async fn redirect_reject(Path(call_id): Path<String>) -> impl IntoResponse {
-    redirect_to(format!(
-        "/v1/approvals/{}/reject",
-        enc(&call_id)
-    ))
+    redirect_to(format!("/v1/approvals/{}/reject", enc(&call_id)))
 }
 
 pub(crate) async fn redirect_amend(Path(call_id): Path<String>) -> impl IntoResponse {
-    redirect_to(format!(
-        "/v1/approvals/{}/amend",
-        enc(&call_id)
-    ))
+    redirect_to(format!("/v1/approvals/{}/amend", enc(&call_id)))
 }

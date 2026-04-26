@@ -455,7 +455,10 @@ pub(crate) async fn list_approvals_handler(
     if want_plan {
         // Ask for a generous slab so post-filter pagination isn't
         // silently truncated by state filtering.
-        let plan_fetch_limit = offset.saturating_add(limit).saturating_add(1).min(MAX_LIST_FETCH);
+        let plan_fetch_limit = offset
+            .saturating_add(limit)
+            .saturating_add(1)
+            .min(MAX_LIST_FETCH);
         match state
             .runtime
             .approvals
@@ -501,7 +504,10 @@ pub(crate) async fn list_approvals_handler(
     // ── Gather tool-call approvals ────────────────────────────────────
     if want_tool {
         let reader: &dyn ToolCallApprovalReadModel = state.runtime.store.as_ref();
-        let fetch_limit = offset.saturating_add(limit).saturating_add(1).min(MAX_LIST_FETCH);
+        let fetch_limit = offset
+            .saturating_add(limit)
+            .saturating_add(1)
+            .min(MAX_LIST_FETCH);
         let records: Result<Vec<ToolCallApprovalRecord>, _> =
             if let Some(rid) = query.run_id.as_deref() {
                 reader.list_for_run(&RunId::new(rid)).await
@@ -772,9 +778,11 @@ pub(crate) async fn amend_approval_handler(
             crate::handlers::sse::publish_runtime_frames_since(&state, before).await;
             let reader: &dyn ToolCallApprovalReadModel = state.runtime.store.as_ref();
             match reader.get(&call_id).await {
-                Ok(Some(updated)) => {
-                    (StatusCode::OK, Json(UnifiedApproval::ToolCall(Box::new(updated)))).into_response()
-                }
+                Ok(Some(updated)) => (
+                    StatusCode::OK,
+                    Json(UnifiedApproval::ToolCall(Box::new(updated))),
+                )
+                    .into_response(),
                 Ok(None) => AppApiError::new(
                     StatusCode::INTERNAL_SERVER_ERROR,
                     "internal_error",
@@ -836,7 +844,11 @@ async fn resolve_plan_approval(
         {
             Ok(_) => {
                 crate::handlers::sse::publish_runtime_frames_since(state, before).await;
-                (StatusCode::OK, Json(UnifiedApproval::Plan(Box::new(updated)))).into_response()
+                (
+                    StatusCode::OK,
+                    Json(UnifiedApproval::Plan(Box::new(updated))),
+                )
+                    .into_response()
             }
             Err(err) => runtime_error_response(err),
         },
@@ -903,9 +915,11 @@ async fn approve_tool_call(
             crate::handlers::sse::publish_runtime_frames_since(state, before).await;
             let reader: &dyn ToolCallApprovalReadModel = state.runtime.store.as_ref();
             match reader.get(&call_id).await {
-                Ok(Some(updated)) => {
-                    (StatusCode::OK, Json(UnifiedApproval::ToolCall(Box::new(updated)))).into_response()
-                }
+                Ok(Some(updated)) => (
+                    StatusCode::OK,
+                    Json(UnifiedApproval::ToolCall(Box::new(updated))),
+                )
+                    .into_response(),
                 Ok(None) => AppApiError::new(
                     StatusCode::INTERNAL_SERVER_ERROR,
                     "internal_error",
@@ -957,9 +971,11 @@ async fn reject_tool_call(
             crate::handlers::sse::publish_runtime_frames_since(state, before).await;
             let reader: &dyn ToolCallApprovalReadModel = state.runtime.store.as_ref();
             match reader.get(&call_id).await {
-                Ok(Some(updated)) => {
-                    (StatusCode::OK, Json(UnifiedApproval::ToolCall(Box::new(updated)))).into_response()
-                }
+                Ok(Some(updated)) => (
+                    StatusCode::OK,
+                    Json(UnifiedApproval::ToolCall(Box::new(updated))),
+                )
+                    .into_response(),
                 Ok(None) => AppApiError::new(
                     StatusCode::INTERNAL_SERVER_ERROR,
                     "internal_error",
@@ -1051,4 +1067,3 @@ pub(crate) async fn list_approval_policies_handler(
         Err(err) => runtime_error_response(err),
     }
 }
-

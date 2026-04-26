@@ -130,8 +130,7 @@ async fn approve_succeeds_after_service_restart_with_same_store() {
 
     // Sanity: HTTP GET on router A sees the pending record (projection
     // is populated).
-    let (get_status, get_body) =
-        http_json(router_a, "GET", "/v1/approvals/tc_restart", None).await;
+    let (get_status, get_body) = http_json(router_a, "GET", "/v1/approvals/tc_restart", None).await;
     assert_eq!(get_status, StatusCode::OK, "GET pre-restart: {get_body}");
     assert_eq!(get_body["state"], "pending");
 

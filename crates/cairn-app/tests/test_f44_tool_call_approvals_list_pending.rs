@@ -144,13 +144,7 @@ async fn f44_pending_approval_is_listed_by_run_id() {
     let proposal = seed_pending_proposal(&state, "tc_f44_run", "run_f44").await;
 
     // 1. Sanity — by-id works, state=pending.
-    let (status, body) = http(
-        app.clone(),
-        "GET",
-        "/v1/approvals/tc_f44_run",
-        None,
-    )
-    .await;
+    let (status, body) = http(app.clone(), "GET", "/v1/approvals/tc_f44_run", None).await;
     assert_eq!(status, StatusCode::OK, "by-id must return 200: {body}");
     assert_eq!(body["call_id"], proposal.call_id.as_str());
     assert_eq!(body["state"], "pending");
