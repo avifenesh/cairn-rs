@@ -132,4 +132,23 @@ pub trait ToolCallApprovalReadModel: Send + Sync {
         limit: usize,
         offset: usize,
     ) -> Result<Vec<ToolCallApprovalRecord>, StoreError>;
+
+    /// List every pending tool-call approval across every tenant,
+    /// workspace and project. Exposed only to admin callers (see
+    /// `list_tool_call_approvals_handler`): regular operators must
+    /// always scope to a project triple so they cannot accidentally
+    /// observe approvals from foreign tenants. Ordered by
+    /// `(proposed_at_ms, call_id)` so replay is deterministic.
+    ///
+    /// F44: added to serve the "admin with no explicit scope" case.
+    /// Previously the handler silently fell back to the admin service
+    /// account's own tenant (`default`), which never matches the
+    /// canonical `default_tenant` cell written by the UI + orchestrate,
+    /// so the dogfood admin inbox rendered empty while by-id returned
+    /// live pending records.
+    async fn list_all_pending(
+        &self,
+        limit: usize,
+        offset: usize,
+    ) -> Result<Vec<ToolCallApprovalRecord>, StoreError>;
 }

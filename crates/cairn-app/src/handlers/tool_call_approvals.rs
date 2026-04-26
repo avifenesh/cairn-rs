@@ -63,11 +63,18 @@ use crate::state::AppState;
 
 /// Query string for the list endpoint.
 ///
-/// At least one of the tenant-bound filters is expected in normal
-/// operation (`run_id`, `session_id`, or project triple). If none is
-/// supplied the handler falls back to the caller's tenant scope and
-/// returns the pending inbox across the default project.
+/// Typical operation supplies one of `run_id`, `session_id`, or a
+/// project triple.
+///
+/// * For a non-admin caller without any of those, the handler falls
+///   back to the caller's tenant scope + the canonical default
+///   workspace/project cell and returns the pending inbox.
+/// * For an admin caller without any of those (F44), the handler
+///   returns the cross-tenant pending inbox so a super-admin sees
+///   every pending approval across every project — the
+///   dogfood operator-inbox shape.
 #[derive(Clone, Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct ListToolCallApprovalsQuery {
     pub tenant_id: Option<String>,
     pub workspace_id: Option<String>,
@@ -75,6 +82,11 @@ pub(crate) struct ListToolCallApprovalsQuery {
     pub run_id: Option<String>,
     pub session_id: Option<String>,
     /// Filter by state. Accepts `pending | approved | rejected | timeout`.
+    ///
+    /// F44: the field name is `state`. Requests that misspell it (e.g.
+    /// `status=pending`) are rejected at deserialize time by
+    /// `deny_unknown_fields` so typos surface loudly as 400 instead of
+    /// being silently dropped and producing a misleading empty list.
     pub state: Option<String>,
     pub limit: Option<usize>,
     pub offset: Option<usize>,
@@ -208,9 +220,12 @@ const MAX_LIST_FETCH: usize = 5_000;
 /// Selection precedence (first match wins):
 /// 1. `run_id` → `list_for_run`
 /// 2. `session_id` → `list_for_session`
-/// 3. project triple → `list_pending_for_project` (operator inbox — only
-///    returns records in `pending`, so a `state=approved|rejected` filter
-///    here is an empty-set noise request).
+/// 3. admin caller with no scope params (F44) → `list_all_pending` —
+///    cross-tenant operator inbox, pending-only.
+/// 4. project triple (explicit or filled in from tenant scope) →
+///    `list_pending_for_project` — pending-only. A `state=approved|rejected`
+///    filter here is a misrouted query: the handler 422s rather than
+///    silently returning an empty list.
 ///
 /// Tenant scope is enforced by filtering the candidate set, then the
 /// `state` filter, *then* the `limit`/`offset` slice is applied — so
@@ -227,6 +242,25 @@ pub(crate) async fn list_tool_call_approvals_handler(
     let reader: &dyn ToolCallApprovalReadModel = state.runtime.store.as_ref();
     let limit = query.limit();
     let offset = query.offset();
+
+    // F44: an admin caller that supplies NO scope hints at all (no
+    // run_id / session_id / project triple) is asking for the
+    // cross-tenant "super-admin" inbox. Previously this path fell back
+    // to the admin service account's own tenant (`default` per
+    // `main.rs`), which never matches the canonical `default_tenant`
+    // cell where the UI + orchestrate write, so the inbox rendered
+    // empty while by-id returned live pending records. For admin +
+    // fully-unscoped listings we now read straight from
+    // `list_all_pending` so operators see every live approval they are
+    // authorised to resolve. Non-admin callers still require a scope:
+    // the `TenantScope` fallback below is tight enough to keep foreign
+    // tenants invisible.
+    let admin_cross_tenant_inbox = tenant_scope.is_admin
+        && query.run_id.is_none()
+        && query.session_id.is_none()
+        && query.tenant_id.is_none()
+        && query.workspace_id.is_none()
+        && query.project_id.is_none();
 
     // Resolve the fallback project triple from the caller's tenant scope
     // (never the process-wide default). A non-admin caller sending a
@@ -265,24 +299,30 @@ pub(crate) async fn list_tool_call_approvals_handler(
     //   *and* it accepts `(limit, offset)`. When the caller has no
     //   state filter (or filters to `pending`) we push `offset`/`limit`
     //   down to the projection, so pagination scales past
-    //   `MAX_LIST_FETCH`. For any other state filter the inbox always
-    //   yields an empty set (the projection doesn't return resolved
-    //   records on this path); return `[]` up front instead of doing an
-    //   expensive fetch + filter that we already know will be empty.
+    //   `MAX_LIST_FETCH`. For any other state filter the inbox would
+    //   always yield an empty set (the projection doesn't return
+    //   resolved records on this path); we 422 up front with
+    //   `unsupported_filter` rather than silently returning `[]`, so
+    //   operators who see approved records on the run view don't
+    //   mistake an empty inbox for "nothing to approve".
+    //
+    // * admin cross-tenant inbox (F44) — same rules as project inbox:
+    //   pending-only, pagination pushed down to the projection, same
+    //   422 on non-pending filters.
     let is_project_inbox = query.run_id.is_none() && query.session_id.is_none();
     let inbox_state_is_pending_only =
         matches!(state_filter, None | Some(ToolCallApprovalState::Pending));
 
-    // Reject non-pending state filter on the project-inbox path up
-    // front (projection has no `list_all_for_project` equivalent; a
-    // caller wanting resolved records must scope by run_id or
-    // session_id). Silently returning `[]` would surprise operators who
+    // Reject non-pending state filter on ANY inbox path (project or
+    // admin cross-tenant). The projection only returns resolved records
+    // when scoped by run_id / session_id; silently returning `[]` for
+    // `state=approved` on an inbox request would surprise operators who
     // see approved records on the run view but an empty project inbox.
     if is_project_inbox && !inbox_state_is_pending_only {
         return AppApiError::new(
             StatusCode::UNPROCESSABLE_ENTITY,
             "unsupported_filter",
-            "listing by project triple only returns pending records; \
+            "inbox listings only return pending records; \
              use run_id or session_id to list resolved state",
         )
         .into_response();
@@ -306,6 +346,13 @@ pub(crate) async fn list_tool_call_approvals_handler(
         reader.list_for_run(&RunId::new(rid)).await
     } else if let Some(sid) = query.session_id.as_deref() {
         reader.list_for_session(&SessionId::new(sid)).await
+    } else if admin_cross_tenant_inbox {
+        // F44: admin + fully-unscoped inbox reads across every tenant.
+        // Pagination pushed down to the projection; fetch `limit + 1`
+        // to detect has_more in a single round trip.
+        reader
+            .list_all_pending(limit.saturating_add(1), offset)
+            .await
     } else {
         // Inbox path: push `offset`/`limit` to the projection, fetch
         // `limit + 1` to detect has_more in a single round trip.

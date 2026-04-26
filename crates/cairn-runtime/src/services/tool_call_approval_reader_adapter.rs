@@ -155,6 +155,13 @@ mod tests {
         ) -> Result<Vec<ToolCallApprovalRecord>, StoreError> {
             Ok(vec![])
         }
+        async fn list_all_pending(
+            &self,
+            _limit: usize,
+            _offset: usize,
+        ) -> Result<Vec<ToolCallApprovalRecord>, StoreError> {
+            Ok(vec![])
+        }
     }
 
     fn rec(state: ToolCallApprovalState) -> ToolCallApprovalRecord {

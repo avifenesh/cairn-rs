@@ -2681,6 +2681,26 @@ impl ToolCallApprovalReadModel for InMemoryStore {
         });
         Ok(results.into_iter().skip(offset).take(limit).collect())
     }
+
+    async fn list_all_pending(
+        &self,
+        limit: usize,
+        offset: usize,
+    ) -> Result<Vec<ToolCallApprovalRecord>, StoreError> {
+        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        let mut results: Vec<ToolCallApprovalRecord> = state
+            .tool_call_approvals
+            .values()
+            .filter(|r| r.state == ToolCallApprovalState::Pending)
+            .cloned()
+            .collect();
+        results.sort_by(|a, b| {
+            a.proposed_at_ms
+                .cmp(&b.proposed_at_ms)
+                .then_with(|| a.call_id.as_str().cmp(b.call_id.as_str()))
+        });
+        Ok(results.into_iter().skip(offset).take(limit).collect())
+    }
 }
 
 // -- CheckpointReadModel --
