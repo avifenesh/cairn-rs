@@ -2119,8 +2119,10 @@ pub(crate) async fn orchestrate_run_handler(
         }
     }
 
-    // F41 (2026-04-24): activate the run's FF execution before the
-    // orchestrator loop dispatches any terminal FCALL.
+    // F41 (2026-04-24) + F51 (2026-04-26): activate the run's FF
+    // execution before the orchestrator loop dispatches any terminal
+    // FCALL, AND keep the lease fresh across the pull-model HTTP gap
+    // between invocations.
     //
     // `POST /v1/runs` calls `runs.start` which calls FF's
     // `ff_create_execution` — that leaves the execution in
@@ -2128,53 +2130,49 @@ pub(crate) async fn orchestrate_run_handler(
     // (`ff_complete_execution` et al.) gate on
     // `lifecycle_phase == "active"` via `validate_lease_and_mark_expired`,
     // so the loop's final `CompleteRun` step was being rejected with
-    // `execution_not_active -> completed` (surfaced to the operator as
-    // the F37 classifier's 409). The transition to `active` is owned
-    // by `ff_claim_execution` / `ff_issue_claim_grant` — previously
-    // only reachable via `POST /v1/runs/:id/claim`, which the orchestrate
-    // flow did not invoke.
+    // `execution_not_active -> completed` pre-F41. The transition to
+    // `active` is owned by `ff_claim_execution` via
+    // `issue_grant_and_claim`, and the F51 helper re-uses that exact
+    // path in its no-lease branch.
     //
-    // `ensure_active` is idempotent: on a run that already holds an
-    // FF lease (operator called `/claim` explicitly, or we're resuming
-    // after a recoverable transient) it short-circuits. A failure here
-    // (runtime-level 5xx, tenant visibility issue) aborts orchestration
-    // before we burn provider budget on a run that can't terminate.
-    if let Err(err) = state
-        .runtime
-        .runs
-        .ensure_active(&run.session_id, &run.run_id)
-        .await
-    {
-        tracing::error!(
-            run_id = %run.run_id,
-            error = %err,
-            "F41: failed to activate run execution before orchestrate loop"
-        );
-        return runtime_error_response(err);
-    }
-
-    // F51 (2026-04-26): `POST /v1/runs/:id/orchestrate` is a pull-model
-    // driver — each call runs one GATHER → DECIDE → EXECUTE iteration
-    // and returns; no long-lived worker renews the lease between
-    // invocations. Operator-paced flows (human approvals, slow
-    // tool-call confirms) routinely exceed the 30s default TTL, and
-    // the next call's terminal FCALL (`ff_complete_execution`) then
-    // rejects with `lease_expired`. Prior workaround was to crank
+    // `POST /v1/runs/:id/orchestrate` is a pull-model driver — each
+    // call runs one GATHER → DECIDE → EXECUTE iteration and returns;
+    // no long-lived worker renews the lease between invocations.
+    // Operator-paced flows (human approvals, slow tool-call confirms)
+    // routinely exceed the 30s default TTL, and the next call's
+    // terminal FCALL (`ff_complete_execution`) would then reject with
+    // `lease_expired`. Prior workaround was to crank
     // `CAIRN_FABRIC_LEASE_TTL_MS` up to 600_000, which paid 20× recovery
-    // latency on stuck runs and worker_leases index bloat.
+    // latency on stuck runs and `worker_leases` index bloat.
     //
-    // Stale-check-and-renew at handler entry closes the gap: we extend
-    // the lease in place if it has less than `F51_MIN_REMAINING_MS`
-    // left, fall back to a full re-claim if the lease is already gone,
-    // and no-op otherwise (back-to-back orchestrate calls hit the
-    // no-op path). `ensure_active` above handles the first-call case
-    // where no lease exists at all; this call handles subsequent
-    // invocations on the same run.
+    // `renew_lease_if_stale` is the single entry-time call that
+    // handles all three cases:
+    //
+    //   * **First call on a freshly-created run** (no lease yet): the
+    //     snapshot has `current_lease = None` and we fall back to a
+    //     full `issue_grant_and_claim`. This supersedes the F41
+    //     `ensure_active` call that used to live here — the no-lease
+    //     branch of `renew_lease_if_stale` walks the exact same
+    //     sequence `ensure_active` did, without the extra snapshot
+    //     round-trip two calls would have cost.
+    //   * **Expired-but-not-cleared lease** (`remaining_ms <= 0`): FF's
+    //     scanner hasn't rolled the exec forward yet. We can't
+    //     `ff_renew_lease` (would reject `lease_expired`), so we
+    //     full-reclaim.
+    //   * **Near-expiry** (remaining <= `F51_MIN_REMAINING_MS`): renew
+    //     in place via `ff_renew_lease` — no epoch rotation, no
+    //     lease-history write, preserves the existing fence triple.
+    //   * **Healthy**: snapshot read only, no FF mutation. Back-to-back
+    //     orchestrate calls (<1s) hit this path.
     //
     // Threshold rationale: 10s gives one iteration's worth of headroom
     // under the default 30s TTL. Calls arriving with ≥20s of TTL
     // already burned are rare but always worth renewing early so the
     // iteration's terminal FCALL doesn't spill past expiry.
+    //
+    // A failure here (runtime-level 5xx, tenant visibility issue)
+    // aborts orchestration before we burn provider budget on a run
+    // that can't terminate.
     const F51_MIN_REMAINING_MS: u64 = 10_000;
     if let Err(err) = state
         .runtime

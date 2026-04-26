@@ -445,7 +445,8 @@ impl FabricRunService {
 
         // No active lease: fall back to a full re-claim so the caller
         // can proceed with terminal FCALLs. This is the "inter-call
-        // expiry" case that motivated F51.
+        // expiry" case that motivated F51 — FF's expiry scanner has
+        // already cleared `current_lease_id`.
         let Some(lease) = snapshot.current_lease.as_ref() else {
             return self.claim(project, session_id, run_id).await;
         };
@@ -456,6 +457,19 @@ impl FabricRunService {
             .as_millis() as i64;
         let expires_at_ms = lease.expires_at.0;
         let remaining_ms = expires_at_ms.saturating_sub(now_ms);
+
+        // Already-expired-but-not-cleared window: the snapshot still
+        // carries `current_lease_id` because FF's expiry scanner runs
+        // on its own cadence (see `lease_expiry` sorted-set sweeper)
+        // and hasn't rolled this execution forward yet. `ff_renew_lease`
+        // would reject with `lease_expired` (same reason a terminal
+        // FCALL would), so we can't renew — but a fresh
+        // `issue_grant_and_claim` is still legal and mints a new
+        // lease + epoch. Do that instead of letting the renewal call
+        // fail.
+        if remaining_ms <= 0 {
+            return self.claim(project, session_id, run_id).await;
+        }
 
         // Fresh enough: no-op. Back-to-back orchestrate calls (<1s)
         // against a 30s lease TTL hit this path and do not mutate FF.
