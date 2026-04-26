@@ -106,7 +106,9 @@ async fn subscriber_emits_retryable_failed_on_lease_expiry() {
     let ctx = ExecKeyContext::new(&partition, &eid);
 
     // Backdate the lease so ff_mark_lease_expired_if_due's "actually
-    // expired" guard passes.
+    // expired" guard passes. Cairn's projection still reads lease
+    // state from exec_core — backdating keeps the per-exec state
+    // consistent with what the subscriber will observe.
     let _: ferriskey::Value = subscriber_fabric
         .runtime
         .client
@@ -118,9 +120,9 @@ async fn subscriber_emits_retryable_failed_on_lease_expiry() {
         .await
         .expect("HSET lease_expires_at");
 
-    // Fire the expiry FCALL. Signature per lua/lease.lua:
-    //   KEYS (4): exec_core, lease_current, lease_expiry_zset, lease_history
-    //   ARGV (1): execution_id
+    // Fire the per-exec expiry FCALL so the on-disk state reflects
+    // the expiry (for the subsequent `resolve_context` HGETALL inside
+    // the subscriber).
     let index = flowfabric::core::keys::IndexKeys::new(&partition);
     let _: ferriskey::Value = subscriber_fabric
         .runtime
@@ -137,6 +139,44 @@ async fn subscriber_emits_retryable_failed_on_lease_expiry() {
         )
         .await
         .expect("ff_mark_lease_expired_if_due");
+
+    // FF 0.10 `subscribe_lease_history` reads from the partition-
+    // level aggregate stream `ff:part:{fp:N}:lease_history` (RFC-019
+    // Stage A). A Lua-side producer that mirrors per-exec lease
+    // history to the partition stream is on the FF roadmap but not
+    // yet shipped — see the `partition_lease_history_key` export in
+    // `ff-backend-valkey`, whose only current writer is FF's own
+    // integration test. Until that Lua producer lands, cairn tests
+    // synthesise the partition-stream XADD manually. The synthetic
+    // frame's fields mirror FF's 0.10 wire shape
+    // (`docs/CONSUMER_MIGRATION_typed-subscribe-events.md`).
+    // FF 0.10 Stage A: the subscriber reads from partition index 0 of
+    // the Flow family regardless of the execution's own partition.
+    // Match that hard-coding by writing to the same key.
+    let flow_partition_0 = flowfabric::core::partition::Partition {
+        family: flowfabric::core::partition::PartitionFamily::Flow,
+        index: 0,
+    };
+    let partition_stream_key = format!("ff:part:{}:lease_history", flow_partition_0.hash_tag());
+    let _: ferriskey::Value = subscriber_fabric
+        .runtime
+        .client
+        .cmd("XADD")
+        .arg(partition_stream_key.as_str())
+        .arg("*")
+        .arg("event")
+        .arg("expired")
+        .arg("execution_id")
+        .arg(eid.as_str())
+        .arg("lease_id")
+        .arg(uuid::Uuid::nil().to_string().as_str())
+        .arg("worker_instance_id")
+        .arg(config.worker_instance_id.as_str())
+        .arg("ts")
+        .arg("1700000000000")
+        .execute()
+        .await
+        .expect("XADD synthetic partition-level lease_history event");
 
     // Poll the TaskReadModel for up to 5s. The subscriber polls the
     // ZSET every 1s; once it hits the new stream it XREADs, emits,

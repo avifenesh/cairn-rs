@@ -71,7 +71,7 @@ pub use control_plane_types::{
     ExecutionLeaseContext, ExpiredLease, FailExecutionOutcome, FailRunInput, FlowCancelOutcome,
     IssueGrantAndClaimInput, QuotaAdmission, RenewLeaseInput, ResumeRunInput, RotationFailure,
     RotationOutcome, StageDependencyEdgeInput, StageDependencyOutcome, SubmitTaskInput,
-    SuspendRunInput, WorkerRegistration,
+    WorkerRegistration,
 };
 pub use snapshots::{
     AttemptSummary, EdgeSnapshot, EdgeState, ExecutionSnapshot, FlowSnapshot, LeaseSummary,

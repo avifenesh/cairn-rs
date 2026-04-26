@@ -123,10 +123,11 @@ pub fn build_deliver_signal(
     max_signals_per_execution: &str,
     waitpoint_token: &str,
 ) -> (Vec<String>, Vec<String>) {
-    // FF ff_deliver_signal KEYS(14): exec_core, wp_condition, wp_signals_stream,
+    // FF 0.10 ff_deliver_signal KEYS(15): exec_core, wp_condition, wp_signals_stream,
     // exec_signals_zset, signal_hash, signal_payload, idem_key, waitpoint_hash,
     // suspension_current, eligible_zset, suspended_zset, delayed_zset,
-    // suspension_timeout_zset, hmac_secrets.
+    // suspension_timeout_zset, hmac_secrets, partition_signal_delivery_stream
+    // (RFC-019 Stage B / #310 — new in FF 0.10).
     // ARGV(18): ... + waitpoint_token (ARGV[18]).
     let keys = vec![
         ctx.core(),
@@ -143,6 +144,7 @@ pub fn build_deliver_signal(
         idx.lane_delayed(lane_id),
         idx.suspension_timeout(),
         idx.waitpoint_hmac_secrets(),
+        idx.partition_signal_delivery(),
     ];
     let args = vec![
         signal_id.to_string(),
@@ -171,7 +173,7 @@ pub const SUSPEND_EXECUTION_KEYS: usize = 17;
 pub const SUSPEND_EXECUTION_ARGS: usize = 17;
 pub const RESUME_EXECUTION_KEYS: usize = 8;
 pub const RESUME_EXECUTION_ARGS: usize = 3;
-pub const DELIVER_SIGNAL_KEYS: usize = 14;
+pub const DELIVER_SIGNAL_KEYS: usize = 15;
 pub const DELIVER_SIGNAL_ARGS: usize = 18;
 
 #[cfg(test)]

@@ -184,6 +184,38 @@ async fn create_and_expire_task_lease(inst: &TestInstance) -> (SessionId, TaskId
         .await
         .expect("ff_mark_lease_expired_if_due");
 
+    // FF 0.10 `subscribe_lease_history` reads the partition-aggregate
+    // stream `ff:part:{fp:0}:lease_history`; a Lua producer that
+    // mirrors per-exec events to it is on the FF roadmap but not yet
+    // shipped (see CG-c migration plan §Deferred). Synthesise the
+    // frame here so the subscriber's adoption tests exercise the
+    // typed end-to-end path.
+    let flow_partition_0 = flowfabric::core::partition::Partition {
+        family: flowfabric::core::partition::PartitionFamily::Flow,
+        index: 0,
+    };
+    let partition_stream_key = format!("ff:part:{}:lease_history", flow_partition_0.hash_tag());
+    let _: ferriskey::Value = inst
+        .fabric
+        .runtime
+        .client
+        .cmd("XADD")
+        .arg(partition_stream_key.as_str())
+        .arg("*")
+        .arg("event")
+        .arg("expired")
+        .arg("execution_id")
+        .arg(eid.as_str())
+        .arg("lease_id")
+        .arg(uuid::Uuid::nil().to_string().as_str())
+        .arg("worker_instance_id")
+        .arg(inst.config.worker_instance_id.as_str())
+        .arg("ts")
+        .arg("1700000000000")
+        .execute()
+        .await
+        .expect("XADD synthetic partition-level lease_history event");
+
     (session_id, task_id)
 }
 
@@ -391,6 +423,34 @@ async fn backfill_restores_visibility_for_pre_upgrade_execs() {
         )
         .await
         .expect("ff_mark_lease_expired_if_due");
+
+    // FF 0.10 partition-aggregate stream (see
+    // `create_and_expire_task_lease` — same producer shim).
+    let flow_partition_0 = flowfabric::core::partition::Partition {
+        family: flowfabric::core::partition::PartitionFamily::Flow,
+        index: 0,
+    };
+    let partition_stream_key = format!("ff:part:{}:lease_history", flow_partition_0.hash_tag());
+    let _: ferriskey::Value = inst
+        .fabric
+        .runtime
+        .client
+        .cmd("XADD")
+        .arg(partition_stream_key.as_str())
+        .arg("*")
+        .arg("event")
+        .arg("expired")
+        .arg("execution_id")
+        .arg(eid.as_str())
+        .arg("lease_id")
+        .arg(uuid::Uuid::nil().to_string().as_str())
+        .arg("worker_instance_id")
+        .arg(inst.config.worker_instance_id.as_str())
+        .arg("ts")
+        .arg("1700000000000")
+        .execute()
+        .await
+        .expect("XADD synthetic partition-level lease_history event");
 
     wait_for_expiry(&inst, &task_id).await;
 

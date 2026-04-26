@@ -50,7 +50,7 @@ use super::control_plane_types::{
     CreateRunExecutionInput, DeliverApprovalSignalInput, EligibilityResult, ExecutionCreated,
     FailExecutionOutcome, FailRunInput, FlowCancelOutcome, IssueGrantAndClaimInput, QuotaAdmission,
     RenewLeaseInput, ResumeRunInput, RotationOutcome, StageDependencyEdgeInput,
-    StageDependencyOutcome, SubmitTaskInput, SuspendRunInput,
+    StageDependencyOutcome, SubmitTaskInput,
 };
 
 /// Cairn-side FCALL backend for budget, quota, and rotation
@@ -175,11 +175,14 @@ pub trait ControlPlaneBackend: Send + Sync {
     /// Cancel an execution (operator-initiated terminal).
     async fn cancel_run_execution(&self, input: CancelRunInput) -> Result<(), FabricError>;
 
-    /// Suspend an execution. Shared by run-pause and
-    /// enter-waiting-approval; the difference is entirely in the
-    /// `SuspendRunInput` fields the caller fills in (reason_code,
-    /// resume_condition_json, timeout_at).
-    async fn suspend_run_execution(&self, input: SuspendRunInput) -> Result<(), FabricError>;
+    // `suspend_*` is NOT on this trait. CG-c (2026-04-26, FF#322) moved
+    // the service-layer suspend path off the Lua-ARGV glue and onto
+    // `EngineBackend::suspend_by_triple` directly — see
+    // `crate::suspension::suspend_by_triple`. Service code builds a
+    // `LeaseFence` + `SuspendArgs` from the lease context and calls
+    // the FF trait without a cairn-side translation layer. Keeping
+    // `suspend_run_execution` on `ControlPlaneBackend` would require
+    // carrying the old Lua JSON translator indefinitely.
 
     /// Resume a suspended execution.
     async fn resume_run_execution(&self, input: ResumeRunInput) -> Result<(), FabricError>;
@@ -228,8 +231,8 @@ pub trait ControlPlaneBackend: Send + Sync {
     // ── Task lifecycle (Phase D PR 2b) ──────────────────────────────────
     //
     // The `complete_run_execution`, `fail_run_execution`,
-    // `cancel_run_execution`, `suspend_run_execution`, and
-    // `resume_run_execution` methods above are kind-neutral — they
+    // `cancel_run_execution`, and `resume_run_execution` methods above
+    // are kind-neutral — they
     // operate on an `ExecutionId` and don't care whether cairn
     // originally minted it as a run or a task. [`FabricTaskService`]
     // reuses them verbatim; the "_run_" in the name is historical and

@@ -25,8 +25,7 @@ use flowfabric::core::partition::{
     PartitionFamily,
 };
 use flowfabric::core::types::{
-    AttemptId, AttemptIndex, BudgetId, ExecutionId, LeaseId, QuotaPolicyId, SignalId, SuspensionId,
-    TimestampMs, WaitpointId,
+    AttemptId, AttemptIndex, BudgetId, ExecutionId, LeaseId, QuotaPolicyId, SignalId, TimestampMs,
 };
 use flowfabric::sdk::task::parse_report_usage_result;
 
@@ -44,7 +43,7 @@ use super::control_plane_types::{
     CreateRunExecutionInput, DeliverApprovalSignalInput, EligibilityResult, ExecutionCreated,
     FailExecutionOutcome, FailRunInput, FlowCancelOutcome, IssueGrantAndClaimInput, QuotaAdmission,
     RenewLeaseInput, ResumeRunInput, RotationFailure, RotationOutcome, StageDependencyEdgeInput,
-    StageDependencyOutcome, SubmitTaskInput, SuspendRunInput,
+    StageDependencyOutcome, SubmitTaskInput,
 };
 use super::valkey_impl::ValkeyEngine;
 
@@ -615,45 +614,10 @@ impl ControlPlaneBackend for ValkeyEngine {
         Ok(())
     }
 
-    async fn suspend_run_execution(&self, input: SuspendRunInput) -> Result<(), FabricError> {
-        let partition = execution_partition(&input.execution_id, &self.runtime().partition_config);
-        let ctx = ExecKeyContext::new(&partition, &input.execution_id);
-        let idx = IndexKeys::new(&partition);
-
-        let suspension_id = SuspensionId::new();
-        let waitpoint_id = WaitpointId::new();
-        let waitpoint_key = format!("wpk:{waitpoint_id}");
-
-        let (keys, args) = fcall::suspension::build_suspend_execution(
-            &ctx,
-            &idx,
-            input.lease.attempt_index,
-            &input.lease.worker_instance_id,
-            &input.lease.lane_id,
-            &waitpoint_id,
-            &input.execution_id,
-            &input.lease.attempt_id,
-            &input.lease.lease_id,
-            &input.lease.lease_epoch,
-            &suspension_id,
-            &waitpoint_key,
-            &input.reason_code,
-            &input.timeout_at,
-            &input.resume_condition_json,
-            &input.resume_policy_json,
-            &input.timeout_behavior,
-        );
-        let key_refs: Vec<&str> = keys.iter().map(|s| s.as_str()).collect();
-        let arg_refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
-
-        let raw: ferriskey::Value = self
-            .runtime()
-            .fcall(fcall::names::FF_SUSPEND_EXECUTION, &key_refs, &arg_refs)
-            .await
-            .map_err(|e| FabricError::Internal(format!("ff_suspend_execution: {e}")))?;
-        check_fcall_success(&raw, fcall::names::FF_SUSPEND_EXECUTION)?;
-        Ok(())
-    }
+    // `suspend_run_execution` retired in CG-c (FF#322). Service-layer
+    // suspend calls now route through
+    // `crate::suspension::suspend_by_triple` → `EngineBackend::suspend_by_triple`
+    // directly; no Lua-ARGV glue remains on cairn's side.
 
     async fn resume_run_execution(&self, input: ResumeRunInput) -> Result<(), FabricError> {
         let partition = execution_partition(&input.execution_id, &self.runtime().partition_config);

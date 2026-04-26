@@ -14,15 +14,16 @@ default = []
 test-harness = ["dep:testcontainers", "dep:url"]
 
 [dependencies]
-# FlowFabric umbrella crate — CG-a (2026-04-25) collapsed the six
-# `ff-*` direct pins into a single `flowfabric = "0.9"` pin (FF#279).
+# FlowFabric umbrella crate — CG-c (2026-04-26) bumped to 0.10 to
+# consume FF#322 (typed suspend_by_triple), FF#323 (v1_handle_for_tests
+# fixture), and FF#324 (ScannerFilter + typed subscribe_* events).
 # `valkey` is default; `engine` + `scheduler-internals` expose direct
 # access to `ff_engine` / `ff_scheduler` internals that cairn still
 # uses (Engine::start_with_completions, ClaimPolicy/ClaimGrant). The
 # `ff-observability` pin stays direct because the umbrella does not
 # re-export it — `Engine::start_with_completions` takes an
 # `Arc<ff_observability::Metrics>` and cairn wires that type through.
-flowfabric = { version = "0.9", features = ["engine", "scheduler-internals"] }
+flowfabric = { version = "0.10", features = ["engine", "scheduler-internals"] }
 # Needed for `Engine::start_with_completions` which takes an
 # `Arc<ff_observability::Metrics>`. The flowfabric umbrella does not
 # re-export ff-observability.
@@ -32,13 +33,22 @@ flowfabric = { version = "0.9", features = ["engine", "scheduler-internals"] }
 # and no FF metrics surface on cairn-app's `/metrics` endpoint. The
 # shim exists for no-observability embedded builds; cairn is never
 # that, so we always want the real backend.
-ff-observability = { version = "0.9", features = ["enabled"] }
-# ferriskey 0.9 ships alongside FF 0.9 family. Still a direct pin in
-# CG-a because `lease_history_subscriber.rs` uses `ferriskey::Client`
-# directly for the raw XREAD loop. CG-b adopts
-# `EngineBackend::subscribe_lease_history` (FF#282) and drops this
-# pin entirely — do not rely on `ferriskey` in new CG-a code.
-ferriskey = "0.9"
+ff-observability = { version = "0.10", features = ["enabled"] }
+# ferriskey 0.10 ships alongside FF 0.10 family. Still a direct pin
+# because cairn's Lua-glue control-plane path (signal_bridge, helpers,
+# version_check) constructs FCALL ARGV directly against
+# `ferriskey::Client`. CG-c migrated `lease_history_subscriber` onto
+# typed `EngineBackend::subscribe_lease_history`, but CH-2
+# (encapsulation collapse) is a separate PR; the remaining direct
+# `ferriskey::Client` users are:
+#   - crates/cairn-fabric/src/signal_bridge.rs (FCALL ARGV for signal)
+#   - crates/cairn-fabric/src/helpers.rs (FCALL return parsers)
+#   - crates/cairn-fabric/src/version_check.rs (FUNCTION LIST probe)
+#   - crates/cairn-fabric/src/engine/valkey_control_plane_impl.rs
+#     (all legacy Lua FCALLs except suspend, which moved to typed).
+# Do not add new direct ferriskey usage; route through the engine
+# traits instead.
+ferriskey = "0.10"
 
 # Cairn crates
 cairn-domain = { path = "../cairn-domain" }
@@ -48,6 +58,11 @@ cairn-store = { path = "../cairn-store" }
 uuid = { version = "1", features = ["v4", "v5", "serde"] }
 tokio = { version = "1", features = ["rt", "sync", "macros", "time"] }
 tokio-util = "0.7"
+# `Stream::next()` extension on the `LeaseHistorySubscription` handle
+# returned by `EngineBackend::subscribe_lease_history` (FF 0.10 typed
+# stream). `tokio-stream` re-exports the std `futures-core::Stream`
+# trait and adds the ergonomic `StreamExt::next().await` adapter.
+tokio-stream = "0.1"
 tracing = "0.1"
 serde_json = "1"
 thiserror = "2"
@@ -77,3 +92,8 @@ cairn-orchestrator = { path = "../cairn-orchestrator" }
 # stream via `ff_engine::Engine::start_with_completions`, which does
 # its own hand-rolled `poll_next` loop and doesn't pull `futures` in.
 futures = "0.3"
+# `test_handle_codec_compat` needs `v1_handle_for_tests` (FF#323) to
+# synthesise a pre-Wave-1c handle byte buffer and assert the 0.9+
+# decode compat path still accepts it. The `test-fixtures` feature is
+# dev-only on ff-core — production binaries never link it.
+ff-core = { version = "0.10", features = ["test-fixtures"] }

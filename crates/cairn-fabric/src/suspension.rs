@@ -1,38 +1,33 @@
-//! Suspension helpers.
+//! Suspension helpers — typed path to FF 0.10 `EngineBackend::suspend`
+//! and `EngineBackend::suspend_by_triple`.
 //!
-//! Two sets of helpers live here:
+//! Two surfaces live here:
 //!
-//! 1. **Typed 4-tuple helpers** (worker_sdk, CG-b and later):
-//!    [`typed_approval`], [`typed_subagent`], [`typed_tool_result`],
-//!    [`typed_signal`]. Each returns the exact 4-tuple
-//!    `(SuspensionReasonCode, ResumeCondition,
-//!    Option<(TimestampMs, TimeoutBehavior)>, ResumePolicy)` expected
-//!    by `flowfabric::sdk::task::ClaimedTask::suspend`. No Lua glue,
-//!    no intermediate struct. This is the path CG-b migrates
-//!    worker_sdk onto.
-//!
-//! 2. **LEGACY [`SuspensionParams`] / [`ConditionMatcher`] factories**
-//!    ([`for_approval`], [`for_tool_result`], [`for_operator_hold`]).
-//!    Used only by the service-layer suspend paths in
-//!    `services/run_service.rs` and `services/task_service.rs`, which
-//!    still go through the Lua-glue `build_suspend_input` + FCALL
-//!    path because those callers hold a `LeaseFencingTriple`, not a
-//!    `Handle`. Removal is blocked on FF upstream issue
-//!    <https://github.com/avifenesh/FlowFabric/issues/322>
-//!    (`EngineBackend::suspend_by_triple` typed trait method). Once
-//!    that lands, CG-c migrates the 3 service-layer call sites onto
-//!    the typed path and this legacy surface is deleted.
-//!
-//!    Note: the subagent factory (`for_subagent`) is worker-only —
-//!    no service-layer suspend call site uses child-completion — so
-//!    it lives solely in the typed path ([`typed_subagent`]).
+//! 1. **Worker-side 4-tuple helpers** ([`typed_approval`],
+//!    [`typed_subagent`], [`typed_tool_result`], [`typed_signal`]).
+//!    Each returns the `(SuspensionReasonCode, ResumeCondition,
+//!    Option<(TimestampMs, TimeoutBehavior)>, ResumePolicy)` tuple
+//!    that `flowfabric::sdk::task::ClaimedTask::suspend` consumes.
+//!    CG-b wired worker_sdk onto these.
+//! 2. **Service-side [`SuspendArgs`] builders**
+//!    ([`build_suspend_args`] + the [`SuspendCase`] variants). CG-c
+//!    adopted FF#322 — the service-layer pause / waiting-approval /
+//!    policy-hold paths now build a typed [`SuspendArgs`] +
+//!    [`LeaseFence`] triple and call
+//!    `EngineBackend::suspend_by_triple` directly. No Lua-ARGV
+//!    translation lives in cairn anymore; every suspension shape is
+//!    expressed as typed fields the FF trait validates on its side.
 
 use flowfabric::core::contracts::{
-    CompositeBody, CountKind, ResumeCondition, ResumePolicy, SignalMatcher, SuspensionReasonCode,
+    CompositeBody, CountKind, ResumeCondition, ResumePolicy, SignalMatcher, SuspendArgs,
+    SuspensionReasonCode, SuspensionRequester, TimeoutBehavior, WaitpointBinding,
 };
-use flowfabric::core::types::TimestampMs;
-use flowfabric::sdk::task::TimeoutBehavior;
+use flowfabric::core::types::{
+    AttemptId, ExecutionId, LeaseEpoch, LeaseFence, LeaseId, SuspensionId, TimestampMs, WaitpointId,
+};
 
+use crate::engine::ExecutionLeaseContext;
+use crate::error::FabricError;
 use crate::helpers::sanitize_signal_component;
 
 /// The 4-tuple shape consumed by
@@ -53,8 +48,7 @@ pub(crate) type TypedSuspendArgs = (
 ///
 /// `u64 → i64` conversion clamps to `i64::MAX` via `.min(i64::MAX as
 /// u64) as i64` and `.saturating_add` guarantees the result is a
-/// valid future timestamp (no wrap, no debug panic). Matches the
-/// arithmetic previously in `cg_a_suspend`.
+/// valid future timestamp (no wrap, no debug panic).
 fn compute_timeout(
     timeout_ms: Option<u64>,
     behavior: TimeoutBehavior,
@@ -66,14 +60,53 @@ fn compute_timeout(
     })
 }
 
-/// Typed 4-tuple for approval suspension: `approval_granted:<id>` OR
-/// `approval_rejected:<id>` resumes.
+/// Build the approval-suspend `ResumeCondition` — any signal
+/// delivered to the single bound waitpoint resumes.
 ///
-/// Uses a composite `DistinctWaitpoints n=1` condition so either
-/// waitpoint satisfies. `ResumePolicy::normal()` matches cairn's
-/// pre-0.9 default (consume matched signals, close waitpoint on
-/// resume). `TimeoutBehavior::Escalate` preserves cairn's pre-0.9
-/// "timeout bumps to operator review, does not auto-fail" semantic.
+/// `waitpoint_key` must match the `WaitpointBinding::Fresh.waitpoint_key`
+/// the caller passes to `SuspendArgs::new`. The `Single { matcher:
+/// Wildcard }` shape tells the Lua evaluator to accept any signal
+/// name — and the `resolve_approval` / `resolve_task_approval` callers
+/// only ever deliver `approval_granted:<id>` or `approval_rejected:<id>`
+/// to this waitpoint, so the functional semantic (first approval
+/// signal resumes) is preserved without a typed composite that would
+/// need to carry both signal-name alternatives.
+///
+/// Why not `Composite(Count { matcher: ByName(...) })`: the v0.10 Lua
+/// evaluator's `matcher_accepts` compares a single `SignalMatcher`
+/// against the incoming signal name — it does not support an
+/// "either-of-two-names" matcher at the Count node. The old Lua-glue
+/// path expressed this via `required_signal_names: [granted, rejected]`
+/// which was a bespoke v0.9-era `signal_set` condition; the typed
+/// trait has no direct equivalent. Wildcard + caller-controlled
+/// delivery set is the idiomatic translation.
+///
+/// Service-layer only. The worker path (`typed_approval`) cannot use
+/// this shape because the `SuspendArgs` it feeds into
+/// `ClaimedTask::suspend` is built before the SDK mints its own
+/// waitpoint binding, so the resume condition cannot reference a
+/// `waitpoint_key` that has not been allocated yet. The worker helper
+/// therefore keeps the `Composite(Count { kind: DistinctWaitpoints })`
+/// shape over the `[approval_granted:<id>, approval_rejected:<id>]`
+/// waitpoint set (see `typed_approval`). The service-layer path has
+/// the binding in hand inside `build_suspend_args`, so it can use the
+/// simpler `Single { waitpoint_key, matcher: Wildcard }` here.
+fn approval_resume_condition(waitpoint_key: &str) -> ResumeCondition {
+    ResumeCondition::Single {
+        waitpoint_key: waitpoint_key.to_owned(),
+        matcher: SignalMatcher::Wildcard,
+    }
+}
+
+/// Typed 4-tuple for approval suspension. The worker_sdk path binds
+/// its own waitpoint via `ClaimedTask::suspend(...)`, which mints the
+/// `WaitpointBinding::Fresh` internally; the resume condition reads
+/// the waitpoint_key from `primary().waitpoint_key()` at the Lua
+/// layer, so we cannot materialise the `Single { waitpoint_key }`
+/// shape here without knowing the binding. Keep the worker helper on
+/// the composite `Count { DistinctWaitpoints }` shape it has used
+/// since CG-b — the worker-side `ClaimedTask::suspend` converts this
+/// into the v0.10 bindings internally (see flowfabric::sdk::task).
 pub(crate) fn typed_approval(approval_id: &str, timeout_ms: Option<u64>) -> TypedSuspendArgs {
     let safe_id = sanitize_signal_component(approval_id);
     let granted = format!("approval_granted:{safe_id}");
@@ -94,9 +127,6 @@ pub(crate) fn typed_approval(approval_id: &str, timeout_ms: Option<u64>) -> Type
 
 /// Typed 4-tuple for subagent suspension: `child_completed:<id>`
 /// resumes.
-///
-/// `TimeoutBehavior::Fail` preserves cairn's pre-0.9 semantic that
-/// an unbounded child wait that trips the deadline fails the parent.
 pub(crate) fn typed_subagent(child_task_id: &str, deadline_ms: Option<u64>) -> TypedSuspendArgs {
     let safe_id = sanitize_signal_component(child_task_id);
     let waitpoint = format!("child_completed:{safe_id}");
@@ -105,12 +135,6 @@ pub(crate) fn typed_subagent(child_task_id: &str, deadline_ms: Option<u64>) -> T
         matcher: SignalMatcher::ByName(waitpoint),
     };
     (
-        // `waiting_for_children` is the FF blocking-reason string used
-        // by the legacy path; on the typed surface the closest
-        // upstream variant is `WaitingForSignal` (FF treats multi-
-        // child satisfaction as a signal-count condition). Matches
-        // the pre-existing `parse_reason` mapping in the worker_sdk
-        // CG-a bridge.
         SuspensionReasonCode::WaitingForSignal,
         cond,
         compute_timeout(deadline_ms, TimeoutBehavior::Fail),
@@ -120,11 +144,6 @@ pub(crate) fn typed_subagent(child_task_id: &str, deadline_ms: Option<u64>) -> T
 
 /// Typed 4-tuple for tool-result suspension: `tool_result:<id>`
 /// resumes.
-///
-/// `TimeoutBehavior::Expire` preserves cairn's pre-0.9 semantic that
-/// a tool that never returns times out silently (does not fail the
-/// run; the orchestrator decides what to do next based on the
-/// timeout event).
 pub(crate) fn typed_tool_result(invocation_id: &str, timeout_ms: Option<u64>) -> TypedSuspendArgs {
     let safe_id = sanitize_signal_component(invocation_id);
     let waitpoint = format!("tool_result:{safe_id}");
@@ -142,14 +161,7 @@ pub(crate) fn typed_tool_result(invocation_id: &str, timeout_ms: Option<u64>) ->
 
 /// Typed 4-tuple for a generic signal suspension: `<signal_name>`
 /// resumes.
-///
-/// Exposed for worker-side patterns that need to suspend on a single
-/// caller-supplied signal with no ID-format assumptions. The caller
-/// is responsible for passing an already-sanitized name; we still
-/// run it through `sanitize_signal_component` as a defence-in-depth
-/// measure (idempotent on already-clean input).
-#[allow(dead_code)] // Wired up in CG-c when worker-side signal patterns land; kept
-                    // public-in-crate so the typed path is complete on this PR.
+#[allow(dead_code)] // Wired up when worker-side signal patterns land.
 pub(crate) fn typed_signal(signal_name: &str, timeout_ms: Option<u64>) -> TypedSuspendArgs {
     let safe = sanitize_signal_component(signal_name);
     let cond = ResumeCondition::Single {
@@ -164,159 +176,287 @@ pub(crate) fn typed_signal(signal_name: &str, timeout_ms: Option<u64>) -> TypedS
     )
 }
 
-// ─── LEGACY surface ────────────────────────────────────────────────
-//
-// Service-layer Lua-glue path. Kept `pub(crate)` + LEGACY-annotated
-// until FF issue #322 (`suspend_by_triple`) lands and CG-c migrates
-// the 3 service-layer call sites onto the typed path.
+// ─── Service-side SuspendArgs / LeaseFence builders (CG-c / FF#322) ─────
 
-/// LEGACY: cairn-side signal matcher descriptor. Used only by the
-/// service-layer Lua-glue suspend path in `run_service.rs` and
-/// `task_service.rs`. Removal blocked on FF#322.
-#[derive(Clone, Debug)]
-pub(crate) struct ConditionMatcher {
-    pub signal_name: String,
+/// Every service-layer suspend call site — the three inside
+/// [`FabricRunService::pause`] / [`FabricRunService::enter_waiting_approval`]
+/// / [`FabricTaskService::pause`] — expresses its intent as one of
+/// these typed variants. [`build_suspend_args`] turns the variant into
+/// a full [`SuspendArgs`] the FF trait accepts.
+///
+/// Each variant captures the semantic (reason code, resume condition,
+/// timeout behaviour), not a wire-level signal-set shape. No
+/// `resume_condition_json` or `resume_policy_json` string is built on
+/// cairn's side.
+pub(crate) enum SuspendCase<'a> {
+    /// Operator-initiated pause. Only an explicit operator resume
+    /// closes the waitpoint. `TimeoutBehavior::Escalate` preserves
+    /// cairn's pre-0.10 "unbounded hold, escalate if deadline trips"
+    /// semantic (operator-hold never sets a deadline in practice, but
+    /// the behaviour field is recorded for parity).
+    OperatorPause,
+    /// Tool requested suspension — worker called
+    /// `runtime.suspend_for_tool_result`, or the orchestrator decided
+    /// to externalise a tool invocation. Resume on
+    /// `tool_result:<invocation_id>` signal.
+    ToolRequestedSuspension {
+        invocation_id: &'a str,
+        resume_after_ms: Option<u64>,
+    },
+    /// Worker-driven generic signal suspension. Resume on
+    /// `<signal_name>` (already sanitized by the caller or, when not,
+    /// defence-in-depth re-sanitized here).
+    RuntimeSuspension {
+        signal_name: &'a str,
+        resume_after_ms: Option<u64>,
+    },
+    /// Policy gate held the execution. Resume on
+    /// `policy_resolved:<detail>`.
+    PolicyHold {
+        detail: &'a str,
+        resume_after_ms: Option<u64>,
+    },
+    /// Service-layer approval suspension (pre-claim gate). Resume on
+    /// any signal delivered to the bound waitpoint — see
+    /// [`approval_resume_condition`] for the Wildcard rationale.
+    /// `approval_id` is the scope identifier (run_id or task_id)
+    /// used to construct the correlated `approval_granted:<id>` /
+    /// `approval_rejected:<id>` signal names on the delivery side.
+    /// Currently unused inside the typed resume condition (the
+    /// condition targets the bound waitpoint_key, not a signal name)
+    /// but kept on the variant for parity with the caller-side shape
+    /// and for debug/trace output.
+    WaitingForApproval {
+        #[allow(dead_code)] // see doc-comment above
+        approval_id: &'a str,
+        timeout_ms: Option<u64>,
+    },
 }
 
-/// LEGACY: intermediate suspension params struct for the service-
-/// layer Lua-glue path. Used only by `build_suspend_input` in
-/// `run_service.rs` and `task_service.rs`. Removal blocked on FF#322.
-#[derive(Clone, Debug)]
-pub(crate) struct SuspensionParams {
-    pub reason_code: String,
-    pub condition_matchers: Vec<ConditionMatcher>,
-    pub timeout_ms: Option<u64>,
-    pub timeout_behavior: TimeoutBehavior,
-}
+impl SuspendCase<'_> {
+    /// The `SuspensionReasonCode` stamped on the execution — read back
+    /// by projection paths to render the pause reason to operators.
+    fn reason_code(&self) -> SuspensionReasonCode {
+        match self {
+            Self::OperatorPause => SuspensionReasonCode::ManualPause,
+            Self::ToolRequestedSuspension { .. } => SuspensionReasonCode::WaitingForToolResult,
+            Self::RuntimeSuspension { .. } => SuspensionReasonCode::WaitingForSignal,
+            Self::PolicyHold { .. } => SuspensionReasonCode::PausedByPolicy,
+            Self::WaitingForApproval { .. } => SuspensionReasonCode::WaitingForApproval,
+        }
+    }
 
-/// LEGACY: factory for the service-layer approval-suspend path.
-/// Removal blocked on FF#322.
-pub(crate) fn for_approval(approval_id: &str, timeout_ms: Option<u64>) -> SuspensionParams {
-    let safe_id = sanitize_signal_component(approval_id);
-    SuspensionParams {
-        reason_code: crate::constants::BLOCKING_WAITING_FOR_APPROVAL.to_owned(),
-        condition_matchers: vec![
-            ConditionMatcher {
-                signal_name: format!("approval_granted:{safe_id}"),
-            },
-            ConditionMatcher {
-                signal_name: format!("approval_rejected:{safe_id}"),
-            },
-        ],
-        timeout_ms,
-        timeout_behavior: TimeoutBehavior::Escalate,
+    /// The typed resume condition FF evaluates against delivered
+    /// signals. Takes the bound waitpoint's key because approval
+    /// conditions (which resume on an unconstrained signal set)
+    /// reference the waitpoint directly rather than a signal name.
+    fn resume_condition(&self, waitpoint_key: &str) -> ResumeCondition {
+        match self {
+            Self::OperatorPause => ResumeCondition::OperatorOnly,
+            Self::ToolRequestedSuspension { invocation_id, .. } => {
+                let safe = sanitize_signal_component(invocation_id);
+                let signal = format!("tool_result:{safe}");
+                ResumeCondition::Single {
+                    waitpoint_key: waitpoint_key.to_owned(),
+                    matcher: SignalMatcher::ByName(signal),
+                }
+            }
+            Self::RuntimeSuspension { signal_name, .. } => {
+                let safe = sanitize_signal_component(signal_name);
+                ResumeCondition::Single {
+                    waitpoint_key: waitpoint_key.to_owned(),
+                    matcher: SignalMatcher::ByName(safe),
+                }
+            }
+            Self::PolicyHold { detail, .. } => {
+                let safe = sanitize_signal_component(detail);
+                let signal = format!("policy_resolved:{safe}");
+                ResumeCondition::Single {
+                    waitpoint_key: waitpoint_key.to_owned(),
+                    matcher: SignalMatcher::ByName(signal),
+                }
+            }
+            Self::WaitingForApproval { .. } => approval_resume_condition(waitpoint_key),
+        }
+    }
+
+    /// Timeout + behaviour pair. `None` means "no deadline — runs
+    /// indefinitely".
+    fn timeout(&self) -> Option<(TimestampMs, TimeoutBehavior)> {
+        let (ms, behavior) = match self {
+            // Operator holds don't expire; an operator must act.
+            Self::OperatorPause => (None, TimeoutBehavior::Escalate),
+            // Tool suspensions silently expire — the orchestrator's
+            // next turn decides what to do with a timed-out invocation.
+            Self::ToolRequestedSuspension {
+                resume_after_ms, ..
+            } => (*resume_after_ms, TimeoutBehavior::Expire),
+            // Generic signal suspensions fail the run if the signal
+            // never arrives before the deadline.
+            Self::RuntimeSuspension {
+                resume_after_ms, ..
+            } => (*resume_after_ms, TimeoutBehavior::Fail),
+            // Policy holds fail the run if no `policy_resolved:<detail>`
+            // signal arrives before the deadline. Operator-driven
+            // escalation is a follow-up track (see cairn-domain
+            // `PolicyHoldEscalation` RFC); today the safe default is
+            // fail-closed so a stuck policy gate does not linger as a
+            // silent "paused forever" run.
+            Self::PolicyHold {
+                resume_after_ms, ..
+            } => (*resume_after_ms, TimeoutBehavior::Fail),
+            // Approval timeouts escalate to operator review.
+            Self::WaitingForApproval { timeout_ms, .. } => (*timeout_ms, TimeoutBehavior::Escalate),
+        };
+        compute_timeout(ms, behavior)
     }
 }
 
-/// LEGACY: factory for the service-layer tool-result-suspend path.
-/// Removal blocked on FF#322.
-pub(crate) fn for_tool_result(invocation_id: &str, timeout_ms: Option<u64>) -> SuspensionParams {
-    let safe_id = sanitize_signal_component(invocation_id);
-    SuspensionParams {
-        reason_code: "waiting_for_tool_result".into(),
-        condition_matchers: vec![ConditionMatcher {
-            signal_name: format!("tool_result:{safe_id}"),
-        }],
-        timeout_ms,
-        timeout_behavior: TimeoutBehavior::Expire,
+/// Build a complete [`SuspendArgs`] for a service-layer suspension.
+///
+/// Every service-layer call site goes through this builder + a
+/// [`build_lease_fence`] call, so the `SuspensionRequester::Operator`
+/// stamp + `WaitpointBinding::fresh()` choice are expressed in one
+/// place. Worker-originated suspensions continue to ride the SDK
+/// `task.suspend(…)` path with `SuspensionRequester::Worker`.
+pub(crate) fn build_suspend_args(case: SuspendCase<'_>) -> SuspendArgs {
+    // Mint the waitpoint_id / waitpoint_key up front so the typed
+    // ResumeCondition can reference the exact key the binding will
+    // carry. `WaitpointBinding::fresh()` would generate its own
+    // uuid — we replicate its shape manually to keep the binding and
+    // the condition in sync.
+    let waitpoint_id = WaitpointId::new();
+    let waitpoint_key = format!("wpk:{waitpoint_id}");
+    let binding = WaitpointBinding::Fresh {
+        waitpoint_id,
+        waitpoint_key: waitpoint_key.clone(),
+    };
+
+    let resume_condition = case.resume_condition(&waitpoint_key);
+    let reason_code = case.reason_code();
+    let timeout = case.timeout();
+
+    let mut args = SuspendArgs::new(
+        SuspensionId::new(),
+        binding,
+        resume_condition,
+        ResumePolicy::normal(),
+        reason_code,
+        TimestampMs::now(),
+    )
+    .with_requester(SuspensionRequester::Operator);
+    if let Some((at, behavior)) = timeout {
+        args = args.with_timeout(at, behavior);
     }
+    args
 }
 
-/// LEGACY: factory for the service-layer operator-hold path.
-/// Removal blocked on FF#322.
-pub(crate) fn for_operator_hold() -> SuspensionParams {
-    SuspensionParams {
-        reason_code: "operator_hold".into(),
-        condition_matchers: vec![ConditionMatcher {
-            signal_name: "__cairn_operator_resume__".into(),
-        }],
-        timeout_ms: None,
-        timeout_behavior: TimeoutBehavior::Escalate,
+/// Promote cairn's string-form [`ExecutionLeaseContext`] to a typed
+/// [`LeaseFence`] triple for [`EngineBackend::suspend_by_triple`].
+///
+/// The legacy Lua-glue path accepted an unfenced
+/// (`source = "operator_override"`, all three tokens empty)
+/// [`ExecutionLeaseContext`]. The typed FF 0.10 trait surface has no
+/// such override — a suspension without an active lease is a
+/// contract violation. We surface that as
+/// [`FabricError::Internal`] carrying the wire-string
+/// `"ff_suspend_execution rejected: fence_required"` so
+/// cairn-app's `fabric_adapter::is_suspend_state_conflict` classifier
+/// maps the error to HTTP 409 (InvalidTransition) — the same class
+/// FF's Lua rejection would map to if we had let the empty triple
+/// round-trip. Callers that hit this are asking FF to suspend an
+/// execution whose current lease is gone (never claimed, terminal, or
+/// reclaimed); the right thing is to read-and-retry or reject at the
+/// API layer. Malformed triples (lease_id/lease_epoch/attempt_id that
+/// fail typed parse after passing the non-empty gate) surface as
+/// [`FabricError::Validation`] with the specific parse error.
+pub(crate) fn build_lease_fence(lease: &ExecutionLeaseContext) -> Result<LeaseFence, FabricError> {
+    if lease.source == "operator_override"
+        || lease.lease_id.is_empty()
+        || lease.lease_epoch.is_empty()
+        || lease.attempt_id.is_empty()
+    {
+        // Shape the error message as `ff_suspend_execution rejected:
+        // fence_required` so the cairn-app `fabric_adapter`
+        // `is_suspend_state_conflict` classifier maps it to
+        // `RuntimeError::InvalidTransition` → HTTP 409 (not 500, not
+        // 422). This is the operator-visible state conflict a pending-
+        // run pause hits: the run has no lease yet, so there is no
+        // fence triple to build.
+        //
+        // FF 0.10's `suspend_by_triple` would return the same
+        // `fence_required` code if we passed a nil lease triple into
+        // the FCALL; we short-circuit here (no round-trip to Valkey)
+        // because the missing-lease check is cheap and local. Keeping
+        // the wire-string shape identical means the HTTP layer
+        // classifier does not need a second code path.
+        return Err(FabricError::Internal(
+            "ff_suspend_execution rejected: fence_required".to_owned(),
+        ));
     }
+    let lease_id = LeaseId::parse(&lease.lease_id).map_err(|e| FabricError::Validation {
+        reason: format!(
+            "suspend_by_triple: malformed lease_id {:?}: {e}",
+            lease.lease_id
+        ),
+    })?;
+    let lease_epoch_u64: u64 = lease
+        .lease_epoch
+        .parse()
+        .map_err(|e| FabricError::Validation {
+            reason: format!(
+                "suspend_by_triple: malformed lease_epoch {:?}: {e}",
+                lease.lease_epoch
+            ),
+        })?;
+    let attempt_id = AttemptId::parse(&lease.attempt_id).map_err(|e| FabricError::Validation {
+        reason: format!(
+            "suspend_by_triple: malformed attempt_id {:?}: {e}",
+            lease.attempt_id
+        ),
+    })?;
+    Ok(LeaseFence {
+        lease_id,
+        lease_epoch: LeaseEpoch::new(lease_epoch_u64),
+        attempt_id,
+    })
+}
+
+/// Invoke `EngineBackend::suspend_by_triple` and map its error +
+/// outcome to cairn's layer. Service call sites discard the
+/// `SuspendOutcome` (they re-read the execution snapshot to recover
+/// the post-commit state — the outcome's `handle` is not lease-bearing
+/// from cairn's perspective because cairn does not cache handles at
+/// the service layer).
+pub(crate) async fn suspend_by_triple(
+    backend: &std::sync::Arc<dyn flowfabric::core::engine_backend::EngineBackend>,
+    exec_id: ExecutionId,
+    fence: LeaseFence,
+    args: SuspendArgs,
+) -> Result<(), FabricError> {
+    let _outcome: flowfabric::core::contracts::SuspendOutcome = backend
+        .suspend_by_triple(exec_id, fence, args)
+        .await
+        .map_err(|e| FabricError::Engine(Box::new(e)))?;
+    // Dropping the `SuspendOutcome::handle` is intentional: the
+    // service-layer caller reads the post-suspend snapshot to build
+    // its `RunRecord` / `TaskRecord`, so the handle has no ongoing
+    // consumer at this layer. Handle retention at the service layer
+    // would imply cairn owns the lease, which is the worker-sdk path
+    // (CG-b), not this one.
+    Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    // ─── legacy factory tests (unchanged from CG-a) ─────────────
-
-    #[test]
-    fn approval_suspension_has_two_matchers() {
-        let params = for_approval("appr_1", Some(60_000));
-        assert_eq!(params.reason_code, "waiting_for_approval");
-        assert_eq!(params.condition_matchers.len(), 2);
-        assert_eq!(
-            params.condition_matchers[0].signal_name,
-            "approval_granted:appr_1"
-        );
-        assert_eq!(
-            params.condition_matchers[1].signal_name,
-            "approval_rejected:appr_1"
-        );
-        assert_eq!(params.timeout_ms, Some(60_000));
-        assert_eq!(params.timeout_behavior, TimeoutBehavior::Escalate);
-    }
-
-    #[test]
-    fn approval_without_timeout() {
-        let params = for_approval("appr_2", None);
-        assert!(params.timeout_ms.is_none());
-        assert_eq!(params.timeout_behavior, TimeoutBehavior::Escalate);
-    }
-
-    #[test]
-    fn tool_result_suspension_encodes_invocation_id() {
-        let params = for_tool_result("inv_42", Some(30_000));
-        assert_eq!(params.reason_code, "waiting_for_tool_result");
-        assert_eq!(params.condition_matchers.len(), 1);
-        assert_eq!(
-            params.condition_matchers[0].signal_name,
-            "tool_result:inv_42"
-        );
-        assert_eq!(params.timeout_ms, Some(30_000));
-        assert_eq!(params.timeout_behavior, TimeoutBehavior::Expire);
-    }
-
-    #[test]
-    fn tool_result_without_timeout() {
-        let params = for_tool_result("inv_99", None);
-        assert!(params.timeout_ms.is_none());
-    }
-
-    #[test]
-    fn operator_hold_uses_sentinel_matcher() {
-        let params = for_operator_hold();
-        assert_eq!(params.reason_code, "operator_hold");
-        assert_eq!(params.condition_matchers.len(), 1);
-        assert_eq!(
-            params.condition_matchers[0].signal_name,
-            "__cairn_operator_resume__"
-        );
-        assert!(params.timeout_ms.is_none());
-        assert_eq!(params.timeout_behavior, TimeoutBehavior::Escalate);
-    }
-
-    #[test]
-    fn different_invocations_produce_different_signals() {
-        let a = for_tool_result("inv_1", None);
-        let b = for_tool_result("inv_2", None);
-        assert_ne!(
-            a.condition_matchers[0].signal_name,
-            b.condition_matchers[0].signal_name
-        );
-    }
-
-    // ─── typed 4-tuple helper tests (new in CG-b) ────────────────
-
     #[test]
     fn typed_approval_maps_reason_and_composite() {
         let (reason, cond, timeout, _policy) = typed_approval("appr_7", Some(45_000));
         assert_eq!(reason, SuspensionReasonCode::WaitingForApproval);
-        // Composite n=1 DistinctWaitpoints over granted|rejected.
         match cond {
             ResumeCondition::Composite(body) => {
-                // Either of the two waitpoints satisfies.
                 let json =
                     serde_json::to_string(&body).expect("composite body serialises for inspection");
                 assert!(
@@ -330,7 +470,6 @@ mod tests {
             }
             other => panic!("expected Composite for approval, got {other:?}"),
         }
-        // Timeout present with Escalate behavior.
         let (_, behavior) = timeout.expect("timeout present when timeout_ms supplied");
         assert_eq!(behavior, TimeoutBehavior::Escalate);
     }
@@ -344,8 +483,6 @@ mod tests {
     #[test]
     fn typed_subagent_is_single_waitpoint_with_fail_timeout() {
         let (reason, cond, timeout, _policy) = typed_subagent("task_42", Some(10_000));
-        // Subagent maps to WaitingForSignal on the typed surface
-        // (see doc-comment on typed_subagent for rationale).
         assert_eq!(reason, SuspensionReasonCode::WaitingForSignal);
         match cond {
             ResumeCondition::Single { waitpoint_key, .. } => {
@@ -377,7 +514,6 @@ mod tests {
         assert_eq!(reason, SuspensionReasonCode::WaitingForSignal);
         match cond {
             ResumeCondition::Single { waitpoint_key, .. } => {
-                // sanitize_signal_component is idempotent on clean input.
                 assert_eq!(waitpoint_key, "custom_signal_x");
             }
             other => panic!("expected Single for generic signal, got {other:?}"),
@@ -386,10 +522,178 @@ mod tests {
 
     #[test]
     fn typed_timeout_saturates_on_u64_max() {
-        // Giant timeout must clamp rather than wrap or panic.
         let (_, _, timeout, _) = typed_tool_result("inv_big", Some(u64::MAX));
         let (at, _behavior) = timeout.expect("timeout_ms supplied");
-        // Saturated to i64::MAX (approximately), not a negative wrap.
         assert!(at.0 > 0, "saturating add must not wrap negative");
+    }
+
+    // ─── SuspendCase / build_suspend_args tests (new in CG-c) ────────────
+
+    #[test]
+    fn service_operator_pause_is_operator_only() {
+        let args = build_suspend_args(SuspendCase::OperatorPause);
+        assert_eq!(args.reason_code, SuspensionReasonCode::ManualPause);
+        assert!(matches!(
+            args.resume_condition,
+            ResumeCondition::OperatorOnly
+        ));
+        assert!(args.timeout_at.is_none(), "operator holds never expire");
+        assert_eq!(args.requested_by, SuspensionRequester::Operator);
+    }
+
+    /// Helper: pull the bound waitpoint_key from a built SuspendArgs
+    /// so we can cross-check the ResumeCondition references the same
+    /// string.
+    fn bound_wp_key(args: &SuspendArgs) -> String {
+        match args.primary() {
+            WaitpointBinding::Fresh { waitpoint_key, .. } => waitpoint_key.clone(),
+            other => panic!("expected Fresh binding, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn service_tool_requested_suspension_targets_bound_waitpoint() {
+        let args = build_suspend_args(SuspendCase::ToolRequestedSuspension {
+            invocation_id: "inv_7",
+            resume_after_ms: Some(30_000),
+        });
+        assert_eq!(args.reason_code, SuspensionReasonCode::WaitingForToolResult);
+        let wp = bound_wp_key(&args);
+        match &args.resume_condition {
+            ResumeCondition::Single {
+                waitpoint_key,
+                matcher,
+            } => {
+                assert_eq!(waitpoint_key, &wp);
+                match matcher {
+                    SignalMatcher::ByName(name) => assert_eq!(name, "tool_result:inv_7"),
+                    other => panic!("expected ByName matcher, got {other:?}"),
+                }
+            }
+            other => panic!("expected Single, got {other:?}"),
+        }
+        assert_eq!(args.timeout_behavior, TimeoutBehavior::Expire);
+    }
+
+    #[test]
+    fn service_runtime_suspension_sanitizes_signal_name() {
+        let args = build_suspend_args(SuspendCase::RuntimeSuspension {
+            signal_name: "my_signal",
+            resume_after_ms: None,
+        });
+        assert_eq!(args.reason_code, SuspensionReasonCode::WaitingForSignal);
+        let wp = bound_wp_key(&args);
+        match &args.resume_condition {
+            ResumeCondition::Single {
+                waitpoint_key,
+                matcher,
+            } => {
+                assert_eq!(waitpoint_key, &wp);
+                assert!(matches!(matcher, SignalMatcher::ByName(n) if n == "my_signal"));
+            }
+            other => panic!("expected Single, got {other:?}"),
+        }
+        assert!(args.timeout_at.is_none());
+    }
+
+    #[test]
+    fn service_policy_hold_uses_policy_resolved_prefix() {
+        let args = build_suspend_args(SuspendCase::PolicyHold {
+            detail: "budget",
+            resume_after_ms: None,
+        });
+        assert_eq!(args.reason_code, SuspensionReasonCode::PausedByPolicy);
+        let wp = bound_wp_key(&args);
+        match &args.resume_condition {
+            ResumeCondition::Single {
+                waitpoint_key,
+                matcher,
+            } => {
+                assert_eq!(waitpoint_key, &wp);
+                assert!(
+                    matches!(matcher, SignalMatcher::ByName(n) if n == "policy_resolved:budget")
+                );
+            }
+            other => panic!("expected Single, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn service_waiting_for_approval_wildcard_single() {
+        let args = build_suspend_args(SuspendCase::WaitingForApproval {
+            approval_id: "run_7",
+            timeout_ms: Some(60_000),
+        });
+        assert_eq!(args.reason_code, SuspensionReasonCode::WaitingForApproval);
+        let wp = bound_wp_key(&args);
+        match &args.resume_condition {
+            ResumeCondition::Single {
+                waitpoint_key,
+                matcher,
+            } => {
+                assert_eq!(waitpoint_key, &wp);
+                assert!(matches!(matcher, SignalMatcher::Wildcard));
+            }
+            other => panic!("expected Single, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn lease_fence_rejects_operator_override_as_fence_required() {
+        // Unfenced context (no live lease) must surface a `fence_required`
+        // error in the shape the cairn-app fabric_adapter classifier
+        // recognises, so pause-on-pending-run returns HTTP 409 not 500.
+        let ctx = ExecutionLeaseContext::unfenced(
+            flowfabric::core::types::LaneId::new("cairn"),
+            flowfabric::core::types::AttemptIndex::new(0),
+        );
+        let err = build_lease_fence(&ctx).unwrap_err();
+        match err {
+            FabricError::Internal(msg) => {
+                assert!(
+                    msg.starts_with("ff_suspend_execution rejected: "),
+                    "expected ff_suspend_execution prefix: {msg}"
+                );
+                assert!(
+                    msg.ends_with(": fence_required"),
+                    "expected fence_required code: {msg}"
+                );
+            }
+            other => panic!("expected Internal(fence_required), got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn lease_fence_round_trip_from_populated_context() {
+        let lease_id = flowfabric::core::types::LeaseId::new();
+        let attempt_id = flowfabric::core::types::AttemptId::new();
+        let ctx = ExecutionLeaseContext {
+            lane_id: flowfabric::core::types::LaneId::new("cairn"),
+            attempt_index: flowfabric::core::types::AttemptIndex::new(3),
+            lease_id: lease_id.to_string(),
+            lease_epoch: "7".to_owned(),
+            attempt_id: attempt_id.to_string(),
+            worker_instance_id: flowfabric::core::types::WorkerInstanceId::new("instance-a"),
+            source: String::new(),
+        };
+        let fence = build_lease_fence(&ctx).expect("populated context yields LeaseFence");
+        assert_eq!(fence.lease_id, lease_id);
+        assert_eq!(fence.lease_epoch.0, 7);
+        assert_eq!(fence.attempt_id, attempt_id);
+    }
+
+    #[test]
+    fn lease_fence_rejects_malformed_epoch() {
+        let ctx = ExecutionLeaseContext {
+            lane_id: flowfabric::core::types::LaneId::new("cairn"),
+            attempt_index: flowfabric::core::types::AttemptIndex::new(0),
+            lease_id: flowfabric::core::types::LeaseId::new().to_string(),
+            lease_epoch: "not-a-number".to_owned(),
+            attempt_id: flowfabric::core::types::AttemptId::new().to_string(),
+            worker_instance_id: flowfabric::core::types::WorkerInstanceId::new("w"),
+            source: String::new(),
+        };
+        let err = build_lease_fence(&ctx).unwrap_err();
+        assert!(matches!(err, FabricError::Validation { .. }));
     }
 }
