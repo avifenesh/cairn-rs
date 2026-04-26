@@ -58,6 +58,11 @@ cairn-store = { path = "../cairn-store" }
 uuid = { version = "1", features = ["v4", "v5", "serde"] }
 tokio = { version = "1", features = ["rt", "sync", "macros", "time"] }
 tokio-util = "0.7"
+# `Stream::next()` extension on the `LeaseHistorySubscription` handle
+# returned by `EngineBackend::subscribe_lease_history` (FF 0.10 typed
+# stream). `tokio-stream` re-exports the std `futures-core::Stream`
+# trait and adds the ergonomic `StreamExt::next().await` adapter.
+tokio-stream = "0.1"
 tracing = "0.1"
 serde_json = "1"
 thiserror = "2"

@@ -72,16 +72,6 @@ impl FabricServices {
         let (bridge, bridge_handle) = EventBridge::start(event_log);
         let bridge = Arc::new(bridge);
 
-        let lease_history = cursor_store.map(|store| {
-            LeaseHistorySubscriber::start(
-                runtime.client.clone(),
-                runtime.partition_config.num_flow_partitions,
-                bridge.clone(),
-                store,
-                runtime.config.worker_instance_id.to_string(),
-            )
-        });
-
         // One concrete [`ValkeyEngine`] impl backs both the [`Engine`]
         // read/tag trait AND the [`ControlPlaneBackend`] FCALL trait.
         // Hold it as a concrete Arc first, then cast to each trait
@@ -90,6 +80,16 @@ impl FabricServices {
         let valkey_engine = Arc::new(ValkeyEngine::new(runtime.clone()));
         let engine: Arc<dyn Engine> = valkey_engine.clone();
         let control_plane: Arc<dyn ControlPlaneBackend> = valkey_engine;
+
+        let lease_history = cursor_store.map(|store| {
+            LeaseHistorySubscriber::start(
+                runtime.backend().clone(),
+                engine.clone(),
+                bridge.clone(),
+                store,
+                runtime.config.worker_instance_id.to_string(),
+            )
+        });
 
         let result = Self::build_services(
             runtime.clone(),
